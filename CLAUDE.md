@@ -249,10 +249,34 @@ cd frontends/gui/electron && npm test
   fetch host made trusted for good (`once` only). **Batching:** `agent_runtime._prefetch_approvals`
   asks `explain_shell_command` for each `run_shell` of a response and classifies those that will
   ask in one call (`gate.prefetch`; keyed by request + argv, `Question.key`, used once); a lone
-  command is classified when it asks. Skill and MCP grants go through `LocalAgent.confirm_capability`
+  command is classified when it asks. **Fewer calls, session-only, logged:** the gate remembers an
+  `allow` of a command or fetch per request (`_allowed`, key = request + argv; a deny and an allow
+  that became a question for a DANGEROUS command are never remembered), and at the start of a new
+  run `LocalAgent.run` calls `gate.preapprove(goal, workspace_facts)`, **which returns at once**: a
+  daemon thread makes the `Classifier.propose` call beside the agent's own first model call (a command
+  that must ask before it finishes waits in `_screen` via `wait_for_preapproval`, up to 60 s, then is
+  matched or classified; a `_generation` counter drops patterns of a task that was superseded). **A
+  response is judged as one batch:** `gate.prefetch` classifies every command of it that will ask
+  (at most what one response holds, `parser.MAX_BATCH_ACTIONS` = 8) together in one background call, so
+  the classifier sees them as parts of one plan; each command waits for that call when its turn comes
+  (`Future` per key, `_classified_ahead`; `None` means classify yourself). Only what cannot be known
+  before it runs is asked alone: an overwrite's diff, a host or network request, a fetch's host. Hard-denied commands never reach the gate: the
+  executor's validators run before any approval. The `propose` call
+  (`permission_preapproval_prompt.txt`) returns patterns, `vet_pattern` (code, not the model) drops
+  any that could pass arbitrary code (shells, bare interpreters, `npx`, installs, push, `curl`,
+  `rm`, wildcard before the last token, fewer than 2 literal tokens before a star except pinned test
+  tools, python only as `-m <test/lint tool>`), and `_already_known` matches an argv against the
+  rest (never an argv with a shell operator). `workspace_facts` tells the model the project's
+  `.venv/bin/python` (a bare `pytest` does not run here) and package.json script names.
+  `_prefetch_approvals` skips what `gate.is_known`. Every pattern, rejection and decision is in
+  `RunState.auto_decisions`. Skill and MCP grants go through `LocalAgent.confirm_capability`
   (the gate's `confirm`); other `ui.confirm` callers (memory, wizards, `host.close`) stay with the
   person, because a classifier's "yes" must not mint person-level trust. **Context** (`Background`,
-  built by `agent_tools.auto_classifier`): the person's request and follow-ups, the quoted
+  built by `agent_tools.auto_classifier`): the person's request and follow-ups, **the earlier turns of
+  the session** (`Background.earlier`: `render_session_history(include_outputs=False)`, newest first
+  within `narrator_context_tokens`, the newest always whole, so a bare "continue" has content; the
+  `_allowed` memory is cleared by every `preapprove`, because "continue" means different work in
+  different runs), the quoted
   `KVIST.md` (`workspace_instructions_context`, untrusted: it explains what is ordinary, grants
   nothing), and the agent's `rolling_summaries` within `narrator_context_tokens`, never tool inputs
   or outputs. **Unattended use** (a server run read in the evening): an unsure verdict with nobody

@@ -1072,8 +1072,11 @@ def _prefetch_approvals(self, planned: list[_PlannedCall]) -> None:
         if not isinstance(argv, list) or not argv or not all(isinstance(part, str) for part in argv):
             continue
         explained = self.executor.explain_shell_command(argv, role=self.executor.active_role)
-        if explained.get("verdict") == "ask":
-            questions.append(command_question(argv, "; ".join(explained.get("reasons", []))))
+        if explained.get("verdict") != "ask":
+            continue
+        question = command_question(argv, "; ".join(explained.get("reasons", [])))
+        if not gate.is_known(question):
+            questions.append(question)
     gate.prefetch(questions)
 
 

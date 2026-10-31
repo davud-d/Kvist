@@ -76,12 +76,12 @@ class PermissionPolicy:
             return "deny"
         if any(_matches(pattern, command) for pattern in self.ask):
             return "ask"
-        if any(_grants(pattern, command) for pattern in (*self.allow, *self.host)):
+        if any(grants(pattern, command) for pattern in (*self.allow, *self.host)):
             return "allow"
         return None
 
     def runs_on_host(self, command: list[str]) -> bool:
-        return any(_grants(pattern, command) for pattern in self.host)
+        return any(grants(pattern, command) for pattern in self.host)
 
 
 def _matches(pattern: str, command: list[str]) -> bool:
@@ -98,7 +98,7 @@ def _matches(pattern: str, command: list[str]) -> bool:
     return True
 
 
-def _grants(pattern: str, command: list[str]) -> bool:
+def grants(pattern: str, command: list[str]) -> bool:
     """``_matches`` for the lists that lift a check: the command name must be written out."""
     return pattern_is_specific(pattern) and _matches(pattern, command)
 

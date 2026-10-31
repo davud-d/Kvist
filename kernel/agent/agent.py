@@ -114,6 +114,7 @@ from kernel.agent.agent_web import (
     prepare_web_search_command,
     summarize_search_results,
 )
+from kernel.sandbox.auto_approval import workspace_facts
 from kernel.sandbox.executor import SafeExecutor
 from kernel.agent.helpers import HelperManager
 from kernel.agent.image_generation import ImageJobs
@@ -957,6 +958,8 @@ class LocalAgent:
             self._ui.print_sandbox_notice(self.executor.sandbox_note)
         except (KeyboardInterrupt, InterruptedError):
             return self._report_stop_before_loop(user_goal)
+        if self.auto_approval:
+            self.executor.approvals.preapprove(user_goal, workspace_facts(self.executor.workspace))
         result = self._run_loop(user_goal, start_step=1)
         self._record_run_turn(user_goal, result)
         return result

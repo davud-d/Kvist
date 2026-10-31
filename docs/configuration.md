@@ -176,15 +176,32 @@ question it answers *allow*, *deny* or *unsure*:
   about the effect, so another command with the same effect meets the same answer.
 - *unsure* asks you, and you have 2 minutes. No answer counts as no.
 
-The classifier sees your request and follow-ups, the repository's `KVIST.md`, and
+The classifier sees your request and follow-ups, the earlier turns of the session
+(what you asked and what the agent answered, so a bare "continue" has content),
+the repository's `KVIST.md`, and
 the agent's own short summaries of its recent steps (not the commands it ran or
 what the tools returned), besides the action itself. The question to you shows a
 countdown, red for the last 3 seconds (Ink and the classic terminal). When nobody
 can be asked (no terminal, no frontend) an unsure answer is a refusal at once, which
 is what you want for a run on a server that you read the report of in the evening.
 
-The commands of one model response that would ask are classified in a single
-request. Every decision is shown as a notice, so it is in the session's history. This mode is **not safe**: the
+To call the classifier less, two things hold for the session only (nothing is
+written to `permissions.json`) and both are listed in the run log: a command it
+allowed once is allowed again for the same request without a new call, and at the
+start of a task it names the command patterns the task will certainly need, such
+as `.venv/bin/python -m pytest *` (it is told which interpreter the project uses,
+and a bare `pytest` does not match). Code checks every proposed pattern and drops
+the ones that could let arbitrary code through: shells, a bare interpreter, `npx`,
+installs, pushes, `curl`, `rm`, a wildcard in the middle. A pattern never covers a
+pipeline.
+
+The classifier works beside the agent, not in front of it. The patterns are chosen
+while the agent's own first model call runs (a command that asks before they are
+ready waits for them, then is matched against them, or classified on its own if
+none fits). The commands of one model response that would ask (up to the most
+one response may hold) are judged together in a single request, so the classifier
+sees them as parts of one plan. What cannot be known before it runs (a file
+overwrite, a host or network request, a page from a new host) is judged alone. Every decision is shown as a notice, so it is in the session's history. This mode is **not safe**: the
 classifier can be wrong, and text in files, web pages and command output can push
 it toward a mistake. Whatever it allows runs with your permissions. It never
 overrides deny rules or built-in blocks, never approves an intrinsically dangerous

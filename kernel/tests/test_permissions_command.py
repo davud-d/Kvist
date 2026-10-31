@@ -262,24 +262,24 @@ def planned(*commands):
     ]
 
 
-def test_commands_that_ask_are_classified_together_and_the_rest_are_left_out(agent_factory):
+def test_commands_that_ask_are_judged_together_and_the_rest_are_left_out(agent_factory):
     agent = agent_factory()
     calls = []
 
     def ask(messages):
         calls.append(messages)
-        return verdicts(("allow", "a"), ("deny", "b"))
+        block = messages[1]["content"].split("source=\"approval_request\">\n")[1].split("\n</UNTRUSTED")[0]
+        subjects = [item["subject"] for item in json.loads(block)]
+        return verdicts(*[("deny", "no") if "b.py" in subject else ("allow", "ok") for subject in subjects])
 
     gate = agent.executor.set_auto_approval(Classifier(ask, lambda: "do x"))
 
     _prefetch_approvals(agent, planned(["python", "a.py"], ["ls"], ["python", "b.py"]))
 
-    assert len(calls) == 1
-    sent = json.loads(calls[0][1]["content"].split("source=\"approval_request\">\n")[1].split("\n</UNTRUSTED")[0])
-    assert [item["id"] for item in sent] == [0, 1]
     assert gate.confirm_command(["python", "a.py"], "x") is True
     assert gate.confirm_command(["python", "b.py"], "x") is False
-    assert len(calls) == 1
+    assert len(calls) == 1  # a.py and b.py together; "ls" asks nobody
+    assert all("ls" not in call[1]["content"].split("approval_request")[-1] for call in calls)
 
 
 def test_nothing_is_prefetched_while_auto_mode_is_off(agent_factory):

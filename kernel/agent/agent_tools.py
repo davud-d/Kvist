@@ -357,6 +357,19 @@ def auto_classifier(agent: Any) -> Classifier:
         state = agent._state
         return "\n\n".join([state.user_goal, *state.task_updates])
 
+    def earlier_turns() -> str:
+        """The newest earlier turns that fit the budget; the newest one is always there, whole."""
+        from kernel.agent.agent_context import render_session_history
+
+        chosen: list = []
+        used = 0
+        for entry in reversed(getattr(agent, "_session_history", None) or []):
+            used += agent._count_tokens(render_session_history([entry], include_outputs=False))
+            if chosen and used > config.narrator_context_tokens:
+                break
+            chosen.append(entry)
+        return render_session_history(list(reversed(chosen)), include_outputs=False)
+
     def background() -> Background:
         from kernel.context.system_context import workspace_instructions_context
 
@@ -370,7 +383,7 @@ def auto_classifier(agent: Any) -> Classifier:
                 break
             steps.append(entry)
         instructions = workspace_instructions_context(agent.executor.workspace, agent.executor.active_role)
-        return Background(instructions, tuple(reversed(steps)))
+        return Background(instructions, tuple(reversed(steps)), earlier_turns())
 
     return Classifier(ask, request, background)
 
