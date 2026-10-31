@@ -37,6 +37,7 @@ frontends/
   tui/opencode/         OpenCode's terminal interface on Kvist (TypeScript, OpenTUI + SolidJS, runs on Bun)
   tui/glass/            Rust interface over a photograph (kitty graphics only)
   gui/electron/         Electron desktop app
+  gui/tauri/            Rust + Tauri desktop app (pixel style): parallel agents, helpers, the agent's browser; ui/ is plain ES modules
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
   ide/jetbrains/        IntelliJ plugin (separate Gradle build)
   zed/                  Zed ACP frontend (acp_frontend, acp_events, acp_stdio) + tests/
@@ -102,6 +103,8 @@ cd frontends/tui/ink && npm install && npm run build    # -> frontends/tui/ink/d
 cd frontends/tui/ink && npm test && npm run typecheck
 cd frontends/ide/vscode && npm test && npm run typecheck   # extension + webview (imports Ink modules)
 cd frontends/gui/electron && npm test
+cd frontends/gui/tauri && node --test "tests/*.test.mjs" && (cd src-tauri && cargo test)   # no npm install; ui/ is served as it is
+cd frontends/gui/tauri/src-tauri && cargo build --release --locked                         # -> target/release/kvist-tauri
 
 .venv/bin/python -m PyInstaller kvist.spec  # build the `kvist` binary (bundles kernel/prompts/)
 
@@ -1252,6 +1255,50 @@ stream (mitigated with `env.XDG_CONFIG_HOME`).
 `scripts/installer/jsonc_settings.py` (character-range surgery on JSONC; comments, key order and line endings
 survive) and never builds or copies the binary (`install_cli.py`'s job; a missing `kvist-core` is a loud
 refusal). It is registered in `install.py` with `after=("cli",)` to avoid a parallel `--all` race.
+
+### Pixel desktop app (`frontends/gui/tauri/`, Rust + Tauri 2)
+A GUI in the style of a pixel game, **not** a rewrite of the Electron app (`gui/electron` stays). Docs: `README.md` / `.ru.md`.
+- **One core per agent.** `src-tauri/src/core.rs` runs each agent as its own `--frontend stdio-multi --wake` process and forwards every
+  line to the page as a `core` event tagged with the agent's id; `main.rs` holds `Agents` (id -> `Core`). The page chooses the id.
+  Starting a core first pins its session (`--session-op launch`, or `switch` for a restored tab) and waits for `hello`, under one lock
+  per app, because the core reads the workspace's *active* session at start (two starts at once would share one). `ops.rs` runs
+  one-shot `--session-op`s for the page, **only** `status|list|history|input-history|input-history-add|delete`: `launch`, `switch` and `new`
+  change the active session and belong to `Agents::open`. Core lookup (`core::command`): `KVIST_CORE_CMD`, then an installed `kvist-core`
+  (beside the app, one folder up, `~/.local/share/kvist`, `%LOCALAPPDATA%\Kvist`, PATH), then the checkout's `.venv`.
+- **The page** (`ui/`, no bundler, no npm install): `reducer.js` (pure, folds §7 events into one agent; the same function replays a
+  `--session-op history` journal), `store.js`, `actions.js` (what the person can do; the only module that sends), `bridge.js` (the one
+  place that knows about Tauri; outside it a scripted `mock-core.js` answers, which is how the UI is looked at in a plain browser),
+  `projects.js` (the rail's tree, project -> sessions, pure), `motion.js` (named curves, springs baked into CSS `linear()`, FLIP, `zoomIn/zoomOut`; every effect goes through `animate`, so the
+  speed setting and `prefers-reduced-motion` reach all of them), `views/*` and `panels/*` (inspector tabs: helpers, screen, jobs, context;
+  a panel is one file with the same shape). Settings are data (`views/settings-defs.js`): a "command" row sends exactly the slash command.
+  **`replaceChildren(null)` prints "null": use `fill` from `dom.js`.**
+- **Look** (modern pixel art, not a retro desktop): flat surfaces, a limited palette per theme, a 3px ink outline whose corners are notched
+  (`--outline`, never a bevel or gradient), a darker band inside buttons, hard edges. **Text is JetBrains Mono** (`ui/fonts`): Pixelify Sans'
+  Cyrillic is unreadable at small sizes, so the pixel typeface is the wordmark only. The squirrel is drawn by `ui/sprites/make_sprites.py`.
+  While a turn runs the status line is Claude Code's rippling word, ported (`ui/js/spinner.js`: colours and cooling from `shimmer.ts`, the
+  words generated from `verbs.ts` into `verbs.js`: **re-run that conversion when the Ink lists change**); the `final_answer` step draws no
+  card (the core sends no result for it, so it used to be marked "stopped"). The rail is a tree (project -> sessions via `--session-op list`); picking a stored session makes an agent for it (asleep until used).
+  The core's `manifest` (roles, styles, ...) now follows `hello` in `stdio-multi` too (`event_stdio._write_manifest`); before that only
+  `stdio` sent it, so the pickers were empty.
+- **Closed session** (`end_session`): the composer is replaced by a bar with `closed_notice`; Enter sends `new`. **Pictures** are attached by
+  paste, drop or the `+` button, shown as thumbnails (never `[image #N]`) and sent as the `kvist-image-goal` envelope. **Formulas** are
+  KaTeX (`ui/vendor/katex`, MIT, fonts OFL) through `markdown.setMathRenderer`; a fourth place with the math converters, unlike the text ones
+  in `ink/math.ts` and `classic/math_text.py`.
+- **Window**: frameless (`decorations: false`), so the title bar, resize edges and buttons are drawn by `views/titlebar.js`. It is created in
+  code (`main.rs::create_window`, no window in `tauri.conf.json`) because transparency is decided at creation: `window.rs` picks it from
+  `--safe`/`--opaque`/`--transparent`, `KVIST_SAFE_RENDER`/`KVIST_OPAQUE`/`KVIST_TRANSPARENT`, the saved `desktop.json` and the platform
+  default, **opaque on Linux** (measured under Xvfb+picom: WebKitGTK paints nothing for transparent + `WEBKIT_DISABLE_DMABUF_RENDERER=1`, paints
+  everything for opaque + it, and NVIDIA needs it off), transparent on macOS (private API) and Windows. The page learns the mode from
+  `window_mode` and drops the glass when opaque; the settings toggle saves the choice and restarts. The menu entry has a `--safe` action. The `screen` event's MJPEG URL is only ever an `<img>` (CSP `img-src http://127.0.0.1:*`).
+- **Installed by the release installers** (component `app`, ticked by default on the `curl` screen): `install.sh` / `install.ps1` download
+  `kvist-app-<os>-<arch>[.exe]` (+ `kvist-app-icon.png`, `kvist-app.icns`) and register it in the application menu; `scripts/installer/install_app.py`
+  is the developer path: it **compiles** the app with cargo (after Rust, which it waits for; on Linux it first checks for the WebKitGTK
+  development files) and registers it in the same menu, and never downloads. Only the `curl` installers download. The workflow job `build-desktop-app` builds the four binaries and the
+  release job publishes them; a failed platform keeps its previous binary. `scripts/tests/test_release_desktop_app.py` checks that the
+  workflow, both scripts and the screen agree on names (and that `install_app.py` builds the binary the workflow uploads). **A new platform
+  asset needs the workflow, `install.sh` and `install.ps1` to agree.**
+- **Not seen:** the real core through the Tauri shell with a real model; macOS and Windows runs; typing into the window under Xvfb (no WM,
+  WebKit ignores synthetic keys), so goal sending is covered by the page tests and the mock only.
 
 ### Voice mode and the narrator (`voice_mode.txt`, `narrator.py`)
 `AgentConfig.voice_mode` (`AGENT_VOICE_MODE=1`; a voice frontend sets it, nothing else) appends

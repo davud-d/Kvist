@@ -1,0 +1,21 @@
+[package]
+name = "kvist-tauri"
+version = "0.1.0"
+edition = "2024"
+description = "Kvist's pixel-art desktop interface: parallel agents, helpers and the agent's browser side by side"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

@@ -1,0 +1,43 @@
+// The right-hand side: helpers, the agent's browser, jobs, context. It opens
+// by itself when something worth watching appears (a helper, a screen).
+
+import { fill, frameThrottle, h, icon } from "../dom.js";
+import { t } from "../i18n.js";
+import { panelById, panels } from "../panels/index.js";
+import { active, setPref, store, subscribe } from "../store.js";
+
+export function mountInspector(root) {
+  const tabs = h("div", { class: "tabs" });
+  const body = h("div", { class: "inspector-body" });
+  root.append(h("div", { class: "inspector-inner" }, tabs, body));
+  const seen = new Map();
+
+  function reveal(agent) {
+    const was = seen.get(agent.id) ?? { helpers: 0, screen: false };
+    const now = { helpers: agent.helpers.size, screen: Boolean(agent.screen) };
+    seen.set(agent.id, now);
+    if (now.screen && !was.screen) openOn("screen");
+    else if (now.helpers > was.helpers) openOn("helpers");
+  }
+
+  function openOn(tab) {
+    if (store.prefs.inspectorTab !== tab) setPref("inspectorTab", tab);
+    if (!store.prefs.inspector) setPref("inspector", true);
+  }
+
+  const redraw = frameThrottle(() => {
+    const agent = active();
+    if (agent) reveal(agent);
+    const current = panelById(store.prefs.inspectorTab);
+    fill(tabs, 
+      ...panels.map((panel) => {
+        const count = agent ? panel.badge(agent) : "";
+        return h("button", { class: `tab${panel.id === current.id ? " on" : ""}`, type: "button", title: t(panel.title), onclick: () => setPref("inspectorTab", panel.id) }, icon(panel.icon, 14), count ? h("span", { class: "tab-badge" }, String(count)) : null);
+      }),
+    );
+    if (agent) current.render(agent, body);
+    else fill(body, );
+  });
+  subscribe(redraw);
+  redraw();
+}

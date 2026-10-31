@@ -1,0 +1,44 @@
+/* The window: title strip, project rail, stage, inspector. */
+
+#app {
+  display: grid;
+  height: 100vh;
+  padding: 14px 18px 18px;
+  gap: 14px 18px;
+  grid-template-columns: 290px minmax(0, 1fr) 340px;
+  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-areas: "title title title" "dock stage inspector";
+  background: color-mix(in srgb, var(--bg) calc(var(--glass) * 100%), transparent);
+  transition: grid-template-columns 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#app.no-inspector { grid-template-columns: 290px minmax(0, 1fr) 0px; }
+#app.no-inspector #inspector { opacity: 0; pointer-events: none; }
+
+#titlebar { grid-area: title; display: flex; align-items: center; gap: 16px; user-select: none; }
+#dock { grid-area: dock; display: flex; flex-direction: column; gap: 12px; min-height: 0; padding: 14px 12px 12px; }
+#stage { grid-area: stage; position: relative; min-width: 0; min-height: 0; }
+#pane, #overview { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; }
+#inspector { grid-area: inspector; min-width: 0; overflow: hidden; transition: opacity 0.35s ease; }
+.inspector-inner { width: 340px; height: 100%; display: flex; flex-direction: column; gap: 14px; padding-right: 3px; }
+
+.brand { display: flex; align-items: center; gap: 10px; width: 262px; }
+.brand-name { font-family: var(--font-pixel); font-size: 26px; line-height: 1; letter-spacing: 0.06em; color: var(--accent); }
+.crumb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 13px; }
+.title-actions, .frame-buttons { display: flex; gap: 8px; }
+.frame-buttons { margin-left: 12px; }
+
+/* Thin hit zones that resize the frameless window. */
+.edge { position: fixed; z-index: 90; }
+.edge-n, .edge-s { left: 8px; right: 8px; height: 4px; cursor: ns-resize; }
+.edge-w, .edge-e { top: 8px; bottom: 8px; width: 4px; cursor: ew-resize; }
+.edge-n { top: 0; } .edge-s { bottom: 0; } .edge-w { left: 0; } .edge-e { right: 0; }
+.edge-nw, .edge-ne, .edge-sw, .edge-se { width: 8px; height: 8px; }
+.edge-nw { top: 0; left: 0; cursor: nwse-resize; } .edge-se { bottom: 0; right: 0; cursor: nwse-resize; }
+.edge-ne { top: 0; right: 0; cursor: nesw-resize; } .edge-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+/* The overview grid. */
+.tiles { position: absolute; inset: 0; overflow-y: auto; padding: 10px; display: grid; gap: 22px; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); grid-auto-rows: 210px; align-content: start; }
+
+#modals { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
+#modals > * { pointer-events: auto; }
+#toasts { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 12px; align-items: center; z-index: 60; pointer-events: none; }
