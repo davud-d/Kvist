@@ -78,6 +78,16 @@ def _stream_events(session: EventSession, out_stream) -> None:
         out_stream.flush()
 
 
+def _write_manifest(out_stream) -> None:
+    """The catalogue of roles, providers, effort levels and so on, sent once after ``hello`` so
+    frontends fill their pickers from the core instead of keeping their own lists."""
+    from kernel.protocol.core_manifest import build_manifest
+    from kernel.protocol.frontend_protocol import ManifestEvent
+
+    out_stream.write(json.dumps(ManifestEvent(manifest=build_manifest()).to_dict()) + "\n")
+    out_stream.flush()
+
+
 def pump(
     session: EventSession,
     out_stream,
@@ -93,13 +103,7 @@ def pump(
     """
     out_stream.write(json.dumps((hello_event or HelloEvent()).to_dict()) + "\n")
     out_stream.flush()
-    # Manifest: the full catalogue of roles, providers, effort levels, etc.
-    # Sent once so frontends can populate pickers from the core.
-    from kernel.protocol.core_manifest import build_manifest
-    from kernel.protocol.frontend_protocol import ManifestEvent
-    manifest_event = ManifestEvent(manifest=build_manifest())
-    out_stream.write(json.dumps(manifest_event.to_dict()) + "\n")
-    out_stream.flush()
+    _write_manifest(out_stream)
 
     reader = threading.Thread(
         target=_read_responses,
@@ -573,6 +577,7 @@ def serve_session_multi(
     )
     out_stream.write(json.dumps(hello.to_dict()) + "\n")
     out_stream.flush()
+    _write_manifest(out_stream)
 
     goal_queue: queue.Queue = queue.Queue()
     if resume:

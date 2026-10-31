@@ -221,8 +221,8 @@ def test_eof_between_turns_ends_process():
     reader.eof()
     thread.join(timeout=3.0)
     assert not thread.is_alive()
-    # Only the hello was emitted; no goal ran.
-    assert [e["type"] for e in out.events()] == ["hello"]
+    # Only the handshake (hello, then the manifest of pickers) was emitted; no goal ran.
+    assert [e["type"] for e in out.events()] == ["hello", "manifest"]
     assert agent.goals == []
 
 

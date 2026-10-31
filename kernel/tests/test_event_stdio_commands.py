@@ -122,7 +122,7 @@ def test_command_dialog_streams_as_input_request_then_command_result():
     }
     _finish(reader, thread)
     types = [e["type"] for e in out.events()]
-    assert types == ["hello", "input_request", "command_result"]
+    assert types == ["hello", "manifest", "input_request", "command_result"]
     assert agent.goals == []
 
 
@@ -999,8 +999,8 @@ def test_resume_announces_the_session_then_streams_a_turn_and_ends_with_turn_end
     out.wait_for(lambda e: e["type"] == "turn_end")
     _finish(reader, thread)
     events = out.events()
-    assert [e["type"] for e in events] == ["hello", "session", "turn_end"]
-    assert events[1] == {"type": "session", "session": "chat-old", "has_checkpoint": True}
+    assert [e["type"] for e in events] == ["hello", "manifest", "session", "turn_end"]
+    assert events[2] == {"type": "session", "session": "chat-old", "has_checkpoint": True}
     assert agent.resumed == 1 and agent.goals == []
 
 
@@ -1023,7 +1023,7 @@ def test_resume_without_any_checkpoint_is_a_failed_result_and_no_turn():
     reader.push("next goal")
     out.wait_for(lambda e: e["type"] == "turn_end")
     _finish(reader, thread)
-    assert [e["type"] for e in out.events()] == ["hello", "command_result", "turn_end"]
+    assert [e["type"] for e in out.events()] == ["hello", "manifest", "command_result", "turn_end"]
     assert agent.resumed == 0 and agent.goals == [("next goal", None)]
 
 
