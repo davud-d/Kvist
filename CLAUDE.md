@@ -260,7 +260,7 @@ cd frontends/gui/tauri/src-tauri && cargo build --release --locked              
   that must ask before it finishes waits in `_screen` via `wait_for_preapproval`, up to 60 s, then is
   matched or classified; a `_generation` counter drops patterns of a task that was superseded). **A
   response is judged as one batch:** `gate.prefetch` classifies every command of it that will ask
-  (at most what one response holds, `parser.MAX_BATCH_ACTIONS` = 8) together in one background call, so
+  (at most what one response holds, `parser.MAX_BATCH_ACTIONS` = 30) together in one background call, so
   the classifier sees them as parts of one plan; each command waits for that call when its turn comes
   (`Future` per key, `_classified_ahead`; `None` means classify yourself). Only what cannot be known
   before it runs is asked alone: an overwrite's diff, a host or network request, a fetch's host. Hard-denied commands never reach the gate: the
@@ -319,8 +319,16 @@ in `kernel/prompts/system/`; `kernel/tests/test_prompt_protocol_sync.py` enforce
 `final_answer` and `report_to_user` are terminal actions handled in `run_loop` (never reach the
 executor); `report_to_user` also routes through the chat reporter (`report_prompt.txt`).
 
-**Action batches.** The model sends `"actions": [...]` (any number of read-only calls plus at most
-`parser.MAX_BATCH_ACTIONS` = 8 others); a bare `"action"` is still accepted. **Every action is its
+**Action batches.** The model sends `"actions": [...]` (up to `parser.MAX_READ_ACTIONS` = 40 read-only
+calls plus at most `parser.MAX_BATCH_ACTIONS` = 30 others; reads run in a pool of `MAX_PARALLEL_CALLS` = 10, and
+so do consecutive `run_shell` calls that need no approval (`SafeExecutor.runs_alongside_others`: foreground, default
+sandbox, no network, `explain_command` verdict `allow`). Each runs on a spare `TerminalExecutor` from
+`parallel_shell_slot` (own run lock, child HOME, `output_sink`, `cancel_event`; its gate is `DenyApprovalGate`, so no
+dialog is ever raised from a thread, and a command that still turns out to need the person comes back `denied` and is
+run again alone on the main thread by `_run_shell_group`). The group writes one `pending_action` for its first
+command and counts as failed if any member failed. Pause/stop reach the threads through `cancel_event`. Every other
+call runs alone in call order. The prompts argue for one big batch over many small responses because some providers
+do not cache the conversation; a bare `"action"` is still accepted. **Every action is its
 own step**: step logs, `pending_action` and the step budget stay per action; only model calls drop.
 The checkpoint is written right after an action with a side effect (what `_build_pending_action`
 records) and otherwise once per batch. `agent_runtime._run_action_batch` runs actions in order
@@ -617,7 +625,7 @@ failed request and is cleared once a call succeeds; the same text is journaled a
   `TerminalExecutor.run(background=BackgroundLaunch)` hands the wrapped argv to `BackgroundJobs.launch`
   and releases the run lock. The job keeps the child HOME it was built with. Without `timeout` it lives
   up to the profile ceiling (300 s dev); an explicit one ends it as `timed_out`. Limit:
-  `MAX_RUNNING_JOBS` = 4.
+  `MAX_RUNNING_JOBS` = 10.
 - **Each sandboxed command has its own network namespace** (bubblewrap `--unshare-net`): a port a job
   opens is unreachable from another command unless both run with `network: true`; the start result says
   so. The reader role is not offered `job_output`/`job_stop`. `process_tree.run_supervised(cancel=Event)`
@@ -793,7 +801,7 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); events and control messages: `docs/U
 - **Pause vs stop:** `task_control.TaskControl` (shared `_cancel_event`); `request_pause` = Esc,
   `request_cancel` = stop all. A skill call gets `Paused`/`Cancelled` at its next request, then the
   runner is frozen (pause) or ended. An interrupted batch's remaining actions are not run.
-- **Helpers** (`helpers.py`): one at a time in a service session `helper-…` (`agent_logging` never makes
+- **Helpers** (`helpers.py`): up to `MAX_ACTIVE_HELPERS` = 10 at once, each in its own service session `helper-…` (`agent_logging` never makes
   it active or resumable). Messages are `sent -> received -> applied` through `_drain_inbox`. Role: the
   one named, else `_role_for` routes the bare task (a `chat` verdict becomes `reader`). It may write
   unless its role is reader, the main agent may not write (`_main_cannot_write`), or a skill started it

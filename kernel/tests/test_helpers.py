@@ -10,6 +10,7 @@ import pytest
 
 from kernel.session.agent_logging import load_active_session, read_session_document
 from kernel.agent.agent_tools import HelperError
+from kernel.agent.helpers import MAX_ACTIVE_HELPERS
 from kernel.tests.conftest import NullUI
 
 
@@ -156,17 +157,21 @@ def test_a_helper_gets_no_more_than_the_agent_that_started_it(agent_factory, lim
     assert "read-only" in started["note"]
 
 
-def test_only_one_helper_works_at_a_time_and_a_helper_has_no_helpers(agent_factory):
+def test_ten_helpers_work_at_a_time_and_a_helper_has_no_helpers(agent_factory):
     gate = threading.Event()
-    main = _main(agent_factory, ScriptedClient(["first result"], gate))
-    first = main.helpers.start("read the logs", role="reader", context="", attachments=[], started_by="main")
+    main = _main(agent_factory, ScriptedClient([], gate))
+    started = [
+        main.helpers.start(f"read the logs {number}", role="reader", context="", attachments=[], started_by="main")
+        for number in range(MAX_ACTIVE_HELPERS)
+    ]
 
     with pytest.raises(HelperError, match="already working"):
         main.helpers.start("read the tests", role="reader", context="", attachments=[], started_by="main")
-    helper_agent = main.helpers.get(first["agent_id"]).agent
+    helper_agent = main.helpers.get(started[0]["agent_id"]).agent
     assert helper_agent.helpers is None and helper_agent.is_helper
     gate.set()
-    main.helpers.wait(first["agent_id"], 10)
+    for helper in started:
+        main.helpers.wait(helper["agent_id"], 10)
 
 
 def test_a_helper_the_person_stopped_is_not_restarted_until_they_write_again(agent_factory):

@@ -114,4 +114,7 @@ def test_reader_prompt_stays_within_token_budget():
     # AI news every morning") is routed to the reader, so it needs them too.
     # → 3150 for memory: "запомни …"/"forget …" is routed to the reader (chat
     # has no tool), so its memory schema needs preference, person and forget.
-    assert tokens <= 3150, f"reader prompt is {tokens} tokens (budget 3150)"
+    # → 3250 for side-by-side commands: run_shell calls in a row that need no
+    # approval now run at once, and the reader must know they may not depend on
+    # each other; plus the cost of one big batch where a provider has no cache.
+    assert tokens <= 3250, f"reader prompt is {tokens} tokens (budget 3250)"

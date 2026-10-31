@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """A real helper agent: its own context, its own service session, read-only work.
 
-The main agent starts at most one helper per task. The helper is a separate
+The main agent runs up to ``MAX_ACTIVE_HELPERS`` helpers at once per task. A helper is a separate
 ``LocalAgent`` on its own thread with the same model client, a fresh run state
 and a service session (``helper-…``) that the person can read and stop but
 never types into; it never becomes the active session. Its role is the one the
@@ -38,7 +38,7 @@ from kernel.agent.agent_tools import HelperError
 from kernel.sandbox.redaction import redact_text
 from kernel.agent.task_control import TaskControl
 
-MAX_ACTIVE_HELPERS = 1
+MAX_ACTIVE_HELPERS = 10
 HELPER_MAX_STEPS = 40
 STOP_WAIT_SECONDS = 15.0
 NOTICE_CHARS = 300
@@ -222,8 +222,9 @@ class HelperManager:
         if getattr(main, "is_helper", False):
             raise HelperError("a helper cannot start helpers")
         if len(self.active()) >= MAX_ACTIVE_HELPERS:
-            raise HelperError(f"one helper is already working ({self.active()[0].agent_id}); this version runs at "
-                              f"most {MAX_ACTIVE_HELPERS} helper per task")
+            working = ", ".join(helper.agent_id for helper in self.active())
+            raise HelperError(f"{MAX_ACTIVE_HELPERS} helpers are already working ({working}); wait for one to "
+                              "finish or stop one before starting another")
         if self._person_stopped_at_message is not None and main._state.message_id == self._person_stopped_at_message:
             raise HelperError("the person stopped the previous helper; do not start another one until they write "
                               "again. Continue the independent work yourself or ask them a specific question.")

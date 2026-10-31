@@ -23,7 +23,7 @@ from typing import Any, Callable, Protocol
 from kernel.protocol.protocol import MAX_JOB_WAIT_SECONDS
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text
 
-MAX_RUNNING_JOBS = 4
+MAX_RUNNING_JOBS = 10
 # Rolling per-job tail. The reader threads of the supervisor already bound the
 # captured bytes; this bounds what the registry keeps for notes and the UI.
 TAIL_CHARS = 16_000

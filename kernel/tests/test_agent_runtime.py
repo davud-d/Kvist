@@ -1537,18 +1537,17 @@ def test_parallel_reads_return_results_in_call_order_not_finish_order(agent_fact
     assert all(d.startswith('<UNTRUSTED_TOOL_OUTPUT source="read_file" call_id="call_') for d in details)
 
 
-def test_no_more_than_four_reads_run_at_once(agent_factory):
-    agent = agent_factory(max_steps=8)
+def test_no_more_than_ten_reads_run_at_once(agent_factory):
+    agent = agent_factory(max_steps=30)
     execute, probe = _concurrency_probe({})
     agent.executor.execute = execute
-    agent._call_action_model = lambda prompt: _v2(
-        "", *(_tool("read_file", path=f"f{i}.py") for i in range(8))
-    )
+    responses = iter([_v2("", *(_tool("read_file", path=f"f{i}.py") for i in range(24))), "Готово."])
+    agent._call_action_model = lambda prompt: next(responses)
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert len(probe["finished"]) == 8
-    assert probe["peak"] == 4
+    assert len(probe["finished"]) == 24
+    assert probe["peak"] == 10
 
 
 def test_reads_are_not_limited_per_response(agent_factory):
@@ -1572,12 +1571,12 @@ def test_reads_are_not_limited_per_response(agent_factory):
     assert not any("Not executed" in error for error in agent._state.error_history)
 
 
-def test_no_more_than_eight_non_read_calls_run_per_response(agent_factory):
-    agent = agent_factory(max_steps=30)
+def test_no_more_than_thirty_non_read_calls_run_per_response(agent_factory):
+    agent = agent_factory(max_steps=80)
     prompts = []
     executed = []
     responses = iter([
-        _v2("", *(_tool("write_file", path=f"w{i}.txt", content="x") for i in range(10))),
+        _v2("", *(_tool("write_file", path=f"w{i}.txt", content="x") for i in range(33))),
         "Готово.",
     ])
 
@@ -1594,9 +1593,35 @@ def test_no_more_than_eight_non_read_calls_run_per_response(agent_factory):
 
     agent._run_loop("Create files", start_step=1)
 
-    assert executed == [f"w{i}.txt" for i in range(8)]
-    assert "at most 8 calls besides reads" in prompts[1]
+    assert executed == [f"w{i}.txt" for i in range(30)]
+    assert "at most 30 calls besides reads" in prompts[1]
     assert not any("Not executed" in error for error in agent._state.error_history)
+
+
+def test_no_more_than_forty_reads_run_per_response(agent_factory):
+    agent = agent_factory(max_steps=80)
+    prompts = []
+    executed = []
+    responses = iter([
+        _v2("", *(_tool("read_file", path=f"r{i}.py") for i in range(45))),
+        "Готово.",
+    ])
+
+    def fake_call_action_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    def fake_execute(command):
+        executed.append(command.action.args["path"])
+        return ExecutionResult(True, "read_file", {"path": command.action.args["path"], "content": "c"})
+
+    agent._call_action_model = fake_call_action_model
+    agent.executor.execute = fake_execute
+
+    agent._run_loop("Read files", start_step=1)
+
+    assert sorted(executed) == sorted(f"r{i}.py" for i in range(40))
+    assert "at most 40 read-only calls" in prompts[1]
 
 
 def test_reads_do_not_use_up_the_non_read_allowance(agent_factory):
@@ -1659,6 +1684,114 @@ def test_shell_never_runs_in_parallel_with_reads(agent_factory):
     agent._run_loop("Investigate files", start_step=1)
 
     assert order == ["list_dir", "run_shell", "list_dir"]
+
+
+def _shell_calls(count: int):
+    return [_tool("run_shell", command=["echo", str(i)], purpose=f"команда {i}") for i in range(count)]
+
+
+def test_commands_that_need_no_approval_run_side_by_side_and_answer_in_call_order(agent_factory):
+    agent = agent_factory(max_steps=20)
+    execute, probe = _concurrency_probe({})
+    agent.executor.execute = execute
+    agent.executor.runs_alongside_others = lambda command: command.action.type == "run_shell"
+    responses = iter([_v2("", *_shell_calls(5)), "Готово."])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Run checks", start_step=1)
+
+    assert probe["peak"] == 5
+    registered = [log["step"] for log in agent._state.step_logs if "feedback" in log]
+    assert registered == [1, 2, 3, 4, 5]
+
+
+def test_a_command_that_needs_approval_is_run_again_alone_on_the_main_thread(agent_factory):
+    import threading
+
+    agent = agent_factory(max_steps=20)
+    agent.executor.runs_alongside_others = lambda command: command.action.type == "run_shell"
+    seen: list[tuple[str, str]] = []
+
+    def fake_execute(command):
+        label = command.action.args["command"][1]
+        where = threading.current_thread().name
+        seen.append((label, where))
+        if label == "1" and where != "MainThread":
+            return ExecutionResult(False, "run_shell", {"denied": True, "error": "needs approval", "command": []})
+        return ExecutionResult(True, "run_shell", {"returncode": 0, "stdout": label, "stderr": ""})
+
+    agent.executor.execute = fake_execute
+    responses = iter([_v2("", *_shell_calls(3)), "Готово."])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Run checks", start_step=1)
+
+    assert [item for item in seen if item[0] == "1"][-1][1] == "MainThread"
+    assert sorted({label for label, _ in seen}) == ["0", "1", "2"]
+    assert len(seen) == 4
+
+
+def test_a_failed_command_in_a_side_by_side_group_skips_the_writes_after_it(agent_factory):
+    agent = agent_factory(max_steps=20)
+    agent.executor.runs_alongside_others = lambda command: command.action.type == "run_shell"
+    executed = []
+
+    def fake_execute(command):
+        executed.append(command.action.type)
+        if command.action.type == "run_shell" and command.action.args["command"][1] == "1":
+            return ExecutionResult(False, "run_shell", {"returncode": 1, "stdout": "", "stderr": "boom"})
+        return ExecutionResult(True, command.action.type, {"returncode": 0, "stdout": "", "stderr": "", "path": "w.txt"})
+
+    agent.executor.execute = fake_execute
+    responses = iter([
+        _v2("", *_shell_calls(3), _tool("write_file", path="w.txt", content="x")),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Run checks then write", start_step=1)
+
+    assert executed.count("run_shell") == 3
+    assert "write_file" not in executed
+
+
+def test_a_command_that_asks_the_person_never_joins_a_side_by_side_group(agent_factory):
+    agent = agent_factory(max_steps=20)
+    execute, probe = _concurrency_probe({})
+    agent.executor.execute = execute
+    agent.executor.runs_alongside_others = lambda command: False
+    responses = iter([_v2("", *_shell_calls(3)), "Готово."])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Run checks", start_step=1)
+
+    assert probe["peak"] == 1
+
+
+def test_each_thread_in_a_shell_slot_gets_a_terminal_of_its_own(agent_factory):
+    import threading
+
+    agent = agent_factory(max_steps=4)
+    executor = agent.executor
+    cancel = threading.Event()
+    barrier = threading.Barrier(2)
+    terminals = []
+
+    def worker():
+        with executor.parallel_shell_slot(None, cancel):
+            terminals.append(executor._shell_terminal())
+            barrier.wait(5)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+
+    assert len(terminals) == 2 and terminals[0] is not terminals[1]
+    assert all(terminal is not executor._terminal for terminal in terminals)
+    assert executor._shell_terminal() is executor._terminal
+    assert all(terminal.cancel_event is None and terminal.output_sink is None for terminal in terminals)
 
 
 def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):

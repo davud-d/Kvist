@@ -8,9 +8,10 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,7 @@ from kernel.agent.native_tools import (
 )
 from kernel.protocol.parser import (
     MAX_BATCH_ACTIONS,
+    MAX_READ_ACTIONS,
     CommandValidationError,
     build_command,
     parse_model_response,
@@ -915,7 +917,8 @@ class _PlannedCall:
 
 
 # Read-only calls of one response that may run at the same time.
-MAX_PARALLEL_CALLS = 4
+MAX_PARALLEL_CALLS = 10
+_INTERRUPT_POLL_SECONDS = 0.05
 _NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already ended the task."
 _NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
 _NOT_RUN_BUDGET = "Not executed: the step budget ran out."
@@ -928,16 +931,29 @@ _SKIPPED_LABELS = ("пропущено: предыдущее действие у
 
 
 def _over_limit(calls: list[ToolCallRequest]) -> list[bool]:
-    """Per call: whether it is past the cap. Reads are exempt; the other calls are capped."""
+    """Per call: whether it is past its cap. Reads and the other calls are counted apart."""
+    reads = 0
     others = 0
     flags: list[bool] = []
     for request in calls:
         if request.name in READONLY_TOOLS:
-            flags.append(False)
+            reads += 1
+            flags.append(reads > MAX_READ_ACTIONS)
             continue
         others += 1
         flags.append(others > MAX_BATCH_ACTIONS)
     return flags
+
+
+def _over_limit_reason(request: ToolCallRequest) -> str:
+    if request.name in READONLY_TOOLS:
+        cap, kind = MAX_READ_ACTIONS, "read-only calls"
+    else:
+        cap, kind = MAX_BATCH_ACTIONS, "calls besides reads"
+    return (
+        f"Not executed: the protocol accepts at most {cap} {kind} "
+        "per response; send this one again in your next response if you still need it."
+    )
 
 
 def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCall]:
@@ -948,10 +964,7 @@ def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCa
     planned: list[_PlannedCall] = []
     for number, (request, over) in enumerate(zip(response.calls, over_limit), start=1):
         if over:
-            planned.append(_PlannedCall(request, None, (
-                f"Not executed: the protocol accepts at most {MAX_BATCH_ACTIONS} calls besides reads "
-                "per response; send this one again in your next response if you still need it."
-            ), over_limit=True))
+            planned.append(_PlannedCall(request, None, _over_limit_reason(request), over_limit=True))
             continue
         try:
             command = build_command(
@@ -985,6 +998,7 @@ def _run_calls(
     it — a later write may rest on it — but not the reads.
     """
     _prefetch_approvals(self, planned)
+    runs_alongside: dict[int, bool] = {}
     answers: list[str] = []
     not_run: list[str] = []
     outcome = _ActionOutcome()
@@ -1028,6 +1042,16 @@ def _run_calls(
             answers.extend(group_answers)
             not_run.extend(group_not_run)
             index += len(group)
+            continue
+        shells = [] if write_failed else _shell_run(self, planned, index, runs_alongside)
+        if len(shells) > 1:
+            step, group_answers, group_not_run, group_failed = _run_shell_group(
+                self, user_goal, step, shells, first_in_response=index == 0
+            )
+            answers.extend(group_answers)
+            not_run.extend(group_not_run)
+            write_failed = write_failed or group_failed
+            index += len(shells)
             continue
         index += 1
         if step > self._state.step_budget and index > 1:
@@ -1122,6 +1146,103 @@ def _run_readonly_group(
         result = _finish_action(self, call_step, group[position].command, feedback)
         answers[position] = _call_answer(self, serial, result)
     return step, answers, not_run
+
+
+def _shell_run(
+    self, planned: list[_PlannedCall], start: int, runs_alongside: dict[int, bool]
+) -> list[_PlannedCall]:
+    """The run_shell calls that follow each other from ``start`` and need no approval."""
+    group: list[_PlannedCall] = []
+    for item in planned[start:]:
+        if item.command is None or item.over_limit:
+            break
+        if id(item) not in runs_alongside:
+            runs_alongside[id(item)] = self.executor.runs_alongside_others(item.command)
+        if not runs_alongside[id(item)]:
+            break
+        group.append(item)
+    return group
+
+
+def _run_shell_group(
+    self, user_goal: str, step: int, group: list[_PlannedCall], *, first_in_response: bool
+) -> tuple[int, list[str], list[str], bool]:
+    """Guards in call order, the commands side by side, results registered in call order.
+
+    Like the read group, only the executor call leaves the main thread. A command
+    that turns out to need the person is run again alone afterwards, where a dialog
+    can be shown. Any command that fails or is refused makes the calls after the
+    group count as following a failed one, as one by one.
+    """
+    answers: list[str] = [""] * len(group)
+    not_run: list[str] = []
+    ready: list[tuple[int, int, int]] = []  # (position, step, result serial)
+    failed = False
+    for position, item in enumerate(group):
+        command = item.command
+        assert command is not None
+        if step > self._state.step_budget and (position or not first_in_response):
+            answers[position] = _NOT_RUN_BUDGET
+            not_run.append(f"{command.action.description}: {_NOT_RUN_BUDGET}")
+            continue
+        serial = getattr(self, "_result_serial", 0)
+        if _prepare_action(self, user_goal, step, command):
+            ready.append((position, step, serial))
+        else:
+            answers[position] = _call_answer(self, serial, _BLOCKED)
+            if getattr(self, "_result_serial", 0) == serial:
+                not_run.append(f"{command.action.description}: {answers[position]}")
+            failed = True
+        step += 1
+    if not ready:
+        return step, answers, not_run, failed
+    # One record for the group: a shell command is never replayed, so resume only needs to know
+    # that something of this kind was in flight.
+    first_step, first_command = ready[0][1], group[ready[0][0]].command
+    pending_action = _build_pending_action(self, first_command, first_step)
+    if pending_action is not None:
+        self._save_checkpoint(user_goal, first_step, pending_action=pending_action)
+    feedbacks = _execute_shells_together(self, [(call_step, group[position].command) for position, call_step, _ in ready])
+    for (position, call_step, serial), feedback in zip(ready, feedbacks):
+        command = group[position].command
+        if _needs_the_person(feedback):
+            serial = getattr(self, "_result_serial", 0)
+            result = _execute_action(self, user_goal, call_step, command)
+        else:
+            result = _finish_action(self, call_step, command, feedback)
+        answers[position] = _call_answer(self, serial, result)
+        failed = failed or not result.proceed
+    self._save_checkpoint(user_goal, ready[-1][1])
+    return step, answers, not_run, failed
+
+
+def _needs_the_person(feedback: dict[str, Any]) -> bool:
+    """A side-by-side command has no one to ask, so an approval it needed shows up as a refusal."""
+    data = feedback.get("data")
+    return isinstance(data, dict) and data.get("denied") is True
+
+
+def _execute_shells_together(self, calls: list[tuple[int, AgentCommand]]) -> list[dict[str, Any]]:
+    """Feedback of each command in call order; Ctrl+C, a pause or a stop ends them all."""
+    watch_output = getattr(self._ui, "print_action_output", None)
+    cancel = threading.Event()
+
+    def run(call: tuple[int, AgentCommand]) -> dict[str, Any]:
+        call_step, command = call
+        sink = functools.partial(watch_output, call_step, call_id=command.call_id) if watch_output else None
+        with self.executor.parallel_shell_slot(sink, cancel):
+            return self._execute_command(command)
+
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_CALLS, thread_name_prefix="kvist-shell") as pool:
+        futures = [pool.submit(run, call) for call in calls]
+        try:
+            while wait(futures, timeout=_INTERRUPT_POLL_SECONDS).not_done:
+                if self.control.interrupted():
+                    cancel.set()
+        except BaseException:
+            cancel.set()
+            raise
+        return [future.result() for future in futures]
 
 
 def _execute_in_parallel(self, commands: list[AgentCommand]) -> list[dict[str, Any]]:

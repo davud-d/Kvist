@@ -69,7 +69,8 @@ _HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "resul
 _HELPER_ROLES = ("reader", "coder", "devops", "universal")
 _SCHEDULE_OPS = ("add", "list", "update", "cancel", "pause", "resume")
 
-MAX_BATCH_ACTIONS = 8
+MAX_BATCH_ACTIONS = 30
+MAX_READ_ACTIONS = 40
 
 # Plain text without calls ends the turn. final_answer is also offered for
 # explicit outcomes; report_to_user remains supported for older prompts.

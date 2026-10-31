@@ -17,6 +17,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
@@ -52,7 +53,7 @@ from kernel.sandbox.secret_paths import (
     count_workspace_inode_aliases,
     is_secret_path,
 )
-from kernel.sandbox.approvals import ApprovalGate, TerminalApprovalGate
+from kernel.sandbox.approvals import ApprovalGate, DenyApprovalGate, TerminalApprovalGate
 from kernel.sandbox.auto_approval import AutoApprovalGate, Classifier, refusal_note
 from kernel.sandbox.scratchpad import Scratchpad, ScratchpadFull
 from kernel.sandbox.permission_policy import append_web_domain, load_policy
@@ -316,14 +317,20 @@ class SafeExecutor:
         # Private directory for an exposed server's socket; set by the agent
         # from its resource manager. None means exposing is unavailable.
         self.service_dir_factory: Callable[[str], Path] | None = None
-        self._terminal = TerminalExecutor(
-            workspace=self.workspace,
-            timeout=terminal_timeout,
-            max_output_chars=self.max_output_chars,
-            profile=terminal_profile,
-            approvals=self._approvals,
-            scratch=self.scratchpad,
-        )
+        self._terminal_args = {
+            "workspace": self.workspace,
+            "timeout": terminal_timeout,
+            "max_output_chars": self.max_output_chars,
+            "profile": terminal_profile,
+            "scratch": self.scratchpad,
+        }
+        self._terminal = TerminalExecutor(approvals=self._approvals, **self._terminal_args)
+        # A TerminalExecutor keeps one run's state on itself and serializes its runs under a lock, so
+        # commands that run side by side each take a terminal of their own. None of them can ask the
+        # person: only a command that needs no approval is ever given one.
+        self._spare_terminals: list[TerminalExecutor] = []
+        self._spare_terminals_lock = threading.Lock()
+        self._shell_slot = threading.local()
 
         # Sandbox honesty + policy-file notices — surfaced once by the
         # agent UI, not stderr.
@@ -465,6 +472,40 @@ class SafeExecutor:
         sandbox's verdict for an arbitrary argv list.
         """
         return self._terminal.explain_command(command, role=role)
+
+    def runs_alongside_others(self, command: AgentCommand) -> bool:
+        """True for a foreground run_shell that needs no approval, so it may run on a thread of its own."""
+        args = command.action.args
+        if command.action.type != "run_shell":
+            return False
+        if args.get("background") or args.get("network") or args.get("sandbox", "default") != "default":
+            return False
+        return self.explain_shell_command(args.get("command"), role=self.active_role).get("verdict") == "allow"
+
+    @contextmanager
+    def parallel_shell_slot(self, sink: Callable[[str], None] | None, cancel: threading.Event):
+        """On this thread, run_shell uses a terminal of its own, reports output to ``sink``, ends on ``cancel``."""
+        terminal = self._take_spare_terminal()
+        terminal.output_sink = sink
+        terminal.cancel_event = cancel
+        self._shell_slot.terminal = terminal
+        try:
+            yield
+        finally:
+            self._shell_slot.terminal = None
+            terminal.output_sink = None
+            terminal.cancel_event = None
+            with self._spare_terminals_lock:
+                self._spare_terminals.append(terminal)
+
+    def _take_spare_terminal(self) -> TerminalExecutor:
+        with self._spare_terminals_lock:
+            if self._spare_terminals:
+                return self._spare_terminals.pop()
+        return TerminalExecutor(approvals=DenyApprovalGate(), **self._terminal_args)
+
+    def _shell_terminal(self) -> TerminalExecutor:
+        return getattr(self._shell_slot, "terminal", None) or self._terminal
 
     def set_output_sink(self, sink: Callable[[str], None] | None) -> None:
         """Watch the output of the shell command about to run; ``None`` stops."""
@@ -2374,7 +2415,7 @@ class SafeExecutor:
         self._job_purpose = ""
         self._job_call_id = ""
         try:
-            result = self._terminal.run(
+            result = self._shell_terminal().run(
                 command, cwd=cwd, timeout=timeout, role=self.active_role,
                 sandbox=sandbox, network=network, justification=justification,
                 background=launch,
