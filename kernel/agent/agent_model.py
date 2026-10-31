@@ -850,6 +850,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     last_call_push = 0.0
     last_lines_push = 0.0
     lines = CallStream()
+    announced: set[str] = set()
     spoken = _SpokenStream(self)
     try:
         for chunk in iterate_cancellable(self._cancel_event, stream):
@@ -889,6 +890,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             elif calls and _writes_a_call(calls) and time.monotonic() - last_call_push > 0.5:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
+            _announce_finished_calls(self, calls, announced)
             if calls and time.monotonic() - last_lines_push > _CALL_LINES_INTERVAL:
                 _stream_call_lines(self, lines, [calls[max(calls)]])
                 last_lines_push = time.monotonic()
@@ -956,6 +958,7 @@ def _seal_thinking(self, reasoning: list[str]) -> None:
 
 
 _PATH_IN_ARGUMENTS_RE = re.compile(r'"path"\s*:\s*"([^"]*)"')
+_DESCRIPTION_IN_ARGUMENTS_RE = re.compile(r'"description"\s*:\s*"((?:[^"\\]|\\.)*)"')
 _MESSAGE_IN_ARGUMENTS_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)')
 # Calls that carry the person's words, not work: the words stream as an answer
 # and a "Writing ..." status would only describe the same text twice.
@@ -1022,6 +1025,25 @@ def _stream_call_lines(self, lines: CallStream, entries: list[dict[str, str]], *
         path = target.group(1) if target else ""
         for piece in lines.pieces(entry["id"], entry["name"], entry["arguments"], final=final):
             emit(entry["id"], entry["name"], path, piece.field, piece.first_line, piece.text, piece.done)
+
+
+def _announce_finished_calls(self, calls: dict[int, dict[str, str]], announced: set[str]) -> None:
+    """Tell the frontend about each call the model has moved past.
+
+    Fragments arrive by index, so a call is complete once a later one has begun;
+    the newest is left alone, its card follows within moments.
+    """
+    emit = getattr(self._ui, "print_call_begin", None)
+    if emit is None or len(calls) < 2:
+        return
+    for index in sorted(calls)[:-1]:
+        entry = calls[index]
+        if entry["id"] in announced or not entry["name"] or entry["name"] in _ANSWER_TOOLS:
+            continue
+        announced.add(entry["id"])
+        target = _PATH_IN_ARGUMENTS_RE.search(entry["arguments"])
+        words = _DESCRIPTION_IN_ARGUMENTS_RE.search(entry["arguments"])
+        emit(entry["id"], entry["name"], target.group(1) if target else "", decode_json_prefix(words.group(1)) if words else "")
 
 
 def _merge_tool_call_delta(calls: dict[int, dict[str, str]], piece: Any) -> None:

@@ -588,6 +588,32 @@ class ActionOutputEvent:
 
 
 @dataclass(slots=True)
+class CallBeginEvent:
+    """A tool call the model has finished writing, before the response ends.
+
+    A response may hold dozens of calls and the ``step`` card of each appears only
+    when the runtime reaches it, after the last one was written. This lets a
+    frontend show the calls one by one while the model is still producing the rest;
+    the ``step`` with the same ``call_id`` then fills the card in. Live only.
+    """
+
+    call_id: str
+    tool: str
+    path: str
+    description: str
+    type: ClassVar[str] = "call_begin"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "call_id": self.call_id,
+            "tool": self.tool,
+            "path": self.path,
+            "description": self.description,
+        }
+
+
+@dataclass(slots=True)
 class CallStreamEvent:
     """Text of a tool call the model is still writing, whole lines at a time.
 

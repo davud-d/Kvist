@@ -88,3 +88,37 @@ def test_a_streamed_native_turn_delivers_lines_before_the_call_is_complete(agent
     assert seen[0][4] == 0 and not seen[0][6]
     assert seen[-1][6] is True
     assert turn.tool_calls[0].arguments == body
+
+
+def test_a_call_is_announced_once_the_model_moves_on_to_the_next(agent_factory):
+    agent = agent_factory(max_steps=1)
+    log: list[tuple] = []
+    agent._ui.print_call_begin = lambda *args: log.append(("begin", *args))
+
+    def chunk(index, call_id, name, arguments):
+        function = SimpleNamespace(name=name, arguments=arguments)
+        piece = SimpleNamespace(index=index, id=call_id, function=function)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[piece]))])
+
+    def stream():
+        # The stream is read on another thread; the pause lets the turn digest each chunk first.
+        for chunk_number, piece in enumerate(
+            [
+                chunk(0, "c1", "read_file", '{"path": "a.py", "description": "reads a.py"}'),
+                chunk(1, "c2", "run_shell", '{"command": ["ls"]}'),
+                chunk(2, "c3", "final_answer", '{"message": "done"}'),
+            ]
+        ):
+            log.append(("chunk", chunk_number))
+            yield piece
+            time.sleep(0.05)
+
+    agent_model._native_turn_from_stream(agent, stream(), time.monotonic())
+
+    assert log == [
+        ("chunk", 0),
+        ("chunk", 1),
+        ("begin", "c1", "read_file", "a.py", "reads a.py"),
+        ("chunk", 2),
+        ("begin", "c2", "run_shell", "", ""),
+    ]

@@ -869,3 +869,14 @@ test("at fifty thousand tokens a second only the last message of the feed is sti
   assert.equal(says.length, 40)
   assert.deepEqual(says.slice(0, -1).filter((item) => item.kind === "say" && item.fresh), [])
 })
+
+test("calls the model has finished writing are counted until their step arrives", () => {
+  const begin = (id: string, tool: string, path: string): CoreEvent => ({ type: "call_begin", call_id: id, tool, path, description: "" })
+  const written = feed(begin("c1", "read_file", "a.py"), begin("c2", "run_shell", ""), begin("c1", "read_file", "a.py"))
+  assert.deepEqual(written.queued.map((call) => call.callId), ["c1", "c2"])
+  const step: CoreEvent = { type: "step", step: 1, plan_step: "inspect", thought: "", user_message: "", action_type: "read_file", action_args: { path: "a.py" }, reasoning_seconds: 0, call_id: "c1" }
+  const after = reduce(written, { type: "event", event: step, now: 1000 })
+  assert.deepEqual(after.queued.map((call) => call.callId), ["c2"])
+  const over = reduce(after, { type: "event", event: { type: "turn_end" } as CoreEvent, now: 1000 })
+  assert.equal(over.queued.length, 0)
+})

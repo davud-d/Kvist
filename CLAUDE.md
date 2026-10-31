@@ -377,6 +377,18 @@ protocol. Gateway facts for Claude through AnyModel (`cc/`): it returns call arg
 In the text protocol `parser.parse_model_response` keeps only the words before the first
 `<tool_call>`: what follows describes a result the model has not been given.
 
+**Calls shown while the model still writes the batch (`call_begin`, `call_stream`).** A call's `step` card is
+emitted when the runtime reaches it, after the whole response was written, so a 27-call batch used to appear all at
+once. `agent_model._announce_finished_calls` therefore sends the live-only `call_begin` for each native call once the
+next one has begun (never for `final_answer`/`report_to_user`/`refuse`; the last call of a response gets none, its
+`step` follows at once); `write_file`/`append_file`/`replace_in_file` also stream their lines as `call_stream`. The
+`step` with the same `call_id` fills the early card in, so a frontend that draws `call_begin` must reuse the card.
+Wired in the Tauri app (an early card), Glass (an early `Item::Tool`, the response's words are inserted above it), and
+Ink's `state.queued` (a dim "N calls written" line in both skins, VS Code panel and OpenCode). **Not wired:** the
+classic terminal (by decision), the Electron GUI (its step cards are immutable and keyed by `batch_id`), Zed, Voice.
+The JSON text protocol sends neither event. Tests: `test_call_stream.py`, `ui.test.mjs`, `state.test.ts`, Glass's
+`model.rs`/`protocol.rs`.
+
 ### LocalAgent composition pattern (important & non-obvious)
 `agent.py::LocalAgent` is assembled by binding functions from other modules as methods via
 class-level assignment (`_run_loop = run_loop`, `_call_action_model = call_action_model`). The logic
@@ -1305,8 +1317,19 @@ A GUI in the style of a pixel game, **not** a rewrite of the Electron app (`gui/
   release job publishes them; a failed platform keeps its previous binary. `scripts/tests/test_release_desktop_app.py` checks that the
   workflow, both scripts and the screen agree on names (and that `install_app.py` builds the binary the workflow uploads). **A new platform
   asset needs the workflow, `install.sh` and `install.ps1` to agree.**
-- **Not seen:** the real core through the Tauri shell with a real model; macOS and Windows runs; typing into the window under Xvfb (no WM,
-  WebKit ignores synthetic keys), so goal sending is covered by the page tests and the mock only.
+- **Open work (as of Nov 1 2026):**
+  - *Not seen:* the real core through the Tauri shell with a real model (the user ran the app on X11 + NVIDIA and gave visual feedback only);
+    macOS and Windows runs; `install.ps1` never executed (no PowerShell here); the first CI run of `build-desktop-app`; typing into the window
+    under Xvfb (no WM, WebKit ignores synthetic keys), so goal sending is covered by the page tests and the mock only. Look is checked with
+    Playwright against the mock (serve `ui/` with any static server); there are no DOM tests.
+  - *Linux transparency* is opt in (see Window); nobody has seen it blend on the user's machine. Wayland untested.
+  - *Rail:* no rename/delete of a session from the tree (settings -> sessions has delete); the overview shows agents, not stored sessions;
+    a launch opens a new session in the last folder (earlier ones are in the tree), restoring tabs was dropped on purpose.
+  - *Missing vs. the other interfaces:* `/website` and other prompt commands go as plain goals (fine), but no memory screen, no helper
+    session viewer, no `input_closed` countdown, no `/doctor` entry in the settings, no first-run provider screen (the core's own
+    `--setup` screen runs in a terminal; this app expects a provider that is already configured; what it shows without one was not tried).
+  - *Ideas the user liked:* parallel agents with zoom in/out, helpers and the agent's browser in view. Not asked yet: sounds, a mascot that
+    reacts to events, drag to reorder the rail.
 
 ### Voice mode and the narrator (`voice_mode.txt`, `narrator.py`)
 `AgentConfig.voice_mode` (`AGENT_VOICE_MODE=1`; a voice frontend sets it, nothing else) appends

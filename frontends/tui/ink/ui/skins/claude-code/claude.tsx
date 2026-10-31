@@ -544,6 +544,11 @@ export function ClaudeLiveBody({ state }: { state: State }) {
           {state.pending ? null : <Result><Text color={color.dim}>{requestIsRussian(state) ? "Выполняется…" : "Running…"}</Text></Result>}
         </Call>
       ) : null}
+      {state.running && !state.pending && state.queued.length > 0 && !inflight ? (
+        <Text color={color.dim} wrap="truncate-end">
+          {requestIsRussian(state) ? `⎿  Записано вызовов: ${state.queued.length}` : `⎿  ${state.queued.length} calls written`} · {state.queued.at(-1)?.action} {state.queued.at(-1)?.target}
+        </Text>
+      ) : null}
       {state.running && !state.pending && state.live?.answer ? <LiveAnswer text={state.live.answer} /> : null}
     </>
   )

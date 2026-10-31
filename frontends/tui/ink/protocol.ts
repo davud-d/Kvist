@@ -48,6 +48,8 @@ export type CoreEvent =
   // first step of its batch only.
   | { type: "step"; step: number; plan_step: string; thought: string; user_message: string; action_type: string; action_args: Record<string, unknown>; reasoning_seconds: number; action_description?: string; call_id?: string; batch_id?: string }
   | { type: "action_result"; step: number; action_type: string; ok: boolean; summary: string; output: string; exit_code: number | null; path: string | null; first_line: number | null; call_id?: string; batch_id?: string }
+  // A call the model finished writing while it writes the next; the step with the same call_id follows later.
+  | { type: "call_begin"; call_id: string; tool: string; path: string; description: string }
   | { type: "action_output"; step: number; output: string; call_id?: string }
   | { type: "plan"; markdown: string }
   | { type: "route"; role: string; source?: string }

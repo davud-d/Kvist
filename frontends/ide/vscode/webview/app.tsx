@@ -450,6 +450,7 @@ export function App() {
         ) : null}
         {feed}
         {state.exploring ? <Working label="Exploring" target={exploreSummary(state.exploring)} /> : null}
+        {state.queued.length > 0 && !running ? <Working action={state.queued.at(-1)?.action} label={`${state.queued.length} calls written`} target={state.queued.at(-1)?.target ?? ""} /> : null}
         {running && running.action !== "run_shell" ? <Working action={running.action} label={verbOf(running.action)} target={actionTarget(running.args)} /> : null}
         {workspacePage && running?.action === "run_shell" ? <Working action="run_shell" label="Running" target={commandLine(running.args)} hint={liveOutput?.step === running.step ? outputLines(liveOutput.text).filter((line) => line.trim()).at(-1) ?? "" : ""} /> : null}
         {thinking ? <Thinking reasoning={state.live?.reasoning ?? ""} since={state.live?.thinkingSince ?? null} /> : null}

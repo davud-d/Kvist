@@ -44,6 +44,12 @@ export function Live({ state }: { state: State }) {
       <Text color={color.dim}>  {clip(actionTarget(inflight.args), 90)}</Text>
     </Text>
   ) : null
+  const queued = state.queued.at(-1)
+  const written = queued ? (
+    <Text color={color.dim} wrap="truncate-end">
+      {spinner} {state.queued.length} calls written so far · {queued.action}  {clip(queued.target, 70)}
+    </Text>
+  ) : null
   if (state.command && !state.pending) {
     return (
       <Box flexDirection="column">
@@ -59,6 +65,7 @@ export function Live({ state }: { state: State }) {
       <Box flexDirection="column">
         {exploring}
         {pendingAction}
+        {written}
       </Box>
     )
   }
@@ -72,6 +79,7 @@ export function Live({ state }: { state: State }) {
     <Box flexDirection="column">
       {exploring}
       {pendingAction}
+      {written}
       {live?.answer ? (
         <Box paddingLeft={2} marginBottom={1}>
           <Markdown text={lastLines(live.answer, budget)} />

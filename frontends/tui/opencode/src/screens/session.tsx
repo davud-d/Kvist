@@ -117,8 +117,17 @@ function LiveRows() {
   const state = kvist.state
   const counts = createMemo(() => (state().exploring ?? {}) as unknown as Record<string, number>)
   const calls = createMemo(() => state().inflight.filter((call) => !isAnswerAction(call.action)))
+  const theme = useTheme()
+  const queued = createMemo(() => state().queued.at(-1))
   return (
     <>
+      <Show when={queued() && !calls().length}>
+        <box marginTop={1} flexShrink={0}>
+          <text fg={theme.text.muted}>
+            {state().queued.length} calls written · {queued()?.action} {queued()?.target}
+          </text>
+        </box>
+      </Show>
       <Show when={state().exploringNames.length && !stillTyping()}>
         <box marginTop={1} flexShrink={0}>
           <ExploredGroup names={state().exploringNames} counts={counts()} completed={false} />

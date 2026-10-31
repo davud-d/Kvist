@@ -68,6 +68,14 @@ export interface Inflight {
   at: number
 }
 
+// A call the model has finished writing while it writes the rest of its response. It has no card yet:
+// the step that follows takes it off this list. Only for a UI to say how far the response has got.
+export interface Queued {
+  callId: string
+  action: string
+  target: string
+}
+
 // A read-only step that may still fail; its result arrives after it, possibly
 // after the other reads of the same response have started.
 interface ExploreStep {
@@ -99,6 +107,7 @@ export interface State {
   exploringNames: string[]
   exploreSteps: ExploreStep[]
   inflight: Inflight[]
+  queued: Queued[]
   // The model response the latest step came from, and how many of its calls arrived.
   batch: { id: string; count: number } | null
   running: boolean
@@ -169,6 +178,7 @@ export function initialState(effort = "", banner = false): State {
     exploringNames: [],
     exploreSteps: [],
     inflight: [],
+    queued: [],
     batch: null,
     running: false,
     turnsAhead: 0,
@@ -327,6 +337,11 @@ function onActionResult(state: State, event: Extract<CoreEvent, { type: "action_
   return event.ok ? pending : failExploreStep(pending, read, event.summary)
 }
 
+function withoutQueued(state: State, callId: string | undefined): State {
+  if (!callId || !state.queued.some((call) => call.callId === callId)) return state
+  return { ...state, queued: state.queued.filter((call) => call.callId !== callId) }
+}
+
 function ensureLive(state: State, streamId: string): Live {
   if (state.live && state.live.streamId === streamId) return state.live
   return { streamId, answer: "", reasoning: "", thinking: false, thinkingSince: null }
@@ -478,7 +493,13 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return push(state, (id) => ({ id, kind: "plan", markdown: event.markdown, russian: requestIsRussian(state) }))
     case "route":
       return event.role ? { ...state, info: { ...state.info, routedRole: event.role } } : state
+    case "call_begin": {
+      if (!event.call_id || state.queued.some((call) => call.callId === event.call_id)) return state
+      const target = event.path || event.description
+      return { ...state, queued: [...state.queued, { callId: event.call_id, action: event.tool, target }] }
+    }
     case "step": {
+      state = withoutQueued(state, event.call_id)
       const args = event.action_args ?? {}
       const kind = EXPLORE_KIND[event.action_type]
       const seconds = event.reasoning_seconds || 0
@@ -609,7 +630,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       // the input box disabled forever.
       // Jobs keep their state: a stopped one already reported job_finished, and one still
       // running was left running by an answered turn and reports its end later.
-      return { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, screen: state.taskState === "paused" ? state.screen : null }
+      return { ...settle(state), exploreSteps: [], queued: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, screen: state.taskState === "paused" ? state.screen : null }
     default:
       return state
   }
@@ -722,6 +743,6 @@ export function reduce(state: State, action: Action): State {
       return { ...state, showDebug: !state.showDebug }
     case "clear":
       // Jobs are kept: /clear empties the screen, and a running job is still running.
-      return { ...state, items: [], exploring: null, exploringNames: [], exploreSteps: [], inflight: [], batch: null, justReasoned: false, epoch: state.epoch + 1 }
+      return { ...state, items: [], exploring: null, exploringNames: [], exploreSteps: [], inflight: [], queued: [], batch: null, justReasoned: false, epoch: state.epoch + 1 }
   }
 }
