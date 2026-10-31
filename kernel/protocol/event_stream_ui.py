@@ -10,6 +10,7 @@ from typing import Any
 
 from kernel.protocol.frontend_protocol import (
     ActionOutputEvent,
+    CallStreamEvent,
     ActionResultEvent,
     ArtifactEvent,
     HelperActivityEvent,
@@ -254,6 +255,13 @@ class EventStreamUI:
                 self._output_timer = threading.Timer(wait, self._flush_output)
                 self._output_timer.daemon = True
                 self._output_timer.start()
+
+    def print_call_stream(
+        self, call_id: str, tool: str, path: str, field: str, line: int, text: str, done: bool
+    ) -> None:
+        self._channel.emit(
+            CallStreamEvent(call_id, tool, redact_text(path), field, line, redact_text(text), done)
+        )
 
     def print_job_started(self, job_id: str, command: list[str], purpose: str, call_id: str = "") -> None:
         self._channel.emit(

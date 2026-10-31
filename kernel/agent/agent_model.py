@@ -29,6 +29,7 @@ from kernel.agent.agent_context import (
     split_prompt_into_sections,
 )
 from kernel.context.context_meter import begin_call, context_usage, end_call, mute_generation, note_generated
+from kernel.agent.call_stream import CallStream, decode_json_prefix
 from kernel.agent.narrator import narrating
 from kernel.context.context_budget import (
     derived_prompt_budget,
@@ -847,6 +848,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     first_output: float | None = None
     last_push = 0.0
     last_call_push = 0.0
+    last_lines_push = 0.0
+    lines = CallStream()
     spoken = _SpokenStream(self)
     try:
         for chunk in iterate_cancellable(self._cancel_event, stream):
@@ -886,6 +889,9 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             elif calls and _writes_a_call(calls) and time.monotonic() - last_call_push > 0.5:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
+            if calls and time.monotonic() - last_lines_push > _CALL_LINES_INTERVAL:
+                _stream_call_lines(self, lines, [calls[max(calls)]])
+                last_lines_push = time.monotonic()
             note_generated(
                 self,
                 lambda: "".join(reasoning)
@@ -900,6 +906,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 close()
             except Exception as error:
                 self._ui.debug_print(f"Native stream close failed: {redact_text(str(error))}")
+    _stream_call_lines(self, lines, list(calls.values()), final=True)
     if first_output is None:
         _seal_thinking(self, reasoning)
     self._last_reasoning_seconds = _thinking_seconds(
@@ -967,14 +974,7 @@ def _final_answer_words(calls: dict[int, dict[str, str]]) -> str:
     found = _MESSAGE_IN_ARGUMENTS_RE.search(entry["arguments"])
     if found is None:
         return ""
-    raw = found.group(1)
-    # A chunk can end inside an escape (a lone backslash or half a \uXXXX).
-    for cut in range(len(raw), max(len(raw) - 6, -1), -1):
-        try:
-            return json.loads(f'"{raw[:cut]}"')
-        except json.JSONDecodeError:
-            continue
-    return ""
+    return decode_json_prefix(found.group(1))
 
 
 def _spoken_with_answer(content: str, calls: dict[int, dict[str, str]]) -> str:
@@ -1005,6 +1005,23 @@ def _note_tool_call_progress(self, entry: dict[str, str]) -> None:
         progress=self._state.progress,
         plan_step="tool call",
     )
+
+
+# Short enough that lines appear as they are written, long enough that a fast
+# provider does not re-decode a large file once per fragment.
+_CALL_LINES_INTERVAL = 0.1
+
+
+def _stream_call_lines(self, lines: CallStream, entries: list[dict[str, str]], *, final: bool = False) -> None:
+    """Hand the frontend the new whole lines of the calls being written."""
+    emit = getattr(self._ui, "print_call_stream", None)
+    if emit is None:
+        return
+    for entry in entries:
+        target = _PATH_IN_ARGUMENTS_RE.search(entry["arguments"])
+        path = target.group(1) if target else ""
+        for piece in lines.pieces(entry["id"], entry["name"], entry["arguments"], final=final):
+            emit(entry["id"], entry["name"], path, piece.field, piece.first_line, piece.text, piece.done)
 
 
 def _merge_tool_call_delta(calls: dict[int, dict[str, str]], piece: Any) -> None:

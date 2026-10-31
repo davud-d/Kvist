@@ -588,6 +588,40 @@ class ActionOutputEvent:
 
 
 @dataclass(slots=True)
+class CallStreamEvent:
+    """Text of a tool call the model is still writing, whole lines at a time.
+
+    ``field`` is the argument being written (``content``, ``old_text``,
+    ``new_text``) and ``text`` is what is new in it, starting at line ``line``
+    (0-based, counted within that field): a frontend appends. ``done`` closes the
+    field, and its last ``text`` may end without a newline. Live only: the
+    finished call still arrives as ``action_result``. A secret is redacted per
+    delivery, so one split across lines can get through here.
+    """
+
+    call_id: str
+    tool: str
+    path: str
+    field: str
+    line: int
+    text: str
+    done: bool
+    type: ClassVar[str] = "call_stream"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "call_id": self.call_id,
+            "tool": self.tool,
+            "path": self.path,
+            "field": self.field,
+            "line": self.line,
+            "text": self.text,
+            "done": self.done,
+        }
+
+
+@dataclass(slots=True)
 class JobStartedEvent:
     """A ``run_shell`` command with ``background: true`` began running.
 
