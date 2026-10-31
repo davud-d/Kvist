@@ -289,6 +289,14 @@ test("input_request is pending until answered; turn_end drops a stale one", () =
   assert.equal(state.pending, null)
 })
 
+test("input_closed drops the dialog it names and no other", () => {
+  const request: CoreEvent = { type: "input_request", request_id: "r", kind: "confirm", title: "t", body: "b", options: null, current_value: "", help_text: "", timeout_seconds: 120 }
+  const state = feed(request)
+  assert.equal(state.pending?.timeout_seconds, 120)
+  assert.equal(reduce(state, { type: "event", event: { type: "input_closed", request_id: "other", reason: "timeout" } }).pending?.request_id, "r")
+  assert.equal(reduce(state, { type: "event", event: { type: "input_closed", request_id: "r", reason: "timeout" } }).pending, null)
+})
+
 test("unknown event types are ignored", () => {
   const state = feed({ type: "quantum_flux" } as unknown as CoreEvent)
   assert.deepEqual(state.items, [])

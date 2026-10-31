@@ -6,7 +6,8 @@ The policy lives in ``<workspace>/.kvist/permissions.json``:
     {
         "allow": ["git status", "python *"],
       "deny":  ["curl *"],
-      "ask":   ["npm run"]
+      "ask":   ["npm run"],
+      "host":  ["git push *"]
     }
 
 Pattern semantics: a pattern is a sequence of whitespace-separated tokens
@@ -15,6 +16,16 @@ globbing per token (``fnmatch``). A trailing ``*`` matches any remaining
 arguments (zero or more); a pattern without it still matches commands that
 have extra arguments after the matched prefix, so ``git push`` covers
 ``git push origin main``.
+
+``allow`` and ``host`` patterns must start with the command's literal name: a
+bare ``*`` (or ``py*``) never matches, so one typo cannot switch approvals off
+for everything. ``deny`` and ``ask`` keep full globbing, since a broader match
+there only asks or refuses more.
+
+``host`` patterns name commands that always run outside the sandbox, with the
+person's real HOME and no file masking, without the per-run host dialog. They
+also count as ``allow``: the person wrote the rule, so the command needs no
+second approval (an intrinsic DANGEROUS command still asks).
 
 Resolution order (enforced by the terminal layer, not here): project ``deny``
 → built-in hard blocks → intrinsic ``DANGEROUS`` → project ``ask`` →
@@ -39,6 +50,9 @@ from kernel.session.durable_json import (
 )
 
 POLICY_RELATIVE_PATH = ".kvist/permissions.json"
+RULE_LISTS = ("allow", "deny", "ask", "host")
+_STORED_LISTS = (*RULE_LISTS, "web_domains")
+_WILDCARD_CHARS = "*?["
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +62,7 @@ class PermissionPolicy:
     allow: tuple[str, ...] = ()
     deny: tuple[str, ...] = ()
     ask: tuple[str, ...] = ()
+    host: tuple[str, ...] = ()
     # Hosts the person chose "always allow" for in the fetch_url prompt.
     web_domains: tuple[str, ...] = ()
 
@@ -61,9 +76,12 @@ class PermissionPolicy:
             return "deny"
         if any(_matches(pattern, command) for pattern in self.ask):
             return "ask"
-        if any(_matches(pattern, command) for pattern in self.allow):
+        if any(_grants(pattern, command) for pattern in (*self.allow, *self.host)):
             return "allow"
         return None
+
+    def runs_on_host(self, command: list[str]) -> bool:
+        return any(_grants(pattern, command) for pattern in self.host)
 
 
 def _matches(pattern: str, command: list[str]) -> bool:
@@ -78,6 +96,16 @@ def _matches(pattern: str, command: list[str]) -> bool:
         if not fnmatch(command[index], pattern_token):
             return False
     return True
+
+
+def _grants(pattern: str, command: list[str]) -> bool:
+    """``_matches`` for the lists that lift a check: the command name must be written out."""
+    return pattern_is_specific(pattern) and _matches(pattern, command)
+
+
+def pattern_is_specific(pattern: str) -> bool:
+    tokens = pattern.split()
+    return bool(tokens) and not any(char in tokens[0] for char in _WILDCARD_CHARS)
 
 
 def policy_file_path(workspace: Path) -> Path:
@@ -107,7 +135,7 @@ def load_policy(workspace: Path) -> tuple[PermissionPolicy, str]:
         return PermissionPolicy(), f"Cannot read {POLICY_RELATIVE_PATH}: {error}"
 
     parsed: dict[str, tuple[str, ...]] = {}
-    for key in ("allow", "deny", "ask", "web_domains"):
+    for key in _STORED_LISTS:
         rules, error = _parse_rule_list(data.get(key, []), key)
         if error:
             return PermissionPolicy(), f"Invalid {POLICY_RELATIVE_PATH}: {error}"
@@ -129,6 +157,32 @@ def append_allow_rule(workspace: Path, pattern: str) -> None:
     _append_rule(workspace, "allow", pattern)
 
 
+def append_rule(workspace: Path, key: str, pattern: str) -> None:
+    """Persist ``pattern`` in one of the rule lists (``/permissions``)."""
+    if key not in RULE_LISTS:
+        raise ValueError(f"unknown rule list '{key}'")
+    _append_rule(workspace, key, pattern)
+
+
+def remove_rule(workspace: Path, pattern: str, only: str | None = None) -> list[str]:
+    """Drop ``pattern`` from every list holding it (or just ``only``); returns the lists it was in."""
+    path = _validated_policy_path(workspace)
+    removed: list[str] = []
+
+    def drop(loaded: dict[str, object]) -> dict[str, object]:
+        data = _normalized(loaded)
+        for key in (only,) if only else RULE_LISTS:
+            target = data[key]
+            assert isinstance(target, list)
+            if pattern in target:
+                target.remove(pattern)
+                removed.append(key)
+        return data
+
+    _update_policy(workspace, path, drop)
+    return removed
+
+
 def append_web_domain(workspace: Path, host: str) -> None:
     """Persist a host the person chose "always allow" for in the fetch_url prompt."""
     _append_rule(workspace, "web_domains", host)
@@ -137,23 +191,32 @@ def append_web_domain(workspace: Path, host: str) -> None:
 def _append_rule(workspace: Path, key: str, value: str) -> None:
     path = _validated_policy_path(workspace)
 
-    def append_rule(loaded: dict[str, object]) -> dict[str, object]:
-        data: dict[str, object] = dict(loaded)
-        for list_key in ("allow", "deny", "ask", "web_domains"):
-            rules, error = _parse_rule_list(loaded.get(list_key, []), list_key)
-            if error:
-                raise ValueError(error)
-            data[list_key] = list(rules)
+    def add(loaded: dict[str, object]) -> dict[str, object]:
+        data = _normalized(loaded)
         target = data[key]
         assert isinstance(target, list)
         if value not in target:
             target.append(value)
         return data
 
+    _update_policy(workspace, path, add)
+
+
+def _normalized(loaded: dict[str, object]) -> dict[str, object]:
+    data: dict[str, object] = dict(loaded)
+    for list_key in _STORED_LISTS:
+        rules, error = _parse_rule_list(loaded.get(list_key, []), list_key)
+        if error:
+            raise ValueError(error)
+        data[list_key] = list(rules)
+    return data
+
+
+def _update_policy(workspace: Path, path: Path, change) -> None:
     try:
         update_json_object(
             path,
-            append_rule,
+            change,
             boundary=workspace.resolve(),
             empty_as_missing=True,
         )

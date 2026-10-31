@@ -440,6 +440,27 @@ def save_memory_paused(paused: bool, config_path: Path | None = None) -> None:
     _update_user_config(update, config_path)
 
 
+AUTO_APPROVAL_KEY = "auto_approval"
+
+
+def get_auto_approval(config_path: Path | None = None) -> bool:
+    """Whether a classifier model answers approval questions (`/permissions auto`); off by default."""
+    return load_user_config(config_path).get(AUTO_APPROVAL_KEY) is True
+
+
+def save_auto_approval(enabled: bool, config_path: Path | None = None) -> None:
+    """Persist auto mode; only the non-default ``true`` is stored."""
+
+    def update(payload: dict[str, object]) -> dict[str, object]:
+        if enabled:
+            payload[AUTO_APPROVAL_KEY] = True
+        else:
+            payload.pop(AUTO_APPROVAL_KEY, None)
+        return payload
+
+    _update_user_config(update, config_path)
+
+
 def save_role_selection(role: str, config_path: Path | None = None) -> None:
     """Save the role selection. Use 'auto' for automatic role detection."""
     normalized_role = role.strip()

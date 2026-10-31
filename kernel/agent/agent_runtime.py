@@ -63,6 +63,7 @@ def _skill_call_readonly(self, command: AgentCommand) -> bool:
 from kernel.context.context_meter import note_pending
 from kernel.protocol.action_result import SKIPPED_ERROR, build_action_result
 from kernel.agent.agent_state import PLAN_PLANNING, RunCancelled, RunState
+from kernel.sandbox.auto_approval import command_question
 from kernel.sandbox.executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from kernel.agent.call_labels import call_label
 from kernel.agent.native_tools import (
@@ -983,6 +984,7 @@ def _run_calls(
     read costs only itself. A failed or refused write stops the writes after
     it — a later write may rest on it — but not the reads.
     """
+    _prefetch_approvals(self, planned)
     answers: list[str] = []
     not_run: list[str] = []
     outcome = _ActionOutcome()
@@ -1051,6 +1053,28 @@ def _run_calls(
                 not_run.append(f"{item.command.action.description}: {answer}")
     _note_calls_not_run(self, not_run)
     return outcome, step, answers
+
+
+def _prefetch_approvals(self, planned: list[_PlannedCall]) -> None:
+    """Auto mode: one classifier call for the response's shell commands that will stop for approval.
+
+    A command that needs no approval is not sent, and a lone command is
+    classified when it asks, so a response costs at most one extra request.
+    """
+    gate = self.executor.approvals
+    if not getattr(gate, "auto_active", False):
+        return
+    questions = []
+    for item in planned:
+        if item.command is None or item.command.action.type != "run_shell":
+            continue
+        argv = item.command.action.args.get("command")
+        if not isinstance(argv, list) or not argv or not all(isinstance(part, str) for part in argv):
+            continue
+        explained = self.executor.explain_shell_command(argv, role=self.executor.active_role)
+        if explained.get("verdict") == "ask":
+            questions.append(command_question(argv, "; ".join(explained.get("reasons", []))))
+    gate.prefetch(questions)
 
 
 def _readonly_run(planned: list[_PlannedCall], start: int) -> list[_PlannedCall]:

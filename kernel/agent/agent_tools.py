@@ -16,6 +16,7 @@ from kernel.agent.image_generation import ImageError, generate as generate_image
 from kernel.plugins.builder import BuildError, check_draft, install_draft, scaffold_files
 from kernel.plugins.skills import SkillUseError
 from kernel.protocol.protocol import AgentCommand
+from kernel.sandbox.auto_approval import Background, Classifier, ClassifierError
 from kernel.sandbox.redaction import redact_text
 from kernel.agent.scheduler import ScheduleError
 from kernel.session.session_search import SessionSearchError, list_sessions, read_session, search_sessions
@@ -323,6 +324,55 @@ def memory_model(agent: Any) -> ModelAccess:
         return safe_extract_completion_content(response, config.provider, model)
 
     return ModelAccess(f"{config.provider} · {model}", ask, agent._count_tokens)
+
+
+def auto_classifier(agent: Any) -> Classifier:
+    """The auto-mode classifier: the session's fast model, low effort, one JSON answer per call."""
+    from kernel.agent.agent_model import (
+        _create_completion_with_reasoning_fallback,
+        _format_llm_error,
+        _sends_temperature,
+        safe_extract_completion_content,
+    )
+    from kernel.llm.llm_clients import provider_supports_json_mode
+    from kernel.llm.reasoning_effort import merge_reasoning_kwargs
+
+    config = agent.config
+    model = config.fast_model
+
+    def ask(messages: list[dict[str, str]]) -> str:
+        request: dict[str, Any] = {"model": model, "messages": messages, "timeout": config.api_timeout}
+        if _sends_temperature(agent, model):
+            request["temperature"] = 0
+        if provider_supports_json_mode(config.provider):
+            request["response_format"] = {"type": "json_object"}
+        merge_reasoning_kwargs(request, config.provider, "low")
+        try:
+            response = _create_completion_with_reasoning_fallback(agent, request)
+        except Exception as error:  # noqa: BLE001 - wrapper clients raise their own types; all mean "no answer"
+            raise ClassifierError(_format_llm_error(error, config.provider)) from None
+        return safe_extract_completion_content(response, config.provider, model)
+
+    def request() -> str:
+        state = agent._state
+        return "\n\n".join([state.user_goal, *state.task_updates])
+
+    def background() -> Background:
+        from kernel.context.system_context import workspace_instructions_context
+
+        summaries = agent._state.rolling_summaries
+        steps: list[str] = []
+        used = 0
+        for step in sorted(summaries, reverse=True):
+            entry = f"step {step}: {summaries[step]}"
+            used += agent._count_tokens(entry)
+            if used > config.narrator_context_tokens:
+                break
+            steps.append(entry)
+        instructions = workspace_instructions_context(agent.executor.workspace, agent.executor.active_role)
+        return Background(instructions, tuple(reversed(steps)))
+
+    return Classifier(ask, request, background)
 
 
 def memory_prompt_section(agent: Any, text: str) -> str:

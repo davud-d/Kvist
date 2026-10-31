@@ -53,6 +53,7 @@ from kernel.sandbox.secret_paths import (
     is_secret_path,
 )
 from kernel.sandbox.approvals import ApprovalGate, TerminalApprovalGate
+from kernel.sandbox.auto_approval import AutoApprovalGate, Classifier, refusal_note
 from kernel.sandbox.scratchpad import Scratchpad, ScratchpadFull
 from kernel.sandbox.permission_policy import append_web_domain, load_policy
 from kernel.config.user_config import get_web_search_settings
@@ -419,6 +420,23 @@ class SafeExecutor:
     def approvals(self) -> ApprovalGate:
         """The gate this executor asks; a writing helper borrows the main agent's."""
         return self._approvals
+
+    def set_auto_approval(self, classifier: Classifier | None) -> AutoApprovalGate | None:
+        """Let ``classifier`` answer approval questions (auto mode); ``None`` gives them back to the person.
+
+        The wrapper stays installed after the first call and passes everything
+        through while it holds no classifier, so a helper that borrowed the gate
+        follows the main agent's setting.
+        """
+        gate = self._approvals
+        if not isinstance(gate, AutoApprovalGate):
+            if classifier is None:
+                return None
+            gate = AutoApprovalGate(gate)
+            self._approvals = gate
+            self._terminal._approvals = gate
+        gate.set_classifier(classifier)
+        return gate
 
     def set_hitl_callbacks(self, suspend_fn, resume_fn):
         """Register UI callbacks for HITL prompts: suspend Live display during input."""
@@ -1119,7 +1137,8 @@ class SafeExecutor:
 
         if not approved:
             raise ExecutorError(
-                f"Overwrite of '{path}' denied by user. "
+                refusal_note(self._approvals)
+                or f"Overwrite of '{path}' denied by user. "
                 "Do not retry the same write; adjust the approach or report to the user."
             )
 
@@ -2929,7 +2948,8 @@ class SafeExecutor:
                 ) from error
             if decision == "deny":
                 raise ExecutorError(
-                    f"Fetching from '{host}' was declined by the person. "
+                    refusal_note(self._approvals)
+                    or f"Fetching from '{host}' was declined by the person. "
                     "Do not retry it; use another source or report to the user."
                 )
             if decision == "always":

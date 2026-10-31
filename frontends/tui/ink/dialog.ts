@@ -49,6 +49,22 @@ export function counterLabel(count: number, selected: number): string {
   return count ? `${selected + 1}/${count}` : "0/0"
 }
 
+// The last seconds of a question with a deadline are drawn in the error colour.
+export const URGENT_SECONDS = 3
+
+export interface Countdown {
+  text: string
+  urgent: boolean
+}
+
+// `total` seconds from the request, `elapsedMs` since the dialog appeared; ru picks the words.
+export function countdown(total: number, elapsedMs: number, ru: boolean): Countdown {
+  const left = Math.max(0, Math.ceil(total - elapsedMs / 1000))
+  const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`
+  const words = ru ? "без ответа будет «нет»" : "no answer counts as no"
+  return { text: `${clock} · ${words}`, urgent: left <= URGENT_SECONDS }
+}
+
 function move(selected: number, count: number, key: DialogKey, size: number): number {
   if (key.upArrow) return (selected - 1 + count) % count
   if (key.downArrow) return (selected + 1) % count

@@ -2,9 +2,11 @@ import { Box, Text, useInput, usePaste } from "ink"
 import { useWindowSize } from "./window-size.js"
 import { useEffect, useReducer, useRef, type ReactNode } from "react"
 
+import { detectLocale } from "../setup/strings.js"
 import {
   DIALOG_ROWS,
   choiceWindow,
+  countdown,
   counterLabel,
   filterOptions,
   initialChoice,
@@ -406,7 +408,34 @@ function Field({ request, onAnswer, secret }: Props & { secret: boolean }) {
   )
 }
 
+// Auto mode asks the person only when its classifier cannot decide, and gives a deadline.
+function Deadline({ seconds }: { seconds: number }) {
+  const started = useRef(Date.now())
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    const timer = setInterval(redraw, 1000)
+    // Never the reason a process stays alive (tests render dialogs without unmounting them).
+    timer.unref()
+    return () => clearInterval(timer)
+  }, [])
+  const left = countdown(seconds, Date.now() - started.current, detectLocale() === "ru")
+  return <Text bold={left.urgent} color={left.urgent ? color.err : color.dim}>⏱ {left.text}</Text>
+}
+
 export function Prompt(props: Props) {
+  const seconds = props.request.timeout_seconds
+  if (seconds) {
+    return (
+      <Box flexDirection="column">
+        <PromptBody {...props} />
+        <Deadline seconds={seconds} />
+      </Box>
+    )
+  }
+  return <PromptBody {...props} />
+}
+
+function PromptBody(props: Props) {
   const subject = subjectOf(props.request)
   switch (props.request.kind) {
     case "confirm":

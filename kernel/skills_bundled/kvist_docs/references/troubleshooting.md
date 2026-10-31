@@ -13,7 +13,7 @@ nothing. Only the optional last step touches the network: it asks, then sends th
 | A request is rejected as too long | Kvist lowers the budget and resends by itself; `/context` shows usage; `/new` frees it |
 | Requests are slow or rate-limited | `/settings-api`: interval, timeout, retries; a cheaper fast model with `/models` |
 | The model ignores tools or the JSON protocol | The run falls back by itself; weak models may need `/models` to a smarter one or `/effort` higher |
-| A command was refused | `/permissions <command>` explains the decision; hard blocks (secrets, forbidden syntax, outside the workspace) cannot be allowed by a rule |
+| A command was refused | `/permissions check <command>` explains the decision; hard blocks (secrets, forbidden syntax, outside the workspace) cannot be allowed by a rule |
 | A command cannot reach the network | The sandbox denies it by default; the command must ask for `network: true`, or set `AGENT_SANDBOX_NET=allow` |
 | A tool is "not found" in a command | Only project toolchains (`.venv/bin`, `node_modules/.bin`) and system directories are on the child PATH; extra directories go in `AGENT_TOOL_PATHS` |
 | A run stopped at the step limit | It asked whether to continue; `AGENT_MAX_STEPS` raises the default (150) |

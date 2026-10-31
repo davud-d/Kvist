@@ -16,7 +16,7 @@ from kernel.sandbox import sandbox
 from kernel.sandbox import terminal
 from kernel.protocol.event_session import EventApprovalGate
 from kernel.sandbox.executor import ExecutorError, SafeExecutor
-from kernel.protocol.frontend_protocol import FrontendChannel, InputRequestEvent
+from kernel.protocol.frontend_protocol import FrontendChannel, InputRequestEvent, InputResponse
 from kernel.protocol.parser import CommandValidationError, validate_action_args
 from kernel.sandbox.permission_policy import append_allow_rule, load_policy
 from kernel.sandbox.sandbox import SandboxMode, wrap_command_for_sandbox
@@ -138,7 +138,7 @@ def test_executor_cannot_inherit_network_policy_through_invalid_args(tmp_path, n
 
 @pytest.mark.parametrize("answer", ["false", "true", 1, None])
 def test_malformed_frontend_answer_cannot_approve_capability(answer):
-    channel = SimpleNamespace(request=lambda *args, **kwargs: SimpleNamespace(approved=answer))
+    channel = SimpleNamespace(request=lambda *args, **kwargs: InputResponse("r", approved=answer))
     gate = EventApprovalGate(channel)
     assert gate.confirm("Network access", "echo hello", "Allow?") is False
 

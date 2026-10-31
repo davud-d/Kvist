@@ -261,6 +261,10 @@ fail-closed).
 | `options:object[]\|null` | для `choice`: `[{"value","label"[,"description"]}, …]` |
 | `current_value:str` | текущее/дефолтное значение (пусто для `secret`) |
 | `help_text:str` | опциональная подсказка |
+| `timeout_seconds:number` | опционально (автоматический режим): без ответа за это время считается «нет» |
+
+Когда ядро перестаёт ждать, оно шлёт `{"type": "input_closed", "request_id", "reason": "timeout"}`:
+уберите этот диалог. Ответ, пришедший позже, игнорируется.
 
 **Ваш ответ — один JSON-объект:**
 

@@ -251,6 +251,8 @@ class RunState:
     read_only_streak: int = 0
     pending_instruction: str = ""
     rolling_summaries: dict[int, str] = field(default_factory=dict)
+    # What the auto-mode classifier decided this run: for the run log, never for the screen.
+    auto_decisions: list[dict[str, str]] = field(default_factory=list)
     last_action_signature: str = ""
     last_progress: int = 0
     last_web_query: str = ""

@@ -75,7 +75,8 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     ),
     SlashCommand(
         "permissions",
-        "Show project permission rules and explain a command's decision",
+        "Allow, ask, deny or run-outside-the-sandbox rules for commands, and auto mode (not safe)",
+        aliases=("permission",),
     ),
     SlashCommand("website", "Build a website: Kvist interviews you, builds it and checks it"),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
@@ -102,7 +103,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
 def slash_commands_context() -> str:
     """Shared command reference for roles answering questions about Kvist."""
     ink = os.getenv("KVIST_COMMAND_FRONTEND") == "ink"
-    classic_only = {"commands", "status", "permissions", "diff", "bug"}
+    classic_only = {"commands", "status", "diff", "bug"}
     rows = []
     for command in SLASH_COMMANDS:
         if ink and command.name in classic_only:
@@ -144,7 +145,10 @@ def slash_commands_context() -> str:
         "/memory remember <text> (this project), /memory remember-global <text> (every project), "
         "/memory process (pick what is worth keeping from this session; asks consent once), "
         "/memory processing on|off, "
-        + ("" if ink else "/permissions <shell command> (explain its permission decision, not execute it), /bug <report text>, ")
+        + "/permissions allow|host|ask|deny|remove <command start> (rules for commands; host runs outside the sandbox), "
+        "/permissions check <shell command> (explain its permission decision, not execute it), "
+        "/permissions auto on|off (a second model answers approval questions; not safe), "
+        + ("" if ink else "/bug <report text>, ")
         + "where supported in the list below. Angle-bracket text denotes a placeholder; "
         "true|false denotes alternatives, not literal input. For other argument "
         "forms, consult verified frontend help rather than guessing. If an "

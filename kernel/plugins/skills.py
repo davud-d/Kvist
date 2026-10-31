@@ -35,6 +35,7 @@ from kernel.plugins.registry import CatalogEntry, RegistryError, SkillRegistry, 
 from kernel.plugins.schema import validate
 from kernel.plugins.screen import ScreenViewer
 from kernel.plugins.services import AttachedSkill, CoreServices, SkillCall
+from kernel.sandbox.auto_approval import refusal_note
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text
 from kernel.plugins.resources import CleanupReport, Owner
 
@@ -289,11 +290,12 @@ class SkillManager:
         title, body = approval_text(entry, language, self.grants.granted_digests(entry.id))
         self._agent.control.awaiting_input(True)
         try:
-            approved = bool(self._agent._ui.confirm(title, body))
+            approved = self._agent.confirm_capability(title, body)
         finally:
             self._agent.control.awaiting_input(False)
         if not approved:
-            raise SkillUseError(f"the person did not allow {entry.id}; do not try to reach the same result another "
+            raise SkillUseError(refusal_note(self._agent.executor.approvals)
+                                or f"the person did not allow {entry.id}; do not try to reach the same result another "
                                 "way that the skill's permissions would have covered")
         return self.grants.put(entry.id, entry.digest, Path(self._agent.executor.workspace), required)
 
@@ -545,12 +547,13 @@ class SkillManager:
             title, body = _mcp_approval_text(server, tools, self._language())
             agent.control.awaiting_input(True)
             try:
-                approved = bool(agent._ui.confirm(title, body))
+                approved = agent.confirm_capability(title, body)
             finally:
                 agent.control.awaiting_input(False)
             if not approved:
                 client.stop()
-                raise SkillUseError(f"the person did not allow MCP server {name}")
+                raise SkillUseError(refusal_note(agent.executor.approvals)
+                                    or f"the person did not allow MCP server {name}")
             self.grants.put(f"mcp:{name}", digest, Path(agent.executor.workspace), {"mcp": {}})
         attached = AttachedServer(server, client, {wire_tool_name(name, tool["name"]): tool for tool in tools}, digest)
         self.mcp_attached[name] = attached

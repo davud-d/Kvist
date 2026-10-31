@@ -618,6 +618,7 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
         "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
         "strime", "revert", "bug", "commit-message", "web-search-provider", "context", "memory", "doctor",
+        "permissions",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)

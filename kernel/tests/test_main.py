@@ -822,6 +822,7 @@ def test_permissions_uses_active_role_and_renders_literal_policy_values(tmp_path
     agent = SimpleNamespace(
         current_session="default", start_fresh_session=lambda: ("default", True),
         _ui=_ShutdownUI(), save_session=lambda: None,
+        _state=SimpleNamespace(response_language="en"), auto_approval=False,
         executor=SimpleNamespace(
             workspace=tmp_path, active_role="devops",
             explain_shell_command=lambda command, role: (
@@ -830,11 +831,11 @@ def test_permissions_uses_active_role_and_renders_literal_policy_values(tmp_path
         ),
     )
     monkeypatch.setattr(
-        "kernel.sandbox.permission_policy.load_policy",
+        "kernel.sandbox.permission_command.load_policy",
         lambda workspace: (PermissionPolicy(allow=("echo [red]literal[/red]",)), ""),
     )
     recorded = _run_main_with_agent(
-        tmp_path, monkeypatch, agent, ["/permissions docker stop worker", "/bye"]
+        tmp_path, monkeypatch, agent, ["/permission show", "/permissions docker stop worker", "/bye"]
     )
     monkeypatch.setattr(main, "get_saved_role", lambda: "auto")
 
@@ -844,6 +845,7 @@ def test_permissions_uses_active_role_and_renders_literal_policy_values(tmp_path
     rendered = recorded.export_text()
     assert "Allow: echo [red]literal[/red]" in rendered
     assert "Ask: (none)" in rendered
+    assert "docker stop worker → ask" in rendered
     assert "[bold]" not in rendered
     assert "[dim]" not in rendered
 

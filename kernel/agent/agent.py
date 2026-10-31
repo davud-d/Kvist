@@ -682,6 +682,28 @@ class LocalAgent:
         """
         return self.control.request_pause("user_paused")
 
+    def set_auto_approval(self, enabled: bool) -> None:
+        """Turn auto mode on or off for this session; see ``sandbox/auto_approval.py``."""
+        from kernel.agent.agent_tools import auto_classifier
+
+        gate = self.executor.set_auto_approval(auto_classifier(self) if enabled else None)
+        if gate is not None:
+            gate.notify = self._note_auto_decision if enabled else None
+
+    def _note_auto_decision(self, decision: dict[str, str]) -> None:
+        # Looked up per call: each run replaces the RunState.
+        self._state.auto_decisions.append(decision)
+
+    @property
+    def auto_approval(self) -> bool:
+        return bool(getattr(self.executor.approvals, "auto_active", False))
+
+    def confirm_capability(self, title: str, body: str) -> bool:
+        """Ask for a skill's or tool server's permissions: the classifier first in auto mode, else the person."""
+        if self.auto_approval:
+            return self.executor.approvals.confirm(title, body, "")
+        return bool(self._ui.confirm(title, body))
+
     def stop_helper(self, agent_id: str) -> dict[str, Any]:
         """The person stopped one helper; the main agent is told and does not restart it on its own."""
         if self.helpers is None:

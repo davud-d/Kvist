@@ -16,8 +16,13 @@ import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from kernel.sandbox.approvals import FetchDecision
-from kernel.protocol.frontend_protocol import ErrorEvent, FrontendChannel
+from kernel.sandbox.approvals import ApprovalTimedOut, FetchDecision
+from kernel.protocol.frontend_protocol import ErrorEvent, FrontendChannel, InputResponse
+
+
+def _raise_if_timed_out(response: InputResponse) -> None:
+    if response.timed_out:
+        raise ApprovalTimedOut("no answer before the deadline")
 
 
 class EventApprovalGate:
@@ -35,7 +40,7 @@ class EventApprovalGate:
         self._workspace = Path(workspace) if workspace else None
         self._remembered_pattern: str | None = None
 
-    def confirm_command(self, command: list[str], reason: str) -> bool:
+    def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
         self._remembered_pattern = None
         if self._mode == "deny":
             return False
@@ -56,12 +61,14 @@ class EventApprovalGate:
             body="",
             subject={"kind": "command", "command": command_str, "reason": reason},
             remember_pattern=remember_pattern,
+            timeout=timeout,
         )
+        _raise_if_timed_out(response)
         if response.approved is True and response.remember is True and remember_pattern and self._workspace:
             self._remembered_pattern = remember_pattern
         return response.approved is True
 
-    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+    def confirm_fetch_domain(self, host: str, url: str, timeout: float | None = None) -> FetchDecision:
         if self._mode == "deny":
             return "deny"
         response = self._channel.request(
@@ -73,7 +80,9 @@ class EventApprovalGate:
                 {"value": "always", "label": f"Always yes for {host}"},
                 {"value": "deny", "label": "No"},
             ],
+            timeout=timeout,
         )
+        _raise_if_timed_out(response)
         if response.value in ("once", "always"):
             return response.value
         return "deny"
@@ -87,7 +96,7 @@ class EventApprovalGate:
         # The frontend shows the pending request itself; no extra reminder.
         return None
 
-    def confirm(self, title: str, body: str, question: str) -> bool:
+    def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         _ = question
         # `_remembered_pattern` is left alone: it belongs to the command approved
         # last, which may still be running while a helper asks about a file.
@@ -108,7 +117,9 @@ class EventApprovalGate:
             body=body if not subject else "",
             subject=subject,
             remember_pattern=None,  # Overwrites and capability grants are never saved
+            timeout=timeout,
         )
+        _raise_if_timed_out(response)
         return response.approved is True
 
     def _save_allow_pattern(self, pattern: str) -> None:

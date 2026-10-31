@@ -4,6 +4,7 @@ import { test } from "node:test"
 import { render } from "ink-testing-library"
 import { createElement } from "react"
 
+import { countdown } from "../dialog.js"
 import type { InputOption, InputRequest } from "../protocol.js"
 import { Prompt } from "../ui/prompts.js"
 
@@ -30,6 +31,26 @@ function mount(fields: Partial<InputRequest>) {
   const app = render(createElement(Prompt, { request: request(fields), onAnswer: (value) => answers.push(value) }))
   return { app, answers, frame: () => plain(app.lastFrame()) }
 }
+
+test("a question with a deadline shows the clock under the dialog; one without shows none", () => {
+  const language = process.env.KVIST_LANG
+  process.env.KVIST_LANG = "en"
+  try {
+    const timed = mount({ kind: "confirm", title: "Allow?", timeout_seconds: 120 })
+    assert.ok(timed.frame().includes("2:00 · no answer counts as no"))
+    assert.ok(!mount({ kind: "confirm", title: "Allow?" }).frame().includes("⏱"))
+  } finally {
+    if (language === undefined) delete process.env.KVIST_LANG
+    else process.env.KVIST_LANG = language
+  }
+})
+
+test("the last three seconds are urgent, the rest are not", () => {
+  assert.deepEqual(countdown(120, 0, false), { text: "2:00 · no answer counts as no", urgent: false })
+  assert.equal(countdown(120, 116_000, false).urgent, false)
+  assert.equal(countdown(120, 117_000, false).urgent, true)
+  assert.deepEqual(countdown(120, 130_000, true), { text: "0:00 · без ответа будет «нет»", urgent: true })
+})
 
 test("an overwrite approval shows removed and added lines, not the raw unified diff", () => {
   const { app, frame } = mount({

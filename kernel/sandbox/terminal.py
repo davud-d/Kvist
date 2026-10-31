@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 import os
 import shlex
 import shutil  # noqa: F401  re-exported: tests patch shutil.which through this module
@@ -17,6 +18,7 @@ import subprocess  # noqa: F401  spawn boundary lives in process_tree; kept as t
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,7 +29,8 @@ from kernel.sandbox.command_policy import (
     canonical_executable_name,
     is_exact_version_probe,
 )
-from kernel.sandbox.approvals import ApprovalGate, TerminalApprovalGate
+from kernel.sandbox.approvals import ApprovalGate, ApprovalTimedOut, TerminalApprovalGate
+from kernel.sandbox.auto_approval import refusal_note
 from kernel.agent.background_jobs import BackgroundLaunch
 from kernel.sandbox.permission_policy import append_allow_rule, load_policy
 from kernel.sandbox.process_tree import (
@@ -173,6 +176,8 @@ class TerminalExecutor(
         # True while a command runs where nothing can cut it off the network.
         self._run_network_unenforced = False
         self._run_justification = ""
+        # True when the person's "host" rule, not the model, put this run outside the sandbox.
+        self._host_by_rule = False
         self._run_background: BackgroundLaunch | None = None
         self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
         self._child_home = Path()
@@ -272,6 +277,7 @@ class TerminalExecutor(
                 self._run_network = None
                 self._run_network_unenforced = False
                 self._run_justification = ""
+                self._host_by_rule = False
                 self._run_background = None
 
     def _effective_sandbox(self) -> tuple[SandboxMode, bool, str | None]:
@@ -302,7 +308,7 @@ class TerminalExecutor(
             f"Directory / Каталог: {context.cwd}\n"
             f"Reason / Причина: {self._run_justification}\n"
         )
-        if self._run_sandbox == "host":
+        if self._run_sandbox == "host" and not self._host_by_rule:
             approved = self._ask_user and self._approvals.confirm(
                 "Host execution / Запуск вне песочницы",
                 body + "This command can access and change host files with your permissions and runs "
@@ -359,6 +365,10 @@ class TerminalExecutor(
         # Before any approval dialog: approving this would cut the turn off
         # mid-step, so the step goes to the person, never to a yes/no prompt.
         self._deny_self_termination(command)
+        if decision == "allow" and self._run_sandbox != "host" and self._runs_on_host(command):
+            self._run_sandbox = "host"
+            self._run_justification = "project rule: this command is set to always run outside the sandbox"
+            self._host_by_rule = True
 
         work_dir = self._resolve_cwd(cwd)
         if self._sandbox_required_unavailable and self._run_sandbox != "host":
@@ -395,7 +405,8 @@ class TerminalExecutor(
         if not self._confirm_run_capabilities(command, initial_context):
             return TerminalResult(
                 command=command, returncode=-1, stdout="",
-                stderr="Host or network permission denied. Do not retry this request or bypass the denial.",
+                stderr=refusal_note(self._approvals)
+                or "Host or network permission denied. Do not retry this request or bypass the denial.",
                 denied=True,
             )
 
@@ -509,7 +520,7 @@ class TerminalExecutor(
                 stdout="",
                 # Inviting "an alternative way" made models rerun the same thing as
                 # another command (npm run build refused, then node build.js).
-                stderr=(
+                stderr=refusal_note(self._approvals) or (
                     f"Error: this command needs the person's approval and did not get it ({reason}). "
                     "The approval is about what the command does, so another command with the same "
                     "effect needs the same approval. Work that does not need it can go on, and what "
@@ -518,7 +529,8 @@ class TerminalExecutor(
                 denied=True,
             )
         result = execute_authorized()
-        if offer_rule:
+        # A rule that outlives the session is never the classifier's to grant.
+        if offer_rule and not getattr(self._approvals, "auto_active", False):
             self._offer_allow_rule(command)
         self._approvals.commit_remembered_rule()
         return result
@@ -699,6 +711,18 @@ class TerminalExecutor(
         if all(item == "allow" for item in decisions):
             return "allow"
         return None
+
+    def _runs_on_host(self, command: list[str]) -> bool:
+        """True when every pipe segment is named by a ``host`` rule."""
+        try:
+            segments = self._split_pipe_segments(command)
+        except TerminalError:
+            return False
+        return all(
+            self._policy.runs_on_host(segment)
+            or self._policy.runs_on_host([canonical_executable_name(segment[0]), *segment[1:]])
+            for segment in segments
+        )
 
     def _refresh_policy(self) -> None:
         policy, note = load_policy(self.workspace)
@@ -1140,21 +1164,67 @@ def _suggest_allow_pattern(command: list[str]) -> str:
     return f"{command[0]} *"
 
 
-def request_user_confirmation(title: str, body: str, question: str) -> bool:
+def request_user_confirmation(title: str, body: str, question: str, timeout: float | None = None) -> bool:
     """Generic Human-in-the-Loop confirmation with Live-TUI pause.
 
     Shared by the terminal layer and the file-write approval gate in
     SafeExecutor. Raises TerminalError when stdin is not a TTY so
     non-interactive callers get a deterministic failure.
     """
-    answer = request_user_answer(title, body, f"{question} [y/N]")
+    answer = request_user_answer(title, body, f"{question} [y/N]", timeout=timeout)
     return answer in ("y", "yes")
 
 
-def request_user_answer(title: str, body: str, prompt: str) -> str:
+def input_before_deadline(prompt: str, timeout: float | None) -> str:
+    """``input()`` that raises ``ApprovalTimedOut`` when nothing is typed for ``timeout`` seconds."""
+    if timeout is None:
+        return input(prompt)
+    # The clock lives on the line above the prompt, so redrawing it never touches what is being typed.
+    end = time.monotonic() + timeout
+    sys.stdout.write(f"{deadline_text(timeout)}\n{prompt}")
+    sys.stdout.flush()
+    while True:
+        left = end - time.monotonic()
+        if left <= 0:
+            sys.stdout.write("\n")
+            raise ApprovalTimedOut(f"no answer in {int(timeout)} s")
+        if _stdin_ready(min(1.0, left)):
+            break
+        sys.stdout.write(f"\x1b7\x1b[1A\r\x1b[2K{deadline_text(left)}\x1b8")
+        sys.stdout.flush()
+    line = sys.stdin.readline()
+    if not line:
+        raise EOFError
+    return line.rstrip("\r\n")
+
+
+def deadline_text(left: float) -> str:
+    """The countdown line of a question with a deadline; the last 3 seconds are bold red."""
+    seconds = max(0, math.ceil(left))
+    text = f"⏱ {seconds // 60}:{seconds % 60:02d} · no answer counts as no / без ответа будет «нет»"
+    return f"\x1b[1;31m{text}\x1b[0m" if seconds <= 3 else f"\x1b[2m{text}\x1b[0m"
+
+
+def _stdin_ready(timeout: float) -> bool:
+    if os.name == "nt":
+        import msvcrt
+
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if msvcrt.kbhit():
+                return True
+            time.sleep(0.1)
+        return False
+    import select
+
+    return bool(select.select([sys.stdin], [], [], timeout)[0])
+
+
+def request_user_answer(title: str, body: str, prompt: str, timeout: float | None = None) -> str:
     """Show ``body`` in a panel and return the lowercased typed answer ("" on EOF).
 
-    Raises TerminalError when stdin is not a TTY.
+    Raises TerminalError when stdin is not a TTY, ``ApprovalTimedOut`` when a
+    ``timeout`` passes without an answer.
     """
     if not sys.stdin.isatty():
         raise TerminalError("Interactive confirmation required, but stdin is not a TTY")
@@ -1181,7 +1251,7 @@ def request_user_answer(title: str, body: str, prompt: str) -> str:
                 )
             )
             try:
-                return input(f"{sanitize_display_text(prompt)}: ").strip().lower()
+                return input_before_deadline(f"{sanitize_display_text(prompt)}: ", timeout).strip().lower()
             except EOFError:
                 return ""
     finally:

@@ -569,6 +569,8 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return push(state, (id) => ({ id, kind: "note", tone: "error", text: event.message }))
     case "input_request":
       return { ...state, pending: event }
+    case "input_closed":
+      return state.pending?.request_id === event.request_id ? { ...state, pending: null } : state
     case "command_result":
       return onCommandResult(state, event)
     case "session":

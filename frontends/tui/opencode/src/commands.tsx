@@ -44,6 +44,7 @@ const CORE_COMMANDS: { name: string; title: string; group: string; aliases?: str
   { name: "context", title: "Show context size", group: "Session", aliases: ["stats"] },
   { name: "memory", title: "What Kvist remembers", group: "Session" },
   { name: "doctor", title: "Check the installation", group: "System" },
+  { name: "permissions", title: "Command rules and auto mode", group: "System" },
   { name: "style", title: "Working style", group: "Agent" },
   { name: "provider", title: "Switch or configure provider", group: "Provider" },
   { name: "change-api", title: "Change API key", group: "Provider" },

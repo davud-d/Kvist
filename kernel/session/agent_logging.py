@@ -729,6 +729,7 @@ def persist_logs(self, user_goal: str) -> None:
         "completion_blockers": self._state.completion_blockers,
         "errors": self._state.error_history,
         "user_messages": self._state.user_messages,
+        "auto_mode_decisions": self._state.auto_decisions,
         "web_research": {
             "dependency_versions": self._state.dependency_versions,
             "searches": self._state.web_search_history,

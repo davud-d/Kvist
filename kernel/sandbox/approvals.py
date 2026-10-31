@@ -19,19 +19,28 @@ from typing import Literal, Protocol, runtime_checkable
 FetchDecision = Literal["once", "always", "deny"]
 
 
+class ApprovalTimedOut(Exception):
+    """The person was asked with a deadline (auto mode) and did not answer in time."""
+
+
 @runtime_checkable
 class ApprovalGate(Protocol):
-    """Confirmation seam for both approval primitives."""
+    """Confirmation seam for both approval primitives.
 
-    def confirm_command(self, command: list[str], reason: str) -> bool:
+    ``timeout`` (seconds) is passed only by auto mode, which asks the person
+    when its classifier cannot decide; a gate that gets one raises
+    ``ApprovalTimedOut`` when the deadline passes. Without it a question waits.
+    """
+
+    def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
         """Dangerous-command gate. May raise to fail closed."""
         ...
 
-    def confirm(self, title: str, body: str, question: str) -> bool:
+    def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         """Generic yes/no confirmation. May raise to fail closed."""
         ...
 
-    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+    def confirm_fetch_domain(self, host: str, url: str, timeout: float | None = None) -> FetchDecision:
         """Ask whether ``fetch_url`` may reach a host outside the trusted list.
 
         ``"once"`` allows this request, ``"always"`` also remembers the host for
@@ -63,18 +72,19 @@ class TerminalApprovalGate:
     def commit_remembered_rule(self) -> None:
         """Nothing to save: the terminal offers its rule itself, after the run."""
 
-    def confirm(self, title: str, body: str, question: str) -> bool:
+    def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         from kernel.sandbox.terminal import request_user_confirmation
 
-        return request_user_confirmation(title, body, question)
+        return request_user_confirmation(title, body, question, timeout=timeout)
 
-    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+    def confirm_fetch_domain(self, host: str, url: str, timeout: float | None = None) -> FetchDecision:
         from kernel.sandbox.terminal import request_user_answer
 
         answer = request_user_answer(
             "Web fetch — Human-in-the-Loop",
             f"The agent wants to fetch a page from {host}, which is not a trusted documentation site:\n\n{url}",
             "Allow? [y] once / [a] always for this host / [N] no",
+            timeout=timeout,
         )
         if answer in ("a", "always"):
             return "always"
@@ -117,7 +127,7 @@ class TerminalApprovalGate:
         notification_timer.start()
         return notification_timer
 
-    def confirm_command(self, command: list[str], reason: str) -> bool:
+    def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
         """Interactive approval prompt (Human-in-the-Loop).
 
         Displays a warning panel via rich inside the terminal's alternate
@@ -145,6 +155,7 @@ class TerminalApprovalGate:
             _alt_screen,
             _enter_hitl,
             _exit_hitl,
+            input_before_deadline,
             sanitize_display_text,
         )
 
@@ -197,7 +208,7 @@ class TerminalApprovalGate:
             with _alt_screen(console):
                 console.print(panel)
                 try:
-                    choice = input("Allow execution? [y/N]: ").strip().lower()
+                    choice = input_before_deadline("Allow execution? [y/N]: ", timeout).strip().lower()
                 except EOFError:
                     raise ApprovalRequiredError(reason)
 
@@ -212,13 +223,13 @@ class TerminalApprovalGate:
 class DenyApprovalGate:
     """For an agent nobody can answer for (a helper): every approval is refused, never assumed."""
 
-    def confirm(self, title: str, body: str, question: str) -> bool:
+    def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         return False
 
-    def confirm_command(self, command: list[str], reason: str) -> bool:
+    def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
         return False
 
-    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+    def confirm_fetch_domain(self, host: str, url: str, timeout: float | None = None) -> FetchDecision:
         return "deny"
 
     def waiting_confirm_command(self) -> threading.Timer | None:

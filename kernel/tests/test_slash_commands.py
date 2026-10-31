@@ -285,7 +285,7 @@ def test_ink_model_reference_matches_frontend_commands(monkeypatch):
         for name in re.findall(r"/([\w-]+)", row.split(":", 1)[0])
     }
     assert reference_names == frontend_names | {"bye", "exit"}
-    for unavailable in ("/status", "/permissions", "/commands", "/diff", "/bug"):
+    for unavailable in ("/status", "/commands", "/diff", "/bug"):
         assert unavailable not in context
 
 

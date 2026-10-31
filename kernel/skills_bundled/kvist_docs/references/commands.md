@@ -31,7 +31,10 @@ exist; do not invent subcommands. Some interfaces offer a few more of their own.
 | `/revert` | Restore agent-changed files to their baselines |
 | `/context` | Context size of the model and how much is used |
 | `/status` | Session, role, provider, models, execution mode |
-| `/permissions <command>` | Show project permission rules and explain a command's decision (does not run it) |
+| `/permissions` | Show project permission rules and the auto mode state |
+| `/permissions allow\|host\|ask\|deny\|remove <command start>` | Edit the rules; `host` runs the command outside the sandbox; `npm run *` covers every `npm run …`, a lone `*` is refused for allow and host |
+| `/permissions check <command>` | Explain a command's decision (does not run it) |
+| `/permissions auto on\|off` | Auto mode: a second model answers approval questions (not safe) |
 | `/memory` | `status`, `pause`, `resume`, `inspect <words>`, `why <id>`, `forget <id>`, `remember <text>`, `remember-global <text>`, `process`, `processing on|off` |
 | `/doctor` | Check modules, interfaces, provider, keys, settings; offers a test request |
 | `/bug <text>` | Save a local bug report (never sent anywhere) |

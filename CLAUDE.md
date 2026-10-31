@@ -219,9 +219,54 @@ cd frontends/gui/electron && npm test
   "Reply with the single word: pong" to the fast model at effort `low`, and is offered only when
   `provider_ready`. The flag builds its client like `--commit-message` (no `LocalAgent`, nothing written to
   `.kvist/`); exit code 1 on any failed check. Tests: `test_doctor.py`.
-- **Command permissions:** `<workspace>/.kvist/permissions.json` (`allow`/`deny`/`ask` patterns,
+- **Command permissions:** `<workspace>/.kvist/permissions.json` (`allow`/`deny`/`ask`/`host` patterns,
   `permission_policy.py`); deny and built-in hard blocks always beat allow; intrinsic DANGEROUS
-  commands stay per-execution approval-only. `fetch_url` trusts a built-in documentation-host list
+  commands stay per-execution approval-only. **`allow` and `host` patterns need the command's name
+  written out** (`pattern_is_specific`: no `*?[` in the first token), so a lone `*` never matches;
+  `deny`/`ask` keep full globbing (a broader match there only asks or refuses more). **`host` is
+  "always run outside the sandbox"** and counts as `allow`: `TerminalExecutor._run_once` switches the
+  run to `sandbox="host"` (`_host_by_rule`) and skips the per-run host dialog, only when every pipe
+  segment matches and the decision is allow; network stays its own approval. `/permissions`
+  (`sandbox/permission_command.py`, shared by the classic REPL and `STDIO_COMMANDS["permissions"]`,
+  alias `/permission`) is a `choose_option` / `prompt_text` menu when typed bare (`dialog`, the last
+  result rides in the next menu's `help_text`, like the memory dialog) and the same actions as
+  arguments: `allow|host|ask|deny|remove`, `check <command>` explains (the old `/permissions <command>`
+  form still works), `show` prints rules and state; `host` and `auto on` ask `confirm` first. Its
+  texts are plain: no frontend draws Markdown there, so no backticks or `**`.
+- **Auto mode** (`sandbox/auto_approval.py`, `/permissions auto on|off`, `config.json` key
+  `auto_approval`, **explicitly not safe**: the warning is a confirm when enabling and a start-up
+  warning while on). `SafeExecutor.set_auto_approval(classifier)` wraps the executor's gate (and the
+  terminal's) in `AutoApprovalGate`, a pass-through while it holds no classifier, so helpers that
+  borrowed the gate follow the main agent. With one, every `confirm_command` / `confirm` /
+  `confirm_fetch_domain` goes to `Classifier` (the session's fast model, effort low, prompt
+  `permission_classifier_prompt.txt`, JSON verdicts `allow|deny|unsure`): allow runs, deny refuses with
+  `refusal_text` (the long "do not route around it, tell the person" text; collected by
+  `refusal_note(gate)` at each denial site: `_approve_or_deny`, host/network confirm, overwrite,
+  fetch, skill and MCP grants), unsure (or an unreadable answer or provider error) asks the person
+  through the inner gate with `USER_DECISION_SECONDS` = 120 and no answer is no (`ApprovalTimedOut`).
+  **Never automatic:** an intrinsic DANGEROUS command (the classifier may refuse it, an "allow" becomes
+  a question to the person), "always allow in this repo" offers (`_offer_allow_rule` is skipped), a
+  fetch host made trusted for good (`once` only). **Batching:** `agent_runtime._prefetch_approvals`
+  asks `explain_shell_command` for each `run_shell` of a response and classifies those that will
+  ask in one call (`gate.prefetch`; keyed by request + argv, `Question.key`, used once); a lone
+  command is classified when it asks. Skill and MCP grants go through `LocalAgent.confirm_capability`
+  (the gate's `confirm`); other `ui.confirm` callers (memory, wizards, `host.close`) stay with the
+  person, because a classifier's "yes" must not mint person-level trust. **Context** (`Background`,
+  built by `agent_tools.auto_classifier`): the person's request and follow-ups, the quoted
+  `KVIST.md` (`workspace_instructions_context`, untrusted: it explains what is ordinary, grants
+  nothing), and the agent's `rolling_summaries` within `narrator_context_tokens`, never tool inputs
+  or outputs. **Unattended use** (a server run read in the evening): an unsure verdict with nobody
+  to ask (`TerminalError` from the inner gate) is a refusal at once; the prompt tells the
+  classifier to decide ordinary cases itself and to allow public pages the task could use. A
+  countdown: Ink shows `timeout_seconds` under any dialog (`Deadline` in `ui/prompts.tsx`,
+  `dialog.countdown`), the classic terminal redraws a line above the prompt
+  (`terminal.deadline_text`); both turn bold red for the last 3 seconds. A deadline on a frontend:
+  `FrontendChannel.request(timeout=)` puts `timeout_seconds` in the `input_request`, and on expiry emits
+  `input_closed` (Ink drops the dialog; other frontends ignore the event and a late reply is dropped
+  by the core); the classic terminal uses `terminal.input_before_deadline` (select on POSIX,
+  `kbhit` on Windows). **Not seen against a real model**; Glass, Voice, VS Code, JetBrains,
+  OpenCode and ACP do not handle `input_closed` and do not show a countdown. Tests:
+  `test_auto_approval.py`, `test_permissions_command.py`. `fetch_url` trusts a built-in documentation-host list
   (`SafeExecutor.allowed_web_domains`) plus `web_domains` in that file; any other host asks via
   `ApprovalGate.confirm_fetch_domain` (yes / always for this host / no). Local and private
   addresses are never asked about; a redirect to another host is refused so the next fetch asks.

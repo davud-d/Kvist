@@ -11,8 +11,10 @@ from kernel.tests.conftest import SYSTEM_CAT, requires_posix
 from kernel.sandbox.permission_policy import (
     PermissionPolicy,
     append_allow_rule,
+    append_rule,
     load_policy,
     policy_file_path,
+    remove_rule,
 )
 from kernel.sandbox.terminal import HardDenyError, TerminalError, TerminalExecutor, TerminalResult
 
@@ -174,6 +176,77 @@ def test_concurrent_allow_updates_do_not_lose_a_rule(tmp_path, monkeypatch):
     policy, note = load_policy(tmp_path)
     assert note == ""
     assert set(policy.allow) == {"git status", "python *"}
+
+
+# ── Wildcards and the host list ──────────────────────────────────────
+
+@pytest.mark.parametrize("pattern", ["*", "py*", "?ython", "[a-z]ython *"])
+def test_allow_and_host_need_the_command_name_written_out(pattern):
+    command = ["python", "script.py"]
+    assert PermissionPolicy(allow=(pattern,)).decide(command) is None
+    assert PermissionPolicy(host=(pattern,)).decide(command) is None
+    assert PermissionPolicy(host=(pattern,)).runs_on_host(command) is False
+
+
+def test_deny_and_ask_keep_full_globbing():
+    assert PermissionPolicy(deny=("*",)).decide(["anything"]) == "deny"
+    assert PermissionPolicy(ask=("*",)).decide(["anything"]) == "ask"
+
+
+def test_name_with_a_trailing_star_covers_every_command_that_starts_with_it():
+    policy = PermissionPolicy(allow=("npm run *",))
+    assert policy.decide(["npm", "run", "build", "--", "--watch"]) == "allow"
+    assert policy.decide(["npm", "install"]) is None
+
+
+def test_host_rule_counts_as_allow_and_runs_on_host():
+    policy = PermissionPolicy(host=("git push *",))
+    assert policy.decide(["git", "push", "origin"]) == "allow"
+    assert policy.runs_on_host(["git", "push", "origin"]) is True
+    assert policy.runs_on_host(["git", "pull"]) is False
+
+
+def test_deny_still_beats_host():
+    policy = PermissionPolicy(host=("git push *",), deny=("git push --force",))
+    assert policy.decide(["git", "push", "--force"]) == "deny"
+
+
+def test_rules_are_added_to_their_list_and_removed_from_every_list(tmp_path):
+    append_rule(tmp_path, "host", "git push *")
+    append_rule(tmp_path, "allow", "git push *")
+    append_rule(tmp_path, "deny", "curl *")
+
+    policy, note = load_policy(tmp_path)
+    assert (note, policy.host, policy.allow, policy.deny) == ("", ("git push *",), ("git push *",), ("curl *",))
+
+    assert remove_rule(tmp_path, "git push *") == ["allow", "host"]
+    policy, _ = load_policy(tmp_path)
+    assert (policy.host, policy.allow, policy.deny) == ((), (), ("curl *",))
+    assert remove_rule(tmp_path, "git push *") == []
+
+
+def test_unknown_rule_list_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        append_rule(tmp_path, "web_domains", "example.com")
+
+
+def test_host_rule_runs_the_command_outside_the_sandbox_without_asking(tmp_path, monkeypatch):
+    policy_file_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    policy_file_path(tmp_path).write_text(json.dumps({"host": ["custom-tool push *"]}), encoding="utf-8")
+    executor = TerminalExecutor(tmp_path)
+    seen: list = []
+
+    def fake_run(self, command, *args, **kwargs):
+        seen.append((list(command), self._run_sandbox, self._host_by_rule))
+        return TerminalResult(command=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(TerminalExecutor, "_execute_validated", fake_run)
+    forbid_approval(monkeypatch)
+
+    executor.run(["custom-tool", "push", "origin"])
+
+    assert seen == [(["custom-tool", "push", "origin"], "host", True)]
+    assert executor._run_sandbox == "default" and executor._host_by_rule is False
 
 
 # ── Integration with TerminalExecutor.run ────────────────────────────

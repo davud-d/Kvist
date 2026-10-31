@@ -792,6 +792,7 @@ class InputRequestEvent:
     help_text: str = ""
     subject: dict | None = None  # {kind: "command", command, reason} or {kind: "overwrite", path, diff}
     remember_pattern: str | None = None  # non-null = user may choose "don't ask again for this pattern"
+    timeout_seconds: float | None = None  # non-null = unanswered after this long counts as "no" (auto mode)
     type: ClassVar[str] = "input_request"
 
     def to_dict(self) -> dict:
@@ -809,7 +810,21 @@ class InputRequestEvent:
             payload["subject"] = self.subject
         if self.remember_pattern is not None:
             payload["remember_pattern"] = self.remember_pattern
+        if self.timeout_seconds is not None:
+            payload["timeout_seconds"] = self.timeout_seconds
         return payload
+
+
+@dataclass(slots=True)
+class InputClosedEvent:
+    """An input request the core stopped waiting for; the frontend drops its dialog."""
+
+    request_id: str
+    reason: str  # "timeout"
+    type: ClassVar[str] = "input_closed"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "request_id": self.request_id, "reason": self.reason}
 
 
 # --- Inbound response --------------------------------------------------------
@@ -821,6 +836,7 @@ class InputResponse:
     value: str | None = None
     approved: bool | None = None
     remember: bool = False  # true = save this approval pattern to project permissions
+    timed_out: bool = False  # the core gave up waiting; never sent by a frontend
 
     @classmethod
     def from_dict(cls, d: dict) -> InputResponse:
@@ -908,6 +924,7 @@ class FrontendChannel:
         help_text: str = "",
         subject: dict | None = None,
         remember_pattern: str | None = None,
+        timeout: float | None = None,
     ) -> InputResponse:
         request_id = uuid.uuid4().hex
         waiter = _Waiter(event=threading.Event())
@@ -927,12 +944,16 @@ class FrontendChannel:
                 help_text=help_text,
                 subject=subject,
                 remember_pattern=remember_pattern,
+                timeout_seconds=timeout,
             )
         )
 
-        waiter.event.wait()
+        answered = waiter.event.wait(timeout)
         with self._lock:
             self._waiters.pop(request_id, None)
+        if not answered and waiter.response is None:
+            self.emit(InputClosedEvent(request_id, "timeout"))
+            return InputResponse(request_id, value=None, approved=None, timed_out=True)
         if waiter.response is None:
             return InputResponse(request_id, value=None, approved=None)
         return waiter.response

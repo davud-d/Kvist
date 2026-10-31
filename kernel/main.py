@@ -714,8 +714,10 @@ from kernel.session.agent_logging import (
 from kernel.session.session_titler import session_display_title
 from kernel.tray import tray_bar
 from kernel.tray.tray_link import mark_terminal_host
+from kernel.sandbox.permission_command import AUTO_MODE_STARTUP_WARNING
 from kernel.config.user_config import (
     ensure_provider_credentials,
+    get_auto_approval,
     get_custom_providers,
     get_custom_provider_by_name,
     save_custom_provider,
@@ -2003,6 +2005,9 @@ def build_agent(
         perf_logger=perf_logger,
     )
     warnings.extend(getattr(agent, "_storage_warnings", []))
+    if get_auto_approval():
+        agent.set_auto_approval(True)
+        warnings.append(AUTO_MODE_STARTUP_WARNING)
     effort_note = effort_advisory(config.provider, config.reasoning_effort)
     if effort_note and config.reasoning_effort != DEFAULT_EFFORT:
         warnings.append(f"Reasoning effort '{config.reasoning_effort}': {effort_note}")
@@ -4129,6 +4134,17 @@ def _stdio_doctor(ctx: CommandContext) -> CommandResult:
     return CommandResult(not doctor.has_failures(checks), doctor.render(checks, ru))
 
 
+def _stdio_permissions(ctx: CommandContext) -> CommandResult:
+    from kernel.sandbox import permission_command
+
+    agent = ctx.session.agent
+    ok, text = permission_command.run(
+        agent, ctx.args, lambda title, body: bool(ctx.ui.confirm(title, body)), _speaks_russian(agent),
+        ui=ctx.ui,
+    )
+    return CommandResult(ok, sanitize_display_text(text)) if text else _command_cancelled()
+
+
 def _stdio_bug(ctx: CommandContext) -> CommandResult:
     from kernel.config.bug_report import save_bug_report
     from kernel.session.durable_json import JsonStorageError
@@ -4563,6 +4579,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "revert": _stdio_revert,
     "bug": _stdio_bug,
     "doctor": _stdio_doctor,
+    "permissions": _stdio_permissions,
 }
 
 
@@ -5633,79 +5650,35 @@ def main() -> None:
                 console.print(Panel(body, title="/status", border_style="bright_cyan"))
                 continue
 
-            if user_goal.lower() == "/permissions" or user_goal.lower().startswith("/permissions "):
-                from kernel.sandbox.permission_policy import load_policy
-
-                workspace = agent.executor.workspace
-                policy, note = load_policy(workspace)
-
-                rules_body = Text()
-                if note:
-                    rules_body.append(sanitize_display_text(note) + "\n", style="yellow")
-                for key, label in (("allow", "Allow"), ("ask", "Ask"), ("deny", "Deny")):
-                    rules = getattr(policy, key, ())
-                    rules_body.append(f"{label}: ", style="bold")
-                    if rules:
-                        rules_body.append(", ".join(sanitize_display_text(rule) for rule in rules))
-                    else:
-                        rules_body.append("(none)", style="dim")
-                    rules_body.append("\n")
-                console.print(Panel(
-                    rules_body,
-                    title="Project permission rules (.kvist/permissions.json)",
-                    border_style="bright_cyan",
-                ))
-
-                argument = user_goal[len("/permissions"):].strip()
-                if not argument:
-                    console.print(
-                        "[dim]Usage: /permissions <command> — explain the sandbox "
-                        "decision for that command.[/dim]"
-                    )
-                    continue
-
+            permissions_head = user_goal.split(maxsplit=1)[0].lower() if user_goal.strip() else ""
+            if permissions_head in ("/permissions", "/permission"):
                 import shlex
 
+                from kernel.sandbox import permission_command
+
                 try:
-                    command = shlex.split(argument)
+                    permission_args = shlex.split(user_goal.split(maxsplit=1)[1]) if " " in user_goal.strip() else []
                 except ValueError as error:
-                    console.print(
-                        _display_text(
-                            f"Could not parse the command: "
-                            f"{sanitize_display_text(str(error))}",
-                            "yellow",
-                        )
-                    )
-                    continue
-                if not command:
-                    console.print("[yellow]Usage: /permissions <command>[/yellow]")
+                    console.print(_display_text(
+                        f"Could not parse the line: {sanitize_display_text(str(error))}", "yellow"
+                    ))
                     continue
 
-                try:
-                    explanation = agent.executor.explain_shell_command(
-                        command, role=agent.executor.active_role
-                    )
-                except Exception as error:
-                    console.print(
-                        _display_text(
-                            "Could not explain the command: "
-                            f"{sanitize_display_text(str(error).strip() or type(error).__name__)}",
-                            "yellow",
-                        )
-                    )
-                    continue
+                def confirm_permission(title: str, details: str) -> bool:
+                    return bool(agent._ui.confirm(title, details))
 
-                verdict = explanation.get("verdict", "unknown")
-                reasons = explanation.get("reasons", [])
-                verdict_style = {"allow": "green", "ask": "yellow", "deny": "red"}.get(
-                    verdict, "white"
-                )
-                console.print(
-                    f"[bold]{sanitize_display_text(' '.join(command))}[/bold] "
-                    f"→ [{verdict_style}]{verdict}[/{verdict_style}]"
-                )
-                for reason in reasons:
-                    console.print(f"  [dim]{sanitize_display_text(reason)}[/dim]")
+                with paused_interactive_screen(interactive_screen):
+                    ok, text = permission_command.run(
+                        agent, permission_args, confirm_permission, _speaks_russian(agent),
+                        ui=TerminalBannerUI(console=console, verbose=verbose),
+                    )
+                if not text:
+                    continue
+                console.print(Panel(
+                    Text(sanitize_display_text(text)),
+                    title="/permissions",
+                    border_style="bright_cyan" if ok else "yellow",
+                ))
                 continue
 
             if user_goal.lower() == "/revert":

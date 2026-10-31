@@ -261,6 +261,10 @@ Inbound request / response:
 | `options:object[]\|null` | for `choice`: `[{"value","label"[,"description"]}, …]` |
 | `current_value:str` | current/default value (empty for `secret`) |
 | `help_text:str` | optional hint |
+| `timeout_seconds:number` | optional (auto mode): unanswered after this long counts as "no" |
+
+When the core gives up waiting it emits `{"type": "input_closed", "request_id", "reason": "timeout"}`:
+drop that dialog. A reply that arrives later is ignored.
 
 **Your reply is one JSON object:**
 

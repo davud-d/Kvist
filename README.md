@@ -186,7 +186,8 @@ Type `/` to see the list. The common ones:
 | `/role`, `/effort`, `/style` | Role, reasoning effort (`false` to `max`), agent style |
 | `/session`, `/new`, `/resume` | Named sessions and continuing an interrupted run |
 | `/changes`, `/diff`, `/revert` | What the agent changed, and undoing it |
-| `/context`, `/status`, `/permissions` | Context usage, state, command permissions |
+| `/context`, `/status` | Context usage, state |
+| `/permissions` | Rules for commands (`allow`, `host` = outside the sandbox, `ask`, `deny`) and auto mode, where a second model answers approval questions (**not safe**); see [configuration](docs/configuration.md) |
 | `/doctor` (or `kvist --doctor`) | Checks modules, frontends, provider, API keys and settings; asks before sending the model a test request that must answer "pong" (`--yes` answers it) |
 | `/web-search-provider` | Tavily, Brave or SearXNG for web search |
 | `/settings-api` | Request pacing, timeouts, retries, context window, fallbacks |

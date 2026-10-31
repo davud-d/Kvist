@@ -134,14 +134,65 @@ extra directories given with repeatable `--allow-read DIR`.
 A command may ask for two separate one-time permissions: `sandbox: "host"` (host
 tools and files) and `network: true`. Each needs a justification and its own
 confirmation, project allow rules do not silence them, and neither can be
-remembered. Host mode keeps a private HOME, a sanitized environment and command
+remembered by the model. Host mode keeps a private HOME, a sanitized environment and command
 validation, and grants no administrator rights.
 
-`<workspace>/.kvist/permissions.json` holds `allow`, `deny` and `ask` patterns.
-Deny rules and built-in blocks always win. With no terminal or frontend to answer,
+`<workspace>/.kvist/permissions.json` holds `allow`, `deny`, `ask` and `host`
+patterns. Deny rules and built-in blocks always win. With no terminal or frontend to answer,
 approvals are refused. `fetch_url` opens well-known documentation hosts without
 asking; for any other host it asks once: yes, always yes for this host (saved as
 `web_domains`), or no.
+
+`/permissions` manages the rules (the model cannot reach the file):
+
+| Command | Effect |
+|---|---|
+| `/permissions` | a menu (arrows and Enter) for everything below; the typed forms work too |
+| `/permissions show` | the rules of this project and the auto mode state |
+| `/permissions allow <command>` | never ask about this command again |
+| `/permissions host <command>` | always run it outside the sandbox, with your real HOME and no secret masking, without the per-run dialog (asks you once to confirm the rule) |
+| `/permissions ask <command>` | always ask, even if the command would be allowed |
+| `/permissions deny <command>` | never run it |
+| `/permissions remove <command>` | delete the rule |
+| `/permissions check <command>` | explain what would happen to the command, without running it |
+| `/permissions auto on\|off` | auto mode, see below |
+
+A rule is the start of a command: `npm run` also covers `npm run build`, and
+`npm run *` covers every command that begins with `npm run`. For `allow` and
+`host` the command's name must be written out, so a lone `*` (or `py*`) is
+refused and never matches. Network access stays a separate permission for a
+`host` command, and an intrinsically dangerous command asks every time.
+
+### Auto mode (not safe)
+
+`/permissions auto on` (after a warning you must confirm) lets a second model, the
+fast model of the session, answer the approval questions instead of you: commands
+no rule allows or denies, file overwrites, host and network access, fetching a page
+from an unknown host, and the permissions of skills and MCP servers. For each
+question it answers *allow*, *deny* or *unsure*:
+
+- *allow* runs the action; nobody is asked.
+- *deny* does not run it, and the agent gets a long explanation that the refusal is
+  about the effect, so another command with the same effect meets the same answer.
+- *unsure* asks you, and you have 2 minutes. No answer counts as no.
+
+The classifier sees your request and follow-ups, the repository's `KVIST.md`, and
+the agent's own short summaries of its recent steps (not the commands it ran or
+what the tools returned), besides the action itself. The question to you shows a
+countdown, red for the last 3 seconds (Ink and the classic terminal). When nobody
+can be asked (no terminal, no frontend) an unsure answer is a refusal at once, which
+is what you want for a run on a server that you read the report of in the evening.
+
+The commands of one model response that would ask are classified in a single
+request. Every decision is shown as a notice, so it is in the session's history. This mode is **not safe**: the
+classifier can be wrong, and text in files, web pages and command output can push
+it toward a mistake. Whatever it allows runs with your permissions. It never
+overrides deny rules or built-in blocks, never approves an intrinsically dangerous
+command (it can only refuse it or leave it to you), never saves a rule or trusts a
+host for good, and a skill's or server's grant it approves stays saved like one
+you approved. The setting is saved in `~/.kvist/config.json` (`auto_approval`) and
+a warning is shown at every start while it is on. `/permissions auto off` turns it
+off.
 
 ## Project instruction files
 

@@ -33,6 +33,8 @@ export interface InputRequest {
   help_text: string
   subject?: ApprovalSubject | null
   remember_pattern?: string | null
+  // Auto mode: unanswered after this many seconds counts as "no" (the core then sends input_closed).
+  timeout_seconds?: number | null
 }
 
 export type CoreEvent =
@@ -71,6 +73,8 @@ export type CoreEvent =
   | { type: "debug"; message: string }
   | { type: "error"; message: string }
   | ({ type: "input_request" } & InputRequest)
+  // The core stopped waiting for this request (its deadline passed); drop the dialog.
+  | { type: "input_closed"; request_id: string; reason: string }
   | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
   | { type: "turn_end" }
   // `--wake` only: the core starts a turn nobody typed, because helpers or jobs an answered turn
