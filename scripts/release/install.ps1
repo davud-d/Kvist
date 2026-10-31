@@ -2,6 +2,8 @@
 #   * the agent binary as %LOCALAPPDATA%\Kvist\kvist-core.exe plus the `kvist` launcher
 #     in %LOCALAPPDATA%\Kvist\bin, added to the user PATH (the layout
 #     scripts\installer\install_cli.py produces);
+#   * the pixel desktop app (frontends\gui\tauri) as %LOCALAPPDATA%\Kvist\app\kvist-app.exe, with a
+#     "Kvist Pixel" shortcut in the Start menu and on the Desktop;
 #   * the JetBrains plugin into every JetBrains IDE found;
 #   * the VS Code extension into VS Code, VS Code Insiders and VSCodium.
 #
@@ -16,6 +18,7 @@ $ProgressPreference = "SilentlyContinue"  # Invoke-WebRequest is orders of magni
 
 $ReleaseUrl = "https://github.com/davud-d/Kvist/releases/download/latest-plugin-build"
 $BinaryAsset = "kvist-windows-x64.exe"
+$AppAsset = "kvist-app-windows-x64.exe"
 $JetBrainsAsset = "kvist-jetbrains.zip"
 $VsCodeAsset = "kvist-vscode.vsix"
 $JetBrainsFolder = "kvist-intellij"
@@ -44,6 +47,46 @@ function Get-Asset([string]$Name) {
     $target = Join-Path $WorkDir $Name
     Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseUrl/$Name" -OutFile $target
     return $target
+}
+
+# Like Get-Asset, for what the release may not have yet (the desktop app is built beside the agent and
+# a platform's build can fail): $null instead of stopping the whole install.
+function Get-OptionalAsset([string]$Name) {
+    try {
+        return Get-Asset $Name
+    } catch {
+        Write-Warning "$Name is not available ($($_.Exception.Message)); the desktop app was not installed"
+        return $null
+    }
+}
+
+function New-Shortcut([string]$LinkPath, [string]$Target, [string]$Description) {
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($LinkPath)
+    $link.TargetPath = $Target
+    $link.WorkingDirectory = Split-Path -Parent $Target
+    $link.IconLocation = "$Target,0"
+    $link.Description = $Description
+    $link.Save()
+}
+
+# kvist-core.exe sits one folder up from the app, where the app looks for it.
+function Install-App([string]$Binary) {
+    $appDir = Join-Path $LibDir "app"
+    New-Item -ItemType Directory -Force -Path $appDir | Out-Null
+    $app = Join-Path $appDir "kvist-app.exe"
+    # A running app cannot be overwritten, but it can be renamed away.
+    $old = "$app.old"
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }
+    if (Test-Path -LiteralPath $app) { Move-Item -LiteralPath $app -Destination $old -Force }
+    Copy-Item -LiteralPath $Binary -Destination $app -Force
+    Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+    $menu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    New-Item -ItemType Directory -Force -Path $menu | Out-Null
+    New-Shortcut (Join-Path $menu "Kvist Pixel.lnk") $app "Kvist agents side by side, in pixel style"
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if ($desktop) { New-Shortcut (Join-Path $desktop "Kvist Pixel.lnk") $app "Kvist agents side by side, in pixel style" }
+    Write-Step "Installed $app with a Start menu entry and a Desktop shortcut"
 }
 
 function Install-Cli([string]$Binary) {
@@ -146,8 +189,10 @@ try {
     $binary = Get-Asset $BinaryAsset
     $jetBrainsZip = Get-Asset $JetBrainsAsset
     $vsix = Get-Asset $VsCodeAsset
+    $appBinary = Get-OptionalAsset $AppAsset
 
     Install-Cli $binary
+    if ($appBinary) { Install-App $appBinary }
     Install-JetBrains $jetBrainsZip
     Install-VsCode $vsix
 

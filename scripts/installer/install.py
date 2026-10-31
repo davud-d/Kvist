@@ -74,6 +74,8 @@ COMPONENTS = (
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),
     Component("vscode", "VS Code extension", "install_vscode.py"),
     Component("gui", "GUI application", "install_gui.py"),
+    # Compiles the pixel desktop app with cargo, so it waits for Rust, and adds it to the application menu.
+    Component("app", "Desktop app — builds Kvist Pixel and adds it to the application menu", "install_app.py", after=("rust",)),
     Component("zed", "Zed agent registration", "install_zed.py", after=("cli",)),
     Component("kvide", "kvide commit-message generator", "install_kvide.py", after=("cli",)),
 )

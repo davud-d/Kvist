@@ -23,6 +23,11 @@ pytestmark = pytest.mark.skipif(
 def _assets(directory: Path, binary: str, drop: tuple[str, ...] = ()) -> Path:
     directory.mkdir(exist_ok=True)
     (directory / binary).write_bytes(b"core:" + binary.encode())
+    # The pixel desktop app and its icons ship in the same release as the agent.
+    app = binary.replace("kvist-", "kvist-app-", 1)
+    (directory / app).write_bytes(b"app:" + app.encode())
+    (directory / "kvist-app-icon.png").write_bytes(b"png")
+    (directory / "kvist-app.icns").write_bytes(b"icns")
     with zipfile.ZipFile(directory / "kvist-jetbrains.zip", "w") as archive:
         archive.writestr("kvist-intellij/lib/kvist.jar", b"jar")
     (directory / "kvist-vscode.vsix").write_bytes(b"vsix")
@@ -438,3 +443,107 @@ def test_bun_that_does_not_match_the_pinned_checksum_is_refused_and_nothing_is_w
     assert "does not match the pinned SHA-256" in next(e for e in events if e["event"] == "warning")["message"]
     assert {"event": "component", "id": "bun", "status": "failed"} in events
     assert not (home / ".local").exists()
+
+
+# ------------------------------------------------------------------ the desktop app (frontends/gui/tauri)
+
+
+def test_plan_offers_the_desktop_app_where_a_build_exists(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",))
+    app = {item["id"]: item for item in json.loads(result.stdout)["components"]}["app"]
+    assert app["available"] is True and app["reason"] == ""
+    assert app["targets"][1:] == [
+        str(home / ".local/share/kvist/app/kvist-app"),
+        str(home / ".local/share/applications/kvist-app.desktop"),
+        str(home / ".local/bin/kvist-app"),
+    ]
+    assert app["targets"][0].endswith("/kvist-app-linux-x64")
+
+    (tmp_path / "mac").mkdir()
+    (tmp_path / "arm").mkdir()
+    mac, mac_home = _run(tmp_path / "mac", "Darwin", "arm64", "kvist-macos-arm64", args=("--plan",))
+    mac_app = {item["id"]: item for item in json.loads(mac.stdout)["components"]}["app"]
+    assert mac_app["available"] is True
+    assert mac_app["targets"][1] == str(mac_home / "Applications/Kvist Pixel.app")
+
+    arm, _ = _run(tmp_path / "arm", "Linux", "aarch64", "kvist-linux-arm64", args=("--plan",))
+    arm_app = {item["id"]: item for item in json.loads(arm.stdout)["components"]}["app"]
+    assert arm_app == {"id": "app", "available": False, "reason": "unsupported", "targets": []}
+
+
+def test_linux_puts_the_app_into_the_menu_with_its_icon_and_a_launcher(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "app", "--events"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    binary = home / ".local/share/kvist/app/kvist-app"
+    assert binary.read_bytes() == b"app:kvist-app-linux-x64" and binary.stat().st_mode & stat.S_IXUSR
+    assert (home / ".local/share/kvist/app/kvist-app.png").read_bytes() == b"png"
+    entry = (home / ".local/share/applications/kvist-app.desktop").read_text()
+    assert "Type=Application" in entry and "Name=Kvist Pixel" in entry and "Terminal=false" in entry
+    assert f'Exec="{binary}"' in entry and f"Icon={binary.parent}/kvist-app.png" in entry
+    assert "[Desktop Action safe]" in entry and f'Exec="{binary}" --safe' in entry, "an empty window needs a way back in"
+    launcher = home / ".local/bin/kvist-app"
+    assert launcher.stat().st_mode & stat.S_IXUSR
+    assert f"exec '{binary}' \"$@\"" in launcher.read_text()
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert {"event": "component", "id": "app", "status": "done"} in events
+
+
+def test_the_menu_entry_follows_xdg_data_home(tmp_path):
+    data = tmp_path / "data"
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "app"), extra_env={"XDG_DATA_HOME": str(data)})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (data / "applications/kvist-app.desktop").is_file()
+
+
+def test_macos_gets_an_app_bundle_in_applications(tmp_path):
+    result, home = _run(tmp_path, "Darwin", "arm64", "kvist-macos-arm64", args=("--only", "app"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    bundle = home / "Applications/Kvist Pixel.app/Contents"
+    assert (bundle / "MacOS/kvist-app").read_bytes() == b"app:kvist-app-macos-arm64"
+    assert (bundle / "MacOS/kvist-app").stat().st_mode & stat.S_IXUSR
+    assert (bundle / "Resources/kvist-app.icns").read_bytes() == b"icns"
+    plist = (bundle / "Info.plist").read_text()
+    assert "<key>CFBundleExecutable</key><string>kvist-app</string>" in plist
+    assert "<key>CFBundleIconFile</key><string>kvist-app</string>" in plist
+    assert "<key>CFBundlePackageType</key><string>APPL</string>" in plist
+
+
+def test_installing_again_replaces_the_app_without_leaving_leftovers(tmp_path):
+    _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "app"))
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "app"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in (home / ".local/share/kvist/app").iterdir()) == ["kvist-app", "kvist-app.png"]
+
+
+def test_a_release_without_the_app_still_installs_the_rest(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "cli,app", "--events"),
+                        drop=("kvist-app-linux-x64",))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert {"event": "component", "id": "app", "status": "failed"} in events
+    assert any(e["event"] == "warning" and "kvist-app-linux-x64" in e["message"] for e in events)
+    assert (home / ".local/share/kvist/kvist-core").is_file()
+    assert not (home / ".local/share/applications/kvist-app.desktop").exists()
+
+
+def test_a_missing_icon_stops_only_the_app(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "cli,app"), drop=("kvist-app-icon.png",))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / ".local/share/kvist/kvist-core").is_file()
+    assert not (home / ".local/share/kvist/app").exists()
+
+
+def test_an_install_with_no_choice_made_includes_the_app(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", offline_assets=True, args=("--events",))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / ".local/share/applications/kvist-app.desktop").is_file()
+
+
+def test_linux_on_arm_has_no_app_and_says_so(tmp_path):
+    result, home = _run(tmp_path, "Linux", "aarch64", "kvist-linux-arm64", args=("--only", "cli,app", "--events"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert any(json.loads(line).get("event") == "warning" and "no desktop app build" in line for line in result.stdout.splitlines())
+    assert not (home / ".local/share/kvist/app").exists()

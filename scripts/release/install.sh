@@ -25,6 +25,10 @@ set -euo pipefail
 RELEASE_URL="${KVIST_RELEASE_URL:-https://github.com/davud-d/Kvist/releases/download/latest-plugin-build}"
 JETBRAINS_ASSET="kvist-jetbrains.zip"
 VSCODE_ASSET="kvist-vscode.vsix"
+# The pixel desktop app (frontends/gui/tauri): one binary per platform, a PNG for the Linux menu
+# entry and an .icns for the macOS bundle. Not every platform has a build (see APP_ASSET below).
+APP_ICON_ASSET="kvist-app-icon.png"
+APP_ICNS_ASSET="kvist-app.icns"
 JETBRAINS_FOLDER="kvist-intellij"
 JETBRAINS_PRODUCTS='IntelliJIdea|IdeaIC|PyCharm|PyCharmCE|WebStorm|PhpStorm|GoLand|CLion|Rider|RubyMine|DataGrip|DataSpell|RustRover|AndroidStudio|Aqua'
 
@@ -57,7 +61,7 @@ PLAN=0
 EVENTS=0
 ONLY_GIVEN=0
 # Components installed when --only is absent: what the script always did.
-ONLY="cli,jetbrains,vscode"
+ONLY="cli,app,jetbrains,vscode"
 
 # One JSON string literal; quotes, backslashes and control characters are escaped.
 json_string() {
@@ -138,7 +142,7 @@ done
 # Without --only the defaults are all but the PATH line; Node.js is among them only when the
 # assets are downloaded (--from is an offline install of the files given).
 if [[ "$ONLY_GIVEN" == 0 && -z "$FROM_DIR" ]]; then
-	ONLY="cli,node,jetbrains,vscode"
+	ONLY="cli,node,app,jetbrains,vscode"
 fi
 
 wanted() {
@@ -151,6 +155,7 @@ FFMPEG_ASSET=""
 FFMPEG_SHA256=""
 BUN_ASSET=""
 BUN_SHA256=""
+APP_ASSET=""
 case "$OS_NAME/$ARCH" in
 	Linux/x86_64)
 		FFMPEG_ASSET="ffmpeg-linux-x64.gz"
@@ -158,6 +163,7 @@ case "$OS_NAME/$ARCH" in
 		BUN_ASSET="bun-linux-x64.zip"
 		BUN_SHA256="951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f"
 		BINARY_ASSET="kvist-linux-x64"
+		APP_ASSET="kvist-app-linux-x64"
 		NODE_ASSET="node-v${NODE_VERSION}-linux-x64.tar.gz"
 		NODE_SHA256="1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
 		;;
@@ -176,6 +182,7 @@ case "$OS_NAME/$ARCH" in
 		BUN_ASSET="bun-darwin-aarch64.zip"
 		BUN_SHA256="d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620"
 		BINARY_ASSET="kvist-macos-arm64"
+		APP_ASSET="kvist-app-macos-arm64"
 		NODE_ASSET="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
 		NODE_SHA256="23b25245dcfb9af7262f8ff142e9e2e0af025368117329e7a7458a51e5922f53"
 		;;
@@ -185,6 +192,7 @@ case "$OS_NAME/$ARCH" in
 		BUN_ASSET="bun-darwin-x64.zip"
 		BUN_SHA256="4183df3374623e5bab315c547cfa0974533cd457d86b73b639f7a87974cd6633"
 		BINARY_ASSET="kvist-macos-x64"
+		APP_ASSET="kvist-app-macos-x64"
 		NODE_ASSET="node-v${NODE_VERSION}-darwin-x64.tar.gz"
 		NODE_SHA256="8a677b0219178efd6eb0e475457c4afb452b521a92f6e67845a73bd85727f2a8"
 		;;
@@ -306,6 +314,24 @@ fetch() {
 	step "Downloading $name"
 	curl_download "$WORK_DIR/$name" "$RELEASE_URL/$name" "$name" || die "could not download $RELEASE_URL/$name"
 	FETCHED="$WORK_DIR/$name"
+}
+
+# Like fetch, for an asset the release may not have (the desktop app is built beside the agent and
+# a platform's build can fail): returns 1 instead of stopping the whole install.
+fetch_optional() {
+	local name="$1"
+	if [[ -n "$FROM_DIR" ]]; then
+		[[ -f "$FROM_DIR/$name" ]] || return 1
+	elif [[ -n "$CACHE_DIR" && -f "$CACHE_DIR/$name" ]]; then
+		:
+	else
+		command -v curl >/dev/null 2>&1 || return 1
+		step "Downloading $name"
+		curl_download "$WORK_DIR/$name" "$RELEASE_URL/$name" "$name" || return 1
+		FETCHED="$WORK_DIR/$name"
+		return 0
+	fi
+	fetch "$name"
 }
 
 sha256_of() {
@@ -464,6 +490,74 @@ install_bun() {
 	rm -rf "$LIB_DIR/bun"
 	mv "$LIB_DIR/.bun.new" "$LIB_DIR/bun"
 	step "Installed Bun $BUN_VERSION as $LIB_DIR/bun/bun"
+}
+
+APP_DIR="$LIB_DIR/app"
+APPLICATIONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+MAC_APP_BUNDLE="$HOME/Applications/Kvist Pixel.app"
+
+# Puts the pixel desktop app where the system's own menu finds it: a .desktop entry on Linux, an
+# .app bundle in ~/Applications on macOS. $1 binary, $2 icon (PNG), $3 icon (.icns, macOS).
+install_app() {
+	local binary="$1" icon="$2" icns="${3:-}"
+	if [[ "$OS_NAME" == "Darwin" ]]; then
+		rm -rf "$MAC_APP_BUNDLE"
+		mkdir -p "$MAC_APP_BUNDLE/Contents/MacOS" "$MAC_APP_BUNDLE/Contents/Resources"
+		install -m 755 "$binary" "$MAC_APP_BUNDLE/Contents/MacOS/kvist-app"
+		[[ -n "$icns" ]] && cp "$icns" "$MAC_APP_BUNDLE/Contents/Resources/kvist-app.icns"
+		cat >"$MAC_APP_BUNDLE/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key><string>Kvist Pixel</string>
+	<key>CFBundleDisplayName</key><string>Kvist Pixel</string>
+	<key>CFBundleIdentifier</key><string>dev.davud.kvist.tauri</string>
+	<key>CFBundleExecutable</key><string>kvist-app</string>
+	<key>CFBundleIconFile</key><string>kvist-app</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>LSMinimumSystemVersion</key><string>11.0</string>
+	<key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+		# A binary saved by a browser is quarantined, and Gatekeeper refuses it unless notarized.
+		xattr -dr com.apple.quarantine "$MAC_APP_BUNDLE" 2>/dev/null || true
+		step "Installed $MAC_APP_BUNDLE (Launchpad and Spotlight find it)"
+		return
+	fi
+	mkdir -p "$APP_DIR" "$APPLICATIONS_DIR" "$BIN_DIR"
+	# Copy to a temporary name first: replacing the running binary in place fails with ETXTBSY.
+	install -m 755 "$binary" "$APP_DIR/.kvist-app.new"
+	mv -f "$APP_DIR/.kvist-app.new" "$APP_DIR/kvist-app"
+	install -m 644 "$icon" "$APP_DIR/kvist-app.png"
+	cat >"$APPLICATIONS_DIR/kvist-app.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Kvist Pixel
+Comment=Kvist agents side by side, in pixel style
+Exec="$APP_DIR/kvist-app"
+Icon=$APP_DIR/kvist-app.png
+Terminal=false
+Categories=Development;
+StartupWMClass=kvist-tauri
+Actions=safe;
+
+[Desktop Action safe]
+Name=Safe mode (if the window is empty)
+Exec="$APP_DIR/kvist-app" --safe
+DESKTOP
+	cat >"$BIN_DIR/.kvist-app.new" <<LAUNCHER
+#!/usr/bin/env bash
+# Installed by the Kvist release installer.
+exec '$APP_DIR/kvist-app' "\$@"
+LAUNCHER
+	chmod 755 "$BIN_DIR/.kvist-app.new"
+	mv -f "$BIN_DIR/.kvist-app.new" "$BIN_DIR/kvist-app"
+	if command -v update-desktop-database >/dev/null 2>&1; then
+		update-desktop-database "$APPLICATIONS_DIR" 2>/dev/null || true
+	fi
+	step "Installed $APP_DIR/kvist-app, the menu entry kvist-app.desktop and the launcher kvist-app"
 }
 
 install_cli() {
@@ -922,6 +1016,18 @@ print_plan() {
 	fi
 	printf ',{"id":"bun","available":%s,"reason":%s,"targets":%s}' \
 		"$bun_available" "$(json_string "$bun_state")" "$(json_array "$BUN_URL/$BUN_ASSET" "$LIB_DIR/bun")"
+	local app_state="" app_available=false app_targets
+	if [[ -z "$APP_ASSET" ]]; then
+		app_state="unsupported"
+		app_targets="$(json_array)"
+	elif [[ "$OS_NAME" == "Darwin" ]]; then
+		app_available=true
+		app_targets="$(json_array "$RELEASE_URL/$APP_ASSET" "$MAC_APP_BUNDLE")"
+	else
+		app_available=true
+		app_targets="$(json_array "$RELEASE_URL/$APP_ASSET" "$APP_DIR/kvist-app" "$APPLICATIONS_DIR/kvist-app.desktop" "$BIN_DIR/kvist-app")"
+	fi
+	printf ',{"id":"app","available":%s,"reason":%s,"targets":%s}' "$app_available" "$(json_string "$app_state")" "$app_targets"
 	printf ',{"id":"jetbrains","available":%s,"targets":%s}' \
 		"$([[ ${#jetbrains_targets[@]} -gt 0 ]] && echo true || echo false)" "$(json_array ${jetbrains_targets[@]+"${jetbrains_targets[@]}"})"
 	printf ',{"id":"vscode","available":%s,"targets":%s}' \
@@ -995,7 +1101,7 @@ fi
 # Every selected asset is fetched before anything is installed, so a missing one stops the run
 # with the machine untouched. Each component announces itself as it is fetched, so the screen
 # shows what is being waited for.
-binary="" jetbrains_zip="" vsix="" ffmpeg_ok=0 bun_ok=0
+binary="" jetbrains_zip="" vsix="" ffmpeg_ok=0 bun_ok=0 app_ok=0 app_binary="" app_icon="" app_icns=""
 if wanted cli; then
 	emit component id cli status start
 	fetch "$BINARY_ASSET"
@@ -1020,6 +1126,24 @@ if wanted bun; then
 	else
 		emit component id bun status failed
 	fi
+fi
+if wanted app; then
+	emit component id app status start
+	if [[ -z "$APP_ASSET" ]]; then
+		warn "there is no desktop app build for $OS_NAME on $ARCH"
+	elif ! fetch_optional "$APP_ASSET"; then
+		warn "$APP_ASSET is not in the release yet; the desktop app was not installed"
+	else
+		app_binary="$FETCHED"
+		if fetch_optional "$APP_ICON_ASSET"; then app_icon="$FETCHED"; fi
+		if [[ "$OS_NAME" == "Darwin" ]] && fetch_optional "$APP_ICNS_ASSET"; then app_icns="$FETCHED"; fi
+		if [[ -n "$app_icon" || "$OS_NAME" == "Darwin" ]]; then
+			app_ok=1
+		else
+			warn "$APP_ICON_ASSET is not in the release; the desktop app was not installed"
+		fi
+	fi
+	[[ "$app_ok" == 1 ]] || emit component id app status failed
 fi
 if wanted jetbrains; then
 	emit component id jetbrains status start
@@ -1046,6 +1170,7 @@ if wanted cli; then run_component cli install_cli "$binary"; fi
 if wanted node; then run_component node install_node; fi
 if wanted ffmpeg && [[ "$ffmpeg_ok" == 1 ]]; then run_component ffmpeg install_ffmpeg; fi
 if wanted bun && [[ "$bun_ok" == 1 ]]; then run_component bun install_bun; fi
+if wanted app && [[ "$app_ok" == 1 ]]; then run_component app install_app "$app_binary" "$app_icon" "$app_icns"; fi
 if wanted jetbrains; then run_component jetbrains install_jetbrains "$jetbrains_zip"; fi
 if wanted vscode; then run_component vscode install_vscode "$vsix"; fi
 if wanted path; then run_component path install_path; fi

@@ -10,6 +10,7 @@ Windows (and, best-effort, macOS).
 | `install_cli.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). The build includes the Ink UI when npm is there and Kvist Glass (`cargo build --release` in `frontends/tui/glass`) when cargo is, and the voice screen (`cargo build --release` in `frontends/voice/screen`), on Linux and macOS; it waits for `install_rust.py` when both are chosen. Formerly at the repo root, then `install.py`. |
 | `install_jetbrains.py` | Finds every installed JetBrains IDE and unpacks the **Kvist** plugin into each one's `plugins/` folder. |
 | `install_vscode.py` | Finds VS Code, VS Code Insiders and VSCodium command-line launchers and installs the Kvist `.vsix` into each editor. |
+| `install_app.py` | Installs the pixel desktop app (`frontends/gui/tauri`): builds it with cargo (the release binary is what `install.sh` / `install.ps1` download instead) and registers it in the application menu: `.desktop` entry + hicolor icon on Linux, `Kvist Pixel.app` in `~/Applications` on macOS, Start Menu + Desktop shortcuts on Windows. Waits for `install_rust.py` when both are chosen. |
 | `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux, `Kvist.app` copied into `~/Applications` on macOS. |
 | `install_zed.py` | Registers the installed `kvist-core` as a Zed ACP external agent: one `agent_servers` member in Zed's settings file, comments and all else left alone. |
 | `install_kvide.py` | Adds a Kvist commit-message generator to the kvide editor: copies the adapter (`frontends/kvide/`) next to `kvist-core` and writes kvide's user `generators.toml`, so a plain `kvide` shows the button. A user file Kvist did not write is never overwritten or removed. |
@@ -31,6 +32,7 @@ python scripts/installer/install_vscode.py               # --build to build the 
 python scripts/installer/install_vscode.py --uninstall
 python scripts/installer/install_gui.py                  # --build to run electron-builder first
 python scripts/installer/install_gui.py --uninstall
+python scripts/installer/install_app.py                  # builds with cargo; --uninstall
 python scripts/installer/install_zed.py                  # needs install_cli.py to have run first
 python scripts/installer/install_zed.py --uninstall
 python scripts/installer/install_kvide.py                # needs install_cli.py to have run first

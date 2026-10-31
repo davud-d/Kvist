@@ -194,9 +194,64 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The pixel desktop app (frontends/gui/tauri): one Rust binary per platform. Like macOS, a platform
+  # whose build fails does not stop the release; its previous binary stays in it.
+  build-desktop-app:
+    name: Build desktop app (${{ matrix.asset }})
+    needs: [cleanup-artifacts]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: kvist-app-linux-x64
+            runner: ubuntu-22.04
+            binary: kvist-tauri
+          - asset: kvist-app-macos-arm64
+            runner: macos-latest
+            binary: kvist-tauri
+          - asset: kvist-app-macos-x64
+            runner: macos-15-intel
+            binary: kvist-tauri
+          - asset: kvist-app-windows-x64.exe
+            runner: windows-latest
+            binary: kvist-tauri.exe
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # Tauri draws with the system's WebKitGTK on Linux; macOS and Windows have their own web views.
+      - name: Install the Linux libraries Tauri needs
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libssl-dev pkg-config
+
+      - name: Test the interface logic and its Rust side
+        working-directory: frontends/gui/tauri
+        run: |
+          node --test "tests/*.test.mjs"
+          cd src-tauri
+          cargo test --locked
+
+      - name: Build the app
+        working-directory: frontends/gui/tauri/src-tauri
+        run: cargo build --release --locked
+
+      - name: Upload the app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-app-${{ matrix.asset }}
+          path: frontends/gui/tauri/src-tauri/target/release/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 1
+
   build-plugin:
     name: Build IntelliJ plugin and publish
-    needs: [build-windows-binary, build-macos-binary, build-linux-arm64-binary]
+    needs: [build-windows-binary, build-macos-binary, build-linux-arm64-binary, build-desktop-app]
     # A failed macOS build must not stop the release; its binaries fall back to the previous ones.
     if: ${{ !cancelled() && needs.build-windows-binary.result == 'success' }}
     # The Linux binary is built here and needs the glibc of the machine it is built on: 22.04's
@@ -313,6 +368,34 @@ jobs:
           done
           ls -l release
 
+      - name: Download the fresh desktop apps
+        if: needs.build-desktop-app.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: desktop-app-*
+          path: app-fresh
+
+      # A platform whose build failed keeps the app the rolling release already holds.
+      - name: Prepare the desktop apps
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for asset in kvist-app-linux-x64 kvist-app-macos-arm64 kvist-app-macos-x64 kvist-app-windows-x64.exe; do
+            fresh="$(ls app-fresh/desktop-app-$asset/kvist-tauri* 2>/dev/null | head -n 1 || true)"
+            if [ -n "$fresh" ]; then
+              cp "$fresh" "release/$asset"
+            else
+              gh release download latest-plugin-build --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir release --clobber || true
+            fi
+          done
+          chmod +x release/kvist-app-linux-x64 release/kvist-app-macos-* 2>/dev/null || true
+          # The icons the menu entries use: the PNG for Linux launchers, the .icns for the macOS bundle.
+          cp "frontends/gui/tauri/src-tauri/icons/128x128@2x.png" release/kvist-app-icon.png
+          cp frontends/gui/tauri/src-tauri/icons/icon.icns release/kvist-app.icns
+          ls -l release
+
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
@@ -352,7 +435,7 @@ jobs:
             echo 'RELEASE_FILES<<END_OF_FILES'
             printf '%s\n' release/kvist-linux-x64 release/kvist-windows-x64.exe release/kvist-jetbrains.zip \
               release/kvist-vscode.vsix release/install.sh release/install.ps1
-            ls release/kvist-macos-* release/kvist-linux-arm64 2>/dev/null || true
+            ls release/kvist-macos-* release/kvist-linux-arm64 release/kvist-app-* release/kvist-app.icns 2>/dev/null || true
             echo 'END_OF_FILES'
           } >> "$GITHUB_ENV"
 
@@ -364,7 +447,7 @@ jobs:
           body: |
             Automatically rebuilt from `${{ github.sha }}` on every push to `main`.
 
-            **Install with one command.** In a terminal it opens an installer screen: tick what to install (the `kvist` command, Node.js for the terminal interface, the JetBrains plugin, the VS Code extension, the PATH line), read exactly which files and commands each choice touches, and the first-run setup follows. By default no administrator rights are used and no system packages are installed; the build tools (Python, its headers, binutils) in the folded "Build from source" row are the exception: untick them to keep sudo out of it.
+            **Install with one command.** In a terminal it opens an installer screen: tick what to install (the `kvist` command, the Kvist Pixel desktop app, Node.js for the terminal interface, the JetBrains plugin, the VS Code extension, the PATH line), read exactly which files and commands each choice touches, and the first-run setup follows. By default no administrator rights are used and no system packages are installed; the build tools (Python, its headers, binutils) in the folded "Build from source" row are the exception: untick them to keep sudo out of it.
 
             ```sh
             # Linux (x64, arm64) and macOS (macOS is best-effort, see below)
@@ -383,6 +466,8 @@ jobs:
             | `kvist-linux-x64`, `kvist-windows-x64.exe` | The standalone agent binary. |
             | `kvist-linux-arm64` | The standalone agent binary for Linux on ARM (servers, Raspberry Pi, a VM on Apple Silicon). Needs glibc 2.35 or newer, so it does not run in Termux itself; inside proot-distro (Debian, Ubuntu) it does. Not verified on a real ARM machine. |
             | `kvist-macos-arm64`, `kvist-macos-x64` | The standalone agent binary for macOS (Apple Silicon, Intel). Best-effort and not verified on a Mac. Rebuilt every tenth build and for web-payload/wrapper changes, so it can still lag unrelated `main` changes. |
+            | `kvist-app-linux-x64`, `kvist-app-macos-arm64`, `kvist-app-macos-x64`, `kvist-app-windows-x64.exe` | The pixel desktop app (Tauri): agents side by side, helpers and the agent's browser in view. The installer puts it in your application menu; ticked by default on the installer screen. macOS and Windows builds are best-effort and not verified on real machines. |
+            | `kvist-app-icon.png`, `kvist-app.icns` | The icons of its menu entries. |
             | `kvist-jetbrains.zip` | JetBrains plugin (also installable from the IDE plugin manager). |
             | `kvist-vscode.vsix` | VS Code / Insiders / VSCodium extension. |
           make_latest: true

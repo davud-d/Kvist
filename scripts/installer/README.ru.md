@@ -10,6 +10,7 @@
 | `install_cli.py` | Ставит команду `kvist` и автономный бинарник (собирает его через PyInstaller, если в `dist/` его нет). В сборку входят Ink-интерфейс, если есть npm, и Kvist Glass (`cargo build --release` в `frontends/tui/glass`), если есть cargo, и экран голоса (`cargo build --release` в `frontends/voice/screen`), в Linux и macOS; когда выбраны оба, ждёт `install_rust.py`. Раньше лежал в корне репозитория, потом в `install.py`. |
 | `install_jetbrains.py` | Находит все установленные IDE JetBrains и распаковывает плагин **Kvist** в папку `plugins/` каждой из них. |
 | `install_vscode.py` | Находит команды запуска VS Code, VS Code Insiders и VSCodium и ставит `.vsix` Kvist в каждый редактор. |
+| `install_app.py` | Ставит пиксельное настольное приложение (`frontends/gui/tauri`): собирает через cargo (готовый бинарник из релиза скачивают `install.sh` / `install.ps1`) и добавляет в меню приложений: запись `.desktop` и иконка hicolor в Linux, `Kvist Pixel.app` в `~/Applications` в macOS, ярлыки в меню «Пуск» и на рабочем столе в Windows. Ждёт `install_rust.py`, если выбраны оба. |
 | `install_gui.py` | Ставит Electron-GUI как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux, копия `Kvist.app` в `~/Applications` в macOS. |
 | `install_zed.py` | Регистрирует установленный `kvist-core` как внешний ACP-агент Zed: одна запись `agent_servers` в файле настроек Zed, комментарии и всё остальное не трогаются. |
 | `install_kvide.py` | Добавляет генератор сообщений коммита Kvist в редактор kvide: копирует адаптер (`frontends/kvide/`) рядом с `kvist-core` и пишет пользовательский `generators.toml` kvide, так что обычный `kvide` показывает кнопку. Чужой пользовательский файл не перезаписывается и не удаляется. |
@@ -31,6 +32,7 @@ python scripts/installer/install_vscode.py               # --build — снач�
 python scripts/installer/install_vscode.py --uninstall
 python scripts/installer/install_gui.py                  # --build — сначала запустить electron-builder
 python scripts/installer/install_gui.py --uninstall
+python scripts/installer/install_app.py                  # собирает через cargo; --uninstall
 python scripts/installer/install_zed.py                  # сначала должен отработать install_cli.py
 python scripts/installer/install_zed.py --uninstall
 python scripts/installer/install_kvide.py                # сначала должен отработать install_cli.py

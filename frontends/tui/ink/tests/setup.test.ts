@@ -457,6 +457,39 @@ test("install: the screen opens on the choice, with everything that exists ticke
   assert.deepEqual(ticked(state), ["cli", "node", "vscode", "path"])
 })
 
+test("install: the desktop app is offered right after the agent and starts ticked", () => {
+  const withApp = {
+    ...plan,
+    components: [
+      plan.components[0]!,
+      { id: "app", available: true, targets: ["https://example.test/kvist-app-linux-x64", "/h/.local/share/kvist/app/kvist-app", "/h/.local/share/applications/kvist-app.desktop"] },
+      ...plan.components.slice(1),
+    ],
+  }
+  const state = send(initialState("/w", "/h", false, "full", true), { type: "plan", reply: withApp }).state
+  assert.deepEqual(state.install!.components.map((component) => component.id), ["cli", "app", "node", "jetbrains", "vscode", "path"])
+  assert.ok(ticked(state).includes("app"), "the download-and-install box is ticked without the person touching it")
+  // Enter starts the installer with the app among the chosen components.
+  const run = send(state, key("enter"))
+  assert.deepEqual(run.effect, { type: "install", only: ["cli", "app", "node", "vscode", "path"] })
+})
+
+test("install: a platform with no desktop app build gets no tick for it", () => {
+  const without = { ...plan, components: [plan.components[0]!, { id: "app", available: false, reason: "unsupported", targets: [] }, ...plan.components.slice(1)] }
+  const state = send(initialState("/w", "/h", false, "full", true), { type: "plan", reply: without }).state
+  assert.ok(!ticked(state).includes("app"))
+  const clicked = send(state, { type: "click", target: { kind: "option", index: 1 } }).state
+  assert.ok(!ticked(clicked).includes("app"), "it cannot be ticked either")
+})
+
+test("install: the app has a name and an explanation in both languages", () => {
+  for (const locale of ["en", "ru"] as const) {
+    const text = stringsFor(locale)
+    assert.ok(text.componentLabels.app?.[0] && text.componentLabels.app[1], locale)
+    assert.ok(text.componentActions.app, locale)
+  }
+})
+
 test("install: keyboard only — arrows move, space ticks, Enter installs just what is ticked", () => {
   let state = installing()
   state = send(state, key("down")).state

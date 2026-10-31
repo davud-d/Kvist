@@ -126,6 +126,7 @@ const EN = {
   installNothingChosen: "Tick at least one item.",
   componentLabels: {
     cli: ["Kvist agent", "the kvist command and launchers"],
+    app: ["Kvist Pixel desktop app", "download the binary and add it to the application menu"],
     node: ["Node.js 22", "runs the terminal interface"],
     ffmpeg: ["ffmpeg", "plays the preview video"],
     bun: ["Bun", "runs the OpenCode-style interface"],
@@ -139,6 +140,7 @@ const EN = {
   } as Record<string, [string, string]>,
   componentActions: {
     cli: "Copies the program and writes the launchers:",
+    app: "Downloads the desktop app for this system from the Kvist release and puts it in the application menu (Linux: a launcher entry; macOS: ~/Applications; Windows: Start menu and Desktop):",
     node: "Downloads a pinned Node.js from nodejs.org, checks its SHA-256 and unpacks it into:",
     ffmpeg: "Downloads a pinned static ffmpeg (GPL) from GitHub (eugeneware/ffmpeg-static), checks its SHA-256 and puts it into:",
     bun: "Downloads a pinned Bun from GitHub (oven-sh/bun), checks its SHA-256 and puts it into:",
@@ -292,6 +294,7 @@ const RU: typeof EN = {
   installNothingChosen: "Отметьте хотя бы один пункт.",
   componentLabels: {
     cli: ["Kvist в терминале", "команда kvist и её запуск"],
+    app: ["Приложение Kvist Pixel", "скачать бинарник и добавить в меню приложений"],
     node: ["Node.js 22", "на нём терминальный интерфейс"],
     ffmpeg: ["ffmpeg", "проигрывает видео-превью"],
     bun: ["Bun", "запускает интерфейс в стиле OpenCode"],
@@ -305,6 +308,7 @@ const RU: typeof EN = {
   },
   componentActions: {
     cli: "Копирует программу и записывает команды запуска:",
+    app: "Скачивает приложение для этой системы из релиза Kvist и добавляет в меню приложений (Linux: запись в лаунчере; macOS: ~/Applications; Windows: меню Пуск и рабочий стол):",
     node: "Скачивает закреплённую версию Node.js с nodejs.org, проверяет SHA-256 и распаковывает в:",
     ffmpeg: "Скачивает закреплённую статическую сборку ffmpeg (GPL) с GitHub (eugeneware/ffmpeg-static), проверяет SHA-256 и кладёт в:",
     bun: "Скачивает закреплённый Bun с GitHub (oven-sh/bun), проверяет SHA-256 и кладёт в:",

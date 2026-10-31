@@ -9,7 +9,7 @@ export type Step = "components" | "installing" | "welcome" | "broad" | "folder" 
 
 // What the release installer can put on a machine, in the order it is offered. The first one is
 // the program itself and cannot be unticked.
-export const COMPONENT_IDS = ["cli", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils", "rust", "bun"] as const
+export const COMPONENT_IDS = ["cli", "app", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils", "rust", "bun"] as const
 export const REQUIRED_COMPONENT = "cli"
 // Developer tools: they sit under one folding row. Python's packages and Rust's compiler are the
 // only items that need administrator rights; Bun is a private download like ffmpeg.
