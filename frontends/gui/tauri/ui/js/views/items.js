@@ -6,9 +6,8 @@ import { t } from "../i18n.js";
 import { renderMarkdown } from "../markdown.js";
 import { animate, finished } from "../motion.js";
 
-// How long a finished write stays open before it folds, and how many of its lines are drawn while it arrives.
+// How long a finished write stays open before it folds.
 const FOLD_AFTER_MS = 2000;
-const STREAM_LINES = 150;
 
 const CALL_ICONS = {
   read_file: "file", read_multiple_files: "file", list_dir: "folder", list_tree: "folder",
@@ -74,22 +73,53 @@ function diffLines(patch) {
   return h("div", { class: "diff" }, rows);
 }
 
-// What the model has typed so far, as the rows of a diff: what goes out, then what comes in.
-function streamLines(item) {
+const LANGUAGES = {
+  py: "Python", rs: "Rust", ts: "TypeScript", tsx: "TSX", jsx: "JSX", js: "JavaScript", mjs: "JavaScript", json: "JSON",
+  md: "Markdown", html: "HTML", css: "CSS", sh: "Shell", bash: "Shell", toml: "TOML", yaml: "YAML", yml: "YAML",
+  go: "Go", c: "C", h: "C", cpp: "C++", java: "Java",
+};
+
+function languageName(path) {
+  const extension = String(path ?? "").split("/").pop().split(".").slice(1).pop() ?? "";
+  return LANGUAGES[extension] ?? (extension ? extension.toUpperCase() : "Text");
+}
+
+// The text a call is typing: what goes out, then what comes in.
+function codeRows(item) {
   const rows = [];
   const side = (text, kind, sign) => {
     if (!text) return;
-    for (const line of text.replace(/\n$/, "").split("\n")) rows.push(h("div", { class: `diff-line ${kind}` }, `${sign}${line}`));
+    for (const line of text.replace(/\n$/, "").split("\n")) rows.push(h("div", { class: `code-line ${kind}` }, h("span", { class: "sign" }, sign), line));
   };
-  side(item.stream.old_text, "del", "-");
-  side(item.stream.new_text ?? item.stream.content, "add", "+");
-  const hidden = Math.max(0, rows.length - STREAM_LINES);
-  const above = hidden ? [h("div", { class: "diff-line hunk" }, `⋯ ${hidden}`)] : [];
-  return h("div", { class: "diff live" }, above, rows.slice(hidden));
+  const replacing = item.actionType === "replace_in_file";
+  side(item.stream.old_text, "del", "−");
+  side(replacing ? item.stream.new_text : item.stream.content, replacing ? "add" : "", replacing ? "+" : "");
+  return rows;
+}
+
+// The block a write is typed into: a header with the language, and a window of fixed height that follows the end of
+// the code until the person scrolls up; the top edge fades while more lies above.
+function codeBox(item) {
+  const path = item.args?.path ?? "";
+  const counts = item.added || item.removed ? h("span", { class: "counts" }, h("b", { class: "plus" }, `+${item.added ?? 0}`), item.removed ? h("b", { class: "minus" }, ` −${item.removed}`) : null) : null;
+  const head = h("div", { class: "code-head" }, h("span", { class: "code-mark" }, "</>"), h("span", { class: "code-lang" }, languageName(path)), h("span", { class: "code-path" }, path), counts);
+  const body = h("div", { class: "code-body" }, codeRows(item));
+  body.addEventListener("scroll", () => {
+    item.pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
+    body.classList.toggle("has-above", body.scrollTop > 0);
+  });
+  const box = h("div", { class: "codebox" }, head, body);
+  // Laid out only once it is in the page, so the scroll position is set by the caller.
+  box.follow = () => {
+    if (item.pinned !== false) body.scrollTop = body.scrollHeight;
+    else body.scrollTop = item.scrollTop ?? 0;
+    body.classList.toggle("has-above", body.scrollTop > 0);
+  };
+  body.addEventListener("scroll", () => { item.scrollTop = body.scrollTop; });
+  return box;
 }
 
 function callDetail(item) {
-  if (item.stream && !item.folded) return streamLines(item);
   if (item.patch) return diffLines(item.patch);
   if (item.output) return h("pre", { class: "call-output" }, item.output);
   const args = Object.keys(item.args ?? {}).length ? JSON.stringify(item.args, null, 2) : "";
@@ -103,34 +133,28 @@ function paintCall(el, item) {
   const head = h("div", { class: "call-head" }, icon(CALL_ICONS[item.actionType] ?? "bolt", 14), h("span", { class: "call-label" }, item.label), counts, h("span", { class: "call-summary" }, item.summary), state);
   const detail = callDetail(item);
   const tail = item.phase === "run" && item.output ? h("pre", { class: "call-tail" }, item.output.split("\n").slice(-3).join("\n")) : null;
-  fill(el, head, tail, detail ? h("div", { class: "call-detail" }, detail) : null);
-  if (item.stream) followStream(el, item);
-}
-
-// A write opens as soon as its first line arrives and stays open while it fills; two seconds after its result it folds.
-function followStream(el, item) {
-  el.classList.toggle("streaming", !item.folded);
-  const box = el.querySelector(".diff.live");
-  if (box && item.phase === "run") box.scrollTop = box.scrollHeight;
-  if (item.phase === "run" || item.folded || el.foldTimer) return;
-  el.foldTimer = setTimeout(() => fold(el, item), FOLD_AFTER_MS);
-}
-
-async function fold(el, item) {
-  item.folded = true;
-  const detail = el.querySelector(".call-detail");
-  if (detail) {
-    detail.style.overflow = "hidden";
-    const run = animate(detail, [{ height: `${detail.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0 }], { curve: "emphasized", ms: 360, fill: "forwards" });
-    await finished(run);
-    // The folded card opens again on a click, so the animation's end state must not outlive the fold.
-    el.classList.remove("streaming");
-    run?.cancel();
-    detail.style.overflow = "";
-    detail.replaceChildren(callDetail(item) ?? "");
-    return;
+  const typing = item.stream && !item.folded;
+  const box = typing ? codeBox(item) : null;
+  fill(el, head, tail, box, detail ? h("div", { class: "call-detail" }, detail) : null);
+  if (box) {
+    box.follow();
+    followStream(el, item, box);
   }
-  el.classList.remove("streaming");
+}
+
+// Two seconds after the call's result the block folds away.
+function followStream(el, item, box) {
+  if (item.phase === "run" || el.foldTimer) return;
+  el.foldTimer = setTimeout(() => fold(el, item, box), FOLD_AFTER_MS);
+}
+
+async function fold(el, item, box) {
+  item.folded = true;
+  if (box.isConnected) {
+    box.style.overflow = "hidden";
+    await finished(animate(box, [{ height: `${box.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0, marginBottom: "0px" }], { curve: "emphasized", ms: 360, fill: "forwards" }));
+  }
+  box.remove();
 }
 
 function paintPlan(el, item) {

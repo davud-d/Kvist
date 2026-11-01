@@ -62,7 +62,7 @@
 .call-summary { flex: 1; text-align: right; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .counts { font-size: 12px; }
 .call-detail { display: none; padding: 0 16px 12px; }
-.item-call.open .call-detail, .item-call.streaming .call-detail { display: block; }
+.item-call.open .call-detail { display: block; }
 .call-output, .call-tail { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; font-size: 12px; line-height: 1.5; background: var(--shade); white-space: pre-wrap; overflow-wrap: anywhere; }
 .call-tail { margin: 0 16px 10px; max-height: 70px; color: var(--dim); }
 .call-output.dim { color: var(--dim); }
@@ -71,7 +71,6 @@
 .diff-line { padding: 0 12px; white-space: pre; }
 .diff-line.add { background: var(--add); color: var(--ok); }
 .diff-line.del { background: var(--del); color: var(--err); }
-.diff.live { max-height: 260px; }
 .diff-line.hunk { color: var(--mint); opacity: 0.8; }
 
 .item-plan { padding: 14px 18px; max-width: 820px; background: var(--surface-2); box-shadow: var(--outline), inset 0 0 0 3px var(--pink); }
@@ -100,3 +99,16 @@
 /* A closed conversation has no input at all: a bar of the same height. */
 .closed-bar { min-height: 60px; width: 100%; border: 0; cursor: pointer; color: var(--dim); text-align: center; background: var(--surface); box-shadow: var(--outline); }
 .closed-bar:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; color: var(--text); }
+
+/* The block a write is typed into */
+.codebox { margin: 0 16px 10px; background: var(--shade); box-shadow: var(--outline); }
+.code-head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; font-size: 12px; background: var(--surface-2); }
+.code-mark { color: var(--mint); font-weight: 700; }
+.code-lang { color: var(--text); font-weight: 700; }
+.code-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.code-body { max-height: 280px; overflow: auto; padding: 8px 0; font-size: 12px; line-height: 1.5; }
+.code-body.has-above { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px); mask-image: linear-gradient(to bottom, transparent 0, #000 34px); }
+.code-line { padding: 0 12px; white-space: pre; }
+.code-line.add { background: var(--add); }
+.code-line.del { background: var(--del); }
+.code-line .sign { display: inline-block; width: 1.4em; color: var(--dim); }

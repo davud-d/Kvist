@@ -91,6 +91,8 @@ pub struct Drawn {
     pub plain: Vec<String>,
     /// The display formulas showing in the conversation, to be drawn as pictures.
     pub formulas: Vec<FormulaSpot>,
+    /// Where each code block's rows are on screen, with its index.
+    pub code: Vec<(Rect, usize)>,
 }
 
 /// A display formula's picture: where it goes and how much of it shows (the rest is scrolled off).
@@ -115,7 +117,7 @@ fn span(s: impl Into<String>, color: Color) -> (String, Style) {
 }
 
 pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
-    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new(), formulas: Vec::new() };
+    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new(), formulas: Vec::new(), code: Vec::new() };
     let area = app.grid.full();
     let ms = now.saturating_duration_since(app.started).as_millis();
     let mut p = Painter { buf, clip: area };
@@ -293,15 +295,7 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let close_hover = app.hover == Some(Hit::DiffClose);
     p.text(right - 1, top, theme::I_CLOSE, st(if close_hover { MOON } else { DUSK }));
     drawn.hits.push((Rect::new((right - 2).max(0) as u16, top.max(0) as u16, 3, 1), Hit::DiffClose));
-    let live = app.live.as_ref().filter(|live| live.shown);
-    let numbers = match (live, file) {
-        (Some(live), _) => {
-            let (added, removed) = live.counts();
-            counts(added, removed)
-        }
-        (None, Some(file)) => counts(file.added, file.removed),
-        (None, None) => Line::default(),
-    };
+    let numbers = file.map(|file| counts(file.added, file.removed)).unwrap_or_default();
     let numbers_w = text::line_width(&numbers) as i32;
     p.line_right(right - 3, top, &numbers);
 
@@ -317,9 +311,6 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
 
     let body_top = top + 2;
     let rows = app.diff_rows();
-    if view.lines.is_empty() && live.is_some() {
-        return;
-    }
     if view.lines.is_empty() {
         let width = (right - x).max(8) as usize;
         for (i, line) in text::wrap(&vec![span(s.diff_none, DUSK)], width).iter().enumerate() {
@@ -329,13 +320,6 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     }
     for (i, line) in view.lines.iter().skip(view.scroll).take(rows).enumerate() {
         p.line(x, body_top + i as i32, line);
-    }
-    let writing = live.is_some_and(|live| live.finished.is_none());
-    if writing {
-        let (mark, color) = helper_mark(HelperState::Running, now.saturating_duration_since(app.started).as_millis());
-        let cx = p.text(x, panel.bottom() as i32 - 2, mark, st(color));
-        p.text(cx + 1, panel.bottom() as i32 - 2, s.live_writing, st(MIST));
-        return;
     }
     let edits = file.map_or(0, |file| file.patches.len());
     let from = view.scroll + 1;
@@ -504,8 +488,10 @@ fn helper_doing(helper: &Helper) -> &str {
 }
 
 /// Builds every line of the conversation for a column `width` wide.
-fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Line>, Vec<markdown::Formula>) {
+fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Line>, Vec<markdown::Formula>, Vec<(usize, usize, usize)>) {
     let mut lines: Vec<Line> = Vec::new();
+    // (first line, line count, block index) of every code block
+    let mut blocks: Vec<(usize, usize, usize)> = Vec::new();
     let mut formulas: Vec<markdown::Formula> = Vec::new();
     let mut previous_tool = false;
     let last_index = app.session.items.len().saturating_sub(1);
@@ -538,7 +524,13 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Lin
                 formulas.extend(found.into_iter().map(|formula| markdown::Formula { line: formula.line + base, ..formula }));
                 lines.extend(rendered);
             }
-            Item::Tool { kind, label, state, .. } => lines.push(tool_line(*kind, label, state, width, ms)),
+            Item::Tool { call, kind, label, state } => {
+                lines.push(tool_line(*kind, label, state, width, ms));
+                // The next item is then set apart by a blank line, as after any block.
+                if push_blocks(app, |block| block.call == *call, width, now, &mut lines, &mut blocks) {
+                    previous_tool = false;
+                }
+            }
             Item::Error(message) => {
                 let mut first = true;
                 for line in text::wrap(&vec![span(message.as_str(), ROSEHIP)], width - 2) {
@@ -550,6 +542,12 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Lin
             }
         }
     }
+    // A call that has no card yet (the model is still writing it) shows its block at the end.
+    let carded = |call: &str| app.session.items.iter().any(|item| matches!(item, Item::Tool { call: c, .. } if c == call));
+    if app.code.iter().any(|block| !carded(&block.call)) && !lines.is_empty() {
+        lines.push(Vec::new());
+    }
+    push_blocks(app, |block| !carded(&block.call), width, now, &mut lines, &mut blocks);
     if app.session.busy
         && let Some(since) = app.session.thinking_since
     {
@@ -562,7 +560,21 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Lin
         row.push(span(format!("  {secs} {}", s.seconds), DUSK));
         lines.push(row);
     }
-    (lines, formulas)
+    (lines, formulas, blocks)
+}
+
+/// Appends the code blocks `wanted` picks; true when any was added.
+fn push_blocks(app: &App, wanted: impl Fn(&crate::code::CodeBlock) -> bool, width: usize, now: Instant, lines: &mut Vec<Line>, blocks: &mut Vec<(usize, usize, usize)>) -> bool {
+    let before = blocks.len();
+    for (index, block) in app.code.iter().enumerate().filter(|(_, block)| wanted(block)) {
+        let rows = block.lines(width, now);
+        if rows.is_empty() {
+            continue;
+        }
+        blocks.push((lines.len(), rows.len(), index));
+        lines.extend(rows);
+    }
+    blocks.len() > before
 }
 
 fn tool_line(kind: ToolKind, label: &str, state: &CallState, width: usize, ms: u128) -> Line {
@@ -621,7 +633,7 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
         return None;
     }
     let width = area.width.saturating_sub(6) as usize;
-    let (lines, formulas) = transcript_lines(app, width, now, ms);
+    let (lines, formulas, blocks) = transcript_lines(app, width, now, ms);
     drawn.widths = lines.iter().map(text::line_width).collect();
     drawn.plain = lines.iter().map(|line| line.iter().map(|(s, _)| s.as_str()).collect()).collect();
     let avail = (area.height - 2) as usize;
@@ -633,6 +645,12 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
     let card = Rect::new(area.x, area.bottom() - height, area.width, height);
     for (i, line) in lines[start..end].iter().enumerate() {
         p.line(card.x as i32 + 3, card.y as i32 + 1 + i as i32, line);
+    }
+    for (first, count, index) in blocks {
+        let (top, bottom) = (first.max(start), (first + count).min(end));
+        if top < bottom {
+            drawn.code.push((Rect::new(card.x + 3, card.y + 1 + (top - start) as u16, width as u16, (bottom - top) as u16), index));
+        }
     }
     drawn.formulas = formulas
         .iter()
@@ -1210,7 +1228,7 @@ mod tests {
     fn at_fifty_thousand_tokens_a_second_every_earlier_message_is_whole_at_once() {
         let rounds = 40;
         let (app, now) = burst_of_rounds(rounds);
-        let (lines, _) = transcript_lines(&app, 100, now, 0);
+        let (lines, _, _) = transcript_lines(&app, 100, now, 0);
         let drawn: String = lines.iter().flatten().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
         for round in 0..rounds - 1 {
             assert!(drawn.contains(&format!("END{round}")), "message {round} still being typed");

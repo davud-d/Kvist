@@ -10,6 +10,7 @@ mod anim;
 mod app;
 mod attach;
 mod backdrop;
+mod code;
 mod core;
 mod dialog;
 mod diff;

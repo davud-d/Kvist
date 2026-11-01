@@ -386,7 +386,7 @@ next one has begun (never for `final_answer`/`report_to_user`/`refuse`; the last
 Wired in the Tauri app (an early card), Glass (an early `Item::Tool`, the response's words are inserted above it), and
 Ink's `state.queued` (a dim "N calls written" line in both skins, VS Code panel and OpenCode). **Not wired:** the
 classic terminal (by decision), the Electron GUI (its step cards are immutable and keyed by `batch_id`), Zed, Voice.
-The JSON text protocol sends neither event. Tests: `test_call_stream.py`, `ui.test.mjs`, `state.test.ts`, Glass's
+The JSON text protocol sends neither event. **The typed text is a code block in the transcript, never a side panel** (the user rejected the panel): Glass `code.rs` (`CodeBlock`: header with the language and its Nerd Font icon, a window of `MAX_BODY` rows following the end with a fading top edge, wheel scrolls it, folds with `Burst` 2 s after the call's result), Tauri `items.js::codeBox` (same shape, `</>` mark, no syntax colours). Tests: `test_call_stream.py`, `ui.test.mjs`, `state.test.ts`, Glass's
 `model.rs`/`protocol.rs`.
 
 ### LocalAgent composition pattern (important & non-obvious)
