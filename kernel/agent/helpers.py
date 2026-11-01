@@ -141,6 +141,7 @@ class Helper:
     finished_at: float = 0.0
     inbox: deque = field(default_factory=deque)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    last_call: str = ""
 
 
 class HelperManager:
@@ -384,13 +385,18 @@ class HelperManager:
     def wait(self, agent_id: str, timeout: float) -> dict[str, Any]:
         """Block the main loop until the helper needs attention; no model request is made."""
         helper = self.get(agent_id)
-        deadline = time.monotonic() + timeout
+        started = time.monotonic()
+        deadline = started + timeout
         control = self._main.control
+        shown_at = 0.0
         with self._cond:
             while helper.state in (STARTING, RUNNING):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or control.interrupted():
                     break
+                if time.monotonic() - shown_at >= 1.0:
+                    shown_at = time.monotonic()
+                    self._show_waiting(helper, shown_at - started)
                 self._cond.wait(min(remaining, 0.5))
         summary = self._summary(helper)
         summary["waited_seconds"] = round(timeout - max(0.0, deadline - time.monotonic()), 1)
@@ -444,7 +450,21 @@ class HelperManager:
         if event in (DONE, FAILED):
             self._main._background_finished()
 
+    def _show_waiting(self, helper: Helper, elapsed: float) -> None:
+        """A wait sends no model request, so without this line the screen looks frozen."""
+        minutes, seconds = divmod(int(elapsed), 60)
+        doing = helper.last_call or "starting"
+        if self._main._state.response_language == "ru":
+            message = f"Ждёт {helper.agent_id} · {minutes}:{seconds:02d} · сейчас: {doing}"
+        else:
+            message = f"Waiting for {helper.agent_id} · {minutes}:{seconds:02d} · now: {doing}"
+        self._main._ui.update_live(user_message=message, status="waiting for a helper",
+                                   step=getattr(self._main, "_current_step", 0),
+                                   progress=self._main._state.progress, plan_step="wait")
+
     def _activity(self, helper: Helper, payload: dict[str, Any]) -> None:
+        if payload.get("phase") == "step":
+            helper.last_call = f"{payload.get('action_type', '')} {payload.get('label') or ''}".strip()[:80]
         printer = getattr(self._main._ui, "print_helper_activity", None)
         if printer is not None:
             printer({"agent_id": helper.agent_id, **payload})

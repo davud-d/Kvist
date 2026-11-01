@@ -246,3 +246,22 @@ def test_inspect_lists_the_helpers_actions_without_its_conversation(agent_factor
     actions = [item["action"] for item in page["items"]]
     assert "read_file" in actions
     assert page["untrusted"] is True
+
+
+def test_waiting_for_a_helper_shows_a_live_line_with_what_it_is_doing(agent_factory):
+    gate = threading.Event()
+    main = _main(agent_factory, ScriptedClient(["result"], gate))
+    lines: list[str] = []
+
+    class Watching(NullUI):
+        def update_live(self, *args, **kwargs):
+            lines.append(kwargs.get("user_message", ""))
+
+    object.__setattr__(main._ui, "_ui", Watching())
+    helper_id = main.helpers.start("read", role="reader", context="", attachments=[], started_by="main")["agent_id"]
+
+    threading.Timer(0.3, gate.set).start()
+    main.helpers.wait(helper_id, 10)
+
+    waiting = [line for line in lines if helper_id in line]
+    assert waiting and ("Waiting for" in waiting[0] or "Ждёт" in waiting[0])
