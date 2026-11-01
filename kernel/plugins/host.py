@@ -139,7 +139,8 @@ class RunnerHost:
             skill_dir=snapshot, entrypoint=self.manifest.entrypoint, exchange_dir=self.exchange_dir,
             rpc_fd=child_sock.fileno(), passwd_file=passwd, group_file=group, env_dir=env_dir,
             net_dir=net_dir, proxy_port=PROXY_PORT if net_dir else 0, screen_dir=screen_dir,
-            screen_size=self._screen_size,
+            screen_size=self.manifest.display.get("size", self._screen_size),
+            screen_wm=self.manifest.display.get("wm", "i3"), screen_glx=bool(self.manifest.display.get("glx", False)),
         )
         self.process = ManagedProcess(
             build_runner_argv(spec),

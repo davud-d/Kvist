@@ -452,9 +452,13 @@ class Display(_Group):
         """{display, width, height, viewer_url}: the skill's own virtual screen."""
         return self._call("info")
 
-    def screenshot(self, name: str = "screen.png") -> dict[str, Any]:
-        """Save the whole virtual screen as an artifact."""
-        return self._call("screenshot", name=name)
+    def screenshot(self, name: str = "screen.png", cursor: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Save the whole virtual screen as an artifact; ``cursor`` (XFixes image + position) is painted on it."""
+        return self._call("screenshot", name=name, cursor=cursor)
+
+    def authorize(self, command: list[str], reason: str = "") -> dict[str, Any]:
+        """{allowed, by|reason}: may this program start on the screen? The project's rules, else the person, decide."""
+        return self._call("authorize", command=command, reason=reason)
 
 
 class Network(_Group):

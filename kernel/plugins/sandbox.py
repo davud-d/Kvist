@@ -85,6 +85,8 @@ class RunnerSpec:
     proxy_port: int = 0
     screen_dir: Path | None = None
     screen_size: str = "1280x800"
+    screen_wm: str = "i3"
+    screen_glx: bool = False
 
 
 def build_runner_argv(spec: RunnerSpec) -> list[str]:
@@ -136,7 +138,9 @@ def build_runner_argv(spec: RunnerSpec) -> list[str]:
             if Path(path).exists():
                 argv += ["--ro-bind", path, path]
         runner_args += ["--display", ":99", "--screen-dir", f"{SANDBOX_ROOT}/screen",
-                        "--screen-size", spec.screen_size]
+                        "--screen-size", spec.screen_size, "--screen-wm", spec.screen_wm]
+        if spec.screen_glx:
+            runner_args.append("--screen-glx")
     argv += ["--chdir", f"{SANDBOX_ROOT}/skill", "--", python, "-I", "-B",
              f"{SANDBOX_ROOT}/runner/skill_runner.py", *runner_args]
     return argv

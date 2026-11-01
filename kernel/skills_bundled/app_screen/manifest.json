@@ -1,0 +1,280 @@
+{
+  "manifest_version": 1,
+  "id": "app_screen",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {
+    "en": "App screen",
+    "ru": "Экран приложений"
+  },
+  "summary": {
+    "en": "Run graphical programs (a terminal, an editor, any GUI app) on its own hidden 1920x1080 screen, drive them with a real pointer and keyboard, and look at the result through the Vision model. Never touches your desktop.",
+    "ru": "Запускает графические программы (терминал, редактор, любое GUI-приложение) на собственном скрытом экране 1920x1080, управляет ими настоящими указателем и клавиатурой и смотрит на результат через Vision-модель. Ваш рабочий стол не затрагивается."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": [
+    "linux"
+  ],
+  "source": {
+    "origin": "bundled",
+    "author": "Kvist",
+    "revision": "0.1.0"
+  },
+  "dependencies": {
+    "system": [
+      "Xvfb",
+      "jwm",
+      "xclip"
+    ]
+  },
+  "display": {
+    "size": "1920x1080",
+    "wm": "jwm",
+    "glx": false
+  },
+  "capabilities": {
+    "required": [
+      {
+        "name": "display",
+        "reason": "the programs run on their own virtual screen, never on yours"
+      },
+      {
+        "name": "permissions.request",
+        "reason": "to ask you before describing the screen with the Vision model"
+      }
+    ],
+    "optional": [
+      {
+        "name": "images.analyze",
+        "reason": "to describe a screenshot with the Vision model"
+      }
+    ]
+  },
+  "limits": {
+    "call_timeout_seconds": 120,
+    "max_result_bytes": 65536,
+    "memory_mb": 3072,
+    "model_calls_per_task": 0,
+    "model_tokens_per_task": 0
+  },
+  "tools": [
+    {
+      "name": "launch",
+      "summary": "Start a program on the screen. The project's permission rules decide whether it may start; otherwise the person (or auto mode's classifier) is asked, and an 'always allow' answer is saved in permissions.json. Returns the new windows. A terminal or other OpenGL program needs gl=true.",
+      "readonly": false,
+      "timeout_seconds": 90,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "minItems": 1,
+            "maxItems": 64
+          },
+          "gl": {
+            "type": "boolean",
+            "description": "Enable OpenGL (software). Needs the screen restarted if programs already run; costs about 26 MiB more."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "Why, in the person's language; shown when asking."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "screenshot",
+      "summary": "Save a screenshot of the whole screen with the real pointer drawn on it. With question, the Vision model describes it: you do not see the picture yourself, so ask about the thing you need.",
+      "readonly": true,
+      "timeout_seconds": 60,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      }
+    },
+    {
+      "name": "mouse",
+      "summary": "Move the real pointer along a natural curved path to the exact point, then act. Actions: move, click, double_click, press, release, drag (needs to_x, to_y), scroll (dx, dy in steps; dy>0 down). Omit x and y to act where the pointer is.",
+      "readonly": false,
+      "timeout_seconds": 60,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "move",
+              "click",
+              "double_click",
+              "press",
+              "release",
+              "drag",
+              "scroll"
+            ]
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3839
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3839
+          },
+          "to_x": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3839
+          },
+          "to_y": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3839
+          },
+          "button": {
+            "type": "string",
+            "enum": [
+              "left",
+              "middle",
+              "right"
+            ]
+          },
+          "dx": {
+            "type": "integer",
+            "minimum": -50,
+            "maximum": 50
+          },
+          "dy": {
+            "type": "integer",
+            "minimum": -50,
+            "maximum": 50
+          },
+          "slow": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "keyboard",
+      "summary": "Type text (any Unicode) and/or press a key combination such as ctrl+shift+v, Return, alt+F4. paste=true puts the text on the clipboard and presses paste_keys (default ctrl+v; terminals use ctrl+shift+v) for text key presses cannot carry.",
+      "readonly": false,
+      "timeout_seconds": 60,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "keys": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "paste": {
+            "type": "boolean"
+          },
+          "paste_keys": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "windows",
+      "summary": "List the windows (id, title, class, position, size, minimized) or act on one: focus, move (x, y), resize (width, height), minimize, close.",
+      "readonly": false,
+      "timeout_seconds": 60,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "list",
+              "focus",
+              "move",
+              "resize",
+              "minimize",
+              "close"
+            ]
+          },
+          "id": {
+            "type": "integer"
+          },
+          "x": {
+            "type": "integer",
+            "minimum": -3840,
+            "maximum": 3840
+          },
+          "y": {
+            "type": "integer",
+            "minimum": -3840,
+            "maximum": 3840
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 50,
+            "maximum": 3840
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 50,
+            "maximum": 3840
+          }
+        }
+      }
+    },
+    {
+      "name": "apps",
+      "summary": "List the programs started here, or stop them all (stop_all).",
+      "readonly": false,
+      "timeout_seconds": 60,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "stop_all": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "status",
+      "summary": "Memory of the screen itself (server, window manager, this skill's process) in MiB of proportional set size, against its 40 MiB budget. Programs you started are not counted.",
+      "readonly": true,
+      "timeout_seconds": 60,
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    }
+  ]
+}

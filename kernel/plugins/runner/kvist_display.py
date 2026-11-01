@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The skill's own virtual screen: Xvfb with i3, started inside the runner's sandbox.
+"""The skill's own virtual screen: Xvfb with a window manager, started inside the runner's sandbox.
 
 The sandbox has private /tmp, IPC and network namespaces, so this X server is
 reachable only from processes of the same sandbox and can never be the
@@ -7,8 +7,10 @@ person's display. ``-fbdir`` writes the framebuffer to a file in the screen
 directory, which the core maps read-only for the preview: one screen, one
 source, no second browser.
 
-GLX stays off: the sandbox has no GPU device, and loading the host's GL
-vendor libraries there crashed Xvfb. Chromium renders in software anyway.
+GLX is off unless a skill asks for it: the sandbox has no GPU device, and loading the host's GL
+vendor libraries there crashed Xvfb. Chromium renders in software anyway. A terminal such as kitty
+needs the extension (it fails with "GLX extension not found"), and the server then loads Mesa's
+software rasteriser with libLLVM: about 26 MiB more resident memory, measured at 1920x1080.
 """
 from __future__ import annotations
 
@@ -27,10 +29,39 @@ hide_edge_borders both
 focus_follows_mouse no
 workspace_layout tabbed
 """
+# No panel, tray, menu, desktop or background: JWM draws only window frames.
+_JWM_CONFIG = """\
+<?xml version="1.0"?>
+<JWM>
+  <FocusModel>click</FocusModel>
+  <DoubleClickSpeed>500</DoubleClickSpeed>
+  <StartupCommand></StartupCommand>
+  <WindowStyle>
+    <Font>DejaVu Sans-9</Font>
+    <Width>2</Width>
+    <Height>20</Height>
+  </WindowStyle>
+</JWM>
+"""
 _START_TIMEOUT = 15.0
+_MESA_EGL = "/usr/share/glvnd/egl_vendor.d/50_mesa.json"
 
 
-def start_display(display: str, screen_dir: str, size: str) -> None:
+def software_gl_environment() -> dict[str, str]:
+    """Pin OpenGL to Mesa's software renderer. Without it libglvnd also probes the host's NVIDIA vendor library,
+    which aborts the process in a sandbox that has no GPU device (Xvfb died with SIGABRT inside libEGL_nvidia)."""
+    environment = {"LIBGL_ALWAYS_SOFTWARE": "1", "__GLX_VENDOR_LIBRARY_NAME": "mesa"}
+    if os.path.exists(_MESA_EGL):
+        environment["__EGL_VENDOR_LIBRARY_FILENAMES"] = _MESA_EGL
+    return environment
+
+_children: dict[str, subprocess.Popen] = {}
+_last_start: tuple[str, str, str, str] = ()  # display, screen_dir, size, wm
+
+
+def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", glx: bool = False) -> None:
+    global _last_start
+    _last_start = (display, screen_dir, size, wm)
     width, height = (int(part) for part in size.lower().split("x", 1))
     number = display.lstrip(":")
     socket_dir = Path("/tmp/.X11-unix")
@@ -38,10 +69,15 @@ def start_display(display: str, screen_dir: str, size: str) -> None:
     socket_dir.mkdir(mode=0o1777, exist_ok=True)
     os.chmod(socket_dir, 0o1777)
     command = ["Xvfb", display, "-screen", "0", f"{width}x{height}x24", "-nolisten", "tcp", "-dpi", "96",
-               "-extension", "GLX", "-nocursor"]
+               "-nocursor"]
+    if not glx:
+        command += ["-extension", "GLX"]
     if screen_dir:
         command += ["-fbdir", screen_dir]
-    server = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr)
+    environment = {**os.environ, **software_gl_environment()} if glx else None
+    server = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr,
+                              env=environment)
+    _children["server"] = server
     socket_path = socket_dir / f"X{number}"
     deadline = time.monotonic() + _START_TIMEOUT
     while not socket_path.exists():
@@ -51,6 +87,47 @@ def start_display(display: str, screen_dir: str, size: str) -> None:
             raise RuntimeError("the virtual screen (Xvfb) did not start")
         time.sleep(0.05)
     os.environ["DISPLAY"] = display
-    config = Path("/tmp/kvist-i3.conf")
-    config.write_text(_I3_CONFIG, encoding="utf-8")
-    subprocess.Popen(["i3", "-c", str(config)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr)
+    _children["wm"] = _start_window_manager(wm)
+
+
+def _start_window_manager(wm: str) -> subprocess.Popen:
+    if wm == "jwm":
+        config = Path("/tmp/kvist-jwm.xml")
+        config.write_text(_JWM_CONFIG, encoding="utf-8")
+        command = ["jwm", "-f", str(config)]
+    else:
+        config = Path("/tmp/kvist-i3.conf")
+        config.write_text(_I3_CONFIG, encoding="utf-8")
+        # i3 keeps a 25 MiB shared-memory log unless told otherwise (a config line is read too late for it).
+        command = ["i3", "--shmlog-size=0", "-c", str(config)]
+    return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr)
+
+
+def display_processes() -> dict[str, int]:
+    """Pids of the screen's own processes (server, window manager), for memory accounting."""
+    return {name: child.pid for name, child in _children.items() if child.poll() is None}
+
+
+def stop_display() -> None:
+    """End the window manager and the server so the screen can be started again with other options."""
+    for name in ("wm", "server"):
+        child = _children.pop(name, None)
+        if child is None or child.poll() is not None:
+            continue
+        child.terminate()
+        try:
+            child.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait()
+
+
+def restart_display(*, glx: bool) -> None:
+    """Start the same screen again with or without GLX; whatever was running on it is gone."""
+    display, screen_dir, size, wm = _last_start
+    stop_display()
+    socket_path = Path("/tmp/.X11-unix") / f"X{display.lstrip(':')}"
+    deadline = time.monotonic() + 3
+    while socket_path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    start_display(display, screen_dir, size, wm=wm, glx=glx)

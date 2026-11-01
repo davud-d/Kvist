@@ -78,10 +78,33 @@ def frame_jpeg(fb_path: Path, max_width: int = PREVIEW_WIDTH, quality: int = 70)
     return output.getvalue()
 
 
-def frame_png(fb_path: Path) -> bytes:
+def frame_png(fb_path: Path, cursor: object = None) -> bytes:
+    frame = read_frame(fb_path)
+    if cursor:
+        _draw_cursor(frame, cursor)
     output = io.BytesIO()
-    read_frame(fb_path).save(output, format="PNG")
+    frame.save(output, format="PNG")
     return output.getvalue()
+
+
+def _draw_cursor(frame, cursor: object) -> None:
+    """Paint the X server's own cursor image (ARGB, from XFixes) where the pointer is: Xvfb never draws it itself."""
+    import base64
+
+    from PIL import Image
+
+    if not isinstance(cursor, dict):
+        return
+    try:
+        width, height = int(cursor["width"]), int(cursor["height"])
+        left, top = int(cursor["x"]) - int(cursor["xhot"]), int(cursor["y"]) - int(cursor["yhot"])
+        argb = base64.b64decode(cursor["pixels"], validate=True)
+    except (KeyError, TypeError, ValueError):
+        return
+    if not (0 < width <= 128 and 0 < height <= 128) or len(argb) != width * height * 4:
+        return
+    sprite = Image.frombuffer("RGBA", (width, height), argb, "raw", "BGRa", 0, 1)
+    frame.paste(sprite, (left, top), sprite)
 
 
 def _xwd_header(data) -> dict[str, int]:

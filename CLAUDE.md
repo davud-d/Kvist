@@ -832,6 +832,25 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); events and control messages: `docs/U
   probe `:9222`: other apps' CEF debuggers, Spotify's for one, listen there). macOS/Windows/GNOME/KDE/niri backends have
   only faked-command tests; skills do not load on Windows yet (POSIX-only package reader). Tests:
   `test_host_actions.py`, core-tool tests at the end of `test_skill_runtime.py`.
+- **App screen** (`skills_bundled/app_screen`, id `app_screen`, **not seen against a real model, JWM never run**): graphical
+  programs on the skill's own hidden screen, driven like a person. It reuses the browser's screen: a manifest `display`
+  object (`size`, `wm` i3|jwm, `glx`; absent keys keep 1280x800 / i3 / no GLX, so `browser` is unchanged) travels
+  `Manifest.display` → `RunnerHost` → `RunnerSpec.screen_*` → `skill_runner --screen-wm/--screen-glx` →
+  `kvist_display.start_display`. Facts that cost time: **Xvfb never paints a cursor into the frame** (neither `-fbdir` nor
+  `XGetImage`, with or without `-nocursor`), so the plugin sends the XFixes cursor image and `frame_png(cursor=)` composites
+  it; **GLX is what makes kitty work and what breaks the 40 MiB budget** (no GLX: `kitty` dies with "GLX extension not found";
+  GLX: Xvfb loads Mesa's libLLVM, +26 MiB PSS, server 13 → ~39-48 MiB), and inside Bubblewrap GLX **aborts Xvfb** in
+  `libEGL_nvidia` unless libglvnd is pinned to Mesa (`kvist_display.software_gl_environment`, applied to the server and to
+  `launch gl=true` programs); a GL launch restarts the screen once (`restart_display`) and ends running programs. Measured
+  PSS in the sandbox, 1920x1080: server 13.4 + i3 2.4 + skill process 13.6 = 29.4 MiB without GLX; i3 needs
+  `--shmlog-size=0` (its 25 MiB shm log otherwise counts). Input is XTEST through python-xlib (the runner's system Python
+  has it; the project venv may not, the tests add the system copy to the path); `motion.py` is pure (curved bezier,
+  min-jerk, drifting speed, tremor that dies out, exact last point). Characters the layout lacks get a **free keycode that
+  stays mapped for the session** (giving it back right after the press made a late-reading program see an empty key).
+  `launch` asks `display.authorize` → `permission_policy.decide` (deny/allow/host rules of `permissions.json`), else
+  `executor.approvals.confirm_command` (the classifier in auto mode) and `commit_remembered_rule`, so "always allow" lands in
+  the same file; programs run **inside the runner sandbox** (empty HOME, no workspace, `SHELL` set because the sandbox
+  passwd shell is `/usr/bin/false`). Tests: `test_app_screen.py` (real Xvfb, a recording X client, a real runner, kitty).
 - **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox (task-exposed ports, granted
   domains, no private addresses, redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and
   serves a loopback MJPEG viewer (token, Host/Origin checks); events `screen`, `task_state` are live-only.

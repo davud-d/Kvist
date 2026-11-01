@@ -57,6 +57,7 @@ _LIMIT_BOUNDS: dict[str, tuple[float, float, float]] = {
 _TOP_LEVEL_KEYS = frozenset({
     "manifest_version", "id", "version", "plugin_api", "kind", "name", "summary", "instructions",
     "entrypoint", "platforms", "dependencies", "capabilities", "limits", "tools", "source", "settings", "core_group",
+    "display",
 })
 # Core tool groups a bundled skill may name: its tools are run by the core itself (CoreServices methods
 # "<group>.<tool>"), so there is no package code and no sandbox. Never available to a package the person installs.
@@ -107,6 +108,7 @@ class Manifest:
     source: dict[str, str]
     settings: dict[str, Any] | None
     core_group: str = ""
+    display: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(repr=False, compare=False, default_factory=dict)
 
     def label(self, language: str) -> str:
@@ -189,6 +191,7 @@ def parse_manifest(data: Any) -> Manifest:
         source=_source(data.get("source")),
         settings=_settings(data.get("settings")),
         core_group=core_group,
+        display=_display_options(data.get("display")),
         raw=data,
     )
 
@@ -391,6 +394,28 @@ def _capability(item: Any, optional: bool) -> CapabilityRequest:
     if not isinstance(reason, str) or len(reason) > 300:
         raise ManifestError(f"capability {name} reason must be a string of at most 300 characters")
     return CapabilityRequest(name=name, scope=scope, reason=reason.strip(), optional=optional)
+
+
+_SCREEN_MANAGERS = frozenset({"i3", "jwm"})
+_SCREEN_SIZE = re.compile(r"^([0-9]{3,4})x([0-9]{3,4})$")
+
+
+def _display_options(value: Any) -> dict[str, Any]:
+    """How a skill's own virtual screen is built; absent keys keep the shared defaults (1280x800, i3, no GLX)."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx"}:
+        raise ManifestError("display may only have: glx, size, wm")
+    size = value.get("size")
+    if size is not None:
+        found = _SCREEN_SIZE.match(size) if isinstance(size, str) else None
+        if found is None or not all(320 <= int(part) <= 3840 for part in found.groups()):
+            raise ManifestError("display.size must look like 1920x1080 (320..3840 per side)")
+    if value.get("wm", "i3") not in _SCREEN_MANAGERS:
+        raise ManifestError(f"display.wm must be one of {sorted(_SCREEN_MANAGERS)}")
+    if not isinstance(value.get("glx", False), bool):
+        raise ManifestError("display.glx must be true or false")
+    return dict(value)
 
 
 def _limits(value: Any) -> dict[str, float]:

@@ -210,6 +210,7 @@ METHODS: dict[str, tuple[str | None, bool]] = {
     "log.write": (None, False),
     "display.info": ("display", False),
     "display.screenshot": ("display", False),
+    "display.authorize": ("display", True),
     "host.open_url": ("host.open", True),
     "host.open_app": ("host.open", True),
     "host.windows": ("host.windows", False),
@@ -1301,7 +1302,7 @@ class CoreServices:
         host = call.skill.host
         if host is None or host.screen is None:
             raise ServiceError("unavailable", "this skill has no virtual screen")
-        return {"display": ":99", "size": self._agent_screen_size(), "viewer_url": host.screen.url,
+        return {"display": ":99", "size": host.manifest.display.get("size") or self._agent_screen_size(), "viewer_url": host.screen.url,
                 "state": host.screen.state}
 
     # --- host (the person's own desktop) ---------------------------------
@@ -1382,6 +1383,31 @@ class CoreServices:
     def _agent_screen_size(self) -> str:
         return getattr(self._manager, "screen_size", "1280x800")
 
+    def _display_authorize(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        """May this program start on the skill's screen? The project's command rules decide, else the person
+        (or auto mode's classifier) is asked, and "always allow" is saved in permissions.json as for a shell command."""
+        from kernel.sandbox.permission_policy import load_policy
+        from kernel.sandbox.auto_approval import refusal_note
+
+        command = _str_list(params, "command", limit=64)
+        if not command:
+            raise _bad("command must not be empty")
+        policy, _ = load_policy(Path(self._agent.executor.workspace))
+        decision = policy.decide(command)
+        if decision == "deny":
+            return {"allowed": False, "reason": "the project's permissions.json denies this command"}
+        if decision == "allow":
+            return {"allowed": True, "by": "rule"}
+        if not self._interactive():
+            return {"allowed": False, "reason": "no_interactive_user"}
+        gate = self._agent.executor.approvals
+        reason = redact_text(_str(params, "reason", required=False, limit=300)) or "start a program on the agent's own screen"
+        approved = bool(self._ask(lambda ui: gate.confirm_command(command, reason)))
+        if not approved:
+            return {"allowed": False, "reason": refusal_note(gate) or "the person did not allow it"}
+        gate.commit_remembered_rule()
+        return {"allowed": True, "by": "person"}
+
     def _display_screenshot(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
         from kernel.plugins.screen import FramebufferError, frame_png
 
@@ -1389,7 +1415,7 @@ class CoreServices:
         if host is None or host.screen is None:
             raise ServiceError("unavailable", "this skill has no virtual screen")
         try:
-            data = frame_png(host.screen.fb_path)
+            data = frame_png(host.screen.fb_path, cursor=params.get("cursor"))
         except FramebufferError as error:
             raise ServiceError("unavailable", str(error)) from None
         name = _str(params, "name", required=False, limit=100) or "screen.png"
