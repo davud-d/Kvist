@@ -73,15 +73,18 @@ function diffLines(patch) {
   return h("div", { class: "diff" }, rows);
 }
 
+// The language's mark in the block's corner: a short code on its colour.
 const LANGUAGES = {
-  py: "Python", rs: "Rust", ts: "TypeScript", tsx: "TSX", jsx: "JSX", js: "JavaScript", mjs: "JavaScript", json: "JSON",
-  md: "Markdown", html: "HTML", css: "CSS", sh: "Shell", bash: "Shell", toml: "TOML", yaml: "YAML", yml: "YAML",
-  go: "Go", c: "C", h: "C", cpp: "C++", java: "Java",
+  py: ["PY", "#7fb2e0"], rs: ["RS", "#dea584"], ts: ["TS", "#5ea2e8"], tsx: ["TSX", "#6fd8f5"], jsx: ["JSX", "#6fd8f5"],
+  js: ["JS", "#e8d44d"], mjs: ["JS", "#e8d44d"], json: ["{}", "#cbcb6a"], md: ["MD", "#9bb3c9"], html: ["HTML", "#e38b5a"],
+  css: ["CSS", "#6cb8e8"], sh: ["SH", "#9cc96b"], bash: ["SH", "#9cc96b"], toml: ["TOML", "#a9b1bf"], yaml: ["YML", "#a9b1bf"],
+  yml: ["YML", "#a9b1bf"], go: ["GO", "#6fc8e0"], c: ["C", "#8aa8d8"], h: ["H", "#8aa8d8"], cpp: ["C++", "#8aa8d8"], java: ["JAVA", "#e08f5a"],
 };
 
-function languageName(path) {
+function languageMark(path) {
   const extension = String(path ?? "").split("/").pop().split(".").slice(1).pop() ?? "";
-  return LANGUAGES[extension] ?? (extension ? extension.toUpperCase() : "Text");
+  const [text, color] = LANGUAGES[extension] ?? [extension ? extension.slice(0, 4).toUpperCase() : "TXT", "#a9b1bf"];
+  return h("span", { class: "code-mark", style: { color } }, text);
 }
 
 // The text a call is typing: what goes out, then what comes in.
@@ -97,25 +100,21 @@ function codeRows(item) {
   return rows;
 }
 
-// The block a write is typed into: a header with the language, and a window of fixed height that follows the end of
-// the code until the person scrolls up; the top edge fades while more lies above.
+// The block a write is typed into: a window of fixed height that follows the end of the code until the person
+// scrolls up; the top edge fades while more lies above, and the language's mark sits in the corner.
 function codeBox(item) {
-  const path = item.args?.path ?? "";
-  const counts = item.added || item.removed ? h("span", { class: "counts" }, h("b", { class: "plus" }, `+${item.added ?? 0}`), item.removed ? h("b", { class: "minus" }, ` −${item.removed}`) : null) : null;
-  const head = h("div", { class: "code-head" }, h("span", { class: "code-mark" }, "</>"), h("span", { class: "code-lang" }, languageName(path)), h("span", { class: "code-path" }, path), counts);
   const body = h("div", { class: "code-body" }, codeRows(item));
   body.addEventListener("scroll", () => {
     item.pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 8;
+    item.scrollTop = body.scrollTop;
     body.classList.toggle("has-above", body.scrollTop > 0);
   });
-  const box = h("div", { class: "codebox" }, head, body);
-  // Laid out only once it is in the page, so the scroll position is set by the caller.
+  const box = h("div", { class: "codebox" }, languageMark(item.args?.path), body);
+  // The caller runs this once the box is in the page, where its height is known.
   box.follow = () => {
-    if (item.pinned !== false) body.scrollTop = body.scrollHeight;
-    else body.scrollTop = item.scrollTop ?? 0;
+    body.scrollTop = item.pinned !== false ? body.scrollHeight : (item.scrollTop ?? 0);
     body.classList.toggle("has-above", body.scrollTop > 0);
   };
-  body.addEventListener("scroll", () => { item.scrollTop = body.scrollTop; });
   return box;
 }
 

@@ -118,7 +118,24 @@ export function createMock(emit) {
       });
       return;
     }
+    const replay = typeof location === "object" ? new URLSearchParams(location.search).get("replay") : null;
+    if (replay) {
+      replayTurn(agent, replay);
+      return;
+    }
     normalTurn(agent, text);
+  }
+
+  // `?replay=<file>`: plays events a real core wrote (scripts/demo_stream.py record) at the times they came.
+  async function replayTurn(agent, url) {
+    const lines = (await (await fetch(url)).text()).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    const turn = lines.filter((event) => !["hello", "session_title", "session"].includes(event.type) && event.at_ms > 0);
+    let before = turn[0]?.at_ms ?? 0;
+    script(agent, turn.map(({ at_ms, ...event }) => {
+      const gap = at_ms - before;
+      before = at_ms;
+      return [gap, event];
+    }));
   }
 
   function command(agent, message) {

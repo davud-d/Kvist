@@ -101,11 +101,8 @@
 .closed-bar:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; color: var(--text); }
 
 /* The block a write is typed into */
-.codebox { margin: 0 16px 10px; background: var(--shade); box-shadow: var(--outline); }
-.code-head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; font-size: 12px; background: var(--surface-2); }
-.code-mark { color: var(--mint); font-weight: 700; }
-.code-lang { color: var(--text); font-weight: 700; }
-.code-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.codebox { position: relative; margin: 0 16px 10px; background: var(--shade); box-shadow: var(--outline); }
+.code-mark { position: absolute; top: 6px; right: 10px; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.9; pointer-events: none; }
 .code-body { max-height: 280px; overflow: auto; padding: 8px 0; font-size: 12px; line-height: 1.5; }
 .code-body.has-above { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px); mask-image: linear-gradient(to bottom, transparent 0, #000 34px); }
 .code-line { padding: 0 12px; white-space: pre; }

@@ -850,6 +850,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     last_call_push = 0.0
     last_lines_push = 0.0
     lines = CallStream()
+    flushed_calls = 0
     announced: set[str] = set()
     spoken = _SpokenStream(self)
     try:
@@ -891,6 +892,10 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
             _announce_finished_calls(self, calls, announced)
+            if len(calls) - 1 > flushed_calls:
+                # A call is complete once the next has begun: its last words go out now, not when the response ends.
+                _stream_call_lines(self, lines, [calls[i] for i in sorted(calls)[flushed_calls:-1]], final=True)
+                flushed_calls = len(calls) - 1
             if calls and time.monotonic() - last_lines_push > _CALL_LINES_INTERVAL:
                 _stream_call_lines(self, lines, [calls[max(calls)]])
                 last_lines_push = time.monotonic()
@@ -1010,13 +1015,13 @@ def _note_tool_call_progress(self, entry: dict[str, str]) -> None:
     )
 
 
-# Short enough that lines appear as they are written, long enough that a fast
+# Short enough that words appear as they are written, long enough that a fast
 # provider does not re-decode a large file once per fragment.
-_CALL_LINES_INTERVAL = 0.1
+_CALL_LINES_INTERVAL = 0.05
 
 
 def _stream_call_lines(self, lines: CallStream, entries: list[dict[str, str]], *, final: bool = False) -> None:
-    """Hand the frontend the new whole lines of the calls being written."""
+    """Hand the frontend the new words of the calls being written."""
     emit = getattr(self._ui, "print_call_stream", None)
     if emit is None:
         return

@@ -1,5 +1,5 @@
 // A write the model is still typing, drawn in the conversation as a code block:
-// a header with the language, the last rows of the code (the top edge fades
+// the language's icon in the corner, the last rows of the code (the top edge fades
 // where more lies above), and a fold when the call is over. The core streams
 // the text as `call_stream` (docs/UI_API.md §7).
 
@@ -12,7 +12,7 @@ use crate::anim::Tween;
 use crate::diff;
 use crate::highlight;
 use crate::text::{self, Line};
-use crate::theme::{self, DIFF_ADD, DIFF_DEL, DUSK, FOG, MIST, MOSS, NIGHT, ROSEHIP};
+use crate::theme::{self, DIFF_ADD, DIFF_DEL, FOG, MOSS, NIGHT, ROSEHIP};
 
 /// Rows of code the block shows at most; more is reached with the wheel.
 pub const MAX_BODY: usize = 14;
@@ -126,7 +126,7 @@ impl CodeBlock {
         let body = self.rows.len().min(MAX_BODY);
         let end = self.rows.len() - self.up.min(self.most_up());
         let start = end - body;
-        let mut lines = vec![self.header(width, bg)];
+        let mut lines = vec![self.top_row(width, bg)];
         for (i, row) in self.rows[start..end].iter().enumerate() {
             let mut row = row.clone();
             if start > 0 && i < FADE.len() {
@@ -142,27 +142,11 @@ impl CodeBlock {
         lines
     }
 
-    fn header(&self, width: usize, bg: Style) -> Line {
+    /// The top row: padding, with the language's icon in the right corner.
+    fn top_row(&self, width: usize, bg: Style) -> Line {
         let (icon, color) = theme::file_icon(&self.path);
-        let mut line: Line = vec![
-            (" ".repeat(PAD), bg),
-            (icon.to_string(), bg.fg(color)),
-            (" ".to_string(), bg),
-            (language_name(&self.path), bg.fg(MIST).add_modifier(Modifier::BOLD)),
-            (format!("  {}", text::fit(&self.path, width / 2)), bg.fg(DUSK)),
-        ];
-        let (added, removed) = self.counts();
-        let mut tail: Line = Vec::new();
-        if added > 0 {
-            tail.push((format!("+{added}"), bg.fg(MOSS)));
-        }
-        if removed > 0 {
-            tail.push((format!(" −{removed}"), bg.fg(ROSEHIP)));
-        }
-        let gap = width.saturating_sub(text::line_width(&line) + text::line_width(&tail) + PAD);
-        line.push((" ".repeat(gap), bg));
-        line.extend(tail);
-        padded(line, width, bg)
+        let gap = width.saturating_sub(PAD + 1);
+        padded(vec![(" ".repeat(gap), bg), (icon.to_string(), bg.fg(color))], width, bg)
     }
 }
 
@@ -245,31 +229,6 @@ fn cut(spans: &Line, width: usize) -> Vec<Line> {
     rows
 }
 
-pub fn language_name(path: &str) -> String {
-    match diff::language(path) {
-        "py" => "Python".into(),
-        "rs" => "Rust".into(),
-        "ts" | "mts" => "TypeScript".into(),
-        "tsx" => "TSX".into(),
-        "jsx" => "JSX".into(),
-        "js" | "mjs" | "cjs" => "JavaScript".into(),
-        "json" => "JSON".into(),
-        "md" => "Markdown".into(),
-        "html" => "HTML".into(),
-        "css" => "CSS".into(),
-        "sh" | "bash" | "zsh" => "Shell".into(),
-        "fish" => "Fish".into(),
-        "toml" => "TOML".into(),
-        "yaml" | "yml" => "YAML".into(),
-        "go" => "Go".into(),
-        "c" | "h" => "C".into(),
-        "cpp" | "hpp" | "cc" => "C++".into(),
-        "java" => "Java".into(),
-        "" => "Text".into(),
-        other => other.to_uppercase(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,7 +253,7 @@ mod tests {
         block.feed("content", 9, "skipped\n");
         open(&mut block, now);
         let lines = block.lines(60, now);
-        assert!(plain(&lines[0]).contains("Python") && plain(&lines[0]).contains("+3"));
+        assert!(plain(&lines[0]).contains("\u{e606}"), "the icon of Python sits in the corner");
         assert!(plain(&lines[1]).contains("import os") && plain(&lines[3]).contains("y = 2"));
         block.feed("content", 0, "z\n");
         block.rebuild(60);
@@ -339,7 +298,7 @@ mod tests {
         assert_eq!(block.lines(60, now).len(), 5);
         block.open.go(0.0, now, 100, crate::anim::Ease::Burst);
         let half = block.lines(60, now + Duration::from_millis(40));
-        assert!(!half.is_empty() && half.len() < 5 && plain(&half[0]).contains("Python"));
+        assert!(!half.is_empty() && half.len() < 5 && plain(&half[0]).contains("\u{e606}"));
         assert!(block.lines(60, now + Duration::from_millis(200)).is_empty());
     }
 

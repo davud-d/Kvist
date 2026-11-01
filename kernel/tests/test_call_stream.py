@@ -15,11 +15,19 @@ def _feed(stream: CallStream, arguments: str, *, final: bool = False, tool: str 
     return [(p.field, p.first_line, p.text, p.done) for p in stream.pieces("c1", tool, arguments, final=final)]
 
 
-def test_only_whole_lines_go_out_and_the_tail_waits():
+def test_whole_words_go_out_and_the_unfinished_one_waits():
     stream = CallStream()
     assert _feed(stream, '{"path": "a.py", "content": "one\\ntw') == [("content", 0, "one\n", False)]
     assert _feed(stream, '{"path": "a.py", "content": "one\\ntw') == []
-    assert _feed(stream, '{"path": "a.py", "content": "one\\ntwo\\nthr') == [("content", 1, "two\n", False)]
+    assert _feed(stream, '{"path": "a.py", "content": "one\\ntwo thr') == [("content", 1, "two ", False)]
+    assert _feed(stream, '{"path": "a.py", "content": "one\\ntwo three\\n') == [("content", 1, "three\n", False)]
+
+
+def test_a_secret_is_never_split_between_two_deliveries():
+    stream = CallStream()
+    key = "sk-abcdefghijklmnopqrstuvwxyz0123456789"
+    assert _feed(stream, '{"content": "k = \'' + key[:12]) == [("content", 0, "k = ", False)]
+    assert _feed(stream, '{"content": "k = \'' + key + "'\\n") == [("content", 0, "'" + key + "'\n", False)]
 
 
 def test_the_closing_quote_flushes_the_last_line_once():
@@ -88,6 +96,37 @@ def test_a_streamed_native_turn_delivers_lines_before_the_call_is_complete(agent
     assert seen[0][4] == 0 and not seen[0][6]
     assert seen[-1][6] is True
     assert turn.tool_calls[0].arguments == body
+
+
+def test_a_call_ends_when_the_next_one_begins_not_when_the_response_ends(agent_factory):
+    agent = agent_factory(max_steps=1)
+    seen: list[tuple] = []
+    agent._ui.print_call_stream = lambda *args: seen.append(args)
+
+    def chunk(index, call_id, name, arguments):
+        function = SimpleNamespace(name=name, arguments=arguments)
+        piece = SimpleNamespace(index=index, id=call_id, function=function)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[piece]))])
+
+    def stream():
+        yield chunk(0, "c1", "write_file", '{"path": "a.py", "content": "one two')
+        yield chunk(1, "c2", "write_file", '{"path": "b.py", "content": "x')
+        time.sleep(0.3)  # the response goes on; the first call must already be closed
+        yield chunk(1, None, "write_file", ' y"}')
+
+    ended_before_the_response_did: list[bool] = []
+    original = agent._ui.print_call_stream
+
+    def watch(*args):
+        original(*args)
+        if args[0] == "c1" and args[6]:
+            ended_before_the_response_did.append(not any(a[0] == "c2" and a[6] for a in seen))
+
+    agent._ui.print_call_stream = watch
+    agent_model._native_turn_from_stream(agent, stream(), time.monotonic())
+
+    assert [a[5] for a in seen if a[0] == "c1" and a[6]] == ["two"]
+    assert ended_before_the_response_did == [True]
 
 
 def test_a_call_is_announced_once_the_model_moves_on_to_the_next(agent_factory):

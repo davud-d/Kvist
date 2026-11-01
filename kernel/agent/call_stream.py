@@ -48,12 +48,20 @@ def decode_json_prefix(raw: str) -> str:
     return ""
 
 
-class CallStream:
-    """Turns the growing argument text of streamed calls into whole new lines.
+def _settled(text: str) -> str:
+    """`text` without the word still being written.
 
-    A half-written line is held back: a frontend that draws line by line would
-    otherwise redraw the same line on every fragment.
+    A word goes out whole, so a secret is redacted as one piece and not
+    split between two deliveries.
     """
+    for index in range(len(text) - 1, -1, -1):
+        if text[index].isspace():
+            return text[: index + 1]
+    return ""
+
+
+class CallStream:
+    """Turns the growing argument text of streamed calls into new words and lines."""
 
     def __init__(self) -> None:
         self._delivered: dict[tuple[str, str], _Delivered] = {}
@@ -76,7 +84,7 @@ class CallStream:
         text = decode_json_prefix(match.group(1))
         done = bool(match.group(2)) or final
         if not done:
-            text = text[: text.rfind("\n") + 1]
+            text = _settled(text)
         fresh = text[state.chars :]
         if not fresh and not done:
             return None

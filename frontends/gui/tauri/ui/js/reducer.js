@@ -229,7 +229,9 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "step": {
       settleStreams(agent);
-      const early = agent.calls.get(ev.call_id || `step-${ev.step}`);
+      const known = agent.calls.get(ev.call_id || `step-${ev.step}`);
+      // Only a card that call_begin or call_stream opened and no step has confirmed; an id that comes round again is a new call.
+      const early = known && known.step === 0 && known.phase === "run" ? known : undefined;
       if (ev.user_message) {
         const words = push(agent, { kind: "reply", text: ev.user_message, live: false, aside: true });
         if (early) placeBefore(agent, words, early);

@@ -197,6 +197,16 @@ test("calls show up one by one while the model is still writing the batch", () =
   assert.equal(agent.items[0].step, 1);
 });
 
+test("an id that comes round again is a new call, not the card a stream opened before", () => {
+  const agent = createAgent("a1", "/w");
+  feed(agent,
+    { type: "call_stream", call_id: "x", tool: "write_file", path: "a.py", field: "content", line: 0, text: "a\n", done: true },
+    { type: "step", step: 1, call_id: "x", action_type: "write_file", action_description: "writes a.py" },
+    { type: "action_result", step: 1, call_id: "x", ok: true, summary: "done" },
+    { type: "step", step: 2, call_id: "x", action_type: "read_file", action_description: "reads a.py" });
+  assert.deepEqual(agent.items.map((item) => item.actionType), ["write_file", "read_file"]);
+});
+
 test("a replacement counts what goes out and what comes in", () => {
   const agent = createAgent("a1", "/w");
   const piece = (field, text) => ({ type: "call_stream", call_id: "r1", tool: "replace_in_file", path: "a.py", field, line: 0, text, done: true });

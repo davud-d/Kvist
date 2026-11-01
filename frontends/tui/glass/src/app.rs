@@ -2120,7 +2120,7 @@ mod tests {
         app.session.items.push(crate::model::Item::User("write it".into()));
         app.on_session(piece("w1", 0, "import os\nx = 1\n"), now);
         let shown = screen_text(&mut app, now + Duration::from_secs(1));
-        assert!(shown.contains("Python") && shown.contains("import os"), "{shown}");
+        assert!(shown.contains("\u{e606}") && shown.contains("import os"), "{shown}");
         assert_eq!(app.code_rects.len(), 1);
 
         app.on_session(piece("w1", 2, "y = 2\n"), now);
