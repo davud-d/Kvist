@@ -746,6 +746,8 @@ from kernel.config.user_config import (
     secret_label_for_key,
     set_provider_secret,
     BRAVE_API_KEY_KEY,
+    EXA_API_KEY_KEY,
+    GEMINI_SEARCH_API_KEY_KEY,
     SEARXNG_BASE_URL_KEY,
     TAVILY_API_KEY_KEY,
     WEB_SEARCH_PROVIDERS,
@@ -2516,9 +2518,11 @@ def choose_style(verbose: bool, ui: AgentUI | None = None) -> str | None:
 
 
 _WEB_SEARCH_PROVIDER_DESCRIPTIONS = {
-    "auto": "First configured one: SearXNG, then Tavily, then Brave",
+    "auto": "First configured one: SearXNG, Tavily, Brave, Exa, then Gemini",
     "tavily": "Tavily Search API (needs an API key)",
     "brave": "Brave Search API (needs an API key)",
+    "exa": "Exa neural search (needs an API key)",
+    "gemini": "Google Search through Gemini (needs a Google AI Studio key)",
     "searxng": "Your own SearXNG instance (needs its base URL)",
 }
 
@@ -2548,9 +2552,14 @@ def choose_web_search_provider(
         return None
 
     secrets: dict[str, str] = {}
-    if provider in ("tavily", "brave"):
-        key_name = TAVILY_API_KEY_KEY if provider == "tavily" else BRAVE_API_KEY_KEY
-        existing = current.tavily_api_key if provider == "tavily" else current.brave_api_key
+    keyed_providers = {
+        "tavily": (TAVILY_API_KEY_KEY, current.tavily_api_key),
+        "brave": (BRAVE_API_KEY_KEY, current.brave_api_key),
+        "exa": (EXA_API_KEY_KEY, current.exa_api_key),
+        "gemini": (GEMINI_SEARCH_API_KEY_KEY, current.gemini_api_key),
+    }
+    if provider in keyed_providers:
+        key_name, existing = keyed_providers[provider]
         label = secret_label_for_key(key_name)
         entered = ui.prompt_secret(
             title=label,

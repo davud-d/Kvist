@@ -189,7 +189,7 @@ cd frontends/gui/tauri/src-tauri && cargo build --release --locked              
   WebAssembly memory, which kills `tsx`, `fetch` and `node --test`), `AGENT_FETCH_EXTRA_DOMAINS`,
   `KVIST_REQUEST_LOG=<file>` (`request_log.py`: one redacted JSON line per HTTP exchange of the
   OpenAI-compatible clients, for handing a provider's support the exact request), and search
-  providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY`.
+  providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY` / `EXA_API_KEY` / `GEMINI_SEARCH_API_KEY` (Gemini with Google Search grounding; the order of `auto` is SearXNG, Tavily, Brave, Exa, Gemini).
   `/web-search-provider` saves the same choice in `config.json`; a saved value outranks the
   variable and is re-read on every `web_search`.
 - **Workspace instructions:** `<workspace>/KVIST.md` (action-loop roles) and `KVIST-CHAT.md` (chat

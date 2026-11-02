@@ -60,7 +60,7 @@ forces JSON.
 | `AGENT_VISION_MODEL` | Image-understanding model on the same provider |
 | `AGENT_VERBOSE`, `AGENT_PERSIST_LOGS` | Diagnostics and run logs |
 | `KVIST_CONFIG_DIR` | Where `config.json` lives |
-| `SEARCH_PROVIDER`, `SEARXNG_BASE_URL`, `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY` | Web search |
+| `SEARCH_PROVIDER`, `SEARXNG_BASE_URL`, `TAVILY_API_KEY`, `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY`, `GEMINI_SEARCH_API_KEY` | Web search |
 
 Prefer the interactive commands. Never print a key from the config; read only the
 non-secret fields you need.

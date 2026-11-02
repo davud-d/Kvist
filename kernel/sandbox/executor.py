@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -2721,7 +2722,7 @@ class SafeExecutor:
         )
 
     def _provider_order(self) -> list[str]:
-        chain = ["searxng", "tavily", "brave"]
+        chain = ["searxng", "tavily", "brave", "exa", "gemini"]
         selected = self._web_settings.provider
         if selected in chain:
             return [selected] + [item for item in chain if item != selected]
@@ -2735,6 +2736,10 @@ class SafeExecutor:
             return bool(self._web_settings.tavily_api_key)
         if provider == "brave":
             return bool(self._web_settings.brave_api_key)
+        if provider == "exa":
+            return bool(self._web_settings.exa_api_key)
+        if provider == "gemini":
+            return bool(self._web_settings.gemini_api_key)
         return False
 
     def _search_with_provider(
@@ -2750,6 +2755,10 @@ class SafeExecutor:
             return self._search_tavily(query=query, top_k=top_k, freshness=freshness)
         if provider == "brave":
             return self._search_brave(query=query, top_k=top_k, freshness=freshness)
+        if provider == "exa":
+            return self._search_exa(query=query, top_k=top_k, freshness=freshness)
+        if provider == "gemini":
+            return self._search_gemini(query=query, top_k=top_k)
         raise ExecutorError(f"Unknown search provider: {provider}")
 
     def _search_searxng(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
@@ -2882,6 +2891,103 @@ class SafeExecutor:
                     "title": str(item.get("title", "")).strip(),
                     "url": str(item.get("url", "")).strip(),
                     "snippet": str(item.get("description", "")).strip(),
+                }
+            )
+        return mapped
+
+    def _search_exa(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
+        if not self._web_settings.exa_api_key:
+            raise ExecutorError("EXA_API_KEY is not set")
+
+        payload: dict[str, Any] = {
+            "query": query,
+            "numResults": top_k,
+            "contents": {"highlights": True},
+        }
+        freshness_days = {"day": 1, "week": 7, "month": 30}
+        if freshness in freshness_days:
+            since = datetime.now(timezone.utc) - timedelta(days=freshness_days[freshness])
+            payload["startPublishedDate"] = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        response = self._http_json_request(
+            url="https://api.exa.ai/search",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "x-api-key": self._web_settings.exa_api_key,
+            },
+            timeout=self.web_timeout,
+            body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        )
+        raw_results = response.get("results")
+        if not isinstance(raw_results, list):
+            raise ExecutorError("Exa returned an invalid result format")
+
+        mapped: list[dict[str, str]] = []
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            highlights = item.get("highlights")
+            snippet = " ".join(str(part) for part in highlights) if isinstance(highlights, list) else ""
+            mapped.append(
+                {
+                    "title": str(item.get("title") or "").strip(),
+                    "url": str(item.get("url") or "").strip(),
+                    "snippet": snippet.strip(),
+                }
+            )
+        return mapped
+
+    def _search_gemini(self, query: str, top_k: int) -> list[dict[str, str]]:
+        if not self._web_settings.gemini_api_key:
+            raise ExecutorError("GEMINI_SEARCH_API_KEY is not set")
+
+        payload = {
+            "contents": [{"parts": [{"text": query}]}],
+            "tools": [{"google_search": {}}],
+        }
+        response = self._http_json_request(
+            url="https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "x-goog-api-key": self._web_settings.gemini_api_key,
+            },
+            timeout=self.web_timeout,
+            body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        )
+        candidates = response.get("candidates")
+        if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
+            raise ExecutorError("Gemini returned no candidates")
+        grounding = candidates[0].get("groundingMetadata")
+        if not isinstance(grounding, dict):
+            return []
+
+        chunks = grounding.get("groundingChunks")
+        if not isinstance(chunks, list):
+            return []
+        snippets: dict[int, list[str]] = {}
+        for support in grounding.get("groundingSupports") or []:
+            if not isinstance(support, dict):
+                continue
+            segment = support.get("segment")
+            text = str(segment.get("text") or "").strip() if isinstance(segment, dict) else ""
+            for index in support.get("groundingChunkIndices") or []:
+                if text and isinstance(index, int):
+                    snippets.setdefault(index, []).append(text)
+
+        mapped: list[dict[str, str]] = []
+        for index, chunk in enumerate(chunks[:top_k]):
+            web = chunk.get("web") if isinstance(chunk, dict) else None
+            if not isinstance(web, dict):
+                continue
+            mapped.append(
+                {
+                    "title": str(web.get("title") or "").strip(),
+                    "url": str(web.get("uri") or "").strip(),
+                    "snippet": " ".join(snippets.get(index, [])),
                 }
             )
         return mapped

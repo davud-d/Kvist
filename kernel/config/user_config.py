@@ -53,7 +53,9 @@ WEB_SEARCH_PROVIDER_KEY = "web_search_provider"
 TAVILY_API_KEY_KEY = "tavily_api_key"
 BRAVE_API_KEY_KEY = "brave_search_api_key"
 SEARXNG_BASE_URL_KEY = "searxng_base_url"
-WEB_SEARCH_PROVIDERS = ("auto", "tavily", "brave", "searxng")
+EXA_API_KEY_KEY = "exa_api_key"
+GEMINI_SEARCH_API_KEY_KEY = "gemini_search_api_key"
+WEB_SEARCH_PROVIDERS = ("auto", "tavily", "brave", "exa", "gemini", "searxng")
 
 _ENV_KEY_ALIASES = {
     USER_CONFIG_KEY: ("OPENAI_API_KEY",),
@@ -70,6 +72,8 @@ _ENV_KEY_ALIASES = {
     TAVILY_API_KEY_KEY: ("TAVILY_API_KEY",),
     BRAVE_API_KEY_KEY: ("BRAVE_SEARCH_API_KEY",),
     SEARXNG_BASE_URL_KEY: ("SEARXNG_BASE_URL",),
+    EXA_API_KEY_KEY: ("EXA_API_KEY",),
+    GEMINI_SEARCH_API_KEY_KEY: ("GEMINI_SEARCH_API_KEY",),
 }
 for _manual_provider, _manual_config in MANUAL_OPENAI_PROVIDERS.items():
     _ENV_KEY_ALIASES[_manual_config["api_key_key"]] = (_manual_config["api_key_key"].upper(),)
@@ -86,6 +90,8 @@ _SECRET_LABELS = {
     DEEPSEEK_API_KEY_KEY: "DeepSeek API key",
     TAVILY_API_KEY_KEY: "Tavily API key",
     BRAVE_API_KEY_KEY: "Brave Search API key",
+    EXA_API_KEY_KEY: "Exa API key",
+    GEMINI_SEARCH_API_KEY_KEY: "Gemini API key (Google AI Studio)",
 }
 for _manual_provider, _manual_config in MANUAL_OPENAI_PROVIDERS.items():
     _SECRET_LABELS[_manual_config["api_key_key"]] = f"{_manual_config['label']} API key"
@@ -562,6 +568,8 @@ class WebSearchSettings:
     provider: str = "auto"
     tavily_api_key: str = ""
     brave_api_key: str = ""
+    exa_api_key: str = ""
+    gemini_api_key: str = ""
     searxng_base_url: str = ""
 
 
@@ -575,6 +583,8 @@ def get_web_search_settings(config_path: Path | None = None) -> WebSearchSetting
         provider=provider if provider in WEB_SEARCH_PROVIDERS else "auto",
         tavily_api_key=_resolve_secret(payload, TAVILY_API_KEY_KEY) or "",
         brave_api_key=_resolve_secret(payload, BRAVE_API_KEY_KEY) or "",
+        exa_api_key=_resolve_secret(payload, EXA_API_KEY_KEY) or "",
+        gemini_api_key=_resolve_secret(payload, GEMINI_SEARCH_API_KEY_KEY) or "",
         searxng_base_url=(_resolve_secret(payload, SEARXNG_BASE_URL_KEY) or "").rstrip("/"),
     )
 

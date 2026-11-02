@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import errno
+import json
 import multiprocessing
 import os
 import stat
@@ -1213,6 +1214,66 @@ def test_web_search_uses_the_key_saved_by_the_command(tmp_path, monkeypatch):
     result = executor._web_search("anything")
 
     assert result.data["provider"] == "tavily"
+
+
+def _executor_with_search_keys(tmp_path, monkeypatch, **keys):
+    from kernel.config import user_config
+    for name in ("SEARXNG_BASE_URL", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "SEARCH_PROVIDER"):
+        monkeypatch.delenv(name, raising=False)
+    user_config.save_web_search_settings("auto", keys)
+    return SafeExecutor(tmp_path)
+
+
+def test_exa_search_sends_the_key_and_joins_highlights(tmp_path, monkeypatch):
+    executor = _executor_with_search_keys(tmp_path, monkeypatch, exa_api_key="exa-key")
+    sent = {}
+
+    def fake_request(url, method, headers, timeout, body=None):
+        sent.update(url=url, headers=headers, body=json.loads(body))
+        return {"results": [{"title": "T", "url": "https://example.org/", "highlights": ["a", "b"]}]}
+
+    monkeypatch.setattr(executor, "_http_json_request", fake_request)
+
+    results = executor._search_exa("query", top_k=3, freshness="week")
+
+    assert sent["url"] == "https://api.exa.ai/search"
+    assert sent["headers"]["x-api-key"] == "exa-key"
+    assert sent["body"]["numResults"] == 3
+    assert "startPublishedDate" in sent["body"]
+    assert results == [{"title": "T", "url": "https://example.org/", "snippet": "a b"}]
+
+
+def test_gemini_search_maps_grounding_chunks_to_results(tmp_path, monkeypatch):
+    executor = _executor_with_search_keys(tmp_path, monkeypatch, gemini_search_api_key="g-key")
+    sent = {}
+
+    def fake_request(url, method, headers, timeout, body=None):
+        sent.update(headers=headers, body=json.loads(body))
+        return {
+            "candidates": [
+                {
+                    "groundingMetadata": {
+                        "groundingChunks": [
+                            {"web": {"uri": "https://example.org/a", "title": "example.org"}},
+                            {"web": {"uri": "https://example.org/b", "title": "other"}},
+                        ],
+                        "groundingSupports": [
+                            {"segment": {"text": "first claim"}, "groundingChunkIndices": [0]},
+                        ],
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(executor, "_http_json_request", fake_request)
+
+    results = executor._search_gemini("query", top_k=5)
+
+    assert sent["headers"]["x-goog-api-key"] == "g-key"
+    assert sent["body"]["tools"] == [{"google_search": {}}]
+    assert results[0] == {"title": "example.org", "url": "https://example.org/a", "snippet": "first claim"}
+    assert results[1]["snippet"] == ""
+    assert executor._provider_available("gemini") is True
 
 
 def test_parallel_fetches_of_one_host_ask_once_when_the_answer_is_always(tmp_path, monkeypatch):
