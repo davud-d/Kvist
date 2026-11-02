@@ -80,6 +80,10 @@ def current_os_context():
     elif platform.system().lower() == "windows":
         return f"{platform.release()} {platform.version()}"        
     
+    # FREEBSD, OPENBSD, NETBSD, DRAGONFLY: the system's own name and release ("OpenBSD 8.0")
+    elif platform.system().lower().endswith("bsd") or platform.system().lower() == "dragonfly":
+        return f"{platform.system()} {platform.release()}"
+
     # UNKNOWN OS
     else:
         return f"unknown os: {platform.system()}"
@@ -101,8 +105,8 @@ def current_shell_context():
             return "powershell" if "powershell" in name or "pwsh" in name else name
         return "unknown"
 
-    # macOS (best-effort)
-    elif current_platform == "darwin":
+    # macOS (best-effort) and the BSDs
+    elif current_platform == "darwin" or current_platform.endswith("bsd") or current_platform == "dragonfly":
         shell = os.environ.get("SHELL", "")
         return os.path.basename(shell) if shell else "unknown"
 

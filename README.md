@@ -239,6 +239,7 @@ Kvist treats their content as data that cannot change its safety rules.
 | Linux | Supported, including the Bubblewrap sandbox |
 | Windows | Supported, without Bubblewrap |
 | macOS | Tested in CI on Apple Silicon, no guarantee for every feature |
+| FreeBSD, OpenBSD, NetBSD | Experimental: run from source, no OS sandbox, only a CI smoke test so far ([`docs/bsd.md`](docs/bsd.md), [RU](docs/bsd.ru.md)) |
 
 ## More documentation
 

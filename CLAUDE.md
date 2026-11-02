@@ -1627,6 +1627,17 @@ descendants cannot survive a timeout or completion: Bubblewrap's PID namespace r
 readers drain stdout/stderr into fixed-size buffers and discard the overflow; the tree is killed before the
 readers are joined so a held-open pipe cannot wedge the parent.
 
+**The BSDs** (FreeBSD, OpenBSD, NetBSD; `docs/bsd.md` + `.ru.md`, **experimental, never run on a real one**): core and classic
+terminal only, from source (`install.sh` refuses with a pointer; PyInstaller does not build there), checked by the `bsd` job of
+`platforms.yml` (QEMU; the smoke subset counts, the wider suite and `--doctor` only report). Like Windows and macOS they get
+no Bubblewrap and no cgroups, so `auto` refuses code-running commands and `AGENT_SANDBOX_MODE=workspace` is the way in
+(`doctor` says so). BSD-specific code: `terminal_env._system_exec_dirs` adds `/usr/local/{s,}bin`, `/usr/pkg/{s,}bin`,
+`/usr/X11R6/bin` after the base dirs when each passes `_is_trusted_system_directory` (on Linux `/usr/local` stays out);
+`process_tree._DescendantTracker` lists descendants with `ps -A -o pid=,ppid=,lstart=` where there is no `/proc` (also macOS,
+which had no tracker before; 100 ms poll, start time is the PID-reuse guard); `system_context` names the system and reads `SHELL`.
+`kernel/tests/test_bsd_support.py` fakes `sys.platform` for those decisions only: **never fake it for a whole run, the
+stdlib's `sysconfig` breaks**. A real sandbox (`pledge`/`unveil`, Capsicum, jail) is not built.
+
 Known limits: transitive imports/build includes and helpers spawned by trusted system tools are not individually
 content-attested; repository/history-aware tools may surface protected content not named in argv; a narrow TOCTOU
 window remains between final comparison and spawn; `workspace` mode has no OS isolation and its cleanup depends

@@ -166,8 +166,8 @@ jobs:
 
   # FreeBSD, OpenBSD and NetBSD have no hosted runners: the action boots each system in QEMU on
   # an Ubuntu runner and runs the script inside it. Experimental: the core has no sandbox there
-  # (no Bubblewrap, no cgroups), so only the credential-free smoke subset runs, and a failure
-  # never fails the workflow (continue-on-error). Native dependencies (cryptography, Pillow,
+  # (no Bubblewrap, no cgroups), so the credential-free smoke subset is the check that counts; the
+  # wider suite after it only reports. A failure never fails the workflow (continue-on-error). Native dependencies (cryptography, Pillow,
   # pydantic-core, tiktoken, jiter) have no BSD wheels, so they come from the system's own
   # packages; the names were checked against each system's package index. NetBSD has no
   # tiktoken/jiter package, so pip builds those two with Rust. The images ship `sudo` without a
@@ -220,6 +220,10 @@ jobs:
             # requirements-dev.txt is not used: ruff and pyinstaller have no BSD builds.
             .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt "pytest>=8.3,<10" defusedxml==0.7.1
             .venv/bin/python -m pytest -ra -m offline_smoke
+            # Informational: the whole default suite and the doctor's view of the system, so the first runs show
+            # what else breaks here. A failure of either does not fail the job (it is continue-on-error anyway).
+            .venv/bin/python -m kernel --doctor || echo "::warning::doctor reported problems"
+            .venv/bin/python -m pytest -ra -q -p no:cacheprovider || echo "::warning::the wider suite has failures on ${{ matrix.name }}"
 
   package:
     name: Wheel and binary on ${{ matrix.os }}

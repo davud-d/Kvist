@@ -150,6 +150,59 @@ def _linux_process_start_time(pid: int) -> int | None:
         return None
 
 
+# One poll costs a `ps` process, so it runs far less often than the /proc reads.
+_PS_POLL_INTERVAL = 0.1
+
+
+def _ps_listing(*selector: str) -> list[list[str]]:
+    """Rows of `ps` (POSIX options, so the BSDs and macOS answer too); empty when ps cannot run."""
+    try:
+        done = subprocess.run(
+            ["ps", *selector, "-o", "pid=,ppid=,lstart="], capture_output=True, text=True, timeout=5, check=False,
+            env={"LC_ALL": "C", "PATH": os.defpath},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.split(None, 2) for line in done.stdout.splitlines() if len(line.split(None, 2)) == 3]
+
+
+def _started_at(text: str) -> int | None:
+    """`ps` start time ("Mon Nov  2 10:23:45 2026") as seconds, whose equality says the pid is the same process."""
+    try:
+        return int(time.mktime(time.strptime(" ".join(text.split()), "%a %b %d %H:%M:%S %Y")))
+    except (ValueError, OverflowError):
+        return None
+
+
+def _ps_process_start_time(pid: int) -> int | None:
+    for row in _ps_listing("-p", str(pid)):
+        return _started_at(row[2])
+    return None
+
+
+def _ps_descendant_snapshot(root_pid: int) -> dict[int, int]:
+    children: dict[int, list[tuple[int, int | None]]] = {}
+    for pid_text, ppid_text, started in _ps_listing("-A"):
+        try:
+            children.setdefault(int(ppid_text), []).append((int(pid_text), _started_at(started)))
+        except ValueError:
+            continue
+    found: dict[int, int] = {}
+    pending, seen = [root_pid], {root_pid}
+    while pending:
+        for child, started in children.get(pending.pop(), []):
+            if child in seen or started is None:
+                continue
+            seen.add(child)
+            found[child] = started
+            pending.append(child)
+    return found
+
+
+def _process_start_time(pid: int) -> int | None:
+    return _linux_process_start_time(pid) if sys.platform.startswith("linux") else _ps_process_start_time(pid)
+
+
 def _linux_child_pids(pid: int) -> list[int]:
     try:
         raw = Path(f"/proc/{pid}/task/{pid}/children").read_text(
@@ -186,18 +239,21 @@ def _linux_descendant_snapshot(root_pid: int) -> dict[int, int]:
     return found
 
 
-class _LinuxDescendantTracker(threading.Thread):
-    """Best-effort fallback for descendants that leave the process group."""
+class _DescendantTracker(threading.Thread):
+    """Best-effort fallback for descendants that leave the process group: /proc on Linux, `ps` elsewhere."""
 
     def __init__(self, root_pid: int) -> None:
         super().__init__(daemon=True)
         self._root_pid = root_pid
+        on_linux = sys.platform.startswith("linux")
+        self._snapshot_of = _linux_descendant_snapshot if on_linux else _ps_descendant_snapshot
+        self._interval = _DESCENDANT_POLL_INTERVAL if on_linux else _PS_POLL_INTERVAL
         self._stop_requested = threading.Event()
         self._lock = threading.Lock()
         self._observed: dict[int, int] = {}
 
     def capture(self) -> None:
-        snapshot = _linux_descendant_snapshot(self._root_pid)
+        snapshot = self._snapshot_of(self._root_pid)
         if snapshot:
             with self._lock:
                 self._observed.update(snapshot)
@@ -205,12 +261,12 @@ class _LinuxDescendantTracker(threading.Thread):
     def run(self) -> None:
         while not self._stop_requested.is_set():
             self.capture()
-            self._stop_requested.wait(_DESCENDANT_POLL_INTERVAL)
+            self._stop_requested.wait(self._interval)
 
     def stop_and_snapshot(self) -> dict[int, int]:
         self.capture()
         self._stop_requested.set()
-        self.join(_DESCENDANT_POLL_INTERVAL * 5)
+        self.join(self._interval * 5)
         with self._lock:
             return dict(self._observed)
 
@@ -225,7 +281,7 @@ class _CgroupScope:
     def create(cls) -> "_CgroupScope | None":
         try:
             own = Path("/proc/self/cgroup").read_text().strip()
-            available = (_CGROUP_ROOT / "cgroup.controlllers").exists()
+            available = (_CGROUP_ROOT / "cgroup.controllers").exists()
         except (PermissionError, OSError):
             available = False
 
@@ -308,12 +364,12 @@ def _terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
 
 
 def _kill_recorded_descendants(processes: dict[int, int]) -> None:
-    """Kill recorded descendants only if their Linux starttime still matches."""
+    """Kill recorded descendants only if their start time still matches."""
     own_group = os.getpgrp()
     groups: set[int] = set()
     live_pids: list[int] = []
     for pid, expected_start in processes.items():
-        if _linux_process_start_time(pid) != expected_start:
+        if _process_start_time(pid) != expected_start:
             continue
         live_pids.append(pid)
         try:
@@ -328,7 +384,7 @@ def _kill_recorded_descendants(processes: dict[int, int]) -> None:
         except (ProcessLookupError, PermissionError, OSError):
             pass
     for pid in live_pids:
-        if _linux_process_start_time(pid) != processes[pid]:
+        if _process_start_time(pid) != processes[pid]:
             continue
         try:
             os.kill(pid, signal.SIGKILL)
@@ -442,11 +498,10 @@ def run_supervised(
         proc.stderr, max_capture_bytes, _text_observer(on_output)
     )
     descendant_tracker = (
-        _LinuxDescendantTracker(proc.pid)
+        _DescendantTracker(proc.pid)
         if (
             not is_windows
             and scope is None
-            and sys.platform.startswith("linux")
             and isinstance(proc.pid, int)
             and proc.pid > 0
         )

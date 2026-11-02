@@ -197,6 +197,8 @@ case "$OS_NAME/$ARCH" in
 		NODE_SHA256="8a677b0219178efd6eb0e475457c4afb452b521a92f6e67845a73bd85727f2a8"
 		;;
 	Linux/* | Darwin/*) die "no release binary for $OS_NAME on $ARCH" ;;
+	FreeBSD/* | OpenBSD/* | NetBSD/* | DragonFly/*)
+		die "no release binary for $OS_NAME (PyInstaller does not build there); run Kvist from source: see docs/bsd.md" ;;
 	*) die "this script supports Linux and macOS only; use install.ps1 on Windows" ;;
 esac
 

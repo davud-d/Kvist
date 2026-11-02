@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 from kernel.sandbox.sandbox import validated_external_tool_path
@@ -118,10 +119,25 @@ def _windows_exec_dirs() -> list[Path]:
     return trusted
 
 
+# Where the BSDs install what the person added: ports and packages. On Linux /usr/local is a place a user may
+# write to, so it stays out; here it is the base system's own convention, root-owned.
+_BSD_PACKAGE_DIRS = ("/usr/local/sbin", "/usr/local/bin", "/usr/pkg/sbin", "/usr/pkg/bin", "/usr/X11R6/bin")
+
+
+def _is_bsd() -> bool:
+    return sys.platform.startswith(("freebsd", "openbsd", "netbsd", "dragonfly"))
+
+
 def _system_exec_dirs() -> list[Path]:
     if os.name == "nt":
         return _windows_exec_dirs()
-    return [Path(p) for p in ("/usr/sbin", "/usr/bin", "/sbin", "/bin") if Path(p).is_dir()]
+    base = [Path(p) for p in ("/usr/sbin", "/usr/bin", "/sbin", "/bin") if Path(p).is_dir()]
+    if not _is_bsd():
+        return base
+    # Without these git, python and rg of a BSD are not found at all. Each passes the same check as any
+    # trusted directory: root-owned and not writable by anyone else, so a user-writable one stays out.
+    packages = [Path(p) for p in _BSD_PACKAGE_DIRS if Path(p).is_dir() and _is_trusted_system_directory(Path(p))]
+    return [*base, *packages]
 
 
 def _controlled_child_path(

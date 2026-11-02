@@ -242,6 +242,7 @@ devops) и `KVIST-CHAT.md`. Один раз опишите там команды
 | Linux | Поддерживается, включая песочницу Bubblewrap |
 | Windows | Поддерживается, без Bubblewrap |
 | macOS | Проверяется в CI на Apple Silicon, работа всех функций не гарантируется |
+| FreeBSD, OpenBSD, NetBSD | Экспериментально: запуск из исходников, без песочницы ОС, пока только быстрая проверка в CI ([`docs/bsd.ru.md`](docs/bsd.ru.md), [EN](docs/bsd.md)) |
 
 ## Другая документация
 

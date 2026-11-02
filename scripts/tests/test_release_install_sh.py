@@ -547,3 +547,11 @@ def test_linux_on_arm_has_no_app_and_says_so(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert any(json.loads(line).get("event") == "warning" and "no desktop app build" in line for line in result.stdout.splitlines())
     assert not (home / ".local/share/kvist/app").exists()
+
+
+@pytest.mark.parametrize("system", ["FreeBSD", "OpenBSD", "NetBSD"])
+def test_a_bsd_is_pointed_at_running_from_source(tmp_path, system):
+    result, _home = _run(tmp_path, system, "amd64", "kvist-linux-x64")
+
+    assert result.returncode != 0
+    assert f"no release binary for {system}" in result.stderr and "docs/bsd.md" in result.stderr

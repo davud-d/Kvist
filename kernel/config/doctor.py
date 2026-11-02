@@ -199,6 +199,14 @@ def _check_environment(say: _Say, workspace: Path) -> list[Check]:
             if cgroup_supervision_available()
             else say("unavailable: a timeout falls back to killpg", "недоступен: по таймауту процессы убиваются через killpg"),
         ))
+    elif os.name != "nt":  # the BSDs and macOS: no Bubblewrap and no cgroups
+        checks.append(Check(
+            group, say("OS sandbox", "песочница ОС"), WARN,
+            say("none on this system: in auto mode commands that run code are refused; "
+                "AGENT_SANDBOX_MODE=workspace allows them with no isolation",
+                "на этой системе её нет: в режиме auto команды, запускающие код, отклоняются; "
+                "AGENT_SANDBOX_MODE=workspace разрешает их без изоляции"),
+        ))
     if not network_isolation_available():
         checks.append(Check(
             group, say("network isolation", "изоляция сети"), WARN,
