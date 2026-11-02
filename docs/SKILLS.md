@@ -477,6 +477,11 @@ out skills this OS can never run; `--skill-op list` shows them with the reason.
   person's rights. Instruction-only skills work everywhere.
 * macOS and Windows: not verified; no executable skills. The macOS, Windows, GNOME, KDE and niri backends of `desktop` are covered by unit tests with faked commands only, and the Windows package reader is covered by mocked native-handle tests. Package reads use native Windows handles and reject reparse points; real Windows/macOS end-to-end runs remain unverified.
 * The browser skill needs Xvfb, i3 and Chromium on the host; `app_screen` needs Xvfb, JWM, xclip and python-xlib.
+* **`app_screen` (graphical programs on the agent's own hidden screen) works on Linux only.** It rests on an X server of its
+  own (Xvfb) with its own pointer and keyboard, run inside the Bubblewrap sandbox that executable skills use. The BSDs have
+  Xvfb but no Bubblewrap, so skills that run code do not start there; Windows and macOS have no comparable hidden screen (one
+  session, one shared pointer). The skill is therefore listed as unavailable on those systems, and nobody has tested it
+  anywhere else because the authors have no such machines.
 * The ctx file API has no delete, move or binary write. MCP is stdio only.
 * ACP (Zed) shows skill, screen, helper and artifact events as text and has no pause.
 * The JetBrains plugin is updated but its Kotlin was not compiled in this change.
