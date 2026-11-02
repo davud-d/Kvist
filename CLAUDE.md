@@ -839,7 +839,7 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); events and control messages: `docs/U
   `kvist_display.start_display`. Facts that cost time: **Xvfb never paints a cursor into the frame** (neither `-fbdir` nor
   `XGetImage`, with or without `-nocursor`), so the plugin sends the XFixes cursor image and `frame_png(cursor=)` composites
   it; **GLX is what makes kitty work and what breaks the 40 MiB budget** (no GLX: `kitty` dies with "GLX extension not found";
-  GLX: Xvfb loads Mesa's libLLVM, +26 MiB PSS, server 13 → ~39-48 MiB), and inside Bubblewrap GLX **aborts Xvfb** in
+  GLX: Xvfb loads Mesa's libLLVM, +13..26 MiB PSS depending on the Mesa build, server 13 → ~26-48 MiB), and inside Bubblewrap GLX **aborts Xvfb** in
   `libEGL_nvidia` unless libglvnd is pinned to Mesa (`kvist_display.software_gl_environment`, applied to the server and to
   `launch gl=true` programs); a GL launch restarts the screen once (`restart_display`) and ends running programs. Measured
   PSS in the sandbox, 1920x1080: server 13.4 + i3 2.4 + skill process 13.6 = 29.4 MiB without GLX; i3 needs

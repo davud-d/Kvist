@@ -362,7 +362,7 @@ def test_web_search_provider_saves_choice_and_key(home, agent_factory):
     )
 
     assert [r.kind for r in requests] == ["choice", "secret"]
-    assert {o["value"] for o in requests[0].options} == {"auto", "tavily", "brave", "searxng"}
+    assert {o["value"] for o in requests[0].options} == {"auto", "tavily", "brave", "searxng", "exa", "gemini"}
     assert result.ok and result.effects == {"web_search_provider": "tavily"}
     assert _saved("web_search_provider") == "tavily"
     assert _saved("tavily_api_key") == "tvly-secret"
