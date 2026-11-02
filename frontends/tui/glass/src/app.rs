@@ -108,6 +108,10 @@ pub struct App {
     core: Option<Core>,
     /// Frames of the agent's browser, while it has one.
     feed: Option<Feed>,
+    /// The newest frame of that feed already shown.
+    feed_version: u64,
+    /// Every screen the agent has open (browser, app screen), the one announced last at the end: it owns the card.
+    screens: Vec<(String, CoreEvent)>,
     /// The core's page for the agent's screen: a real browser shows it at 30-60 fps, the card at about one.
     screen_url: String,
     /// A picture is being drawn or decoded: the card shows a spinner until it arrives.
@@ -217,6 +221,8 @@ impl App {
             session: Session::default(),
             core: None,
             feed: None,
+            feed_version: 0,
+            screens: Vec::new(),
             screen_url: String::new(),
             image_in: None,
             image_pending: false,
@@ -437,13 +443,17 @@ impl App {
 
     /// Applies one session event, starting the motion it causes.
     fn on_session(&mut self, event: CoreEvent, now: Instant) {
+        let Some(event) = self.route_screen(event) else { return };
         match &event {
             CoreEvent::FileChanged { .. } | CoreEvent::Helper { .. } => self.left_in.go(1.0, now, 480, Ease::Burst),
             CoreEvent::Screen { stream_url, url, .. } => {
                 self.screen_url = url.clone();
                 if self.feed.as_ref().is_none_or(|feed| feed.url != *stream_url) {
                     match Feed::start(stream_url) {
-                        Ok(feed) => self.feed = Some(feed),
+                        Ok(feed) => {
+                            self.feed = Some(feed);
+                            self.feed_version = 0;
+                        }
                         Err(error) => self.notify(error, true, now),
                     }
                 }
@@ -475,7 +485,7 @@ impl App {
                 self.image_version += 1;
                 self.browser_in.go(1.0, now, 520, Ease::OutBack);
             }
-            CoreEvent::ScreenClosed => {
+            CoreEvent::ScreenClosed { .. } => {
                 self.feed = None;
                 self.image_in = None;
                 self.image_pending = false;
@@ -491,6 +501,30 @@ impl App {
             _ => {}
         }
         self.session.apply(event, now);
+    }
+
+    /// The card shows one screen at a time. A screen announced last takes it; when the one on show closes and
+    /// another is still open, the card goes to that one instead of closing; a screen that is not on show may
+    /// close without the card noticing.
+    fn route_screen(&mut self, event: CoreEvent) -> Option<CoreEvent> {
+        match event {
+            CoreEvent::Screen { ref screen_id, .. } => {
+                let id = screen_id.clone();
+                self.screens.retain(|(known, _)| *known != id);
+                self.screens.push((id, event.clone()));
+                Some(event)
+            }
+            CoreEvent::ScreenClosed { screen_id } => {
+                let on_show = self.screens.last().is_some_and(|(known, _)| *known == screen_id);
+                self.screens.retain(|(known, _)| *known != screen_id);
+                match self.screens.last() {
+                    Some((_, next)) if on_show => Some(next.clone()),
+                    Some(_) => None,
+                    None => Some(CoreEvent::ScreenClosed { screen_id }),
+                }
+            }
+            other => Some(other),
+        }
     }
 
     fn poll_feed(&mut self, now: Instant, pictures: &mut Pictures) {
@@ -521,7 +555,12 @@ impl App {
         if let Some(feed) = self.feed.as_ref() {
             while let Ok(frame) = feed.frames.try_recv() {
                 match frame {
-                    Ok(frame) => pictures.set_web(Some(frame)),
+                    // Frames are decoded by several threads, so one can arrive after a newer one.
+                    Ok(frame) if frame.version > self.feed_version => {
+                        self.feed_version = frame.version;
+                        pictures.set_web(Some(frame));
+                    }
+                    Ok(_) => {}
                     Err(error) => failure = Some(error),
                 }
             }
@@ -2100,6 +2139,43 @@ mod tests {
         assert_eq!(app.diff_in.target(), 0.0);
         app.drop_closed_diff(now + Duration::from_secs(3));
         assert!(app.diff.is_none());
+    }
+
+    fn open_screen(id: &str, title: &str) -> CoreEvent {
+        CoreEvent::Screen {
+            screen_id: id.into(),
+            title: title.into(),
+            frame_url: format!("http://127.0.0.1:9/{id}/frame"),
+            stream_url: format!("http://127.0.0.1:9/{id}/stream"),
+            url: format!("http://127.0.0.1:9/{id}/"),
+        }
+    }
+
+    fn card_title(app: &App) -> Option<&str> {
+        app.session.browser.as_ref().map(|browser| browser.title.as_str())
+    }
+
+    #[test]
+    fn the_card_follows_the_screen_announced_last_and_goes_back_when_it_closes() {
+        let (mut app, now) = changed_app();
+        app.on_session(open_screen("browser", "Browser"), now);
+        app.on_session(open_screen("app_screen", "App screen"), now);
+        assert_eq!(card_title(&app), Some("App screen"));
+        assert!(app.feed.as_ref().is_some_and(|feed| feed.url.contains("app_screen")));
+
+        // The browser closing while the app screen is on show does not touch the card.
+        app.on_session(CoreEvent::ScreenClosed { screen_id: "browser".into() }, now);
+        assert_eq!(card_title(&app), Some("App screen"));
+        assert!(app.feed.is_some());
+
+        app.on_session(open_screen("browser", "Browser"), now);
+        app.on_session(CoreEvent::ScreenClosed { screen_id: "browser".into() }, now);
+        assert_eq!(card_title(&app), Some("App screen"), "the app screen is still open and takes the card back");
+        assert!(app.feed.as_ref().is_some_and(|feed| feed.url.contains("app_screen")));
+
+        app.on_session(CoreEvent::ScreenClosed { screen_id: "app_screen".into() }, now);
+        assert_eq!(card_title(&app), None);
+        assert!(app.feed.is_none() && app.screens.is_empty());
     }
 
     fn piece(call: &str, line: u32, text: &str) -> CoreEvent {

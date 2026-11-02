@@ -5,9 +5,9 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -21,11 +21,33 @@ pub struct Feed {
     pub frames: Receiver<Result<Arc<WebFrame>, String>>,
 }
 
+/// Decoding a Full HD JPEG takes longer than a 60 fps frame lasts, so frames are decoded by a few threads in
+/// turn; one that arrives while all are busy is dropped (a live screen wants the newest, not every one).
+const DECODERS: usize = 3;
+
 impl Feed {
     pub fn start(url: &str) -> Result<Feed, String> {
         let (host, path) = loopback(url)?;
         let stop = Arc::new(AtomicBool::new(false));
         let (sender, frames) = mpsc::channel();
+        let (jobs, queue) = mpsc::sync_channel::<(u64, Vec<u8>)>(1);
+        let queue = Arc::new(Mutex::new(queue));
+        for _ in 0..DECODERS {
+            let (queue, sender, stopped) = (Arc::clone(&queue), sender.clone(), Arc::clone(&stop));
+            thread::spawn(move || {
+                while !stopped.load(Ordering::Relaxed) {
+                    let job = queue.lock().ok().and_then(|queue| queue.recv_timeout(Duration::from_millis(200)).ok());
+                    let Some((version, jpeg)) = job else { continue };
+                    let message = match image::load_from_memory(&jpeg) {
+                        Ok(picture) => Ok(Arc::new(backdrop::web_frame(picture.to_rgb8(), version))),
+                        Err(error) => Err(format!("the frame is not an image ({error})")),
+                    };
+                    if sender.send(message).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
         let stopped = Arc::clone(&stop);
         thread::spawn(move || {
             let mut last: Vec<u8> = Vec::new();
@@ -38,27 +60,20 @@ impl Feed {
                 }
             };
             while !stopped.load(Ordering::Relaxed) {
-                let message = match next_frame(&mut stream) {
+                match next_frame(&mut stream) {
                     // A still screen is sent over and over; decoding it again shows nothing new.
-                    Ok(jpeg) if jpeg == last => None,
-                    Ok(jpeg) => match image::load_from_memory(&jpeg) {
-                        Ok(picture) => {
-                            version += 1;
-                            last = jpeg;
-                            Some(Ok(Arc::new(backdrop::web_frame(picture.to_rgb8(), version))))
+                    Ok(jpeg) if jpeg == last => {}
+                    Ok(jpeg) => {
+                        version += 1;
+                        last = jpeg.clone();
+                        if let Err(TrySendError::Disconnected(_)) = jobs.try_send((version, jpeg)) {
+                            return;
                         }
-                        Err(error) => Some(Err(format!("the frame is not an image ({error})"))),
-                    },
-                    Err(error) => Some(Err(error.to_string())),
-                };
-                let failed = matches!(message, Some(Err(_)));
-                if let Some(message) = message
-                    && sender.send(message).is_err()
-                {
-                    return;
-                }
-                if failed {
-                    return;
+                    }
+                    Err(error) => {
+                        sender.send(Err(error.to_string())).ok();
+                        return;
+                    }
                 }
             }
         });
@@ -160,6 +175,56 @@ mod tests {
         assert!(loopback("http://localhost:9/").is_ok());
         assert!(loopback("http://example.com:80/frame").is_err());
         assert!(loopback("https://127.0.0.1:1/").is_err());
+    }
+
+    /// 120 distinct Full HD frames pushed at 60 a second: the feed must keep up with a live screen and
+    /// never hand the interface a frame older than one it already has.
+    #[test]
+    fn a_sixty_frames_a_second_full_hd_stream_is_decoded_in_time() {
+        use std::time::Instant;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 256];
+            while !request.ends_with(b"\r\n\r\n") {
+                let read = socket.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..read]);
+            }
+            socket.write_all(b"HTTP/1.0 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=kvistframe\r\n\r\n").unwrap();
+            // Made before the stream starts: encoding Full HD frames here would be the slow part of the test.
+            let variants: Vec<Vec<u8>> = (0..8u32)
+                .map(|index| {
+                    let picture = image::RgbImage::from_fn(1920, 1080, |x, y| image::Rgb([((x + index * 31) % 251) as u8, (y % 241) as u8, ((x ^ y) % 255) as u8]));
+                    let mut jpeg = std::io::Cursor::new(Vec::new());
+                    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90).encode_image(&picture).unwrap();
+                    jpeg.into_inner()
+                })
+                .collect();
+            for index in 0..120usize {
+                let jpeg = &variants[index % variants.len()];
+                let head = format!("--kvistframe\r\nContent-Type: image/jpeg\r\nContent-Length: {}\r\n\r\n", jpeg.len());
+                if socket.write_all(head.as_bytes()).is_err() || socket.write_all(jpeg).is_err() || socket.write_all(b"\r\n").is_err() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(16));
+            }
+        });
+        let feed = Feed::start(&format!("http://{address}/stream")).unwrap();
+        let (start, mut newest, mut shown) = (Instant::now(), 0, 0);
+        while start.elapsed() < Duration::from_millis(2600) {
+            if let Ok(Ok(frame)) = feed.frames.recv_timeout(Duration::from_millis(50)) {
+                shown += 1;
+                newest = newest.max(frame.version);
+                assert_eq!(frame.raw.dimensions(), (1920, 1080));
+            }
+        }
+        drop(feed);
+        server.join().ok();
+        println!("decoded {shown} of 120 frames, newest {newest}");
+        assert!(newest >= 100, "the feed fell behind: newest frame {newest}");
+        assert!(shown >= 60, "only {shown} frames were decoded");
     }
 
     #[test]

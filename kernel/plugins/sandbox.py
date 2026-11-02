@@ -87,6 +87,7 @@ class RunnerSpec:
     screen_size: str = "1280x800"
     screen_wm: str = "i3"
     screen_glx: bool = False
+    screen_cursors: str = ""
 
 
 def build_runner_argv(spec: RunnerSpec) -> list[str]:
@@ -141,6 +142,8 @@ def build_runner_argv(spec: RunnerSpec) -> list[str]:
                         "--screen-size", spec.screen_size, "--screen-wm", spec.screen_wm]
         if spec.screen_glx:
             runner_args.append("--screen-glx")
+        if spec.screen_cursors:
+            runner_args += ["--screen-cursors", f"{SANDBOX_ROOT}/skill/{spec.screen_cursors}"]
     argv += ["--chdir", f"{SANDBOX_ROOT}/skill", "--", python, "-I", "-B",
              f"{SANDBOX_ROOT}/runner/skill_runner.py", *runner_args]
     return argv

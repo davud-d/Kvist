@@ -336,6 +336,7 @@ def test_the_skill_runs_in_the_sandbox_and_the_project_rules_decide_what_may_sta
     status, launched, clicked, typed, shot, denied = results
     assert status["screen"] == "1920x1080"
     assert status["pss_mib"]["server"] > 0 and status["pss_mib"]["wm"] > 0
+    assert (status["cursor"]["width"], status["cursor"]["height"]) == (56, 56)  # the window manager's own pointer is the theme's
     assert launched["ok"] is True, launched
     assert launched["authorized_by"] == "rule" and launched["windows"]
     assert clicked["pointer"] == [400, 300] and typed["ok"] is True
@@ -385,3 +386,123 @@ def test_a_gl_terminal_needs_the_screen_restarted_with_glx_and_then_runs(agent_f
     assert launched["windows"] and after["gl"] is True
     print("PSS before:", before["pss_mib"], before["total_mib"], "after GLX:", after["pss_mib"], after["total_mib"])
     assert after["pss_mib"]["server"] > before["pss_mib"]["server"] + 15  # the software renderer is the cost
+
+
+# --- the pointer on the core's live preview ---------------------------------
+
+@needs_x
+def test_the_pointer_is_published_for_the_live_preview_and_drawn_by_the_viewer(screen, tmp_path, monkeypatch):
+    plugin, fb_path = screen
+    from kernel.plugins.screen import CURSOR_FILE, frame_jpeg, read_cursor
+
+    monkeypatch.setattr(plugin, "CURSOR_FILE", str(tmp_path / CURSOR_FILE))
+    plugin._mouse({"action": "move", "x": 1000, "y": 600}, None)
+    plugin.SCREEN.refresh_cursor()
+    published = read_cursor(tmp_path / CURSOR_FILE)
+
+    assert published is not None and (published["x"], published["y"]) == (1000, 600)
+    with_pointer = frame_jpeg(fb_path, cursor=published)
+    without = frame_jpeg(fb_path)
+    assert with_pointer != without
+
+
+def test_an_oversized_or_broken_cursor_file_is_ignored(tmp_path):
+    from kernel.plugins.screen import MAX_CURSOR_BYTES, frame_jpeg, read_cursor
+
+    big, broken, odd = tmp_path / "big.json", tmp_path / "broken.json", tmp_path / "odd.json"
+    big.write_text('{"x": 1, "pad": "' + "a" * MAX_CURSOR_BYTES + '"}')
+    broken.write_text("{not json")
+    odd.write_text("[1, 2]")
+
+    assert read_cursor(big) is None and read_cursor(broken) is None and read_cursor(odd) is None
+    assert read_cursor(tmp_path / "missing.json") is None
+    assert callable(frame_jpeg)
+
+
+@needs_x
+def test_programs_on_the_screen_really_use_the_skills_own_blue_pointer(screen, monkeypatch):
+    """The cursor is the X server's own: a program that sets its text cursor gets the themed I-beam, and the
+    XFixes image any viewer reads back is that blue-glow picture, not a drawing laid over the preview."""
+    plugin, _ = screen
+    if shutil.which("xterm") is None:
+        pytest.skip("needs xterm")
+    theme = SKILL_DIR / "icons"
+    monkeypatch.setenv("XCURSOR_PATH", str(theme))
+    monkeypatch.setenv("XCURSOR_THEME", "kvist")
+    monkeypatch.setenv("XCURSOR_SIZE", "32")
+    started = plugin.SCREEN.launch(["xterm"], gl=False)
+    window = started["windows"][0]
+    plugin.SCREEN.move(window["x"] + 100, window["y"] + 100)   # inside the text area: xterm asks for its I-beam
+    time.sleep(0.3)
+
+    image = plugin.SCREEN.cursor_image()
+    pixels = base64.b64decode(image["pixels"])
+    bluish = sum(1 for index in range(0, len(pixels), 4)
+                 if pixels[index] > pixels[index + 2] + 40 and pixels[index + 3] > 40)  # BGRA: blue well above red
+
+    assert (image["width"], image["height"]) == (56, 56)    # the theme's canvas, not the server's 16x16 default
+    assert bluish > 100
+    plugin.SCREEN.end_apps()
+
+
+# --- the live preview: native size, high quality, 60 fps while something moves, quiet while nothing does ----
+
+def _frames_in(viewer, seconds: float) -> list[bytes]:
+    """The stream parts received in ``seconds`` (a multipart MJPEG read by hand, like the interfaces do)."""
+    import socket
+
+    sock = socket.create_connection(("127.0.0.1", viewer.port), timeout=3)
+    sock.sendall(f"GET /stream.mjpeg?t={viewer.token} HTTP/1.0\r\nHost: 127.0.0.1:{viewer.port}\r\n\r\n".encode())
+    reader = sock.makefile("rb")
+    while reader.readline().strip():
+        pass
+    frames, deadline = [], time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        length = 0
+        while True:
+            line = reader.readline().strip()
+            if line.lower().startswith(b"content-length:"):
+                length = int(line.split(b":")[1])
+            if not line and length:
+                break
+        frames.append(reader.read(length))
+        reader.readline()
+    sock.close()
+    return frames
+
+
+@needs_x
+def test_the_live_preview_is_full_size_sharp_fast_while_the_pointer_moves_and_quiet_when_nothing_changes(screen, tmp_path):
+    plugin, fb_path = screen
+    from kernel.plugins.screen import CURSOR_FILE, ScreenViewer
+
+    viewer = ScreenViewer(fb_path.parent, title="t")
+    viewer.start()
+    try:
+        still = _frames_in(viewer, 2.6)
+        stop = threading.Event()
+
+        def move() -> None:   # the skill publishing a pointer that keeps moving
+            cursor = plugin.SCREEN.cursor_image()
+            step = 0
+            while not stop.is_set():
+                step += 1
+                (fb_path.parent / CURSOR_FILE).write_text(__import__("json").dumps({**cursor, "x": 100 + step % 900, "y": 300}))
+                time.sleep(0.004)
+
+        mover = threading.Thread(target=move, daemon=True)
+        mover.start()
+        moving = _frames_in(viewer, 1.5)
+        stop.set()
+        mover.join(timeout=2)
+    finally:
+        viewer.close()
+        (fb_path.parent / CURSOR_FILE).unlink(missing_ok=True)
+
+    from PIL import Image
+
+    print(f"live preview: still {len(still) / 2.6:.1f} fps, moving {len(moving) / 1.5:.1f} fps, "
+          f"{len(moving[-1]) // 1024} KiB a frame")
+    assert len(still) <= 8                      # a still screen is not streamed at 60: a few repeats keep the read alive
+    assert len(moving) >= 1.5 * 40              # at least 40 frames a second while the pointer moves (60 asked)
+    assert Image.open(io.BytesIO(moving[-1])).size == (1920, 1080)   # native size, not scaled down

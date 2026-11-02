@@ -850,7 +850,18 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); events and control messages: `docs/U
   `launch` asks `display.authorize` → `permission_policy.decide` (deny/allow/host rules of `permissions.json`), else
   `executor.approvals.confirm_command` (the classifier in auto mode) and `commit_remembered_rule`, so "always allow" lands in
   the same file; programs run **inside the runner sandbox** (empty HOME, no workspace, `SHELL` set because the sandbox
-  passwd shell is `/usr/bin/false`). Tests: `test_app_screen.py` (real Xvfb, a recording X client, a real runner, kitty).
+  passwd shell is `/usr/bin/false`). **The pointer is the X server's own, in the browser cursor's look** (black arrow, light
+  outline, blue glow): `scripts/make_app_screen_cursors.py` (Pillow, output committed) draws an Xcursor theme `kvist`
+  (8 shapes, 73 names, 32 px) into `app_screen/icons/`; manifest `display.cursors: "icons"` makes `kvist_display` export
+  `XCURSOR_PATH/THEME/SIZE`, so JWM's root cursor and every program's cursor (kitty, GTK, Xlib via libXcursor) are the
+  themed ones, and the XFixes image anyone reads back is that picture (tested through the runner and with a real program).
+  Shapes the theme lacks fall back to libXcursor's black font glyph. `/usr/bin/xterm` on the author's machine is a symlink
+  to alacritty, so tests use it without arguments. **Live preview** (`screen.py`): the plugin publishes the pointer in
+  `<screen dir>/cursor.json` (position per step, shape per tool call; untrusted, 16 KiB cap) and the viewer draws it
+  (the frame has no cursor); the stream is the frame's own size (resizing 1920 -> 1280 cost 23 ms, encoding 4-7 ms), JPEG
+  q90 4:4:4, up to 60 fps (53-59 measured with the reader in the same process), a row sample (`frame_signature`) skips an
+  unchanged screen and a keep-alive repeats it once a second (Glass's 3 s read timeout would end a silent stream).
+  Tests: `test_app_screen.py` (real Xvfb, a recording X client, a real runner, kitty, the stream rate).
 - **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox (task-exposed ports, granted
   domains, no private addresses, redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and
   serves a loopback MJPEG viewer (token, Host/Origin checks); events `screen`, `task_state` are live-only.
@@ -1142,11 +1153,17 @@ Modules: `probe`, `kitty` (upload once, then place/move by id; z-layers below ce
 `model::CoreEvent`), `model`, `dialog` (every `input_request`; approvals with `subject` and Always via
 `remember_pattern`), `models` (Ctrl+P picker), `edit`, `markdown` + `highlight` (pulldown-cmark,
 syntect/two-face), `slash` (a copy of the core-routed names in `frontends/tui/ink/commands.ts` plus `tui`),
-`screen` (browser preview, loopback only), `view`, `app`, `anim` (`KVIST_GLASS_FPS`, default 60), `water`
+`screen` (live screen feed, loopback only: 3 decoder threads, a frame arriving while all are busy is dropped, `App::feed_version`
+drops one that arrives out of order), `view`, `app`, `anim` (`KVIST_GLASS_FPS`, default 60), `water`
 (text selection is "pouring water on the glass", a kitty z-layer under text). Relies on core features in
 `docs/UI_API.md`: `action_result.lines_added/lines_removed`, the live-only `helper_activity` event, the
 `catalog` command and `models PROVIDER FAST SMART`.
-Launcher: `--frontend glass` / saved `glass` → `main.launch_glass` (`KVIST_GLASS`, PATH, then
+**Several screens** (`screen` events carry `screen_id` = the skill id): `App::screens` keeps every open one, the newest
+announced owns the card, closing one that is not on show leaves the card alone, closing the one on show hands it to the
+next, so the browser and `app_screen` do not clobber each other. Per frame at Full HD: decode 15 ms (hence the pool), `rounded`
+2 ms (corners only; was 14), upload file 5 ms; **the small card's thumbnail still costs 14-32 ms and is throttled to ~8 fps
+(`THUMB_EVERY`); the opened view (`Modal::Browser`) is what shows the screen live**. Not seen live in kitty (only the feed
+and its parts are measured). Launcher: `--frontend glass` / saved `glass` → `main.launch_glass` (`KVIST_GLASS`, PATH, then
 `_GLASS_BUILD`, also where `kvist.spec` packs the build); `--check` must see the real tty; any refusal
 falls back to the Ink UI. `/tui` inside Glass is local (`local:frontend`, exit 64 + `KVIST_SWITCH_FILE`).
 Installer: `install_rust.py` (C compiler + rustup; not on Windows), `install_cli.py::build_glass`; release CI

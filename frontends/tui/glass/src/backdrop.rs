@@ -219,15 +219,31 @@ fn grain(x: u32, y: u32) -> f32 {
 }
 
 /// Gives a picture rounded transparent corners.
+///
+/// Only the four corners are not opaque, so the distance is worked out there alone and every other pixel is a
+/// plain copy: a live screen is made into one of these 60 times a second.
 pub fn rounded(image: &RgbImage, radius: f32) -> RgbaImage {
     let (width, height) = image.dimensions();
-    let half_w = width as f32 / 2.0;
-    let half_h = height as f32 / 2.0;
-    RgbaImage::from_fn(width, height, |x, y| {
-        let d = rounded_rect_distance(x as f32 + 0.5 - half_w, y as f32 + 0.5 - half_h, half_w, half_h, radius);
-        let p = image.get_pixel(x, y).0;
-        image::Rgba([p[0], p[1], p[2], ((0.5 - d).clamp(0.0, 1.0) * 255.0) as u8])
-    })
+    let (half_w, half_h) = (width as f32 / 2.0, height as f32 / 2.0);
+    let reach = (radius.ceil() as u32 + 1).min(width).min(height);
+    let mut out = RgbaImage::new(width, height);
+    let (source, target) = (image.as_raw(), out.as_mut());
+    for y in 0..height {
+        let from = &source[(y * width * 3) as usize..((y + 1) * width * 3) as usize];
+        let to = &mut target[(y * width * 4) as usize..((y + 1) * width * 4) as usize];
+        for (pixel, rgb) in to.chunks_exact_mut(4).zip(from.chunks_exact(3)) {
+            pixel[..3].copy_from_slice(rgb);
+            pixel[3] = 255;
+        }
+        if y >= reach && y + reach < height {
+            continue;
+        }
+        for x in (0..reach).chain(width - reach..width) {
+            let d = rounded_rect_distance(x as f32 + 0.5 - half_w, y as f32 + 0.5 - half_h, half_w, half_h, radius);
+            to[(x * 4 + 3) as usize] = ((0.5 - d).clamp(0.0, 1.0) * 255.0) as u8;
+        }
+    }
+    out
 }
 
 /// One frame of the agent's browser: sharp, and two blurred steps (made when
@@ -280,6 +296,52 @@ pub fn developing_thumbnail(frame: &RgbImage, width: u32, height: u32, light: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Not a check: prints what one 1920x1080 frame of a live screen costs at each step.
+    #[test]
+    #[ignore]
+    fn frame_cost_at_full_hd() {
+        use std::time::Instant;
+        let raw = RgbImage::from_fn(1920, 1080, |x, y| image::Rgb([(x * 7 % 251) as u8, (y * 3 % 241) as u8, ((x ^ y) % 255) as u8]));
+        let mut jpeg = std::io::Cursor::new(Vec::new());
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90).encode_image(&raw).unwrap();
+        let jpeg = jpeg.into_inner();
+        let time = |label: &str, mut work: Box<dyn FnMut()>| {
+            work();
+            let start = Instant::now();
+            for _ in 0..20 {
+                work();
+            }
+            println!("{label:28} {:6.1} ms", start.elapsed().as_secs_f64() * 1000.0 / 20.0);
+        };
+        time("jpeg decode", Box::new(|| drop(image::load_from_memory(&jpeg).unwrap().to_rgb8())));
+        let decoded = image::load_from_memory(&jpeg).unwrap().to_rgb8();
+        let for_rounded = decoded.clone();
+        time("rounded (web_frame)", Box::new(move || drop(rounded(&for_rounded, 21.0))));
+        let rgba = rounded(&decoded, 21.0);
+        time("write 8 MB (upload file)", Box::new(move || std::fs::write("/dev/shm/kvist-bench-frame", rgba.as_raw()).unwrap()));
+        std::fs::remove_file("/dev/shm/kvist-bench-frame").ok();
+        let for_thumb = decoded.clone();
+        time("thumbnail 560x350 (Lanczos3)", Box::new(move || drop(thumbnail(&for_thumb, 560, 350, 1.0))));
+        let for_fast = decoded.clone();
+        time("imageops::thumbnail (area)", Box::new(move || drop(imageops::thumbnail(&for_fast, 560, 315))));
+        let for_tri = decoded;
+        time("resize Triangle", Box::new(move || drop(imageops::resize(&for_tri, 560, 315, FilterType::Triangle))));
+    }
+
+    #[test]
+    fn rounding_only_the_corners_gives_the_same_picture_as_working_out_every_pixel() {
+        let source = RgbImage::from_fn(97, 61, |x, y| image::Rgb([(x * 5) as u8, (y * 9) as u8, (x + y) as u8]));
+        for radius in [0.0, 3.0, 8.5, 25.0] {
+            let (half_w, half_h) = (97.0 / 2.0, 61.0 / 2.0);
+            let every_pixel = RgbaImage::from_fn(97, 61, |x, y| {
+                let d = rounded_rect_distance(x as f32 + 0.5 - half_w, y as f32 + 0.5 - half_h, half_w, half_h, radius);
+                let p = source.get_pixel(x, y).0;
+                image::Rgba([p[0], p[1], p[2], ((0.5 - d).clamp(0.0, 1.0) * 255.0) as u8])
+            });
+            assert_eq!(rounded(&source, radius), every_pixel, "radius {radius}");
+        }
+    }
 
     #[test]
     fn cover_fills_the_area_exactly() {

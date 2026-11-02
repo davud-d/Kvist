@@ -404,8 +404,12 @@ def _display_options(value: Any) -> dict[str, Any]:
     """How a skill's own virtual screen is built; absent keys keep the shared defaults (1280x800, i3, no GLX)."""
     if value is None:
         return {}
-    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx"}:
-        raise ManifestError("display may only have: glx, size, wm")
+    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx", "cursors"}:
+        raise ManifestError("display may only have: cursors, glx, size, wm")
+    cursors = value.get("cursors")
+    if cursors is not None and not (isinstance(cursors, str) and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,63}", cursors)
+                                    and ".." not in cursors.split("/")):
+        raise ManifestError("display.cursors must be a folder of the package holding an Xcursor theme named kvist")
     size = value.get("size")
     if size is not None:
         found = _SCREEN_SIZE.match(size) if isinstance(size, str) else None

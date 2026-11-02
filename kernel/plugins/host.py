@@ -141,6 +141,7 @@ class RunnerHost:
             net_dir=net_dir, proxy_port=PROXY_PORT if net_dir else 0, screen_dir=screen_dir,
             screen_size=self.manifest.display.get("size", self._screen_size),
             screen_wm=self.manifest.display.get("wm", "i3"), screen_glx=bool(self.manifest.display.get("glx", False)),
+            screen_cursors=self.manifest.display.get("cursors", ""),
         )
         self.process = ManagedProcess(
             build_runner_argv(spec),

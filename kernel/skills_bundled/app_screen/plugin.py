@@ -8,6 +8,7 @@ XTEST extension, so the pointer is a real X pointer and programs see ordinary ev
 from __future__ import annotations
 
 import base64
+import json
 import os
 import random
 import shutil
@@ -19,6 +20,9 @@ from typing import Any
 import motion
 
 BUDGET_MIB = 40.0
+# Where the core's viewer looks for the pointer to draw on the live preview (the sandbox shares this directory).
+CURSOR_FILE = os.path.join(os.environ.get("KVIST_SCREEN_DIR", "/kvist/screen"), "cursor.json")
+_PUBLISH_EVERY = 0.02
 MAX_TEXT = 4000
 BUTTONS = {"left": 1, "middle": 2, "right": 3}
 _MODIFIERS = {"ctrl": "Control_L", "control": "Control_L", "shift": "Shift_L", "alt": "Alt_L", "super": "Super_L",
@@ -44,6 +48,8 @@ class Screen:
         self._clipboard: subprocess.Popen | None = None
         self._borrowed: dict[int, int] = {}
         self._free_keycodes: list[int] = []
+        self._cursor_image: dict[str, Any] = {}
+        self._published_at = 0.0
 
     # --- connection ------------------------------------------------------
 
@@ -94,13 +100,41 @@ class Screen:
         width, height = self.size()
         if not (0 <= x < width and 0 <= y < height):
             raise ScreenError(f"({x}, {y}) is outside the screen ({width}x{height})")
+        if not self._cursor_image:
+            self.refresh_cursor()
         for px, py, delay in motion.pointer_path(self.pointer(), (x, y), _RNG, slow=slow):
             self._fake(X.MotionNotify, 0, px, py)
             self.dpy.sync()
+            self.publish_cursor(px, py)
             time.sleep(delay)
         if self.pointer() != (x, y):
             self._fake(X.MotionNotify, 0, x, y)
             self.dpy.sync()
+        self.publish_cursor(x, y, force=True)
+
+    def publish_cursor(self, x: int, y: int, *, force: bool = False) -> None:
+        """Let the core's live preview draw the pointer (a person watching sees where the agent is pointing).
+        Position only while moving; the image is refreshed after each tool call."""
+        now = time.monotonic()
+        if not self._cursor_image or (not force and now - self._published_at < _PUBLISH_EVERY):
+            return
+        self._published_at = now
+        self._write_cursor({**self._cursor_image, "x": x, "y": y})
+
+    def refresh_cursor(self) -> None:
+        """Re-read the cursor's shape (a program changes it: arrow, text bar, hand) and publish it."""
+        self._cursor_image = self.cursor_image()
+        self._write_cursor(self._cursor_image)
+
+    @staticmethod
+    def _write_cursor(cursor: dict[str, Any]) -> None:
+        directory = os.path.dirname(CURSOR_FILE)
+        if not os.path.isdir(directory):  # outside the runner there is no shared screen directory
+            return
+        temporary = f"{CURSOR_FILE}.{os.getpid()}"
+        with open(temporary, "w", encoding="ascii") as handle:
+            json.dump(cursor, handle)
+        os.replace(temporary, CURSOR_FILE)
 
     def button(self, number: int, pressed: bool) -> None:
         from Xlib import X
@@ -336,13 +370,14 @@ class Screen:
             raise ScreenError(f"{command[0]!r} is not installed in the skill's sandbox")
         before = {info["id"] for info in self.windows()}
         # The sandbox's passwd entry names /usr/bin/false as the shell, which makes a terminal exit at once.
-        environment = {**os.environ, "HOME": "/tmp/home", "DISPLAY": os.environ["DISPLAY"], "LANG": "C.UTF-8",
+        home = "/tmp/home" if os.path.isdir("/tmp/home") else os.environ.get("HOME", "/tmp")
+        environment = {**os.environ, "HOME": home, "DISPLAY": os.environ["DISPLAY"], "LANG": "C.UTF-8",
                        "SHELL": shutil.which("bash") or "/bin/sh", "TERM": "xterm-256color"}
         if gl:
             import kvist_display
 
             environment.update(kvist_display.software_gl_environment())
-        process = subprocess.Popen([executable, *command[1:]], env=environment, cwd="/tmp/home",
+        process = subprocess.Popen([executable, *command[1:]], env=environment, cwd=home,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    start_new_session=True)
         self.apps.append({"pid": process.pid, "command": command, "process": process})
@@ -387,9 +422,23 @@ def execute(tool_name: str, arguments: dict[str, Any], ctx: Any) -> Any:
     if tool_name not in handlers:
         raise ValueError(f"unknown tool {tool_name}")
     try:
-        return handlers[tool_name](arguments, ctx)
+        result = handlers[tool_name](arguments, ctx)
     except ScreenError as error:
         return {"ok": False, "error": str(error)}
+    _show_pointer()
+    return result
+
+
+def _show_pointer() -> None:
+    """A failure to publish the pointer costs the preview its cursor, never the tool call its result."""
+    from Xlib.error import ConnectionClosedError, XError
+
+    if SCREEN.dpy is None:
+        return
+    try:
+        SCREEN.refresh_cursor()
+    except (OSError, XError, ConnectionClosedError):
+        pass
 
 
 def _launch(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -524,6 +573,7 @@ def _status(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     parts["skill_process"] = _pss_mib(os.getpid())
     total = round(sum(value for value in parts.values() if value), 1)
     width, height = SCREEN.size()
-    return {"ok": True, "pss_mib": parts, "total_mib": total, "budget_mib": BUDGET_MIB,
+    shape = SCREEN.cursor_image()
+    return {"ok": True, "cursor": {"width": shape["width"], "height": shape["height"]}, "pss_mib": parts, "total_mib": total, "budget_mib": BUDGET_MIB,
             "within_budget": total <= BUDGET_MIB, "screen": f"{width}x{height}", "gl": SCREEN.glx,
             "pointer": list(SCREEN.pointer())}

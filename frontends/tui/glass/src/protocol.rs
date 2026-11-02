@@ -46,9 +46,15 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         }],
         "helper_activity" => helper_activity(event),
         "screen" => match text("state").as_str() {
-            "closed" | "unavailable" => vec![CoreEvent::ScreenClosed],
+            "closed" | "unavailable" => vec![CoreEvent::ScreenClosed { screen_id: text("screen_id") }],
             _ if text("frame_url").is_empty() => Vec::new(),
-            _ => vec![CoreEvent::Screen { title: text("title"), frame_url: text("frame_url"), stream_url: text("stream_url"), url: text("url") }],
+            _ => vec![CoreEvent::Screen {
+                screen_id: text("screen_id"),
+                title: text("title"),
+                frame_url: text("frame_url"),
+                stream_url: text("stream_url"),
+                url: text("url"),
+            }],
         },
         "image_job" => match text("state").as_str() {
             "generating" => vec![CoreEvent::ImageDrawing { title: text("name") }],
@@ -238,10 +244,13 @@ mod tests {
 
     #[test]
     fn a_closed_screen_or_session_is_reported() {
-        assert_eq!(translate(&json!({"type": "screen", "state": "closed", "frame_url": ""})), vec![CoreEvent::ScreenClosed]);
         assert_eq!(
-            translate(&json!({"type": "screen", "state": "running", "title": "Browser", "frame_url": "http://127.0.0.1:1/f", "stream_url": "http://127.0.0.1:1/s", "url": "http://127.0.0.1:1/?t=k"})),
-            vec![CoreEvent::Screen { title: "Browser".into(), frame_url: "http://127.0.0.1:1/f".into(), stream_url: "http://127.0.0.1:1/s".into(), url: "http://127.0.0.1:1/?t=k".into() }]
+            translate(&json!({"type": "screen", "state": "closed", "screen_id": "browser", "frame_url": ""})),
+            vec![CoreEvent::ScreenClosed { screen_id: "browser".into() }]
+        );
+        assert_eq!(
+            translate(&json!({"type": "screen", "state": "running", "screen_id": "browser", "title": "Browser", "frame_url": "http://127.0.0.1:1/f", "stream_url": "http://127.0.0.1:1/s", "url": "http://127.0.0.1:1/?t=k"})),
+            vec![CoreEvent::Screen { screen_id: "browser".into(), title: "Browser".into(), frame_url: "http://127.0.0.1:1/f".into(), stream_url: "http://127.0.0.1:1/s".into(), url: "http://127.0.0.1:1/?t=k".into() }]
         );
         assert_eq!(
             translate(&json!({"type": "session", "session": "s", "closed": true, "closed_notice": "Закрыт"})),

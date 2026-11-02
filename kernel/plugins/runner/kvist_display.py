@@ -56,12 +56,16 @@ def software_gl_environment() -> dict[str, str]:
     return environment
 
 _children: dict[str, subprocess.Popen] = {}
-_last_start: tuple[str, str, str, str] = ()  # display, screen_dir, size, wm
+_last_start: tuple[str, str, str, str, str] = ()  # display, screen_dir, size, wm, cursors
 
 
-def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", glx: bool = False) -> None:
+def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", glx: bool = False,
+                  cursors: str = "") -> None:
     global _last_start
-    _last_start = (display, screen_dir, size, wm)
+    _last_start = (display, screen_dir, size, wm, cursors)
+    if cursors:
+        # libXcursor reads these, so the window manager and every program started later use the skill's own pointer.
+        os.environ.update({"XCURSOR_PATH": cursors, "XCURSOR_THEME": "kvist", "XCURSOR_SIZE": "32"})
     width, height = (int(part) for part in size.lower().split("x", 1))
     number = display.lstrip(":")
     socket_dir = Path("/tmp/.X11-unix")
@@ -124,10 +128,10 @@ def stop_display() -> None:
 
 def restart_display(*, glx: bool) -> None:
     """Start the same screen again with or without GLX; whatever was running on it is gone."""
-    display, screen_dir, size, wm = _last_start
+    display, screen_dir, size, wm, cursors = _last_start
     stop_display()
     socket_path = Path("/tmp/.X11-unix") / f"X{display.lstrip(':')}"
     deadline = time.monotonic() + 3
     while socket_path.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
-    start_display(display, screen_dir, size, wm=wm, glx=glx)
+    start_display(display, screen_dir, size, wm=wm, glx=glx, cursors=cursors)

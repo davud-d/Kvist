@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "app_screen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "plugin_api": 1,
   "kind": "tools",
   "name": {
@@ -20,7 +20,7 @@
   "source": {
     "origin": "bundled",
     "author": "Kvist",
-    "revision": "0.1.0"
+    "revision": "0.1.1"
   },
   "dependencies": {
     "system": [
@@ -32,7 +32,8 @@
   "display": {
     "size": "1920x1080",
     "wm": "jwm",
-    "glx": false
+    "glx": false,
+    "cursors": "icons"
   },
   "capabilities": {
     "required": [

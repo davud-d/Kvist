@@ -16,6 +16,7 @@ from __future__ import annotations
 import hmac
 import html
 import io
+import json
 import mmap
 import os
 import secrets
@@ -29,10 +30,20 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 FRAME_FILE = "Xvfb_screen0"
-# A 1280x800 frame takes ~10 ms to read and encode, so 30 fps costs ~30% of one core while a viewer is open
-# and 60 fps ~60%. KVIST_SCREEN_FPS overrides it (1..60).
-DEFAULT_FPS = 30.0
-PREVIEW_WIDTH = 1280
+# Written by a skill that drives the pointer (app_screen) into the screen directory the sandbox shares with the
+# core: Xvfb never paints a cursor, so the viewer draws this one. Untrusted input, hence the size cap.
+CURSOR_FILE = "cursor.json"
+MAX_CURSOR_BYTES = 16 * 1024
+# Measured at 1920x1080: reading the frame 6 ms, a JPEG at quality 90 without chroma subsampling 7 ms (so text keeps
+# its colour edges), which fits a 60 fps frame of 16.7 ms. Resizing is what costs (23 ms), so a frame goes out at
+# its own size up to PREVIEW_WIDTH. A still screen is not encoded again: a cheap sample of rows says whether it
+# changed. KVIST_SCREEN_FPS overrides the rate (1..60).
+DEFAULT_FPS = 60.0
+PREVIEW_WIDTH = 1920
+PREVIEW_QUALITY = 90
+# A viewer reading a stream gives up on one that is silent; a still screen is sent again this often.
+KEEP_ALIVE_SECONDS = 1.0
+_SAMPLE_ROW_STRIDE = 4
 _COOKIE = "kvist_screen"
 _STATES = frozenset({"starting", "running", "paused", "unavailable", "closed"})
 
@@ -69,12 +80,42 @@ def read_frame(fb_path: Path):
     return Image.frombuffer("RGB", (width, height), raw, "raw", mode, header["bytes_per_line"], 1)
 
 
-def frame_jpeg(fb_path: Path, max_width: int = PREVIEW_WIDTH, quality: int = 70) -> bytes:
+def read_cursor(path: Path) -> dict | None:
+    """The cursor a skill published, or None when there is none or it is unreadable."""
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_CURSOR_BYTES + 1)
+        if len(raw) > MAX_CURSOR_BYTES:
+            return None
+        value = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def frame_signature(fb_path: Path) -> bytes:
+    """A sample of the frame (every few rows): equal samples mean the screen did not change, at a fraction of
+    the cost of reading and encoding all of it. A change under the stride's height waits for the keep-alive."""
+    try:
+        with open(fb_path, "rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            header = _xwd_header(data)
+            start = header["header_size"] + header["ncolors"] * 12
+            line = header["bytes_per_line"]
+            return b"".join(data[start + row * line:start + (row + 1) * line]
+                            for row in range(0, header["height"], _SAMPLE_ROW_STRIDE))
+    except (OSError, ValueError) as error:
+        raise FramebufferError(f"framebuffer unavailable: {error}") from None
+
+
+def frame_jpeg(fb_path: Path, max_width: int = PREVIEW_WIDTH, quality: int = PREVIEW_QUALITY,
+               cursor: object = None) -> bytes:
     image = read_frame(fb_path)
+    if cursor:
+        _draw_cursor(image, cursor)
     if image.width > max_width:
         image = image.resize((max_width, round(image.height * max_width / image.width)))
     output = io.BytesIO()
-    image.save(output, format="JPEG", quality=quality)
+    image.save(output, format="JPEG", quality=quality, subsampling=0)
     return output.getvalue()
 
 
@@ -103,6 +144,8 @@ def _draw_cursor(frame, cursor: object) -> None:
         return
     if not (0 < width <= 128 and 0 < height <= 128) or len(argb) != width * height * 4:
         return
+    if not (-10_000 < left < 10_000 and -10_000 < top < 10_000):
+        return
     sprite = Image.frombuffer("RGBA", (width, height), argb, "raw", "BGRa", 0, 1)
     frame.paste(sprite, (left, top), sprite)
 
@@ -128,6 +171,7 @@ class ScreenViewer:
 
     def __init__(self, fb_dir: Path, *, title: str = "Kvist") -> None:
         self.fb_path = Path(fb_dir) / FRAME_FILE
+        self.cursor_path = Path(fb_dir) / CURSOR_FILE
         self.title = title
         self.token = secrets.token_urlsafe(32)
         self._session = secrets.token_urlsafe(32)
@@ -251,7 +295,7 @@ setTimeout(poll,1000)}}poll()</script></body></html>""".encode("utf-8")
 
     def _frame(self) -> None:
         try:
-            body = frame_jpeg(self.owner.fb_path)
+            body = frame_jpeg(self.owner.fb_path, cursor=read_cursor(self.owner.cursor_path))
         except FramebufferError as error:
             self._plain(HTTPStatus.SERVICE_UNAVAILABLE, str(error))
             return
@@ -264,10 +308,17 @@ setTimeout(poll,1000)}}poll()</script></body></html>""".encode("utf-8")
         self._common_headers()
         self.end_headers()
         viewer = self.owner
+        seen: tuple[bytes, dict | None] | None = None
+        sent_at = 0.0
         while not viewer._closed.is_set():
             started = time.monotonic()
+            frame = b""
             try:
-                frame = frame_jpeg(viewer.fb_path)
+                cursor = read_cursor(viewer.cursor_path)
+                now = (frame_signature(viewer.fb_path), cursor)
+                if now != seen or started - sent_at >= KEEP_ALIVE_SECONDS:
+                    frame = frame_jpeg(viewer.fb_path, cursor=cursor)
+                    seen, sent_at = now, started
             except FramebufferError:
                 frame = b""
             if frame:

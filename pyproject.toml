@@ -106,7 +106,7 @@ kvist_web = "frontends/web-local/kvist_web"
 # A bundled skill is installed as a package folder (kvist --skill-op install
 # --skill-path bundled:<id>), so its manifest, instructions and own tests ship too.
 "kernel.skills_bundled.browser" = ["manifest.json", "SKILL.md"]
-"kernel.skills_bundled.app_screen" = ["manifest.json", "SKILL.md"]
+"kernel.skills_bundled.app_screen" = ["manifest.json", "SKILL.md", "icons/kvist/index.theme", "icons/kvist/cursors/*"]
 "kernel.skills_bundled.test_runner" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
 "kernel.skills_bundled.documents" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
 "kernel.skills_bundled.code_nav" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]

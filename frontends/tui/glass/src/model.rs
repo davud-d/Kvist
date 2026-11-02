@@ -41,8 +41,9 @@ pub enum CoreEvent {
     CallStream { call: String, tool: String, path: String, field: String, line: u32, text: String },
     /// A successful write; `patch` is its unified diff when the core sent one.
     FileChanged { path: String, added: u32, removed: u32, patch: Option<String> },
-    Screen { title: String, frame_url: String, stream_url: String, url: String },
-    ScreenClosed,
+    /// One of the agent's virtual screens (the browser's, the app screen's); `screen_id` names its skill.
+    Screen { screen_id: String, title: String, frame_url: String, stream_url: String, url: String },
+    ScreenClosed { screen_id: String },
     /// A picture is being drawn in the background; the card waits for it.
     ImageDrawing { title: String },
     /// The picture could not be made.
@@ -177,7 +178,7 @@ impl Session {
             CoreEvent::Screen { title, .. } | CoreEvent::Image { title, .. } | CoreEvent::ImageDrawing { title } => {
                 self.browser = Some(Browser { title })
             }
-            CoreEvent::ScreenClosed | CoreEvent::ImageFailed { .. } => self.browser = None,
+            CoreEvent::ScreenClosed { .. } | CoreEvent::ImageFailed { .. } => self.browser = None,
             CoreEvent::Helper { id, task, state, summary } => self.update_helper(id, task, state, summary),
             CoreEvent::HelperStep { id, call, kind, label } => {
                 let helper = self.helper_mut(&id);
