@@ -10,6 +10,7 @@ import pytest
 from kernel.protocol import event_stdio
 from kernel.agent.agent import LocalAgent
 from kernel.agent.agent_state import AgentConfig
+from kernel.agent.task_control import AWAITING_INPUT, RUNNING, TaskControl
 from kernel.protocol.event_session import EventApprovalGate, EventSession
 from kernel.protocol.event_stream_ui import EventStreamUI
 from kernel.sandbox.executor import SafeExecutor
@@ -33,6 +34,7 @@ class _ChoiceAgent:
     def __init__(self, ui: EventStreamUI) -> None:
         self._ui = ui
         self.used: str | None = None
+        self.control = TaskControl()
 
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
         _ = user_goal, routed_role
@@ -112,6 +114,34 @@ def test_input_request_round_trip_delivers_value():
     assert agent.used == "x"
     assert session.result == "x"
     assert any(isinstance(event, FinalEvent) for event in events)
+
+
+def test_any_open_request_reports_awaiting_input_until_the_last_is_answered():
+    channel = FrontendChannel()
+    agent = _ChoiceAgent(EventStreamUI(channel))
+    EventSession(channel, agent)
+    agent.control.begin()
+    states: list[str] = []
+    agent.control.listeners.append(lambda state, _reason: states.append(state))
+    answers: list[object] = []
+
+    def ask() -> None:
+        answers.append(channel.request("confirm", "Run it?").approved)
+
+    first, second = threading.Thread(target=ask), threading.Thread(target=ask)
+    first.start()
+    second.start()
+    requests = []
+    while len(requests) < 2:
+        requests.append(channel.get(timeout=2))
+    assert agent.control.state == AWAITING_INPUT
+    channel.respond(requests[0].request_id, approved=True)
+    first.join(2)
+    assert agent.control.state == AWAITING_INPUT
+    channel.respond(requests[1].request_id, approved=False)
+    second.join(2)
+    assert agent.control.state == RUNNING
+    assert states == [AWAITING_INPUT, RUNNING]
 
 
 def test_event_approval_gate_approves_and_fails_closed():

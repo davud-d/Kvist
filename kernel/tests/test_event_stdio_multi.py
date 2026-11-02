@@ -14,6 +14,7 @@ import time
 
 import pytest
 
+from kernel.agent.task_control import TaskControl
 from kernel.protocol import event_stdio
 from kernel.protocol.event_session import EventSession
 from kernel.protocol.event_stream_ui import EventStreamUI
@@ -89,6 +90,7 @@ class _ScriptAgent:
     def __init__(self, ui: EventStreamUI, handler) -> None:
         self._ui = ui
         self._handler = handler
+        self.control = TaskControl()
         self.config = _FakeConfig()
         self.current_session = "default"
         self.goals: list[str] = []

@@ -140,6 +140,8 @@ class EventSession:
     def __init__(self, channel: FrontendChannel, agent) -> None:
         self._channel = channel
         self._agent = agent
+        # Read through self so a rebuilt agent (replace_agent) is the one that reports.
+        channel.on_waiting = lambda waiting: self._agent.control.awaiting_input(waiting)
         self._worker: threading.Thread | None = None
         self.result: str | None = None
         self.error: Exception | None = None

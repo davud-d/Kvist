@@ -4,6 +4,7 @@ from __future__ import annotations
 import queue
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -954,6 +955,9 @@ class FrontendChannel:
         self._lock = threading.Lock()
         self._waiters: dict[str, _Waiter] = {}
         self._closed = False
+        # Called with True when the first request opens and False when the last one is answered or
+        # gives up, so the task can report ``awaiting_input`` for every dialog, not only ``ask_user``.
+        self.on_waiting: Callable[[bool], None] | None = None
 
     def emit(self, event) -> None:
         self._out.put(event)
@@ -992,6 +996,9 @@ class FrontendChannel:
             if self._closed:
                 return InputResponse(request_id, value=None, approved=None)
             self._waiters[request_id] = waiter
+            first_open = len(self._waiters) == 1
+        if first_open:
+            self._notify_waiting(True)
 
         self.emit(
             InputRequestEvent(
@@ -1011,12 +1018,20 @@ class FrontendChannel:
         answered = waiter.event.wait(timeout)
         with self._lock:
             self._waiters.pop(request_id, None)
+            none_left = not self._waiters
+        if none_left:
+            self._notify_waiting(False)
         if not answered and waiter.response is None:
             self.emit(InputClosedEvent(request_id, "timeout"))
             return InputResponse(request_id, value=None, approved=None, timed_out=True)
         if waiter.response is None:
             return InputResponse(request_id, value=None, approved=None)
         return waiter.response
+
+    def _notify_waiting(self, waiting: bool) -> None:
+        listener = self.on_waiting
+        if listener is not None:
+            listener(waiting)
 
     def respond(
         self, request_id: str, *, value=None, approved=None, remember: bool = False

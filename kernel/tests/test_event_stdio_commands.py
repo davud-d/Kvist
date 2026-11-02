@@ -18,6 +18,7 @@ import pytest
 from kernel.protocol import event_stdio
 from kernel import main
 from kernel.agent.agent_state import AgentConfig
+from kernel.agent.task_control import TaskControl
 from kernel.protocol.event_session import EventSession
 from kernel.protocol.event_stdio import CommandContext, CommandResult
 from kernel.protocol.event_stream_ui import EventStreamUI
@@ -29,6 +30,7 @@ class _Agent:
     """Fake agent that records the role each goal was submitted with."""
 
     def __init__(self) -> None:
+        self.control = TaskControl()
         self.config = AgentConfig()
         self.current_session = "default"
         self.goals: list[tuple[str, str | None]] = []

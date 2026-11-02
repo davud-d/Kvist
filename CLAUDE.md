@@ -970,6 +970,7 @@ save (`None` for an intrinsically DANGEROUS command, so "don't ask again" is nev
 with `remember: true` appends that pattern to the project's allow rules, best-effort. The gate only
 holds the pattern; `TerminalExecutor._approve_or_deny` calls `commit_remembered_rule()` *after* the
 command ran (saving earlier changed the policy digest bound to the approval and the spawn was refused).
+**Needs input.** `FrontendChannel.request` counts open requests and calls `on_waiting` on the first open and the last closed; `EventSession` points it at `agent.control.awaiting_input`, so every dialog of a running turn (approval, plan, step budget, `ask_user`, a skill grant) gives `task_state` `awaiting_input` -> `running` (`UI_API.md` §7). A frontend marks the session "needs you" from that event and draws the dialog from the `input_request`. How each frontend draws it is not decided yet; only Electron has a status text.
 **Switching interfaces.** `/tui` is a *local* dialog (`local:frontend`, built in `app.tsx` from
 `commands.FRONTENDS`, never sent to the core). Picking another writes its name to `KVIST_SWITCH_FILE` and
 exits 64; `launch_tui` validates it through `user_config.save_frontend` and returns `None` so the
