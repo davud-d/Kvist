@@ -272,6 +272,10 @@ frontends/         tui/classic, tui/ink, tui/opencode, gui/electron, ide/vscode,
 scripts/           установщики и скрипты релиза
 docs/              протокол, скиллы, конфигурация, медиа
 site/              лендинг kvist.site
+cloud/             облачный сервис
 ```
 
-Лицензия: [MIT](LICENSE).
+## Лицензия 
+Kvist распространяется под лицензией **MIT** ([лицензия MIT](LICENSE))
+
+Kvist Cloud распространяется под лицензией **AGPL-V3-or-later** ([лицензия AGPL](cloud/LICENSE))

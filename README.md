@@ -269,6 +269,10 @@ frontends/         tui/classic, tui/ink, tui/opencode, gui/electron, ide/vscode,
 scripts/           installers and release scripts
 docs/              protocol, skills, configuration, media
 site/              kvist.site landing page
+cloud/             cloud service
 ```
 
-Licensed under the [MIT license](LICENSE).
+## LICENSE 
+Kvist is distributed under the **MIT** license ([MIT LICENSE](LICENSE))
+
+Kvist Cloud is distributed under the **AGPL-V3-or-later** license ([AGPL LICENSE](cloud/LICENSE))
