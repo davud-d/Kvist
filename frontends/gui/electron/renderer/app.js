@@ -150,6 +150,8 @@ let navigationProjects = []
 let activeSessionName = ""
 // The active session's closed_notice when end_session closed it (see applyClosed).
 let closedNotice = null
+// A core on a server that another frontend drives: its notice stands in the prompt and Enter takes over.
+let watchingNotice = null
 const expandedProjects = new Set()
 
 // Live output-speed indicator. The protocol carries cumulative text snapshots
@@ -611,17 +613,35 @@ function resetRunStats() {
 }
 
 function lockPrompt() {
-  promptInput.disabled = running || requestHost.childElementCount > 0 || closedNotice !== null
+  promptInput.disabled = running || requestHost.childElementCount > 0 || closedNotice !== null || watchingNotice !== null
   composer.classList.toggle("is-disabled", promptInput.disabled)
 }
 
 // A session end_session closed takes no input: the core's notice stands in the prompt.
 function applyClosed(notice) {
   closedNotice = notice || null
-  promptInput.placeholder = closedNotice ?? PROMPT_PLACEHOLDER
-  if (closedNotice) promptInput.value = ""
+  showPromptNotice()
+}
+
+// Whoever can write decides what the prompt says: a watched session first, then a closed one.
+function applyControl(event) {
+  watchingNotice = event.role === "observer" ? event.notice || "" : null
+  showPromptNotice()
+}
+
+function showPromptNotice() {
+  const notice = watchingNotice ?? closedNotice
+  promptInput.placeholder = notice ?? PROMPT_PLACEHOLDER
+  if (notice !== null) promptInput.value = ""
   lockPrompt()
 }
+
+// The prompt is disabled while watching, so the key that takes over is read on the page.
+document.addEventListener("keydown", (event) => {
+  if (watchingNotice === null || event.key !== "Enter" || event.shiftKey || event.isComposing) return
+  event.preventDefault()
+  void window.kvist.takeover()
+})
 
 function setRunning(value) {
   running = value
@@ -1485,6 +1505,9 @@ function handleEvent(event) {
       break
     case "session_ended":
       applyClosed(event.closed_notice)
+      break
+    case "control":
+      applyControl(event)
       break
     case "final":
       if (event.message && event.message !== lastAssistantText) addAssistantMessage(event.message)

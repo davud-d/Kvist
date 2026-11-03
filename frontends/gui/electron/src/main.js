@@ -413,6 +413,12 @@ function registerIpc() {
     return { ok: true }
   })
 
+  ipcMain.handle("kvist:takeover", () => {
+    if (!runner) return { ok: false }
+    runner.control("takeover")
+    return { ok: true }
+  })
+
   ipcMain.handle("kvist:stop-all", () => {
     if (!runner) return { ok: false }
     runner.control("cancel")

@@ -40,6 +40,11 @@ export function createAgent(id, workspace, session = "") {
     spend: { input: 0, output: 0 },
     changed: new Map(),
     closed: null,
+    // A core on a server that another frontend drives: its notice stands where the composer was and
+    // Enter takes over. Null for a driver and for a core on this machine.
+    observer: null,
+    // The link to that server while it is down or coming back: {text} or null.
+    remote: null,
     attention: false,
     needsHistory: false,
     command: null,
@@ -204,6 +209,15 @@ export function reduce(agent, ev, { replay = false } = {}) {
     case "session_ended":
       agent.closed = ev.closed_notice ?? "";
       return;
+    case "control":
+      agent.observer = ev.role === "observer" ? (ev.notice ?? "") : null;
+      return;
+    case "remote_state": {
+      const words = [ev.reason || ev.host];
+      if (ev.state === "reconnecting" && typeof ev.retry_in === "number") words.push(`${Math.round(ev.retry_in)} s`);
+      agent.remote = ev.state === "connected" ? null : { state: ev.state, text: words.join(" · ") };
+      return;
+    }
     case "route":
       agent.routedRole = ev.role;
       return;
@@ -378,6 +392,8 @@ export function reduce(agent, ev, { replay = false } = {}) {
       agent.context = { tokens: ev.context_tokens ?? 0, limit: ev.context_limit ?? agent.context.limit };
       return;
     case "input_request":
+      // The core sends a dialog again to a frontend that takes over; it is the same dialog.
+      agent.dialogs = agent.dialogs.filter((d) => d.request_id !== ev.request_id);
       agent.dialogs.push(ev);
       agent.attention = true;
       return;
@@ -451,6 +467,8 @@ export function replayHistory(agent, events) {
 
 /** Short words for the dock: what this agent is doing right now. */
 export function summary(agent) {
+  if (agent.remote) return "offline";
+  if (agent.observer !== null) return "watching";
   if (agent.dialogs.length) return "asks";
   if (agent.closed !== null) return "closed";
   return agent.state;

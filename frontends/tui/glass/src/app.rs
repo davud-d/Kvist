@@ -125,6 +125,10 @@ pub struct App {
     image_version: u64,
     /// The browser closed: its pictures are to be dropped.
     web_closed: bool,
+    /// A core on a server that another frontend drives: its notice takes the input's place and Enter takes over.
+    pub observer: Option<String>,
+    /// The link to that server while it is down or coming back.
+    pub remote: Option<String>,
     /// Width / height of the browser's latest frame.
     pub web_aspect: Option<f32>,
     /// When Esc was pressed once during a turn.
@@ -229,6 +233,8 @@ impl App {
             developed_at: None,
             image_version: 1 << 40,
             web_closed: false,
+            observer: None,
+            remote: None,
             web_aspect: None,
             stop_armed: None,
             core_error: None,
@@ -367,10 +373,15 @@ impl App {
         }
     }
 
+    /// Nothing can be typed: the session is closed, another frontend drives it, or the server is out of reach.
+    pub fn input_locked(&self) -> bool {
+        self.session.closed.is_some() || self.observer.is_some() || self.remote.is_some()
+    }
+
     /// The commands the input is asking for; none while a dialog is open or
-    /// the session is closed.
+    /// the input is locked.
     pub fn menu(&self) -> Vec<&'static Command> {
-        if self.modal.is_some() || self.session.closed.is_some() || !matches!(self.phase, Phase::Main { .. }) {
+        if self.modal.is_some() || self.input_locked() || !matches!(self.phase, Phase::Main { .. }) {
             return Vec::new();
         }
         slash::suggest(&self.input)
@@ -414,7 +425,7 @@ impl App {
     /// place, and how many did not fit.
     pub fn strip(&self, now: Instant) -> (Vec<(Rect, &Attachment)>, usize) {
         let open = self.strip_rows(now) == layout::STRIP_ROWS;
-        if !open || self.session.closed.is_some() {
+        if !open || self.input_locked() {
             return (Vec::new(), 0);
         }
         let attached = self.attached();
@@ -691,7 +702,11 @@ impl App {
                     self.session_title = text("title");
                 }
             }
+            // The driver's to answer; a frontend that takes over is sent the ones still open.
+            "input_request" if self.observer.is_some() => {}
             "input_request" => self.on_request(event, now),
+            "control" => self.observer = (text("role") == "observer").then(|| text("notice")),
+            "remote_state" => self.remote = (text("state") != "connected").then(|| remote_notice(event)),
             "command_result" => self.on_command_result(event, now),
             // An error outside a turn (a failed command) is only a notice.
             "error" if !self.session.busy => self.notify(text("message"), true, now),
@@ -1099,16 +1114,16 @@ impl App {
         match key.code {
             KeyCode::Char('p') if ctrl => return self.open_models(now),
             KeyCode::Char('t') if ctrl => return self.toggle_helpers(None, now),
-            KeyCode::Char('v') if ctrl && self.session.closed.is_none() => return self.paste_from_clipboard(now),
+            KeyCode::Char('v') if ctrl && !self.input_locked() => return self.paste_from_clipboard(now),
             KeyCode::Esc if self.pour.is_some() => return self.drain_water(now),
             KeyCode::Esc if self.diff_in.target() > 0.0 => return self.close_diff(now),
             KeyCode::Esc if self.session.busy => return self.stop(now),
             KeyCode::Esc if self.helpers_in.target() > 0.0 => return self.toggle_helpers(None, now),
             _ => {}
         }
-        if self.session.closed.is_some() {
+        if self.input_locked() {
             if key.code == KeyCode::Enter {
-                self.command("new", &[], now);
+                self.enter_on_banner(now);
             }
             return;
         }
@@ -1399,6 +1414,22 @@ impl App {
 
     /// The core moved to another session: the cards go and the input glides
     /// back to the middle.
+    /// What Enter does on the banner that stands in for the input.
+    fn enter_on_banner(&mut self, now: Instant) {
+        if self.remote.is_some() {
+            return;
+        }
+        if self.observer.is_some() {
+            return self.take_over(now);
+        }
+        self.command("new", &[], now);
+    }
+
+    /// Ask the core on the server to let this frontend write.
+    fn take_over(&mut self, now: Instant) {
+        self.send(&json!({"type": "takeover"}), now);
+    }
+
     fn reset_view(&mut self, now: Instant) {
         self.session = Session::fresh();
         self.replay = None;
@@ -1422,12 +1453,13 @@ impl App {
         if !matches!(self.phase, Phase::Main { .. }) {
             return;
         }
+        let locked = self.input_locked();
         match self.modal.as_mut() {
             Some(Modal::Ask(Some(ask))) => ask.paste(text),
             Some(_) => {}
             // A terminal that has only a picture to paste sends nothing at all.
-            None if self.session.closed.is_none() && text.is_empty() => self.paste_from_clipboard(now),
-            None if self.session.closed.is_none() => match attach::from_path(self.next_image, text) {
+            None if !locked && text.is_empty() => self.paste_from_clipboard(now),
+            None if !locked => match attach::from_path(self.next_image, text) {
                 Some(made) => self.put_attachment(made, now),
                 None => self.insert(&text.replace("\r\n", "\n"), now),
             },
@@ -1768,6 +1800,7 @@ impl App {
                 Some(Hit::Helper(id)) => self.toggle_helpers(Some(id), now),
                 Some(Hit::HelpersTitle | Hit::HelpersClose) => self.toggle_helpers(None, now),
                 Some(Hit::NewSession) => self.command("new", &[], now),
+                Some(Hit::TakeOver) => self.take_over(now),
                 Some(Hit::Provider) => self.command("provider", &[], now),
                 Some(Hit::Models) => self.open_models(now),
                 Some(Hit::Command(row)) => {
@@ -1967,6 +2000,17 @@ fn wait_for_events(
     }
 }
 
+/// The words for a link to the server that is not simply up: the proxy's reason, and when it tries again.
+fn remote_notice(event: &Value) -> String {
+    let reason = event.get("reason").and_then(Value::as_str).unwrap_or("");
+    let host = event.get("host").and_then(Value::as_str).unwrap_or("");
+    let first = if reason.is_empty() { host } else { reason };
+    let Some(seconds) = event.get("retry_in").and_then(Value::as_f64) else { return first.to_string() };
+    let russian = reason.chars().any(|c| ('а'..='я').contains(&c.to_ascii_lowercase()) || c == 'ё');
+    let wait = if russian { format!("повтор через {} с", seconds.round()) } else { format!("retrying in {} s", seconds.round()) };
+    format!("{first} · {wait}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1975,6 +2019,33 @@ mod tests {
     fn app() -> App {
         let grid = Grid { cols: 120, rows: 36, cw: 10, ch: 20 };
         App::new(grid, Instant::now(), Path::new("/tmp"))
+    }
+
+    #[test]
+    fn a_session_another_frontend_drives_locks_the_input_and_opens_no_dialogs() {
+        let mut app = app();
+        let now = Instant::now();
+        app.on_core(&json!({"type": "control", "role": "observer", "notice": "watching"}), now);
+        assert!(app.input_locked());
+        app.on_core(&json!({"type": "input_request", "request_id": "r", "kind": "confirm", "title": "Run it?"}), now);
+        assert!(app.modal.is_none());
+        app.on_core(&json!({"type": "control", "role": "driver", "notice": ""}), now);
+        assert!(!app.input_locked());
+        // The core re-sends what is still open when this frontend takes over.
+        app.on_core(&json!({"type": "input_request", "request_id": "r", "kind": "confirm", "title": "Run it?"}), now);
+        assert!(matches!(app.modal, Some(Modal::Ask(Some(_)))));
+    }
+
+    #[test]
+    fn a_link_that_is_down_says_why_and_when_it_tries_again() {
+        let mut app = app();
+        let now = Instant::now();
+        app.on_core(&json!({"type": "remote_state", "state": "reconnecting", "host": "me@box",
+            "reason": "me@box is not answering", "retry_in": 4.0}), now);
+        assert!(app.input_locked());
+        assert_eq!(app.remote.as_deref(), Some("me@box is not answering · retrying in 4 s"));
+        app.on_core(&json!({"type": "remote_state", "state": "connected", "host": "me@box"}), now);
+        assert!(!app.input_locked());
     }
 
     #[test]

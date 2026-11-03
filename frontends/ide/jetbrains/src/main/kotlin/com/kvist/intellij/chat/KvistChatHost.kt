@@ -99,6 +99,7 @@ internal class KvistChatHost(
             "respond" -> respond(message)
             "cancel" -> send { it.cancel() }
             "pause" -> send { it.pause() }
+            "takeover" -> send { it.takeOver() }
             "stopHelper" -> send { it.stopHelper(message.stringField("agentId").orEmpty()) }
             "pickFiles" -> ApplicationManager.getApplication().invokeLater { pickFiles() }
             "getEnvironment" -> post(environmentMessage(environment()))

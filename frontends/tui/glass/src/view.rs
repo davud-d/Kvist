@@ -64,6 +64,7 @@ pub enum Hit {
     Answer(Answer),
     Input,
     NewSession,
+    TakeOver,
     Provider,
     Models,
     /// A row of the model picker, by its index in `ModelPicker::rows()`.
@@ -723,8 +724,18 @@ pub fn move_row(input: &str, cursor: usize, width: usize, up: bool) -> Option<us
 
 fn draw_input(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let card = app.layout.input;
+    // What stands for the input when nothing can be typed: the link to the server, a session another
+    // frontend drives (the button takes over), a session that was closed.
+    if let Some(notice) = &app.remote {
+        draw_banner(p, app, card, notice, Banner::Plain, Instant::now(), now, drawn);
+        return;
+    }
+    if let Some(notice) = &app.observer {
+        draw_banner(p, app, card, notice, Banner::TakeOver, Instant::now(), now, drawn);
+        return;
+    }
     if let Some((notice, at)) = &app.session.closed {
-        draw_closed(p, app, card, notice, *at, now, drawn);
+        draw_banner(p, app, card, notice, Banner::NewSession, *at, now, drawn);
         return;
     }
     let dy = (((1.0 - app.input_rise.value(now)) * 8.0).round()) as i32;
@@ -803,29 +814,44 @@ fn draw_menu(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     text::fade(p.buf, card, 1.0 - open, NIGHT);
 }
 
-/// A closed session: the core's notice where the input was, and one button.
+/// What the button of a banner does.
+enum Banner {
+    /// No button: only the words.
+    Plain,
+    TakeOver,
+    NewSession,
+}
+
+/// A notice where the input was, and a button when there is something to do.
 /// Nothing can be typed; Enter does what the button does.
-fn draw_closed(p: &mut Painter, app: &App, card: Rect, notice: &str, at: Instant, now: Instant, drawn: &mut Drawn) {
+#[allow(clippy::too_many_arguments)]
+fn draw_banner(p: &mut Painter, app: &App, card: Rect, notice: &str, kind: Banner, at: Instant, now: Instant, drawn: &mut Drawn) {
     let y = card.y as i32 + 1;
     let x = card.x as i32 + 3;
     let right = card.right() as i32 - 3;
-    let label = format!(" {} ", strings().new_session);
-    let button_w = text::width(&label) as i32;
+    let (label, hit) = match kind {
+        Banner::Plain => (None, Hit::NewSession),
+        Banner::TakeOver => (Some(format!(" {} ", strings().take_over)), Hit::TakeOver),
+        Banner::NewSession => (Some(format!(" {} ", strings().new_session)), Hit::NewSession),
+    };
+    let button_w = label.as_ref().map_or(0, |label| text::width(label) as i32);
     let button_x = right - button_w;
-    let hint_x = button_x - 7;
+    let hint_x = if label.is_some() { button_x - 7 } else { right };
     let cx = p.text(x, y, theme::I_CLOSED, st(DUSK));
     p.text(cx + 2, y, &text::fit(notice, (hint_x - cx - 4).max(4) as usize), st(MIST));
-    p.text(hint_x, y, "enter", st(DUSK));
-    let hovered = app.hover == Some(Hit::NewSession);
-    let bg = if hovered { FOG } else { MOON };
-    p.text(button_x, y, &label, Style::default().fg(INK).bg(bg).add_modifier(Modifier::BOLD));
+    if let Some(label) = label {
+        p.text(hint_x, y, "enter", st(DUSK));
+        let hovered = app.hover == Some(hit);
+        let bg = if hovered { FOG } else { MOON };
+        p.text(button_x, y, &label, Style::default().fg(INK).bg(bg).add_modifier(Modifier::BOLD));
+        drawn.hits.push((Rect::new(button_x.max(0) as u16, y as u16, button_w as u16, 1), hit));
+    }
     let appear = Ease::OutCubic.apply(now.saturating_duration_since(at).as_secs_f32() / 0.35);
     text::fade(p.buf, Rect::new(card.x, card.y, card.width, card.height), 1.0 - appear, NIGHT);
-    drawn.hits.push((Rect::new(button_x.max(0) as u16, y as u16, button_w as u16, 1), Hit::NewSession));
 }
 
 fn draw_hints(p: &mut Painter, app: &App) {
-    if !app.session.items.is_empty() || app.modal.is_some() || app.session.closed.is_some() {
+    if !app.session.items.is_empty() || app.modal.is_some() || app.input_locked() {
         return;
     }
     let s = strings();

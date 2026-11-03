@@ -113,6 +113,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.send(() => this.core?.cancel());
             case 'pause':
                 return this.send(() => this.core?.pause());
+            case 'takeover':
+                return this.send(() => this.core?.takeOver());
             case 'stopHelper':
                 return this.send(() => this.core?.stopHelper(message.agentId));
             case 'pickFiles':
@@ -163,7 +165,12 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             this.post({ type: 'fault', message: `Failed to start Kvist: ${error}` });
             return undefined;
         }
-        return { command: binaryPath, prefixArgs: [] };
+        // With a server named, the core this panel starts is the ssh proxy to the one running there;
+        // the open folder is then only where the process starts.
+        const settings = vscode.workspace.getConfiguration('kvist');
+        const host = settings.get<string>('remote.host', '').trim();
+        const folder = settings.get<string>('remote.workspace', '').trim();
+        return { command: binaryPath, prefixArgs: host && folder ? ['--remote', host, '--remote-workspace', folder] : [] };
     }
 
     private workspacePath(): string | undefined {
@@ -257,7 +264,10 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         }
 
         // A window opens its own session, so a new run is never planned against an older launch's history.
-        await sessionOp(command, workspace, 'launch');
+        // A core on a server is already working in its session, and a window that joins must not start another over it.
+        if (!command.prefixArgs.includes('--remote')) {
+            await sessionOp(command, workspace, 'launch');
+        }
 
         const core = new KvistCore(command);
         core.on('event', (event) => this.post({ type: 'event', event }));

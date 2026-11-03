@@ -1,8 +1,9 @@
 // The agent in front: header, feed, and below it the composer, the closed
 // banner or (over everything) the agent's open question.
 
-import { activate, pause, runCommand, sendGoal, stopAll, wake } from "../actions.js";
+import { activate, pause, runCommand, sendGoal, stopAll, takeOver, wake } from "../actions.js";
 import { sessionOp } from "../bridge.js";
+import { summary } from "../reducer.js";
 import { basename, fill, frameThrottle, h, icon, keyedList } from "../dom.js";
 import { t } from "../i18n.js";
 import { coolDown, formatSeconds, shimmerColor, spinnerWord, tokenCount } from "../spinner.js";
@@ -55,7 +56,7 @@ export function mountChat(root) {
   }
 
   function paintHeader(agent) {
-    const stateLabel = agent.dialogs.length ? "asks" : agent.closed !== null ? "closed" : agent.state;
+    const stateLabel = summary(agent);
     fill(title, h("span", { class: `state-dot ${stateLabel}` }), h("span", { class: "title-text" }, agent.title || basename(agent.workspace)), h("span", { class: "title-sub" }, `${basename(agent.workspace)} · ${agent.session || "…"}`));
     const role = agent.routedRole || agent.role;
     fill(chips, 
@@ -78,10 +79,10 @@ export function mountChat(root) {
   }
 
   function paintBottom(agent) {
-    const closed = agent.closed !== null;
-    composer.hidden = closed;
-    banner.hidden = !closed;
-    if (closed) banner.textContent = agent.closed || t("closed hint");
+    const words = bannerWords(agent);
+    composer.hidden = words !== null;
+    banner.hidden = words === null;
+    if (words !== null) banner.textContent = words;
     const running = agent.state === "running";
     input.placeholder = running ? t("message running") : t("message");
     input.disabled = agent.state === "gone";
@@ -91,8 +92,24 @@ export function mountChat(root) {
     empty.hidden = agent.items.length > 0;
   }
 
+  // What stands where the composer was: the link to a server that is down, a session another frontend
+  // drives, a session that was closed.
+  function bannerWords(agent) {
+    if (agent.remote) return agent.remote.text;
+    if (agent.observer !== null) return agent.observer;
+    return agent.closed !== null ? agent.closed || t("closed hint") : null;
+  }
+
+  // What Enter on the banner does; the link that is down offers nothing.
+  function bannerAction(agent) {
+    if (agent.remote) return () => {};
+    if (agent.observer !== null) return () => takeOver(agent);
+    return () => runCommand(agent, "new");
+  }
+
   function paintDialog(agent) {
-    const request = agent.dialogs[0];
+    // The driver's to answer; whoever takes over is sent the ones still open.
+    const request = agent.observer !== null ? undefined : agent.dialogs[0];
     if (!request) {
       if (dialogFor) fill(overlay, );
       dialogFor = null;
@@ -183,7 +200,7 @@ export function mountChat(root) {
 
   banner.addEventListener("click", () => {
     const agent = active();
-    if (agent) runCommand(agent, "new");
+    if (agent) bannerAction(agent)();
   });
   banner.addEventListener("keydown", (event) => {
     // Nothing is typed into a closed conversation; only Enter does something.
@@ -195,7 +212,7 @@ export function mountChat(root) {
     if (!agent || store.mode !== "chat") return;
     if (event.key === "Escape" && agent.state === "running" && !agent.dialogs.length) pause(agent);
     else if (event.key === "c" && event.ctrlKey && agent.state === "running" && !getSelection()?.toString()) stopAll(agent);
-    else if (event.key === "Enter" && agent.closed !== null && !agent.dialogs.length && document.activeElement !== input) runCommand(agent, "new");
+    else if (event.key === "Enter" && bannerWords(agent) !== null && (agent.observer !== null || !agent.dialogs.length) && document.activeElement !== input) bannerAction(agent)();
   });
 
   subscribe((change) => {
@@ -203,7 +220,7 @@ export function mountChat(root) {
     if (change.kind === "active") {
       const agent = active();
       if (agent?.state === "asleep") wake(agent);
-      queueMicrotask(() => (active()?.closed === null ? input.focus() : banner.focus()));
+      queueMicrotask(() => (active() && bannerWords(active()) === null ? input.focus() : banner.focus()));
     }
     redraw();
   });

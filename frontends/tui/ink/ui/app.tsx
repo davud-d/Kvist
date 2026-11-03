@@ -14,7 +14,8 @@ import { answerFromEnd, initialState, reduce, requestIsRussian } from "../state.
 import type { Starters } from "../starters.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./skins/claude-code/claude.js"
 import { ViewContext } from "./context.js"
-import { ClosedBar, InputBox } from "./input.js"
+import { NoticeBar, InputBox } from "./input.js"
+import { remoteNotice } from "../remote.js"
 import { JobStrip, ScreenLine } from "./jobs.js"
 import { ItemView } from "./skins/kvist/items.js"
 import { Live } from "./skins/kvist/live.js"
@@ -161,6 +162,20 @@ export function App(props: AppProps) {
     }
   }, [note])
 
+  // The launcher checks the server (and offers to install the service there), then starts this
+  // interface again with the core on it, or on this machine for "local".
+  const switchRemote = useCallback((choice: string) => {
+    const target = process.env.KVIST_SWITCH_FILE
+    if (!target) return note("Switching needs Kvist to be started through its launcher (kvist or python -m kernel).", "warn")
+    try {
+      writeFileSync(target, `${frontendOf(props.skin)}\n\n${choice}`, "utf8")
+    } catch (error) {
+      return note(`Could not record the choice: ${error instanceof Error ? error.message : String(error)}`, "error")
+    }
+    process.exitCode = SWITCH_CODE
+    void quit()
+  }, [note, quit, props.skin])
+
   const runLocal = useCallback((name: string, args: string[]) => {
     switch (name) {
       case "help":
@@ -180,6 +195,12 @@ export function App(props: AppProps) {
         const { chars } = copyToClipboard(text)
         return note(`Copied ${chars} character${chars === 1 ? "" : "s"} to the clipboard.`)
       }
+      case "remote": {
+        const [host, ...folder] = args
+        if (host?.toLowerCase() === "off" && folder.length === 0) return switchRemote("local")
+        if (!host || folder.length === 0) return note("Usage: /remote user@host /folder-on-the-server, or /remote off.", "warn")
+        return switchRemote(`${host}\t${folder.join(" ")}`)
+      }
       case "tui":
         // A local dialog: it is answered here, never sent to the core.
         return dispatch({
@@ -196,7 +217,7 @@ export function App(props: AppProps) {
           },
         })
     }
-  }, [note, quit, props.skin])
+  }, [note, quit, props.skin, switchRemote])
 
   const switchFrontend = useCallback((value: string) => {
     if (value === frontendOf(props.skin)) return
@@ -357,11 +378,16 @@ export function App(props: AppProps) {
   const caption = claude
     ? <ClaudeFooter running={state.running} armed={armed} usage={state.usage} model={state.info.model} role={role} toast={toast} exitWarning={exitWarning} />
     : <ModeLine model={state.info.model} role={role} effort={state.effort} />
-  const input = state.pending ? (
+  const input = state.remote ? (
+    <NoticeBar notice={remoteNotice(state.remote, russian)} active={false} caption={caption} onEnter={() => {}} />
+  ) : state.observer !== null ? (
+    // Dialogs of a session another frontend drives are the driver's to answer.
+    <NoticeBar notice={state.observer} active onEnter={() => core.current?.takeOver()} caption={caption} />
+  ) : state.pending ? (
     <Prompt key={state.pending.request_id} request={state.pending} onAnswer={answer} />
   ) : state.closed !== null ? (
     // Enter takes the same way as /new.
-    <ClosedBar notice={state.closed} active={!state.running && !state.command} caption={caption} onNewSession={() => sendCommand("new", [])} />
+    <NoticeBar notice={state.closed} active={!state.running && !state.command} caption={caption} onEnter={() => sendCommand("new", [])} />
   ) : (
     <InputBox
       active={!state.running && !state.command}

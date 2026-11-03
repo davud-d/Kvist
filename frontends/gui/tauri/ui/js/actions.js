@@ -171,6 +171,11 @@ export function pause(agent) {
   bridge.sendToAgent(agent.id, { type: "pause" }).catch(() => {});
 }
 
+/** A core on a server lets one frontend write; this asks to be that one. */
+export function takeOver(agent) {
+  bridge.sendToAgent(agent.id, { type: "takeover" }).catch(() => {});
+}
+
 export function stopAll(agent) {
   bridge.sendToAgent(agent.id, { type: "cancel" }).catch(() => {});
 }

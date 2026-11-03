@@ -60,6 +60,7 @@ packages = [
     "kernel.providers",
     "kernel.session_import",
     "kernel.memory",
+    "kernel.ssh",
     "kernel.prompts",
     "kernel.prompts.system",
     "kernel.prompts.styles",

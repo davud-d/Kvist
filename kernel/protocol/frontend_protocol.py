@@ -1045,6 +1045,11 @@ class FrontendChannel:
             )
             waiter.event.set()
 
+    def open_request_ids(self) -> list[str]:
+        """Requests still waiting for an answer; a reattaching frontend shows only these."""
+        with self._lock:
+            return list(self._waiters)
+
     def close(self) -> None:
         with self._lock:
             self._closed = True

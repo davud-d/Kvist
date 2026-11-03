@@ -117,6 +117,37 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--remote",
+        metavar="HOST",
+        help=(
+            "Work on a server over ssh (user@host or user@host:port): the core runs there as a daemon "
+            "that outlives this frontend. Needs --remote-workspace. See docs/remote.md."
+        ),
+    )
+    parser.add_argument(
+        "--remote-workspace",
+        metavar="PATH",
+        help="The folder on the server that --remote works in.",
+    )
+    parser.add_argument(
+        "--remote-op",
+        choices=("probe", "status", "start", "stop", "install-service", "uninstall-service"),
+        help=(
+            "Look at, start, stop or install the daemon of --workspace (on the server; with --remote, "
+            "over ssh), print JSON, exit."
+        ),
+    )
+    parser.add_argument(
+        "--remote-attach",
+        action="store_true",
+        help="Internal: the server end of the ssh pipe a --remote frontend uses.",
+    )
+    parser.add_argument(
+        "--remote-serve",
+        action="store_true",
+        help="Internal: run the daemon in the foreground (started by --remote-op start or the service).",
+    )
+    parser.add_argument(
         "--resume",
         nargs="?",
         const=True,
@@ -1114,8 +1145,8 @@ def launch_glass(args: argparse.Namespace) -> int | None:
             reason = check.stderr.strip() or f"kvist-glass --check exited with {check.returncode}"
             print(f"{reason}\nUsing the Ink UI.", file=sys.stderr)
             return None
-    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
-    command = [glass, "--workspace", str(resolve_workspace_path(args.workspace))]
+    core = _core_command(args)
+    command = [glass, "--workspace", str(_launch_workspace(args))]
     if force:
         command.append("--force")
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
@@ -1183,10 +1214,13 @@ def launch_voice(args: argparse.Namespace) -> int | None:
         reason = check.stderr.strip() or f"kvist-voice-screen --check exited with {check.returncode}"
         print(f"{reason}\nUsing the Ink UI.", file=sys.stderr)
         return None
-    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    core = _core_command(args)
     launcher = _VOICE_DIR / "kvist-voice"
     program = str(launcher) if launcher.is_file() and os.access(launcher, os.X_OK) else screen
-    command = [program, "--workspace", str(resolve_workspace_path(args.workspace))]
+    command = [program, "--workspace", str(_launch_workspace(args))]
+    if args.remote:
+        # The session on the server is the one in progress; a launch must not start another over it.
+        command.append("--continue")
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
         env = {
@@ -1275,8 +1309,8 @@ def launch_opencode(args: argparse.Namespace) -> int | None:
     start = _opencode_command()
     if start is None:
         return None
-    workspace = resolve_workspace_path(args.workspace)
-    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    workspace = _launch_workspace(args)
+    core = _core_command(args)
     command = [
         *start,
         "--workspace", str(workspace),
@@ -1310,7 +1344,27 @@ def needs_setup(args: argparse.Namespace) -> bool:
     """True when the first-run setup screen should open: asked for, or no provider is known yet."""
     if args.setup or args.installer:
         return True
+    if args.remote:
+        # The provider is the server's business.
+        return False
     return not (args.provider or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider_or_none())
+
+
+def _core_command(args: argparse.Namespace) -> list[str]:
+    """What a frontend runs as the core: this program, which with --remote is the ssh proxy."""
+    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    if args.remote:
+        core += ["--remote", args.remote, "--remote-workspace", args.remote_workspace]
+    return core
+
+
+def _launch_workspace(args: argparse.Namespace) -> Path:
+    """The folder a frontend is started in; for a server, an empty stand-in the core never writes to."""
+    if args.remote:
+        from kernel.ssh.paths import local_placeholder
+
+        return local_placeholder(args.remote, args.remote_workspace)
+    return resolve_workspace_path(args.workspace)
 
 
 def find_node() -> str | None:
@@ -1365,8 +1419,8 @@ def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: 
         return None
 
     # A provider-only setup has no workspace: resolving one would create the default folder.
-    workspace = Path.cwd() if provider_only else resolve_workspace_path(args.workspace)
-    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    workspace = Path.cwd() if provider_only else _launch_workspace(args)
+    core = _core_command(args)
     command = [
         node, str(_TUI_ENTRY),
         "--workspace", str(workspace),
@@ -1433,11 +1487,31 @@ def _use_setup_folder(raw: str, args: argparse.Namespace) -> None:
         args.workspace = folder
 
 
+def _use_remote_choice(raw: str, args: argparse.Namespace) -> bool:
+    """Apply /remote's choice; False when the server cannot be used (the reason is printed)."""
+    host, _, folder = raw.strip().partition("\t")
+    if host == "local":
+        args.remote = args.remote_workspace = None
+        return True
+    from kernel.ssh.command import parse_target
+    from kernel.ssh.paths import RemoteError
+    from kernel.ssh.prepare import prepare
+
+    try:
+        target = parse_target(host, folder)
+    except RemoteError as error:
+        print(str(error), file=sys.stderr)
+        return False
+    args.remote, args.remote_workspace = host, folder
+    return prepare(target)
+
+
 def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     """Apply the interface the Node app asked for and start it; None hands over to the classic terminal.
 
     The file holds the interface on its first line and, from the setup screen, the folder to work
-    in on the second.
+    in on the second. A third line, from /remote, is ``host<TAB>folder`` to work on a server, or
+    ``local`` to come back to this machine.
     """
     try:
         lines = switch_file.read_text(encoding="utf-8").split("\n")
@@ -1446,6 +1520,9 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     chosen = lines[0].strip().casefold()
     if len(lines) > 1:
         _use_setup_folder(lines[1], args)
+    if len(lines) > 2 and lines[2].strip() and not _use_remote_choice(lines[2], args):
+        # The reason is printed; the person goes back to this machine instead of to a shell.
+        args.remote = args.remote_workspace = None
     try:
         save_frontend(chosen)
     except ValueError:
@@ -4602,6 +4679,24 @@ def main() -> None:
         args.frontend = "glass"
         args.no_banner = False
     args.role = resolve_startup_role(args.role)
+
+    if args.remote or args.remote_op or args.remote_attach or args.remote_serve:
+        from kernel.ssh.entry import dispatch, refuse_unsupported_frontend
+        from kernel.ssh.paths import RemoteError
+
+        remote_exit = dispatch(args, sys.argv[1:])
+        if remote_exit is not None:
+            raise SystemExit(remote_exit)
+        try:
+            refuse_unsupported_frontend(args.frontend or get_saved_frontend())
+        except RemoteError as error:
+            print(str(error), file=sys.stderr)
+            raise SystemExit(2) from error
+        from kernel.ssh.command import parse_target
+        from kernel.ssh.prepare import prepare
+
+        if not prepare(parse_target(args.remote, args.remote_workspace)):
+            raise SystemExit(2)
 
     if args.login and not args.acp:
         print("--login only makes sense with --acp.", file=sys.stderr)

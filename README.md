@@ -248,6 +248,7 @@ Kvist treats their content as data that cannot change its safety rules.
   variables ([RU](docs/configuration.ru.md));
 - [`docs/UI_API.md`](docs/UI_API.md): the frontend protocol ([RU](docs/UI_API.ru.md));
 - [`docs/SKILLS.md`](docs/SKILLS.md): skills ([RU](docs/SKILLS.ru.md));
+- [`docs/remote.md`](docs/remote.md): Kvist working on a server over ssh, as a service that outlives its interfaces ([RU](docs/remote.ru.md));
 - [`docs/vision.md`](docs/vision.md): image input;
 - [`scripts/installer/README.md`](scripts/installer/README.md): installers ([RU](scripts/installer/README.ru.md)).
 

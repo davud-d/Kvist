@@ -179,6 +179,11 @@ export class KvistCore extends EventEmitter {
     this.write({ type: "pause" })
   }
 
+  // A core on a server lets one frontend write; this asks to be that one (UI_API.md section 8g).
+  takeOver(): void {
+    this.write({ type: "takeover" })
+  }
+
   stopHelper(agentId: string): void {
     this.write({ type: "helper_stop", agent_id: agentId })
   }

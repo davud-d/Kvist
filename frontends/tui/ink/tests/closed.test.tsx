@@ -6,7 +6,7 @@ import { render } from "ink-testing-library"
 import { createElement } from "react"
 
 import { ViewContext } from "../ui/context.js"
-import { ClosedBar, InputBox } from "../ui/input.js"
+import { NoticeBar, InputBox } from "../ui/input.js"
 import { applySkin } from "../ui/theme.js"
 
 const plain = (text: string | undefined) => (text ?? "").replace(/\x1b\[[0-9;]*m/g, "")
@@ -15,7 +15,7 @@ const NOTICE = "conversation over · Enter — new session"
 
 async function pressKeys(active: boolean, ...keys: string[]) {
   let opened = 0
-  const app = render(createElement(ViewContext.Provider, { value: view }, createElement(ClosedBar, { notice: NOTICE, active, onNewSession: () => { opened += 1 } })))
+  const app = render(createElement(ViewContext.Provider, { value: view }, createElement(NoticeBar, { notice: NOTICE, active, onEnter: () => { opened += 1 } })))
   await sleep(30)
   const before = plain(app.lastFrame())
   for (const key of keys) {
@@ -50,7 +50,7 @@ test("the bar takes no key while a command or a turn is running", async () => {
 for (const skin of ["ink", "claude"] as const) {
   test(`the bar is exactly as tall as the input box (${skin} skin)`, async () => {
     applySkin(skin)
-    const bar = render(createElement(ViewContext.Provider, { value: view }, createElement(ClosedBar, { notice: NOTICE, active: true, onNewSession: () => {} })))
+    const bar = render(createElement(ViewContext.Provider, { value: view }, createElement(NoticeBar, { notice: NOTICE, active: true, onEnter: () => {} })))
     const box = render(createElement(ViewContext.Provider, { value: view }, createElement(InputBox, { active: true, history: [], onSubmit: () => {} })))
     await sleep(30)
     const rows = (frame: string | undefined) => plain(frame).split("\n").length

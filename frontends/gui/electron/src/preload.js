@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld("kvist", {
   stop: () => ipcRenderer.invoke("kvist:stop"),
   pause: () => ipcRenderer.invoke("kvist:pause"),
   stopAll: () => ipcRenderer.invoke("kvist:stop-all"),
+  takeover: () => ipcRenderer.invoke("kvist:takeover"),
   stopHelper: (agentId) => ipcRenderer.invoke("kvist:stop-helper", { agentId }),
   openViewer: (url) => ipcRenderer.invoke("kvist:open-viewer", { url }),
   helperHistory: (session) => ipcRenderer.invoke("kvist:helper-history", { session }),

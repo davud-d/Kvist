@@ -4,7 +4,7 @@
 // reach the closed session.
 
 import { useKeyboard } from "@opentui/solid"
-import { createMemo } from "solid-js"
+import { createMemo, Show } from "solid-js"
 
 import { useTheme } from "../oc/tui/context/theme"
 import { SplitBorder } from "../oc/tui/ui/border"
@@ -20,11 +20,13 @@ export function buttonLabel(notice: string): string {
   return /[а-яё]/i.test(notice) ? "Новая сессия" : "New session"
 }
 
-export function ClosedBar(props: { notice: string; active: boolean; onNewSession(): void }) {
+// The same bar serves a session another frontend drives (the button takes over) and a link to the server that
+// is down (no action, so no key and no button).
+export function ClosedBar(props: { notice: string; active: boolean; onNewSession?: () => void; label?: string }) {
   const theme = useTheme()
   const background = createMemo(() => theme.decrease(theme.background.raised.base))
   useKeyboard((event) => {
-    if (!props.active || event.name !== "return") return
+    if (!props.active || !props.onNewSession || event.name !== "return") return
     event.preventDefault()
     props.onNewSession()
   })
@@ -49,20 +51,22 @@ export function ClosedBar(props: { notice: string; active: boolean; onNewSession
       <text fg={theme.text.muted} flexGrow={1} flexShrink={1} wrapMode="none" truncate>
         {noticeWords(props.notice)}
       </text>
-      <text fg={theme.text.muted} flexShrink={0} selectable={false}>
-        enter
-      </text>
-      <box
-        flexShrink={0}
-        paddingLeft={1}
-        paddingRight={1}
-        backgroundColor={theme.background.action.primary.focused}
-        onMouseUp={() => props.active && props.onNewSession()}
-      >
-        <text fg={theme.text.action.primary.focused} attributes={1} selectable={false}>
-          {buttonLabel(props.notice)}
+      <Show when={props.onNewSession}>
+        <text fg={theme.text.muted} flexShrink={0} selectable={false}>
+          enter
         </text>
-      </box>
+        <box
+          flexShrink={0}
+          paddingLeft={1}
+          paddingRight={1}
+          backgroundColor={theme.background.action.primary.focused}
+          onMouseUp={() => props.active && props.onNewSession?.()}
+        >
+          <text fg={theme.text.action.primary.focused} attributes={1} selectable={false}>
+            {props.label ?? buttonLabel(props.notice)}
+          </text>
+        </box>
+      </Show>
     </box>
   )
 }

@@ -100,6 +100,13 @@ export type CoreEvent =
   | { type: "job_notice"; text: string; job_ids: string[] }
   // end_session closed the active session for good; `closed_notice` goes in place of the input.
   | { type: "session_ended"; session_id: string; warned_msg_id: number | null; closed_msg_id: number; reason: string; closed_notice: string }
+  // A core on a server (UI_API.md section 8g): who may write. An observer only watches; `notice` goes
+  // in place of the input and Enter sends `takeover`.
+  | { type: "control"; role: "driver" | "observer"; notice: string; holder_idle_seconds?: number }
+  // The link to that server, from the local proxy; `reason` is already in the person's language.
+  | { type: "remote_state"; state: RemoteLinkState; host: string; reason?: string; attempt?: number; retry_in?: number }
+
+export type RemoteLinkState = "connecting" | "connected" | "reconnecting" | "gave_up"
 
 // What `--session-op history` returns per event: the events the stream carried, plus two the journal adds
 // (UI_API.md, "Restoring a session's feed").

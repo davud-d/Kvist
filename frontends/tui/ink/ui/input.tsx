@@ -286,21 +286,23 @@ export function InputBox({ active, history, placeholder, mask = false, starters 
   )
 }
 
-interface ClosedBarProps {
+interface NoticeBarProps {
   // The core's `closed_notice`; the bar has no words of its own.
   notice: string
   active: boolean
   caption?: ReactNode
-  onNewSession: () => void
+  onEnter: () => void
 }
 
-// A session end_session closed: the notice sits in the input's frame, one row tall like it.
-// A calm stop, not an error: muted text, no alarm colour. Enter is the only key it takes,
-// and it has no editor, so nothing typed or pasted can reach the session.
-export function ClosedBar({ notice, active, caption, onNewSession }: ClosedBarProps) {
+// What stands in for the input when the person cannot write: a session end_session closed, a core
+// on a server that another frontend is driving, a server link that is down. The notice sits in
+// the input's frame, one row tall like it. A calm stop, not an error: muted text, no alarm
+// colour. Enter is the only key it takes (the closed session opens a new one, an observer takes
+// over), and it has no editor, so nothing typed or pasted can reach the session.
+export function NoticeBar({ notice, active, caption, onEnter }: NoticeBarProps) {
   useInput(
     (_input, key) => {
-      if (key.return) onNewSession()
+      if (key.return) onEnter()
     },
     { isActive: active },
   )

@@ -26,6 +26,7 @@ kernel/                 the core: Python package `kernel` (run: python -m kernel
   context/   context_budget/meter/utils, system_context, language_*, attachments, import_resolver
   llm/       llm_clients, api_settings, custom_provider, request_log, reasoning_effort
   vision/ tray/ config/ ide/ (commit_message, completion*)
+  ssh/       a core on a server that outlives its frontends (--remote, daemon, proxy, service)
   plugins/ memory/ providers/ session_import/ skills_bundled/   (older subpackages)
   prompts/ themes/              data read relative to the modules (a module one level down uses
                                 `Path(__file__).parent.parent`)
@@ -695,6 +696,53 @@ model says its piece and ends the turn.
   and headless runs refuse `wait` and save a `schedule` with a note that it fires elsewhere. No daemon:
   a closed Kvist runs nothing. Helpers have neither tool. A woken turn has nobody watching: approvals
   still go through the normal gates. Tests: `test_scheduler.py` (fake clock, timer thread off).
+
+### Remote core (`kernel/ssh/`, `docs/remote.md` + `.ru.md`, protocol in `UI_API.md` §8g)
+The agent runs on a server as a daemon; a frontend reaches it over ssh and may come and go. **The stdio-multi
+contract does not change**: a frontend starts `kvist-core --remote HOST --remote-workspace PATH` (`main._core_command`,
+`_launch_workspace`) instead of the local core, and that is a proxy (`proxy.Proxy`), not an agent.
+```
+frontend -stdio-> proxy -ssh -T-> kvist-core --remote-attach (attach.py: a byte relay) -unix socket-> daemon
+```
+- **Daemon** (`--remote-serve`, `daemon.py`): `event_stdio.launch_multi(in_stream=ClientInbox, out_stream=EventLog, wake=True,
+  on_ready=)`. One per workspace (`paths.daemon_id`), files in `<config dir>/remote/<id>/` (0700; `events.ndjson`, `sock` 0600,
+  `daemon.lock` held with `flock` for its whole life, which is how "is it running" is answered, `daemon.json`, `daemon.log`).
+  The core never sees EOF when a client leaves (`ClientInbox` ends only on `remote_stop`/SIGTERM); an approval waits for ever.
+- **One mechanism for replay and tail** (`event_log.py`): a client thread reads `events.ndjson` from an offset and waits on a
+  `Condition` the writer notifies. A fresh attach (`from: null`) gets `fresh_replay`: finished turns lose
+  `session_events._TRANSIENT_EVENTS`, the turn in progress stays whole, an `input_request` comes back only while
+  `EventSession.open_request_ids()` (`FrontendChannel._waiters`) still holds it. A resume (`from: N` and the same `segment`) is the raw
+  tail, so a reconnect repeats nothing. A new segment (old file -> `.1`) starts with the daemon and, at a turn end with no reader,
+  past 64 MB (the cached `hello`/`manifest`/`session` lines are written first). A stale `segment` is refused (`gave_up`), never mixed in.
+  After an unclean end (`daemon.json` left behind) a notice `message` follows the manifest; the checkpoint is **not** resumed.
+- **One writer** (`lease.py`, enforced in `Daemon._route` before `ClientInbox.put`, never in a frontend): the first client
+  drives, others observe and everything an observer sends is dropped (it is told again with `control`). The lease is lost after
+  20 s without `remote_ping` (the proxy pings every 5 s; without it a powered-off computer would hold the lease for the ~2 h of TCP
+  keepalive), regained only by an explicit `takeover` (or by the next attach once it is free). A client reconnecting under
+  the same `client` id replaces its old connection and keeps the lease. A takeover re-sends the still-open dialogs, so **a frontend
+  must treat a repeated `request_id` as the same dialog** and an observer must not draw dialogs. `control` is withheld until the
+  client has seen `manifest` (a frontend refuses a stream that does not open with `hello`; Ink's `core.ts` faults).
+- **Proxy** (`proxy.py`, `command.py`): stays in the loop (not `exec ssh`) so the frontend sees no break; pings, remembers
+  `remote_offset`/`segment`, reconnects with 1..30 s delays and gives up after 10 min or at once on a definitive failure
+  (`command.classify`: unknown/changed host key, auth, kvist not found (127), no daemon (exit 3 / `no_service`); a refused connection is
+  **not** final, the server may be rebooting). Before the first `hello` its states go to stderr; after it, `remote_state` events.
+  A line typed while disconnected is answered with an `error` event, never queued. ssh always runs `-T -o BatchMode=yes` (no password, no
+  host-key question: `prepare` says to run `ssh HOST` once) and `KVIST_SSH` replaces the program (tests). The host is validated
+  (`parse_target`: nothing that starts with `-`), the remote command is `sh -c <quoted>` (the login shell may be fish) and finds
+  `kvist-core` in PATH or `~/.local/share/kvist`. `--session-op`/`--memory-op` are forwarded one-shot with the folder replaced
+  (`forward_args`). The local `--workspace` is an empty stand-in (`paths.local_placeholder`).
+- **Launcher** (`prepare.py`): before a frontend opens, `--remote-op probe` over ssh, then, with a terminal and no daemon, a question: install the
+  service / start once / cancel. `/remote HOST /folder` in Ink writes `iface\n\nHOST\tfolder` to `KVIST_SWITCH_FILE` (exit 64); a failed prepare
+  returns to this machine. Voice gets `--continue` (a join must not open a session over the one in progress); VS Code skips `--session-op launch`.
+- **Service** (`service.py`, `--remote-op install-service`): systemd user unit (`Restart=on-failure`, `RestartPreventExitStatus=2` for
+  "no provider", linger), macOS LaunchAgent (starts at login, not at boot, said so), crontab `@reboot` (no restart after a crash). Renderers are
+  pure and tested; **macOS and BSD were never run**. Windows is not a server (`daemon.require_posix`).
+- **Frontends**: all of them draw `control` (banner in the input's place, Enter = `takeover`) and `remote_state`; see the table in
+  `docs/remote.md` for what was actually seen. Not wired: choosing a server in JetBrains, Tauri, Electron; `/remote` outside Ink; ACP and the classic
+  REPL cannot use it. **`frontends/web-local` (`kvist_web`) has its own, separate paramiko bridge for remote agents; the two were not merged.**
+- Tests: `test_ssh_*.py` (daemon over a fake core, proxy over a stand-in `ssh` that runs the real shim, command/lease/service/prepare),
+  `scripts/e2e_remote_smoke.py` (real core + fake provider: a frontend killed mid-turn, the next one takes over and sees it finish),
+  Ink `tests/remote.test.ts`, Glass/Voice `cargo test`, Tauri `tests/ui.test.mjs`.
 
 ### Image generation (`image_generation.py`)
 `generate_image {prompt, path, high_quality?}` draws a picture with AnyModel's image models (OpenAI images

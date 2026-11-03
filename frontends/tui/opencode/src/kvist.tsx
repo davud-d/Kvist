@@ -53,6 +53,8 @@ export interface Kvist {
   answer(request: InputRequest, value: boolean | string | null, remember?: boolean): void
   cancel(): void
   pause(): void
+  // A core on a server lets one frontend write; this asks to be that one.
+  takeOver(): void
   note(text: string, tone?: Tone): void
   dispatch(action: Action): void
   // Redraws the feed of the session the core has switched to.
@@ -223,6 +225,7 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
       core.cancel()
     },
     pause: () => core.pause(),
+    takeOver: () => core.takeOver(),
     note,
     dispatch,
     redraw: (name) => redraw(name),

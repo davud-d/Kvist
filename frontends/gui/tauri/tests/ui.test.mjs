@@ -260,6 +260,31 @@ test("the rail: a session that is open but not stored yet is listed first, and a
   assert.equal(tree[0].running, 1);
 });
 
+test("a core on a server that another frontend drives is watched, and its dialogs wait for the driver", () => {
+  const agent = createAgent("a");
+  feed(agent, { type: "control", role: "observer", notice: "watching · Enter — take over" });
+  assert.equal(agent.observer, "watching · Enter — take over");
+  assert.equal(summary(agent), "watching");
+  feed(agent, { type: "control", role: "driver", notice: "" });
+  assert.equal(agent.observer, null);
+});
+
+test("a dialog the core sends again to whoever takes over is still one dialog", () => {
+  const agent = createAgent("a");
+  const request = { type: "input_request", request_id: "r1", kind: "confirm", title: "Run it?" };
+  feed(agent, request, request);
+  assert.equal(agent.dialogs.length, 1);
+});
+
+test("a link to the server that is down says why and when it tries again, and coming back clears it", () => {
+  const agent = createAgent("a");
+  feed(agent, { type: "remote_state", state: "reconnecting", host: "me@box", reason: "me@box is not answering", retry_in: 4 });
+  assert.equal(agent.remote.text, "me@box is not answering · 4 s");
+  assert.equal(summary(agent), "offline");
+  feed(agent, { type: "remote_state", state: "connected", host: "me@box" });
+  assert.equal(agent.remote, null);
+});
+
 test("the rail: a closed session and a waiting question are marked", () => {
   const a = createAgent("a3", "/w", "s");
   a.state = "idle";

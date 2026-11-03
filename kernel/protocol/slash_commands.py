@@ -121,6 +121,7 @@ def slash_commands_context() -> str:
             "- /copy: Copy the last answer to the clipboard",
             "- /debug: Show or hide debug events",
             "- /clear: Clear the screen",
+            "- /remote: Work on a server over ssh (/remote user@host /folder, /remote off comes back)",
         ])
     return (
         "== KVIST COMMAND REFERENCE ==\n\n"

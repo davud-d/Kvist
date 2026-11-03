@@ -27,7 +27,7 @@ local_hiddenimports = sorted(
         name
         for group in (
             'agent', 'plan', 'protocol', 'sandbox', 'session', 'context',
-            'vision', 'llm', 'tray', 'config', 'ide', 'plugins',
+            'vision', 'llm', 'tray', 'config', 'ide', 'plugins', 'ssh',
         )
         for name in _module_names(os.path.join(SPECPATH, 'kernel', group), f'kernel.{group}.')
     ]

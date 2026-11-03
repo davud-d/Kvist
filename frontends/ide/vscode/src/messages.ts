@@ -57,6 +57,8 @@ export type ToHost =
     | { type: 'respond'; requestId: string; answer: boolean | string | null; remember: boolean }
     | { type: 'cancel' }
     | { type: 'pause' }
+    // A core on a server lets one frontend write; this asks to be that one.
+    | { type: 'takeover' }
     | { type: 'stopHelper'; agentId: string }
     | { type: 'pickFiles' }
     | { type: 'getConfig' }

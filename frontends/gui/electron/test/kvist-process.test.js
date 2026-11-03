@@ -165,6 +165,19 @@ test("diagnostics redact common API key forms", () => {
   assert.equal(redactDiagnostic(`Authorization: Bearer ${secret}`), "Authorization: Bearer [REDACTED]")
 })
 
+test("taking over a core on a server is a control line too", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Fix tests")
+
+  processRunner.control("takeover")
+
+  // The first line is the goal as plain text.
+  assert.deepEqual(JSON.parse(stdin.trim().split("\n").at(-1)), { type: "takeover" })
+})
+
 test("pause, stop-all and helper stop are control lines on the core's stdin", () => {
   const child = fakeChild()
   const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })

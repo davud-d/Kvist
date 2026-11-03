@@ -25,6 +25,7 @@ import { createCommands } from "./commands"
 import { KvistProvider, useKvist, type LaunchOptions } from "./kvist"
 import { ApprovalPrompt } from "./screens/approval"
 import { ClosedBar } from "./screens/closed"
+import { remoteNotice } from "../../ink/remote"
 import { Home } from "./screens/home"
 import type { PromptRef } from "./screens/prompt"
 import { Session } from "./screens/session"
@@ -267,8 +268,13 @@ function Shell(props: { onSession?(name: string): void; copy(text: string): Prom
     onCleanup(() => clearTimeout(timer))
   })
 
-  // What replaces the prompt: an approval that waits, or the notice of a session that was closed.
+  // What replaces the prompt: a link to a server that is down, a session another frontend drives
+  // (its dialogs are the driver's to answer), an approval that waits, or the notice of a closed session.
   const approvalView = () => {
+    const link = state().remote
+    if (link) return <ClosedBar notice={remoteNotice(link, /[а-яё]/i.test(link.reason))} active={false} />
+    const watching = state().observer
+    if (watching !== null) return <ClosedBar notice={watching} active={!dialog.stack.length} label={/[а-яё]/i.test(watching) ? "Перехватить" : "Take over"} onNewSession={() => kvist.takeOver()} />
     const request = approval()
     if (request) return <ApprovalPrompt request={request} onDecide={(decision) => kvist.answer(request, decision !== "no", decision === "remember")} />
     const notice = state().closed

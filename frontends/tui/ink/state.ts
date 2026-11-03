@@ -1,5 +1,6 @@
 import { clipText, englishOnly } from "./format.js"
 import type { CoreEvent, InputRequest, JournalEvent } from "./protocol.js"
+import type { RemoteLink } from "./remote.js"
 
 export type ActionResult = Omit<Extract<CoreEvent, { type: "action_result" }>, "type" | "step" | "action_type">
 
@@ -123,6 +124,11 @@ export interface State {
   // The core's notice when end_session closed the session on screen; it takes the input's
   // place until another session is opened.
   closed: string | null
+  // A core on a server that another frontend is driving: its notice takes the input's place and
+  // Enter takes over. Null for a driver and for a core on this machine.
+  observer: string | null
+  // The link to a core on a server while it is down or coming back; null while it is up.
+  remote: RemoteLink | null
   // Background jobs of the session on screen, oldest first; finished ones stay until a new session.
   jobs: JobView[]
   info: { provider: string; model: string; role: string; session: string; title?: string; routedRole?: string; kvistVersion?: string }
@@ -187,6 +193,8 @@ export function initialState(effort = "", banner = false): State {
     command: null,
     effort,
     closed: null,
+    observer: null,
+    remote: null,
     jobs: [],
     info: { provider: "", model: "", role: "", session: "" },
     usage: { input: 0, output: 0, context: 0, limit: 0 },
@@ -601,6 +609,10 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return event.session === state.info.session ? { ...state, info: { ...state.info, title: event.title } } : state
     case "session_ended":
       return { ...state, closed: event.closed_notice }
+    case "control":
+      return { ...state, observer: event.role === "observer" ? event.notice : null }
+    case "remote_state":
+      return { ...state, remote: event.state === "connected" ? null : { state: event.state, host: event.host, reason: event.reason ?? "", retryIn: event.retry_in ?? null } }
     case "job_started": {
       const job: JobView = { id: event.job_id, command: event.command ?? [], purpose: event.purpose ?? "", status: "running", exitCode: null, output: "", startedAt: now, endedAt: null }
       return { ...state, jobs: [...state.jobs.filter((known) => known.id !== job.id), job] }

@@ -151,6 +151,9 @@ class EventSession:
         """The wrapped LocalAgent. Read-only handle for launch-time metadata."""
         return self._agent
 
+    def open_request_ids(self) -> list[str]:
+        return self._channel.open_request_ids()
+
     def submit(self, user_goal: str, routed_role: str | None = None) -> None:
         self._start_worker(self._run, (user_goal, routed_role))
 

@@ -114,6 +114,11 @@ class KvistCoreProcess(
         writeLine("""{"type":"pause"}""")
     }
 
+    // A core on a server lets one frontend write; this asks to be that one (UI_API.md section 8g).
+    fun takeOver() {
+        writeLine("""{"type":"takeover"}""")
+    }
+
     fun stopHelper(agentId: String) {
         val message = JsonObject()
         message.addProperty("type", "helper_stop")

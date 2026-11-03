@@ -745,6 +745,33 @@ in argv). Details and semantics are in [SKILLS.md](SKILLS.md).
 
 ---
 
+## 8g. A core on a server (`--remote`)
+
+A core can run on another machine as a daemon that outlives its frontends (see [remote.md](remote.md)).
+To a frontend nothing changes: it starts `kvist-core --remote HOST --remote-workspace PATH` instead of the
+local core and speaks the same `--frontend stdio-multi` protocol with it. That program is a proxy that keeps
+one ssh connection to the daemon, replays the daemon's event log to a frontend that starts from nothing, and
+continues from where it was after a break. Two additive events come from it; a frontend that ignores them
+still works, but cannot show who may write.
+
+| Event | Meaning |
+|---|---|
+| `{"type": "control", "role": "driver"\|"observer", "notice": str, "holder_idle_seconds"?: float}` | Who may write to this session. Exactly one connected frontend is the **driver**; any other is an **observer**: it sees everything and the core drops what it sends (goals, commands, dialog answers, `cancel`, `pause`, `helper_stop`). `notice` is the text for the banner an observer shows **in place of the input** (it ends with "· Enter — take over"); a frontend has no words of its own for it. Sent after `hello` and `manifest`, again whenever the role changes. |
+| `{"type": "remote_state", "state": "connecting"\|"connected"\|"reconnecting"\|"gave_up", "host": str, "reason"?: str, "attempt"?: int, "retry_in"?: float}` | The link to the server, from the proxy. While it is `reconnecting` nothing can be sent (a line written then is answered with an `error` event); show `reason` and the countdown in place of the input. `gave_up` is final: the proxy exits (code 75) with the reason, which is already in the person's language. Before the first `hello` the proxy has no events to send and writes the same words to stderr. |
+
+| Inbound message | Effect |
+|---|---|
+| `{"type": "takeover"}` | Ask to be the driver. The previous driver becomes an observer at once and is told by `control`. Dialogs (`input_request`) that were still open are sent again to the new driver, with the same `request_id`; a frontend must treat a repeat as the same dialog. |
+
+An observer must not answer or draw dialogs: they are the driver's. A driver that goes silent (no ping from its
+proxy for 20 s, as when the computer loses power) loses the role; the next frontend takes it by asking.
+
+**Operations on the server** (`--remote-op probe|status|start|stop|install-service|uninstall-service`, JSON
+on one line, with `--remote HOST --remote-workspace PATH` over ssh). `--session-op` and `--memory-op` given
+with `--remote` run on the server too, so session lists and history are the server's.
+
+---
+
 ## 9. Universal frontend dispatch (`frontends.py`)
 
 All non-terminal frontends share the same wiring (`FrontendChannel` →

@@ -163,6 +163,16 @@
           "default": "",
           "markdownDescription": "Path to the Kvist executable. Leave empty to use the binary bundled with the extension."
         },
+        "kvist.remote.host": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Work on a server over ssh instead of this machine, as `user@host` or `user@host:port`. Together with `kvist.remote.workspace`. The agent then runs there as a service and keeps working when VS Code is closed. Needs ssh key login and Kvist installed on the server; see docs/remote.md. Changes apply when the panel reloads."
+        },
+        "kvist.remote.workspace": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The folder on the server that `kvist.remote.host` works in."
+        },
         "kvist.environment": {
           "type": "object",
           "default": {},

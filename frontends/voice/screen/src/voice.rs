@@ -210,6 +210,8 @@ pub struct Voice {
     model: String,
     context: Option<f32>,
     notice: String,
+    /// A core on a server that another frontend drives: what is said instead of listening. Enter takes over.
+    observer: Option<String>,
     /// The last phrase the ears heard that was not for Kvist, and when.
     overheard: Option<(String, Instant)>,
     outbox: Vec<Out>,
@@ -258,6 +260,7 @@ impl Voice {
             model: if demo { "model".into() } else { String::new() },
             context: demo.then_some(0.42),
             notice: String::new(),
+            observer: None,
             overheard: None,
             outbox: Vec::new(),
             quit: false,
@@ -404,6 +407,16 @@ impl Voice {
                     self.start_command("new", true);
                 }
             }
+            "control" => {
+                self.observer = (text("role") == "observer").then(|| text("notice").to_string());
+                if let Some(notice) = &self.observer {
+                    self.notice = notice.clone();
+                }
+            }
+            "remote_state" if text("state") != "connected" => {
+                let reason = text("reason");
+                self.notice = if reason.is_empty() { text("host").to_string() } else { reason.to_string() };
+            }
             "session" | "session_title" => {
                 let title = text("title");
                 let name = if title.is_empty() { text("session") } else { title };
@@ -469,12 +482,18 @@ impl Voice {
     }
 
     fn start_command_with(&mut self, command: &str, args: &[&str], silent: bool) {
+        if self.refuse_while_watching() {
+            return;
+        }
         self.pending = Some(Pending { silent });
         self.outbox.push(Out::Core(json!({"type": "command", "name": command, "args": args})));
     }
 
     /// A request typed instead of spoken: the same path as heard words.
     fn send_goal(&mut self, text: &str) {
+        if self.refuse_while_watching() {
+            return;
+        }
         self.caption = text.to_string();
         self.caption_from_person = true;
         self.converse = None;
@@ -482,6 +501,13 @@ impl Voice {
         self.outbox.push(Out::Core(json!({"type": "goal", "text": text})));
         self.turn = Turn::Thinking;
         self.stream_text.clear();
+    }
+
+    /// Another frontend writes to this session; the core would drop anything sent, so say so instead.
+    fn refuse_while_watching(&mut self) -> bool {
+        let Some(notice) = &self.observer else { return false };
+        self.notice = notice.clone();
+        true
     }
 
     fn toast(&mut self, message: &str, ok: bool, now: Instant) {
@@ -550,6 +576,10 @@ impl Voice {
 
     /// A dialog of the core. One this screen cannot show is cancelled, and the person is told.
     fn on_ask(&mut self, event: &Value) {
+        // The driver's to answer; whoever takes over is sent the ones still open.
+        if self.observer.is_some() {
+            return;
+        }
         let Some(ask) = Ask::from_request(event) else {
             let id = event.get("request_id").and_then(Value::as_str).unwrap_or("");
             self.outbox.push(Out::Core(json!({"request_id": id, "value": Value::Null})));
@@ -745,6 +775,7 @@ impl Voice {
             KeyCode::Esc if self.demo.is_some() => self.quit = true,
             KeyCode::Esc => self.toggle_microphone(now),
             KeyCode::Tab => self.menu = Some(0),
+            KeyCode::Enter if self.observer.is_some() => self.outbox.push(Out::Core(json!({"type": "takeover"}))),
             KeyCode::Char('q') if self.demo.is_some() => self.quit = true,
             KeyCode::Char(' ') | KeyCode::Right if self.demo.is_some() => self.step_demo(1, now),
             KeyCode::Left if self.demo.is_some() => self.step_demo(ALL_STATES.len() - 1, now),
@@ -1987,6 +2018,25 @@ mod tests {
         voice.on_ears(&json!({"event": "text", "text": "хм, дай подумать"}), now);
         assert!(voice.ask.is_some());
         assert!(voice.take_outbox().is_empty(), "no goal is sent while a question is open");
+    }
+
+    #[test]
+    fn a_session_another_frontend_drives_is_watched_not_written_to() {
+        let mut voice = voice();
+        let now = Instant::now();
+        voice.on_core(&json!({"type": "control", "role": "observer", "notice": "watching · Enter — take over"}), now);
+
+        voice.send_goal("write a poem");
+        voice.on_ask(&json!({"type": "input_request", "request_id": "r", "kind": "confirm", "title": "Run it?"}));
+
+        assert!(voice.take_outbox().is_empty());
+        assert!(voice.ask.is_none());
+        assert_eq!(voice.notice, "watching · Enter — take over");
+        voice.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert_eq!(voice.take_outbox(), vec![Out::Core(json!({"type": "takeover"}))]);
+        voice.on_core(&json!({"type": "control", "role": "driver", "notice": ""}), now);
+        voice.send_goal("write a poem");
+        assert_eq!(voice.take_outbox(), vec![Out::Core(json!({"type": "goal", "text": "write a poem"}))]);
     }
 
     #[test]

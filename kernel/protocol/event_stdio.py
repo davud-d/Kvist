@@ -703,13 +703,16 @@ def launch_multi(
     commands: dict[str, CommandHandler] | None = None,
     resume: bool | str = False,
     wake: bool = False,
+    on_ready: Callable[[EventSession], None] | None = None,
 ) -> None:
     """Run the real Kvist core behind the multi-turn stdio frontend boundary.
 
     Same launch-time contract as ``launch`` (provider check, stdout redirected
     to stderr, one agent build), but the session serves an unbounded sequence of
     goals read from stdin instead of a single goal. ``commands`` are the
-    in-process slash-command handlers (see ``CommandContext``).
+    in-process slash-command handlers (see ``CommandContext``). ``on_ready``
+    receives the session before it starts serving (the remote daemon asks it
+    which dialogs are still open).
     """
     source = in_stream if in_stream is not None else sys.stdin
     destination = out_stream if out_stream is not None else sys.stdout
@@ -749,6 +752,8 @@ def launch_multi(
             sys.stdin = original_stdin
         agent.config.interactive = True
         session = EventSession(channel, agent)
+        if on_ready is not None:
+            on_ready(session)
 
         def rebuild(provider_override=None, models_override=None, interactive=False):
             current = session.agent.config

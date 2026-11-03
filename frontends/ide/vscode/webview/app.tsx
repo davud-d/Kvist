@@ -6,6 +6,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
 import { contextLabel, formatSeconds, formatTokens, outputLines } from "../../../tui/ink/format"
 import { actionTarget, exploreSummary, initialState, lastInflight, reduce, requestIsRussian } from "../../../tui/ink/state"
+import { remoteNotice } from "../../../tui/ink/remote"
 import { findProvider, type ConfigInfo, type ProviderInfo, type SessionInfo, type ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
@@ -191,18 +192,22 @@ export function App() {
 
   useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [state.items.length, state.live?.answer, state.live?.reasoning, state.pending])
 
-  // A closed session has no composer to type into; Enter anywhere takes the New session path.
+  // What stands where the composer was: a link to a server that is down, a session another frontend
+  // drives (Enter takes over), a session end_session closed (Enter opens a new one).
+  const banner = state.remote ? remoteNotice(state.remote, russianUi) : state.observer ?? state.closed
+  const watching = !state.remote && state.observer !== null
+  const bannerEnter = state.remote ? null : watching ? () => post({ type: "takeover" }) : state.closed !== null && !busy && !state.pending ? () => runCommandRef.current("new") : null
   useEffect(() => {
-    if (state.closed === null || busy || state.pending) return
+    if (!bannerEnter) return
     function onKey(event: KeyboardEvent): void {
       const targetTag = event.target instanceof Element ? event.target.tagName : ""
       if (!opensNewSession({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, altKey: event.altKey, metaKey: event.metaKey, targetTag })) return
       event.preventDefault()
-      runCommandRef.current("new")
+      bannerEnter?.()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [state.closed, busy, state.pending])
+  }, [state.closed, state.observer, state.remote, busy, state.pending])
 
   async function attachImages(files: FileList | File[]): Promise<void> {
     if (busy || loadingImages) return
@@ -455,7 +460,7 @@ export function App() {
         {workspacePage && running?.action === "run_shell" ? <Working action="run_shell" label="Running" target={commandLine(running.args)} hint={liveOutput?.step === running.step ? outputLines(liveOutput.text).filter((line) => line.trim()).at(-1) ?? "" : ""} /> : null}
         {thinking ? <Thinking reasoning={state.live?.reasoning ?? ""} since={state.live?.thinkingSince ?? null} /> : null}
         {state.live?.answer ? <Markdown text={state.live.answer} /> : null}
-        {state.pending ? <Dialog key={state.pending.request_id} request={state.pending} answer={answer} /> : null}
+        {state.pending && !watching ? <Dialog key={state.pending.request_id} request={state.pending} answer={answer} /> : null}
         <div ref={bottom} />
       </main>
 
@@ -481,10 +486,10 @@ export function App() {
             {metrics.tokensPerSecond && !workspacePage ? <span title="Estimated from output tokens and call time">≈{Math.round(metrics.tokensPerSecond)} tokens/s</span> : null}
           </div>
         ) : null}
-        {state.closed !== null ? (
+        {banner !== null ? (
           // The core's notice where the composer was, as tall as it: a calm stop, not an error.
           <div class="composer closed-bar" role="status">
-            <div class="closed-notice">{state.closed}</div>
+            <div class="closed-notice" onClick={() => bannerEnter?.()} style={bannerEnter ? { cursor: "pointer" } : undefined}>{banner}</div>
             <div class="toolbar" aria-hidden="true" />
           </div>
         ) : (

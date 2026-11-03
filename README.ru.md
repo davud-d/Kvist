@@ -251,6 +251,7 @@ devops) и `KVIST-CHAT.md`. Один раз опишите там команды
   переменные окружения ([EN](docs/configuration.md));
 - [`docs/UI_API.ru.md`](docs/UI_API.ru.md): протокол для клиентов ([EN](docs/UI_API.md));
 - [`docs/SKILLS.ru.md`](docs/SKILLS.ru.md): скиллы ([EN](docs/SKILLS.md));
+- [`docs/remote.ru.md`](docs/remote.ru.md): Kvist на сервере по ssh, службой, которая переживает свои интерфейсы ([EN](docs/remote.md));
 - [`docs/vision.md`](docs/vision.md): ввод изображений;
 - [`scripts/installer/README.ru.md`](scripts/installer/README.ru.md): установщики ([EN](scripts/installer/README.md)).
 
