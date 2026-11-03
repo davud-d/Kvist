@@ -192,6 +192,16 @@ cd frontends/gui/tauri/src-tauri && cargo build --release --locked              
   providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY` / `EXA_API_KEY` / `GEMINI_SEARCH_API_KEY` (Gemini with Google Search grounding; the order of `auto` is SearXNG, Tavily, Brave, Exa, Gemini).
   `/web-search-provider` saves the same choice in `config.json`; a saved value outranks the
   variable and is re-read on every `web_search`.
+- **Self-update** (`config/self_update.py`, on by default; `auto_update: false` in `config.json` or `KVIST_AUTO_UPDATE=0` turns it off).
+  Only a frozen binary named `kvist-core` (the release installer's) updates itself, from the rolling release
+  `latest-plugin-build`, which CI builds from `main` only. **A source checkout, on `experimental` or any branch, a `dist/`
+  PyInstaller build and a copy under another name are never touched** (`installed_core()` is None), and headless runs
+  (`end_session_enabled` unset) and helpers do not start it. A daemon thread started in `LocalAgent.__init__` compares the
+  SHA-256 of the installed file with the `digest` GitHub reports for this platform's asset (so a macOS binary that was not
+  rebuilt is not "updated"), downloads beside the file, verifies the digest, runs `--help` once, then `os.replace`s it (Windows:
+  rename the running exe to `.old` first). Only after all that does `ui.print_result` tell the person to restart; any failure is
+  a `debug` line and the old binary stays. Checks: at start (at most hourly, `update.json` beside `config.json`), then every 6 h
+  until one succeeds. The IDE plugins, the desktop app, Node and ffmpeg are not updated: the installer does that. Tests: `test_self_update.py`.
 - **Workspace instructions:** `<workspace>/KVIST.md` (action-loop roles) and `KVIST-CHAT.md` (chat
   role) are Kvist's own CLAUDE.md, owned by `system_context.py`. `build_agent` calls
   `ensure_workspace_instructions` once (creates each from its template if absent, appends both

@@ -141,6 +141,7 @@ from kernel.context.system_context import (
 from kernel.sandbox.self_info import ancestor_chain, describe_host, detect_host
 from kernel.session.session_events import JournalingUI, SessionJournal
 from kernel.session.session_titler import generate_session_title
+from kernel.config import self_update
 from kernel.tray.tray_link import TrayLink, is_terminal_host
 from kernel.protocol.ui import AgentUI
 from kernel.context.language_policy import resolve_response_language
@@ -299,6 +300,9 @@ class LocalAgent:
             if self.config.memory_auto_processing and not self.is_helper
             else None
         )
+        # Only interactive frontends can show "restart"; headless runs must not swap the binary.
+        if self.config.end_session_enabled and not self.is_helper:
+            self_update.start(self._ui.print_result, self._ui.debug_print)
         self.resources = ResourceManager(executor.workspace)
         self.executor.service_dir_factory = self._service_dir
         self.skills = SkillManager(self)
