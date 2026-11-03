@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 
-from kernel.tests.conftest import requires_posix
+from kernel.tests.conftest import CommandOnlyApprovals, requires_posix
 
 from kernel.sandbox import terminal as terminal_module
 from kernel.sandbox.process_tree import (
@@ -88,9 +88,66 @@ def _write_policy(workspace: Path, allow) -> None:
 def _bwrap_executor(workspace: Path, monkeypatch, allow=("*",), timeout=10) -> TerminalExecutor:
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     _write_policy(workspace, allow)
-    ex = TerminalExecutor(workspace, timeout=timeout)
+    # A wildcard allow no longer grants execution; model only the HITL answer.
+    ex = TerminalExecutor(workspace, timeout=timeout, approvals=CommandOnlyApprovals())
     assert ex.sandbox_mode is SandboxMode.BUBBLEWRAP
     return ex
+
+
+@requires_bwrap
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["python3", "probe.py"],
+        ["sh", "probe.sh"],
+        ["awk", 'BEGIN { print "approval-probe" }'],
+        ["sed", "-n", "--file=probe.sed", "input.txt"],
+        ["./probe"],
+    ],
+)
+def test_bwrap_helper_approves_commands_without_saving_rules(tmp_path, monkeypatch, command):
+    (tmp_path / "probe.py").write_text("print('approval-probe')\n", encoding="utf-8")
+    (tmp_path / "probe.sh").write_text("echo approval-probe\n", encoding="utf-8")
+    (tmp_path / "probe.sed").write_text("1p\n", encoding="utf-8")
+    (tmp_path / "input.txt").write_text("approval-probe\n", encoding="utf-8")
+    executable = tmp_path / "probe"
+    executable.write_text("#!/bin/sh\necho approval-probe\n", encoding="utf-8")
+    executable.chmod(0o755)
+    ex = _bwrap_executor(tmp_path, monkeypatch)
+    policy_path = tmp_path / ".kvist" / "permissions.json"
+    original = policy_path.read_text(encoding="utf-8")
+    requested = []
+    confirm_command = ex._approvals.confirm_command
+
+    def confirm(command, reason):
+        requested.append(command)
+        return confirm_command(command, reason)
+
+    monkeypatch.setattr(ex._approvals, "confirm_command", confirm)
+    # Exercise the offer-to-save branch too; approval is per command only.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    result = ex.run(command)
+
+    assert requested == [command]
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "approval-probe"
+    assert policy_path.read_text(encoding="utf-8") == original
+
+
+@requires_bwrap
+@pytest.mark.parametrize("command", [["find", ".", "-delete"], ["python3", "-"]])
+def test_bwrap_helper_keeps_hard_denials_before_approval(tmp_path, monkeypatch, command):
+    ex = _bwrap_executor(tmp_path, monkeypatch)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("hard-denied command reached approval or execution")
+
+    monkeypatch.setattr(ex._approvals, "confirm_command", unexpected)
+    monkeypatch.setattr(ex, "_execute_validated", unexpected)
+
+    with pytest.raises(HardDenyError):
+        ex.run(command)
 
 
 # ─────────────────────────── secret classification ───────────────────────────
@@ -901,7 +958,7 @@ def test_venv_symlink_to_system_python_is_permitted(tmp_path, monkeypatch, trust
     (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("import sys; print('prefix', sys.prefix)", encoding="utf-8")
-    ex = TerminalExecutor(tmp_path, timeout=10)
+    ex = TerminalExecutor(tmp_path, timeout=10, approvals=CommandOnlyApprovals())
     result = ex.run([".venv/bin/python", "hi.py"])
     assert result.returncode == 0
     assert "prefix" in result.stdout
@@ -980,7 +1037,7 @@ def test_venv_workspace_mode_permits_trusted_root_interpreter(
     (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("print('prefix ok')", encoding="utf-8")
-    ex = TerminalExecutor(tmp_path, timeout=10)
+    ex = TerminalExecutor(tmp_path, timeout=10, approvals=CommandOnlyApprovals())
     assert ex.sandbox_mode is SandboxMode.WORKSPACE_ONLY
     result = ex.run([".venv/bin/python", "hi.py"])
     assert result.returncode == 0
@@ -1000,7 +1057,7 @@ def test_venv_workspace_mode_permits_external_interpreter_matching_pyvenv_cfg(
     (venv_dir / "bin").mkdir(parents=True)
     (venv_dir / "bin" / "python").symlink_to(external)
     (tmp_path / "hi.py").write_text("print('external ok')", encoding="utf-8")
-    ex = TerminalExecutor(tmp_path, timeout=10)
+    ex = TerminalExecutor(tmp_path, timeout=10, approvals=CommandOnlyApprovals())
     assert ex.sandbox_mode is SandboxMode.WORKSPACE_ONLY
     assert ex.sandbox_request == "workspace"
     result = ex.run([".venv/bin/python", "hi.py"])
@@ -1043,7 +1100,7 @@ def test_venv_non_workspace_mode_runs_external_interpreter_read_only(
         "    print('external ok, root writable')\n",
         encoding="utf-8",
     )
-    ex = TerminalExecutor(tmp_path, timeout=20)
+    ex = TerminalExecutor(tmp_path, timeout=20, approvals=CommandOnlyApprovals())
 
     if ex.sandbox_mode is not SandboxMode.BUBBLEWRAP and not cgroup_supervision_available():
         # Automatic mode refuses arbitrary code when it cannot stop detached

@@ -75,6 +75,17 @@ class AllowAllApprovals:
         return None
 
 
+class CommandOnlyApprovals(AllowAllApprovals):
+    """Approve individual test commands without saving project allow rules.
+
+    Inject explicitly into execution tests, never into approval/denial tests.
+    This replaces only the human answer; validation and sandboxing stay real.
+    """
+
+    def confirm(self, title: str, body: str, question: str) -> bool:
+        return False
+
+
 class NullUI:
     def start_live(self):
         pass

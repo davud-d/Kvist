@@ -279,7 +279,8 @@ def test_commands_that_ask_are_judged_together_and_the_rest_are_left_out(agent_f
     assert gate.confirm_command(["python", "a.py"], "x") is True
     assert gate.confirm_command(["python", "b.py"], "x") is False
     assert len(calls) == 1  # a.py and b.py together; "ls" asks nobody
-    assert all("ls" not in call[1]["content"].split("approval_request")[-1] for call in calls)
+    block = calls[0][1]["content"].split('source="approval_request">\n')[1].split("\n</UNTRUSTED")[0]
+    assert {item["subject"].splitlines()[0] for item in json.loads(block)} == {"python a.py", "python b.py"}
 
 
 def test_nothing_is_prefetched_while_auto_mode_is_off(agent_factory):

@@ -7,6 +7,7 @@ what needs the real system is replaced: cargo, ``pkg-config``, ``powershell`` an
 """
 from __future__ import annotations
 
+import os
 import stat
 import subprocess
 import sys
@@ -135,7 +136,8 @@ def test_linux_puts_the_app_in_the_launcher_menu(tmp_path, built):
 
     assert layout.binary == layout.home / ".local/share/kvist/app/kvist-app"
     assert layout.binary.read_bytes() == b"app-binary"
-    assert layout.binary.stat().st_mode & stat.S_IXUSR
+    if os.name == "posix":
+        assert layout.binary.stat().st_mode & stat.S_IXUSR
     assert (layout.icon_dir / "kvist-app.png").stat().st_size > 1000, "the checkout's icon is copied"
     entry = layout.desktop_entry.read_text()
     assert entry.startswith("[Desktop Entry]\nType=Application\n")
@@ -209,7 +211,8 @@ def test_macos_gets_an_app_bundle_in_applications(tmp_path, built, monkeypatch):
     bundle = layout.home / "Applications" / "Kvist Pixel.app" / "Contents"
     assert layout.mac_bundle == bundle.parent
     assert (bundle / "MacOS" / "kvist-app").read_bytes() == b"app-binary"
-    assert (bundle / "MacOS" / "kvist-app").stat().st_mode & stat.S_IXUSR
+    if os.name == "posix":
+        assert (bundle / "MacOS" / "kvist-app").stat().st_mode & stat.S_IXUSR
     assert (bundle / "Resources" / "kvist-app.icns").stat().st_size > 1000
     plist = (bundle / "Info.plist").read_text()
     assert "<key>CFBundleExecutable</key><string>kvist-app</string>" in plist

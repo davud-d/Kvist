@@ -139,7 +139,9 @@ def test_any_open_request_reports_awaiting_input_until_the_last_is_answered():
     first.join(2)
     assert agent.control.state == AWAITING_INPUT
     channel.respond(requests[1].request_id, approved=False)
+    first.join(2)
     second.join(2)
+    assert not first.is_alive() and not second.is_alive()
     assert agent.control.state == RUNNING
     assert states == [AWAITING_INPUT, RUNNING]
 

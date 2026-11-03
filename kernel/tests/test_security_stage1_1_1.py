@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 
-from kernel.tests.conftest import SYSTEM_BASH, SYSTEM_SH, requires_posix
+from kernel.tests.conftest import CommandOnlyApprovals, SYSTEM_BASH, SYSTEM_SH, requires_posix
 
 from kernel.sandbox import terminal as terminal_module
 from kernel.sandbox.sandbox import resolve_bubblewrap_path, SandboxMode
@@ -56,7 +56,8 @@ def _write_policy_ask(workspace: Path, ask) -> None:
 def _bwrap_executor(workspace: Path, monkeypatch, allow=("*",), timeout=10) -> TerminalExecutor:
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     _write_policy(workspace, allow)
-    ex = TerminalExecutor(workspace, timeout=timeout)
+    # A wildcard allow no longer grants execution; model only the HITL answer.
+    ex = TerminalExecutor(workspace, timeout=timeout, approvals=CommandOnlyApprovals())
     assert ex.sandbox_mode is SandboxMode.BUBBLEWRAP
     return ex
 
@@ -550,7 +551,7 @@ def test_valid_venv_python_launcher_still_works(tmp_path, monkeypatch, trusted_p
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("print('VENV_OK')", encoding="utf-8")
     _write_policy(tmp_path, ["*"])
-    ex = TerminalExecutor(tmp_path, timeout=10)
+    ex = TerminalExecutor(tmp_path, timeout=10, approvals=CommandOnlyApprovals())
     result = ex.run([".venv/bin/python", "hi.py"])
     assert result.returncode == 0
     assert "VENV_OK" in result.stdout
@@ -563,7 +564,7 @@ def test_valid_venv_dir_python3_still_works(tmp_path, monkeypatch, trusted_pytho
     (tmp_path / "venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("print('VENV_OK')", encoding="utf-8")
     _write_policy(tmp_path, ["*"])
-    ex = TerminalExecutor(tmp_path, timeout=10)
+    ex = TerminalExecutor(tmp_path, timeout=10, approvals=CommandOnlyApprovals())
     result = ex.run(["venv/bin/python3", "hi.py"])
     assert result.returncode == 0
     assert "VENV_OK" in result.stdout

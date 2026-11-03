@@ -25,6 +25,7 @@ from kernel.sandbox import process_tree, terminal_env
 BSD_PLATFORMS = ["freebsd15", "openbsd8", "netbsd11"]
 
 
+@pytest.mark.skipif(os.name != "posix", reason="BSD executable paths require POSIX")
 @pytest.mark.parametrize("platform_name", BSD_PLATFORMS)
 def test_a_bsd_child_path_reaches_the_packages_directories_that_pass_the_trust_check(monkeypatch, tmp_path, platform_name):
     trusted, writable = tmp_path / "local-bin", tmp_path / "home-bin"
@@ -76,7 +77,7 @@ def test_doctor_tells_a_system_without_bubblewrap_how_code_can_still_run(monkeyp
 
 # --- process trees without /proc ----------------------------------------------------------------
 
-needs_ps = pytest.mark.skipif(shutil.which("ps") is None, reason="needs ps")
+needs_ps = pytest.mark.skipif(os.name != "posix" or shutil.which("ps") is None, reason="needs POSIX ps")
 
 
 def test_a_ps_start_time_is_read_as_seconds():
@@ -87,13 +88,16 @@ def test_a_ps_start_time_is_read_as_seconds():
 
 @pytest.fixture
 def detached_tree():
-    """A shell whose child sleeps in a process group of its own: what `setsid` leaves behind after a timeout."""
-    shell = subprocess.Popen(["sh", "-c", "setsid sleep 60 & wait"], start_new_session=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    """A parent whose child sleeps in a separate session, as after a detached command."""
+    parent = subprocess.Popen(
+        [sys.executable, "-c", "import subprocess; subprocess.Popen(['sleep', '60'], start_new_session=True).wait()"],
+        start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
     time.sleep(0.4)
-    yield shell
-    shell.kill()
-    shell.wait()
+    yield parent
+    process_tree._kill_recorded_descendants(process_tree._ps_descendant_snapshot(parent.pid))
+    parent.kill()
+    parent.wait()
 
 
 @needs_ps
