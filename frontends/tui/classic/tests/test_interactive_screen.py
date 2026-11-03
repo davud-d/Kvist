@@ -49,6 +49,8 @@ def _wait_until(predicate, *, timeout: float = 2.0) -> None:
 
 
 def _rendered_lines(runtime) -> list[str]:
+    if runtime.screen._run_error is not None:
+        raise runtime.screen._run_error
     app = runtime.screen.app
     assert app is not None
     rendered = app.renderer.last_rendered_screen
@@ -114,6 +116,16 @@ def screen_runtime(monkeypatch):
             smart_model="old-smart",
         )
         screen = InteractiveScreen(session, config)
+
+        def fail_on_loop_error(app, loop, context):
+            # The default handler opens an interactive "Press ENTER" prompt.
+            # With test input at EOF that prompt can recursively fail forever.
+            error = context.get("exception") or RuntimeError(context.get("message", "UI event loop failed"))
+            if not app.is_done:
+                app.exit(exception=error)
+            screen._input_queue.put(interactive_screen_module._STOP)
+
+        monkeypatch.setattr(interactive_screen_module.Application, "_handle_exception", fail_on_loop_error)
         screen.start()
         runtime = SimpleNamespace(
             screen=screen,
@@ -131,6 +143,8 @@ def screen_runtime(monkeypatch):
             yield runtime
         finally:
             screen.stop()
+            if screen._run_error is not None:
+                raise screen._run_error
 
         assert sys.stdout is original_stdout
         assert sys.stderr is original_stderr
@@ -492,7 +506,7 @@ def test_status_slot_reanimates_on_a_time_tick(screen_runtime, monkeypatch):
 
     now = [1000.0]
     monkeypatch.setattr(
-        interactive_screen_module.time, "monotonic", lambda: now[0]
+        interactive_screen_module, "time", SimpleNamespace(monotonic=lambda: now[0])
     )
     renders = []
     real_format = screen._format_content
@@ -926,7 +940,7 @@ def test_escape_stop_arming_expires(screen_runtime, monkeypatch):
     """A lone Escape must not stay armed until some later accidental press."""
     screen = screen_runtime.screen
     now = [100.0]
-    monkeypatch.setattr(interactive_screen_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(interactive_screen_module, "time", SimpleNamespace(monotonic=lambda: now[0]))
 
     assert not screen._stop_armed()
     screen._stop_armed_at = now[0]
@@ -941,3 +955,24 @@ def test_stop_hint_follows_the_turn_language(screen_runtime):
     assert "Esc ещё раз" in screen._get_stop_hint()[0][1]
     screen.set_language("en")
     assert "Press Esc again" in screen._get_stop_hint()[0][1]
+
+
+def test_ui_loop_error_is_reported_without_waiting_for_enter(screen_runtime):
+    """A failed callback must fail the test, not start an interactive dialog."""
+    screen = screen_runtime.screen
+    app = screen.app
+    error = RuntimeError("test UI callback failed")
+
+    def fail():
+        raise error
+
+    try:
+        app.loop.call_soon_threadsafe(fail)
+        _wait_until(lambda: screen._run_error is not None)
+        assert screen._run_error is error
+        screen.stop()
+        assert not screen.is_running
+    finally:
+        # This test deliberately caused and checked the error; teardown should
+        # still stop the screen, but must not report the expected error twice.
+        screen._run_error = None

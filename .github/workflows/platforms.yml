@@ -223,7 +223,7 @@ jobs:
             # Informational: the whole default suite and the doctor's view of the system, so the first runs show
             # what else breaks here. A failure of either does not fail the job (it is continue-on-error anyway).
             .venv/bin/python -m kernel --doctor || echo "::warning::doctor reported problems"
-            .venv/bin/python -m pytest -ra -q -p no:cacheprovider || echo "::warning::the wider suite has failures on ${{ matrix.name }}"
+            .venv/bin/python -m pytest -ra -vv -p no:cacheprovider -o faulthandler_timeout=60 || echo "::warning::the wider suite has failures on ${{ matrix.name }}"
 
   package:
     name: Wheel and binary on ${{ matrix.os }}

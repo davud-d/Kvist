@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from kernel.agent.agent_runtime import _prefetch_approvals
 from kernel.config.user_config import get_auto_approval
 from kernel.sandbox import permission_command
@@ -262,9 +264,17 @@ def planned(*commands):
     ]
 
 
-def test_commands_that_ask_are_judged_together_and_the_rest_are_left_out(agent_factory):
+@pytest.mark.parametrize("ls_verdict", ["allow", "ask", "deny"])
+def test_commands_that_ask_are_judged_together_and_the_rest_are_left_out(agent_factory, monkeypatch, ls_verdict):
     agent = agent_factory()
     calls = []
+
+    # This tests batching, not the host's executable trust: even ls may ask,
+    # depending on its resolved path and permissions (including Windows ACLs).
+    monkeypatch.setattr(
+        agent.executor, "explain_shell_command",
+        lambda command, role: {"verdict": ls_verdict if command == ["ls"] else "ask", "reasons": []},
+    )
 
     def ask(messages):
         calls.append(messages)
@@ -278,9 +288,12 @@ def test_commands_that_ask_are_judged_together_and_the_rest_are_left_out(agent_f
 
     assert gate.confirm_command(["python", "a.py"], "x") is True
     assert gate.confirm_command(["python", "b.py"], "x") is False
-    assert len(calls) == 1  # a.py and b.py together; "ls" asks nobody
+    assert len(calls) == 1  # every command that asks shares one classifier request
     block = calls[0][1]["content"].split('source="approval_request">\n')[1].split("\n</UNTRUSTED")[0]
-    assert {item["subject"].splitlines()[0] for item in json.loads(block)} == {"python a.py", "python b.py"}
+    expected = {"python a.py", "python b.py"}
+    if ls_verdict == "ask":
+        expected.add("ls")
+    assert {item["subject"].splitlines()[0] for item in json.loads(block)} == expected
 
 
 def test_nothing_is_prefetched_while_auto_mode_is_off(agent_factory):
