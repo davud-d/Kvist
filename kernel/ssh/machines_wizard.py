@@ -22,7 +22,7 @@ _TEXT = {
     "help": {"en": "↑/↓ — select, Enter — open, Esc — back", "ru": "↑/↓ — выбор, Enter — открыть, Esc — назад"},
     "add": {"en": "+ Add a machine…", "ru": "+ Добавить машину…"},
     "local": {"en": "This computer", "ru": "Этот компьютер"},
-    "local_hint": {"en": "work here, without a server", "ru": "работать здесь, без сервера"},
+    "local_hint": {"en": "work here, without a server (and next time too)", "ru": "работать здесь, без сервера (и в следующий раз тоже)"},
     "recent": {"en": "Recent sessions…", "ru": "Недавние сессии…"},
     "recent_hint": {"en": "sessions on all machines", "ru": "сессии на всех машинах"},
     "main_mark": {"en": "main", "ru": "основная"},
@@ -365,6 +365,8 @@ def run_menu(ui, language: str | None = None, now: float | None = None) -> Choic
 
 def _selected(ui, language: str, selected: str, now: float) -> Choice | None:
     if selected == "@local":
+        # Chosen here, it is chosen for good: the machine marked as the main one would otherwise take the next start back to the server.
+        machines.set_main(None)
         return Choice(None)
     if selected == "@add":
         machine = add_or_edit_machine(ui, language)

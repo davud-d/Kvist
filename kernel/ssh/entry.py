@@ -138,7 +138,7 @@ def _dispatch(args: argparse.Namespace, argv: list[str]) -> int | None:
     if args.frontend == "stdio-multi":
         from kernel.ssh.proxy import Proxy
 
-        return Proxy(target, machine=args.machine, open_session=args.open_session).run()
+        return Proxy(target, machine=args.machine, open_session=args.open_session, resume=bool(args.resume)).run()
     return None
 
 

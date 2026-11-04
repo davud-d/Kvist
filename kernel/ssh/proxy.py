@@ -45,6 +45,7 @@ class Proxy:
         max_delay: float = MAX_DELAY_SECONDS,
         machine: str | None = None,
         open_session: str | None = None,
+        resume: bool = False,
         record=None,
         prepare_machine: Callable[..., bool] = prepare,
     ) -> None:
@@ -73,6 +74,10 @@ class Proxy:
         self._place = machine or target.label
         # The session the person asked to continue; asked of the daemon once, when this frontend drives and the log is read.
         self._open_session = open_session
+        # Every launch starts a new session; only a person who asked to go on with one (--resume, a chosen session) stays in it.
+        # The daemon keeps its own session between frontends, so the proxy has to ask for the new one itself, once.
+        self._fresh_session_due = not (open_session or resume)
+        self._swallow_failed_new = False
         self._driver = False
         self._local = LocalCommands(self._write_event)
         self._ever_connected = False
@@ -220,6 +225,9 @@ class Proxy:
                     continue
                 connected, self._connected = True, True
                 self._segment = message.get("segment")
+                if message.get("unseen_work"):
+                    # The agent worked while nobody was here; this interface is how the person sees what it did, in the session it did it in.
+                    self._fresh_session_due = False
                 if not self._ever_connected:
                     self._ever_connected = True
                     self._release_held()
@@ -285,6 +293,8 @@ class Proxy:
 
     def _forward(self, raw: bytes) -> None:
         kind = wire.event_type(raw)
+        if kind == "command_result" and self._swallow_failed_new and self._failed_new(raw):
+            return
         self._write_frontend(self._located(raw) if kind == "hello" else raw)
         if not self._greeted and kind == "hello":
             self._greeted = True
@@ -293,9 +303,26 @@ class Proxy:
             self._driver = message.get("role") == "driver"
         self._sessions.see(kind, raw)
 
+    def _failed_new(self, raw: bytes) -> bool:
+        """The answer to the ``new`` the proxy sent itself, when it was refused (a turn was running). It is not the person's command, so nothing is shown."""
+        result = wire.decode(raw) or {}
+        if result.get("name") != "new":
+            return False
+        self._swallow_failed_new = False
+        return not result.get("ok")
+
+    def _open_fresh_session(self) -> None:
+        if not self._driver:
+            return
+        self._swallow_failed_new = True
+        self._send_to_server(wire.encode({"type": "command", "name": "new", "args": []}))
+
     def _switch_to_asked_session(self) -> None:
-        """The log has been read: move the daemon to the session the person chose, if it is not already there."""
+        """The log has been read: start the new session every launch begins with, or move to the one the person chose."""
         wanted, self._open_session = self._open_session, None
+        fresh, self._fresh_session_due = self._fresh_session_due, False
+        if fresh:
+            self._open_fresh_session()
         if not wanted or wanted == self._sessions.session:
             return
         command = {"type": "command", "name": "session", "args": ["switch", wanted]}

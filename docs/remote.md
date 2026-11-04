@@ -43,7 +43,13 @@ terminal behind the interface. `--frontend` chooses which interface (`tui`, `cla
 A dialog saves the machines you work on, so you do not type addresses again. For each one it keeps the address
 (`login@host`, an IP, or a name from `~/.ssh/config`), the port, a key file, and a folder to work in. One machine can
 be **main**: plain `kvist` then opens on it (`kvist --local` opens on this computer instead; if the main machine
-cannot be used Kvist says why and opens here). `kvist --machine NAME [--remote-workspace FOLDER]` names one.
+cannot be used Kvist says why and opens here). Choosing **This computer** in the dialog clears the main machine, so the next
+plain `kvist` stays here too. `kvist --machine NAME [--remote-workspace FOLDER]` names one.
+
+**Every start opens a new session**, here and on a server, like a local launch. An agent on a server keeps its session while interfaces come and
+go, so the interface asks it for a new one when it connects. **Work is never hidden by it**: a turn that is still running is not interrupted, and when the agent
+finished work while nobody was connected, the next interface opens in that session, once, to show what it did. It stays in an old session also when
+you asked to go on with it: `--resume`, or a session chosen under *Recent sessions*. Older ones are in `/session`.
 
 Signing in, when you add a machine:
 

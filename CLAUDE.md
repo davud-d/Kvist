@@ -761,7 +761,12 @@ frontend -stdio-> proxy -ssh -T-> kvist-core --remote-attach (attach.py: a byte 
   `command_result` with `effects.relaunch = @local`) / close (exit 75). A ready machine has its folder remembered. Commands and requests the frontend sends before the first connection (OpenCode may send its own on
   start, the person may type) are held (`_held`, 20 lines) and sent on the first attach; after the first failed attempt a command is answered with a failed
   `command_result` and a request with a `notice` + `turn_end`, so the frontend never waits for ever on "running /new…". `remote_state` is not used for this phase:
-  the Ink skin draws it in place of the dialog. `/remote HOST /folder` writes `iface\n\nHOST\tfolder` to `KVIST_SWITCH_FILE` (exit 64). Voice gets `--continue` (a join must not open a session over the one in progress); VS Code skips `--session-op launch`.
+  the Ink skin draws it in place of the dialog. `/remote HOST /folder` writes `iface\n\nHOST\tfolder` to `KVIST_SWITCH_FILE` (exit 64). Voice gets `--continue` and VS Code skips `--session-op launch` because **the proxy opens the new session**: every frontend starts a new session (the person's rule), and
+  `--session-op launch` only rewrites a file a running daemon never re-reads, so on the first `remote_offset`, as the driver and unless `--resume`/`--open-session` was given, `Proxy` sends the
+  core's own `new` command once (`_fresh_session_due`); a refusal because a turn is running is swallowed (`_swallow_failed_new`), a success reaches the frontend (`effects.changed` resets its feed).
+  **The person's main requirement is that work goes on when they leave and they can come back to it**, so a new session never hides work: `EventLog` counts turns that ended with no reader
+  (`take_unseen`), the daemon reports `remote_attached.unseen_work` to a fresh attach (not to a reconnect with an offset, and once), and the proxy then skips `new`. An additive field needs no `REVISION` bump; an old daemon just never says it.
+  Choosing "This computer" in `/machines` calls `machines.set_main(None)`: it is chosen for good, otherwise the main machine takes the next start back to the server (the "work on this computer" fallback of a machine that would not open is only for that start).
 - **Saved machines** (`machines.py`, `access.py`, `machines_wizard.py`, `tracker.py`, `entry.py`): `<config dir>/machines.json` (private, `durable_json`)
   holds, per machine, `host`/`port`/`key`/`folder`/`folders`, plus `default` (the main machine; null = this computer) and the recent
   `sessions`. **A password is never stored**: `access.install_key_with_password` makes `<config dir>/ssh/<name>`, signs in once with

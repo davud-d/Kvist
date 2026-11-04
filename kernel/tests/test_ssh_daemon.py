@@ -243,3 +243,45 @@ def test_status_answers_without_attaching(core):
 
     assert answer["protocol_version"] == 1
     assert answer["attached"] == 0
+
+
+def wait_for_a_turn_to_end(daemon, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while b'"turn_end"' not in daemon.paths.log.read_bytes():
+        if time.monotonic() > deadline:
+            raise TimeoutError("the turn did not end")
+        time.sleep(0.02)
+
+
+def test_work_done_while_nobody_was_attached_is_reported_to_the_next_frontend_only_once(core):
+    daemon = core()
+    daemon.daemon.inbox.put("work while nobody watches")
+    wait_for_a_turn_to_end(daemon)
+
+    first = daemon.client("first")
+    second = daemon.client("second")
+
+    assert first.wait_for(is_type(wire.ATTACHED))["unseen_work"] is True
+    assert second.wait_for(is_type(wire.ATTACHED))["unseen_work"] is False
+
+
+def test_a_turn_that_ended_in_front_of_a_frontend_is_not_unseen_work(core):
+    daemon = core()
+    watcher = daemon.client("watcher")
+    watcher.wait_for(is_type("control"))
+    watcher.send("work in front of someone")
+    watcher.wait_for(is_type("turn_end"))
+    watcher.close()
+    time.sleep(0.2)
+
+    assert daemon.client("later").wait_for(is_type(wire.ATTACHED))["unseen_work"] is False
+
+
+def test_a_reconnect_that_continues_from_an_offset_never_claims_missed_work(core):
+    daemon = core()
+    daemon.daemon.inbox.put("work while nobody watches")
+    wait_for_a_turn_to_end(daemon)
+
+    resumed = daemon.client("returning", start=0, segment=daemon.log.segment)
+
+    assert resumed.wait_for(is_type(wire.ATTACHED))["unseen_work"] is False

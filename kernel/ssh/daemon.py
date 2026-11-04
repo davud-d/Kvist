@@ -287,11 +287,18 @@ class Daemon:
             client.send({"type": wire.ATTACHED, "ok": False, "reason": "segment"})
             client.close()
             return
+        # A reconnect of a frontend that was here (it has an offset) saw everything up to it; only a fresh attach can be the one that missed work.
+        unseen = start is None and self.log.take_unseen()
         segment = self.log.attach_reader()
         try:
             self._register(client)
             self.lease.claim_if_free(client.id)
-            client.send({"type": wire.ATTACHED, "ok": True, "segment": segment, "revision": wire.REVISION, "needs_credentials": self.needs_credentials})
+            client.send(
+                {
+                    "type": wire.ATTACHED, "ok": True, "segment": segment, "revision": wire.REVISION,
+                    "needs_credentials": self.needs_credentials, "unseen_work": unseen,
+                }
+            )
             threading.Thread(target=self._stream, args=(client, start), daemon=True, name="remote-stream").start()
             self._read_loop(client, reader)
         finally:

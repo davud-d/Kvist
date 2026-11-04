@@ -181,6 +181,15 @@ def test_this_computer_is_a_choice_too():
     assert wizard.run_menu(ScriptUI("@local"), "en") == wizard.Choice(None)
 
 
+def test_choosing_this_computer_is_remembered_so_the_next_start_does_not_go_back_to_the_server():
+    saved("work")
+    machines.set_main("work")
+
+    wizard.run_menu(ScriptUI("@local"), "en")
+
+    assert machines.main_machine() is None
+
+
 def test_leaving_the_dialog_changes_nothing():
     saved("work")
 

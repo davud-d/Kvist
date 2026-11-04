@@ -364,20 +364,21 @@ def test_machines_is_answered_by_the_proxy_with_dialogs_and_never_reaches_the_se
 
 
 def test_a_command_for_the_server_still_goes_to_the_server(server_tools, tmp_path):
-    commands = SessionCommands()
+    commands = NewCommand()
     daemon = FakeCoreDaemon(tmp_path, commands=commands.handlers())
     try:
         _, frontend, thread, _ = start_proxy(daemon.workspace)
-        frontend.wait_for(lambda line: line["type"] == "control")
+        # The proxy opens the new session first, and a core takes one command at a time.
+        frontend.wait_for(lambda line: line["type"] == "command_result" and line["name"] == "new")
 
         frontend.say(json.dumps({"type": "command", "name": "session", "args": ["switch", "x"]}))
-        frontend.wait_for(lambda line: line["type"] == "command_result")
+        frontend.wait_for(lambda line: line["type"] == "command_result" and line["name"] == "session")
         frontend.leave()
         thread.join(timeout=10)
     finally:
         daemon.close()
 
-    assert commands.asked == [["switch", "x"]]
+    assert commands.asked == ["new", "session switch x"]
 
 
 def test_the_frontend_is_told_where_the_core_works_as_machine_then_folder(server_tools, tmp_path):
@@ -536,3 +537,128 @@ def test_a_command_refused_after_a_break_is_answered_so_the_frontend_does_not_wa
 
     # The link is down and the frontend was told; what it sends meanwhile is answered, not left to wait.
     assert result["name"] == "new" and result["ok"] is False
+
+
+# --- every launch begins with a new session -------------------------------------------------------------------
+
+
+class NewCommand:
+    """A test core that knows ``new`` and ``session`` and notes what it was asked."""
+
+    def __init__(self, *, ok: bool = True) -> None:
+        self.asked: list[str] = []
+        self._ok = ok
+
+    def handlers(self) -> dict:
+        from kernel.protocol.event_stdio import CommandResult
+
+        def new(context) -> CommandResult:
+            self.asked.append("new")
+            return CommandResult(self._ok, "A new session" if self._ok else "busy", {"changed": self._ok})
+
+        def session(context) -> CommandResult:
+            self.asked.append("session " + " ".join(context.args))
+            return CommandResult(True, "switched", {})
+
+        return {"new": new, "session": session}
+
+
+def run_launch(tmp_path, command: NewCommand, **options) -> Frontend:
+    daemon = FakeCoreDaemon(tmp_path, commands=command.handlers())
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, **options)
+        frontend.wait_for(lambda line: line["type"] == "control")
+        time.sleep(1.0)
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+    return frontend
+
+
+def test_a_launch_opens_a_new_session_instead_of_sitting_in_the_one_the_daemon_was_left_in(server_tools, tmp_path):
+    command = NewCommand()
+
+    frontend = run_launch(tmp_path, command)
+
+    assert command.asked == ["new"]
+    assert frontend.events("command_result")[0]["effects"] == {"changed": True}
+
+
+def test_a_reconnect_does_not_start_another_session_in_the_middle_of_the_work(server_tools, tmp_path):
+    command = NewCommand()
+    daemon = FakeCoreDaemon(tmp_path, commands=command.handlers())
+    try:
+        proxy, frontend, thread, _ = start_proxy(daemon.workspace)
+        frontend.wait_for(lambda line: line["type"] == "command_result")
+        proxy._proc.kill()
+        states = lambda: [event["state"] for event in frontend.events("remote_state")]  # noqa: E731
+        frontend.wait_for(lambda line: states()[-2:] == ["reconnecting", "connected"])
+        time.sleep(1.0)
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert command.asked == ["new"]
+
+
+def test_a_person_who_asked_to_go_on_with_a_session_is_not_given_a_new_one(server_tools, tmp_path):
+    chosen, resumed = NewCommand(), NewCommand()
+
+    for folder in ("a", "b"):
+        (tmp_path / folder).mkdir()
+    run_launch(tmp_path / "a", chosen, open_session="chat-from-before")
+    run_launch(tmp_path / "b", resumed, resume=True)
+
+    assert chosen.asked == ["session switch chat-from-before"]
+    assert resumed.asked == []
+
+
+def test_a_new_session_that_the_core_refused_because_it_is_busy_shows_nothing(server_tools, tmp_path):
+    command = NewCommand(ok=False)
+
+    frontend = run_launch(tmp_path, command)
+
+    assert command.asked == ["new"]
+    assert frontend.events("command_result") == []
+
+
+def test_a_watching_interface_does_not_open_a_session_over_the_one_that_is_driving(server_tools, tmp_path):
+    command = NewCommand()
+    daemon = FakeCoreDaemon(tmp_path, commands=command.handlers())
+    try:
+        _, driver, driver_thread, _ = start_proxy(daemon.workspace)
+        driver.wait_for(lambda line: line["type"] == "command_result")
+        _, watcher, watcher_thread, _ = start_proxy(daemon.workspace)
+        watcher.wait_for(lambda line: line["type"] == "control")
+        time.sleep(1.0)
+        driver.leave()
+        watcher.leave()
+        driver_thread.join(timeout=10)
+        watcher_thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert command.asked == ["new"]
+
+
+def test_work_the_agent_did_while_nobody_was_attached_is_what_the_person_comes_back_to_not_a_new_session(server_tools, tmp_path):
+    command = NewCommand()
+    daemon = FakeCoreDaemon(tmp_path, commands=command.handlers())
+    try:
+        daemon.daemon.inbox.put("work while the person is away")
+        deadline = time.monotonic() + 5
+        while b'"turn_end"' not in daemon.paths.log.read_bytes() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        _, frontend, thread, _ = start_proxy(daemon.workspace)
+        frontend.wait_for(lambda line: line["type"] == "control")
+        final = frontend.wait_for(lambda line: line["type"] == "final")
+        time.sleep(1.0)
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert final["message"] == "done work while the person is away"
+    assert command.asked == []

@@ -10,7 +10,7 @@ import json
 import re
 
 HELLO = "remote_hello"        # proxy -> daemon, first line: {op, client, from?, segment?, lang?}
-ATTACHED = "remote_attached"  # daemon -> proxy: {ok, segment, needs_credentials?, reason?}
+ATTACHED = "remote_attached"  # daemon -> proxy: {ok, segment, revision?, needs_credentials?, unseen_work?, reason?}
 CREDENTIALS = "remote_credentials"  # proxy -> daemon: {settings} (the person's provider, memory only) or {use_server: true};
 #                                     {for: provider, settings|null} answers NEED; {renew: settings} replaces a token about to run out
 NEED = "remote_need"                # daemon -> proxy: {provider}: the person picked a provider the daemon was not given

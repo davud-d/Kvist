@@ -113,6 +113,10 @@ def main() -> int:
             first.process.wait(timeout=5)
             print("ok  frontend killed in the middle of a turn")
 
+            # Nobody is attached while the agent finishes: what the person comes back to is that work, in its session.
+            deadline = time.monotonic() + TIMEOUT
+            while (workspace / "hello.txt").read_bytes() != SCENARIOS[1][2] and time.monotonic() < deadline:
+                time.sleep(0.2)
             second = Frontend(local_home, tools, workspace, stand_in)
             events = second.collect_until("hello", TIMEOUT)
             become_driver(second)
@@ -123,13 +127,31 @@ def main() -> int:
             print("ok  the new frontend saw the turn finish")
 
             time.sleep(1.0)
+            replayed = []
             while not second.events.empty():  # what was replayed is not this turn's answer
-                second.events.get_nowait()
+                replayed.append(second.events.get_nowait())
+            started_new = [event for event in events + more + replayed if event.get("type") == "command_result" and event.get("name") == "new"]
+            assert not started_new, "the interface opened a new session over work it had not seen"
+            print("ok  work done while nobody was attached is shown in its own session, not hidden by a new one")
             second.send_goal(SCENARIOS[2][0])
             second.collect_until("turn_end", TIMEOUT)
             content = (workspace / "hello.txt").read_bytes()
             assert content == SCENARIOS[2][2], f"hello.txt is {content!r}"
             print("ok  the new frontend drives")
+
+            # Every launch begins with a new session: a third interface comes after the second one has left.
+            second.stop()
+            third = Frontend(local_home, tools, workspace, stand_in)
+            try:
+                seen = third.collect_until("hello", TIMEOUT) + third.collect_until("hello", TIMEOUT)
+                become_driver(third)
+                opened = third.collect_until("command_result", TIMEOUT)[-1]
+                assert opened["name"] == "new" and opened["ok"] and opened["effects"].get("changed"), opened
+                sessions = [event["session"] for event in seen + [opened] if event.get("type") == "hello" and event.get("session")]
+                assert sessions, "no hello with a session"
+            finally:
+                third.stop()
+            print("ok  a later interface starts in a new session, not in the one the last one left")
 
             # The server never had a provider and was never given one to keep.
             kept = [path.read_text(errors="replace") for path in home.rglob("config.json")]

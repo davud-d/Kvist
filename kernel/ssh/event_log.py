@@ -35,6 +35,8 @@ class EventLog:
         self._after_manifest = after_manifest.encode("utf-8") if after_manifest else None
         self._grown = threading.Condition()
         self._readers = 0
+        # Turns that ended while no frontend was attached: work nobody has seen yet.
+        self._unseen_turns = 0
         self._header: dict[str, bytes] = {}
         self._fd = -1
         self._size = 0
@@ -68,6 +70,8 @@ class EventLog:
                 self._append(self._after_manifest)
                 self._after_manifest = None
             if kind == "turn_end":
+                if not self._readers:
+                    self._unseen_turns += 1
                 os.fsync(self._fd)
                 self._rotate_when_large()
             self._grown.notify_all()
@@ -86,6 +90,12 @@ class EventLog:
     def size(self) -> int:
         with self._grown:
             return self._size
+
+    def take_unseen(self) -> bool:
+        """Whether a turn ended with nobody attached since the last call; asking clears it."""
+        with self._grown:
+            unseen, self._unseen_turns = self._unseen_turns > 0, 0
+            return unseen
 
     def attach_reader(self) -> int:
         """Pin the current segment (it cannot rotate while read) and return its id."""
