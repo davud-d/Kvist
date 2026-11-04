@@ -52,6 +52,34 @@ function finalFrame(cast) {
     .join("");
 }
 
+/** The front page's recorded run: one clip per interface, the first shown.
+    Both <video> elements are in the markup so nothing needs JavaScript; main.js
+    adds the switch and hides the one not chosen. Nothing is fetched until play. */
+function demoVideos(t) {
+  const clips = [
+    { id: "classic", label: t.demo.tabClassic },
+    { id: "claude", label: t.demo.tabClaude },
+  ];
+  return `<div class="clips" data-clips>
+        <div class="clip-tabs" role="group" aria-label="${esc(t.demo.tabsLabel)}">
+          ${clips
+            .map(
+              (clip, index) =>
+                `<button class="chip" type="button" data-clip-tab="${clip.id}" aria-pressed="${index === 0}">${esc(clip.label)}</button>`,
+            )
+            .join("\n          ")}
+        </div>
+        ${clips
+          .map(
+            (clip) => `<video class="clip" data-clip="${clip.id}" controls playsinline preload="none"
+               poster="/assets/demo/video/${clip.id}.jpg" aria-label="${esc(clip.label)}">
+          <source src="/assets/demo/video/${clip.id}.mp4" type="video/mp4">
+        </video>`,
+          )
+          .join("\n        ")}
+      </div>`;
+}
+
 /** One replay: server-rendered final frame plus the controls that drive it. */
 function replay({ t, cast, source, label, autoplay }) {
   return `<div class="replay" data-replay data-cast="${esc(source)}"
@@ -163,7 +191,7 @@ function langbar(t, otherPath) {
 </aside>`;
 }
 
-export function render({ t, css, cast, buildId }) {
+export function render({ t, css, buildId }) {
   const rail = ["demo", "loop", "boundary", "recovery", "control", "install"]
     .map((key) => `<a href="#${key}">${esc(t.nav[key])}</a>`)
     .join("\n      ") +
@@ -205,20 +233,7 @@ ${header({ t, home: t.dir, rail })}
       <h2 class="h2">${esc(t.demo.h2)}</h2>
       <p class="lede">${esc(t.demo.lede)}</p>
 
-      ${replay({
-        t,
-        cast,
-        source: `/assets/demo/run-${t.lang}.json`,
-        label: t.demo.h2,
-        autoplay: true,
-      })}
-      <p class="sr">${esc(t.demo.srHint)}</p>
-
-      <div class="task">
-        <span class="term">${esc(t.demo.task)}</span>
-        ${esc(t.demo.taskText)}
-      </div>
-      <p class="hero-note">${esc(t.demo.reRecord)}</p>
+      ${demoVideos(t)}
     </div>
   </section>
 

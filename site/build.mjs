@@ -127,6 +127,10 @@ async function main() {
     filter: (src) => !src.endsWith("font-face.css"),
   });
   mkdirSync(join(dist, "assets/demo"), { recursive: true });
+  cpSync(resolve(here, "assets/demo/video"), join(dist, "assets/demo/video"), {
+    recursive: true,
+    dereference: true,
+  });
   for (const locale of ["en", "ru"]) {
     cpSync(
       resolve(here, `assets/demo/run-${locale}.json`),
@@ -169,11 +173,8 @@ async function main() {
     const t = JSON.parse(
       readFileSync(resolve(here, `src/i18n/${locale}.json`), "utf8"),
     );
-    const cast = JSON.parse(
-      readFileSync(resolve(here, `assets/demo/run-${locale}.json`), "utf8"),
-    );
     const prefix = locale === "en" ? "" : "ru/";
-    write(locale, `${prefix}index.html`, render({ t, css, cast, buildId }));
+    write(locale, `${prefix}index.html`, render({ t, css, buildId }));
     write(
       `${locale} guides`,
       `${prefix}guides/index.html`,
@@ -239,6 +240,7 @@ function securityHeaderValues() {
       `script-src 'self' 'sha256-${bootHash}'`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
+      "media-src 'self'",
       "font-src 'self'",
       "connect-src 'self'",
       "base-uri 'none'",
@@ -366,6 +368,8 @@ const TYPES = {
   ".json": "application/json; charset=utf-8",
   ".woff2": "font/woff2",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".mp4": "video/mp4",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
 };
@@ -393,9 +397,17 @@ function serve(port = 4173) {
       return;
     }
     try {
-      const body = readFileSync(file);
-      response.writeHead(200, {
+      const whole = readFileSync(file);
+      /* Browsers seek a <video> with Range requests; nginx answers them in
+         production, so the dev server has to as well. */
+      const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? "");
+      const start = range && range[1] !== "" ? Number(range[1]) : 0;
+      const end = range && range[2] !== "" ? Math.min(Number(range[2]), whole.length - 1) : whole.length - 1;
+      const body = range ? whole.subarray(start, end + 1) : whole;
+      response.writeHead(range ? 206 : 200, {
         ...headers,
+        ...(range ? { "content-range": `bytes ${start}-${end}/${whole.length}` } : {}),
+        "accept-ranges": "bytes",
         "content-type": TYPES[extname(file)] ?? "application/octet-stream",
         "cache-control": "no-store",
       });

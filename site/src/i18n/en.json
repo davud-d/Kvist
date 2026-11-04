@@ -42,16 +42,15 @@
   "demo": {
     "kicker": "Recorded run",
     "h2": "A real run, not a rehearsal",
-    "lede": "This is the terminal recording of Kvist fixing a slug function: it reads both files, plans, and stops at the approval gate with the one-line diff on screen before it is allowed to write. Then it runs the check and reports 4/4. Nothing was cut or re-taken. The replay below is the recording parsed into text, so you can select it and your screen reader can read it.",
+    "lede": "Screen recordings of Kvist building a small Python project from a single request, in two of its interfaces. Same agent, same core; pick the look you prefer. The video loads only when you press play.",
     "play": "Play",
     "pause": "Pause",
     "restart": "Restart",
     "speed": "Speed",
     "progress": "Position in the run",
-    "srHint": "Use the slider to move through the run. The final frame is shown when playback is stopped.",
-    "task": "Task given to the agent",
-    "taskText": "check.py fails. Read slugify.py and check.py, fix slugify so runs of non-alphanumeric characters collapse into a single dash and leading and trailing dashes are stripped, then run python3 check.py.",
-    "reRecord": "Recorded with web/assets/demo/record.fish — the same script, every time."
+    "tabsLabel": "Interface",
+    "tabClassic": "Classic",
+    "tabClaude": "Claude style"
   },
   "loop": {
     "kicker": "The loop",

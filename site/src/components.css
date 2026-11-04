@@ -412,15 +412,18 @@
   white-space: nowrap;
 }
 
-.task {
-  margin-top: var(--s-4);
-  border-inline-start: 2px solid var(--line-2);
-  padding-inline-start: var(--s-3);
-  color: var(--dim);
-  font-size: var(--t-15);
-  max-width: var(--measure);
+.clips { margin-top: var(--s-6); }
+.clip-tabs { display: flex; gap: var(--s-2); margin-bottom: var(--s-3); }
+.no-js .clip-tabs { display: none; }
+.clip {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--panel);
 }
-.task .term { display: block; color: var(--faint); margin-bottom: var(--s-1); }
+.clip[hidden] { display: none; }
 
 /* -- footer ---------------------------------------------------------------- */
 

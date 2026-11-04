@@ -157,3 +157,18 @@ for (const replay of document.querySelectorAll("[data-replay]")) {
     },
   });
 }
+
+for (const box of document.querySelectorAll("[data-clips]")) {
+  const tabs = box.querySelectorAll("[data-clip-tab]");
+  const clips = box.querySelectorAll("[data-clip]");
+  const show = (id) => {
+    for (const clip of clips) {
+      const chosen = clip.dataset.clip === id;
+      clip.hidden = !chosen;
+      if (!chosen) clip.pause();
+    }
+    for (const tab of tabs) tab.setAttribute("aria-pressed", String(tab.dataset.clipTab === id));
+  };
+  for (const tab of tabs) tab.addEventListener("click", () => show(tab.dataset.clipTab));
+  show(tabs[0].dataset.clipTab);
+}
