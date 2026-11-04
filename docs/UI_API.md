@@ -175,7 +175,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `type` | Fields | Meaning |
 |---|---|---|
 | `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level) and `commands` (the names `command` accepts, `resume` included) are sent by `--frontend stdio-multi`. |
-| `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object[], themes:object` | UI-facing metadata catalog built by `core_manifest.build_manifest`; sent once after `hello` (by `--frontend stdio` and `--frontend stdio-multi`) so frontends can populate pickers dynamically without hardcoding. `styles` lists the picks (`{value, description}`); each pick also sets the chat voice, which the core derives and the manifest does not carry. |
+| `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object[], themes:object` | UI-facing metadata catalog built by `core_manifest.build_manifest`; sent once after `hello` (by `--frontend stdio` and `--frontend stdio-multi`) so frontends can populate pickers dynamically without hardcoding. `styles` lists the picks (`{value, description}`); each pick also sets the chat voice, which the core derives and the manifest does not carry. `slash_commands` is the list a frontend should offer after `/`: `via: "core"` marks a command this core carries out (send a `command` message and draw its dialogs), and an entry without `via` exists only in the Classic Legacy terminal and is not to be offered. |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress; during a call `user_message` is the call's label built by the core ("reads src/x.py") |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number, action_description:str, call_id:str, batch_id:str` | one tool call of a model response. `reasoning_seconds` is how long the model spent thinking before it (0 when it did not think). `action_description` is the call's label, built by the core from its arguments ("reads src/x.py", `search "role" in src/`; a `run_shell` label is the purpose the model gave). `batch_id` names the model response the call came from: the calls of one response share it and may be shown as one group. `call_id` names the call; its `action_result` carries the same one. `thought` is always `""` (the model no longer writes one). `user_message` is the response's own text for the person on the first `step` of its batch and `""` on the others, so a frontend that shows it per step shows it once. |
@@ -210,6 +210,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `narration` | `text:str` | one short spoken line from the narrator: with `AGENT_VOICE_MODE=1`, while the strong model works on a step (never while the fast model does), a fast model voices what the work shows, in the person's language, at most once per `narrator_interval_seconds` and only after `narrator_delay_seconds` of the call. A voice frontend speaks it at once and drops it when the step's own output arrives. Live-only: not journaled, and it never enters a model request. |
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
+| `notice` | `text:str, level?:"info"\|"warn"\|"error"` | a short word for the person that is **not part of the conversation** (the proxy's "Connecting to …"): show it where notifications go (a toast, a status line), never as a message of the agent. A frontend that does not know it ignores it. |
 | `turn_end` | — | `--frontend stdio-multi` only: the turn ended (after `final`, `error`, or a chat reply that has no `final`); the process stays up for the next goal |
 | `wake` | — | `--frontend stdio-multi --wake` only: the core starts a turn nobody typed, because helpers or background jobs an answered turn left running ended on their own (see "Wake-ups" below). The turn's events follow, then `turn_end`. It has no request text: its `job_notice` and `helper` events say what ended. |
 | `session` | `session:str, has_checkpoint:bool`; optional `closed:true, closed_notice:str, title:str` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` — and the session a `session`/`new` command switched to (§8c). `closed` and `closed_notice` are present only for a session `end_session` closed (§8a, "Closed sessions"): show `closed_notice` in place of the input box. `title` is the session's stored title, when it has one. |
@@ -757,18 +758,39 @@ still works, but cannot show who may write.
 | Event | Meaning |
 |---|---|
 | `{"type": "control", "role": "driver"\|"observer", "notice": str, "holder_idle_seconds"?: float}` | Who may write to this session. Exactly one connected frontend is the **driver**; any other is an **observer**: it sees everything and the core drops what it sends (goals, commands, dialog answers, `cancel`, `pause`, `helper_stop`). `notice` is the text for the banner an observer shows **in place of the input** (it ends with "· Enter — take over"); a frontend has no words of its own for it. Sent after `hello` and `manifest`, again whenever the role changes. |
-| `{"type": "remote_state", "state": "connecting"\|"connected"\|"reconnecting"\|"gave_up", "host": str, "reason"?: str, "attempt"?: int, "retry_in"?: float}` | The link to the server, from the proxy. While it is `reconnecting` nothing can be sent (a line written then is answered with an `error` event); show `reason` and the countdown in place of the input. `gave_up` is final: the proxy exits (code 75) with the reason, which is already in the person's language. Before the first `hello` the proxy has no events to send and writes the same words to stderr. |
+| `{"type": "remote_state", "state": "connecting"\|"connected"\|"reconnecting"\|"gave_up", "host": str, "reason"?: str, "attempt"?: int, "retry_in"?: float}` | The link to the server, from the proxy. While it is `reconnecting` nothing can be sent (a line written then is answered: a command with a failed `command_result`, a request with a `notice` and a `turn_end`); show `reason` and the countdown in place of the input. `gave_up` is final: the proxy exits (code 75) with the reason, which is already in the person's language. Before the first `hello` the proxy has no events to send and writes the same words to stderr. |
 
 | Inbound message | Effect |
 |---|---|
 | `{"type": "takeover"}` | Ask to be the driver. The previous driver becomes an observer at once and is told by `control`. Dialogs (`input_request`) that were still open are sent again to the new driver, with the same `request_id`; a frontend must treat a repeat as the same dialog. |
 
+`hello` carries `workspace` (the core's folder, absolute, on the machine it runs on); for a core on a server the proxy adds `location`,
+`<machine name>:<that path>`. A frontend that shows where it works shows `location` when it is there, never its own stand-in folder; the
+terminal interfaces that show a folder (Ink's Claude-style skin, OpenCode, Classic) do, and the ones that never showed one are unchanged.
+
 An observer must not answer or draw dialogs: they are the driver's. A driver that goes silent (no ping from its
 proxy for 20 s, as when the computer loses power) loses the role; the next frontend takes it by asking.
 
-**Operations on the server** (`--remote-op probe|status|start|stop|install-service|uninstall-service`, JSON
+**`/machines` and `/remote` are commands like any other.** The core asks what it needs to know with ordinary `input_request`s
+(`choice`, `text`, `secret`, `confirm`), so each frontend draws the dialog with its own widgets and nothing is asked on a
+terminal behind its back. They are about this computer's saved machines and ssh, so for a frontend on a server the proxy answers
+them itself (the server's core never sees them). When the person has decided, the `command_result` carries
+`effects.relaunch = {switch, label, machine, host, folder, session}`: **the frontend ends so that the launcher starts it again where
+the person chose.** A frontend that runs under the launcher (Ink, OpenCode, Glass, Voice) writes `KVIST_SWITCH_FILE` as
+`<its own id>\n\n<switch>` and exits with code 64; the VS Code panel saves `machine`/`host`/`folder` in its settings and restarts its core;
+a frontend that cannot (JetBrains, the pixel app, Electron, ACP) shows the command's message, which says how to start Kvist there.
+`switch` is `@local`, `@machine<TAB>name<TAB>folder<TAB>session`, or `host<TAB>folder`, and a frontend passes it on untouched.
+
+**Saved machines.** `--machine NAME` stands for a machine saved with `--machines` (address, key, folder); a frontend that
+starts a core passes the launcher's flags on, so nothing else changes. `--open-session NAME` asks the proxy to switch the
+daemon to that session once it is the driver and the log has been read; if it cannot, the frontend gets an `error` event.
+The proxy also learns which session is on screen (`hello`, `session`, `session_title`, `turn_end`) and keeps the sessions that
+had a turn in the saved machines file.
+
+**Operations on the server** (`--remote-op probe|status|start|stop|install-service|uninstall-service|mkdir`, JSON
 on one line, with `--remote HOST --remote-workspace PATH` over ssh). `--session-op` and `--memory-op` given
-with `--remote` run on the server too, so session lists and history are the server's.
+with `--remote` run on the server too, and so do `--config-op`, `--config-info`, `--skill-op`, `--mcp-op` and
+`--connection-op`: session lists, history and settings are the server's. Whatever the server's login shell prints before the JSON is dropped.
 
 ---
 

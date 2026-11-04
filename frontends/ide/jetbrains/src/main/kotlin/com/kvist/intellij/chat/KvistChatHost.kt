@@ -100,6 +100,8 @@ internal class KvistChatHost(
             "cancel" -> send { it.cancel() }
             "pause" -> send { it.pause() }
             "takeover" -> send { it.takeOver() }
+            // The core asked to work on another machine; this IDE has no setting to choose a server yet, so it says how to get there.
+            "relaunch" -> post(fault(relaunchAdvice(message.stringField("machine"), message.stringField("host"), message.stringField("folder"))))
             "stopHelper" -> send { it.stopHelper(message.stringField("agentId").orEmpty()) }
             "pickFiles" -> ApplicationManager.getApplication().invokeLater { pickFiles() }
             "getEnvironment" -> post(environmentMessage(environment()))
@@ -167,6 +169,12 @@ internal class KvistChatHost(
 
     private fun deliverCall(message: JsonObject): String {
         return "window.kvistHost && window.kvistHost.receive && window.kvistHost.receive(${gson.toJson(message)});"
+    }
+
+    private fun relaunchAdvice(machine: String?, host: String?, folder: String?): String = when {
+        machine != null -> "This IDE cannot move itself to another machine. Start Kvist there with: kvist --machine $machine"
+        host != null -> "This IDE cannot move itself to another machine. Start Kvist there with: kvist --remote $host --remote-workspace ${folder.orEmpty()}"
+        else -> "This IDE cannot move itself to another machine. Start Kvist again with: kvist --local"
     }
 
     private fun fault(text: String): JsonObject = message("fault") { addProperty("message", text) }

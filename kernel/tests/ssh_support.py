@@ -57,7 +57,9 @@ def echo(agent, ui, goal):
 class FakeCoreDaemon:
     """The daemon's own classes, a scripted agent in place of the model."""
 
-    def __init__(self, tmp_path: Path, handler=echo, *, lease_seconds: float = 20.0, log_limit: int | None = None) -> None:
+    def __init__(
+        self, tmp_path: Path, handler=echo, *, lease_seconds: float = 20.0, log_limit: int | None = None, commands=None
+    ) -> None:
         self.workspace = str(tmp_path / "workspace")
         Path(self.workspace).mkdir()
         self.paths = daemon_paths(self.workspace)
@@ -73,7 +75,7 @@ class FakeCoreDaemon:
         self.daemon.listen()
         self.thread = threading.Thread(
             target=event_stdio.serve_session_multi,
-            kwargs={"session": self.session, "out_stream": self.log, "in_reader": self.daemon.inbox},
+            kwargs={"session": self.session, "out_stream": self.log, "in_reader": self.daemon.inbox, "commands": commands},
             daemon=True,
         )
         self.thread.start()

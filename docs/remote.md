@@ -12,7 +12,8 @@ interface ── ssh ──> server: kvist daemon (a service) ── writes ever
 ## What you need
 
 - A Linux, macOS or BSD server with Kvist installed (`~/.local/share/kvist/kvist-core`, which the installer
-  puts there) and a provider set up there (`ssh -t HOST kvist-core --setup` once).
+  puts there). It needs **no provider of its own**: the server works with the provider you have on this computer (see
+  *Your provider* below).
 - Key login over ssh (ssh-agent or a key without a prompt). Passwords cannot be typed: the connection is
   made without a terminal, and Kvist never asks ssh a question. The first time, run `ssh HOST` yourself once
   so the host key is accepted.
@@ -24,13 +25,68 @@ interface ── ssh ──> server: kvist daemon (a service) ── writes ever
 kvist --remote me@server --remote-workspace /home/me/project
 ```
 
-Kvist asks the server first: is Kvist there, does it speak this version, is the folder real, is a provider
-set up. If the agent is not running for that folder, it offers to **install it as a service** (recommended:
-it starts again after a reboot and after a crash), to start it once, or to cancel. Then the interface opens as
-usual. `--frontend` chooses which (`tui`, `claude`, `opencode`, `glass`, `voice`). In the Ink interfaces the
-command `/remote user@host /folder` does the same from inside, and `/remote off` comes back to this machine.
+The interface opens at once, showing `machine:/folder` where it works, and **asks its questions itself**, in its own dialogs: is Kvist
+on the server and does it speak this version, is the folder real. If the agent is not running for that folder, it
+offers to **install it as a service** (recommended: it starts again after a reboot and after a crash), to start it once, or to cancel. When the
+machine cannot be made ready you choose: try again, work on this computer (the interface starts again here), or close. Nothing is asked on the
+terminal behind the interface. `--frontend` chooses which interface (`tui`, `claude`, `opencode`, `glass`, `voice`). In the interfaces,
+`/remote user@host /folder` does the same from inside, and `/remote off` comes back to this machine.
 
 `user@host:2222` names a port. Names from `~/.ssh/config` work.
+
+## Saved machines
+
+```
+/machines                 # in the interface; or, without one: kvist --machines
+```
+
+A dialog saves the machines you work on, so you do not type addresses again. For each one it keeps the address
+(`login@host`, an IP, or a name from `~/.ssh/config`), the port, a key file, and a folder to work in. One machine can
+be **main**: plain `kvist` then opens on it (`kvist --local` opens on this computer instead; if the main machine
+cannot be used Kvist says why and opens here). `kvist --machine NAME [--remote-workspace FOLDER]` names one.
+
+Signing in, when you add a machine:
+
+- **Host key.** Kvist fetches the machine's key and shows its fingerprint; you confirm it once and it goes to
+  `~/.ssh/known_hosts`. No more running `ssh HOST` by hand first.
+- **As ssh does** (agent, `~/.ssh/config`), or **a key file**: tried at once.
+- **A password**, once. Kvist makes a key for that machine under `~/.kvist/ssh/`, signs in with the password (it
+  exists only in the environment of that one ssh process), puts the key in the machine's `authorized_keys`,
+  proves it works and forgets the password. Nothing with a password in it is ever written. The password path
+  needs OpenSSH 8.4 or newer on your side and has not been run against a server that asks for a password.
+
+The **folder** is per machine: leave it empty for `~/Kvist Workspace` (Kvist offers to create it) or name any
+other, and pick another one each time you connect. **A session belongs to the machine it was made on**: it lives in
+that folder's `.kvist/sessions` there. *Recent sessions* in the dialog lists sessions from every machine and opens
+one where it lives. What you change inside a session (`/models`, `/effort`, `/permissions`) changes
+that machine's Kvist; with `--machine` the settings screens and `--config-op`, `--skill-op`, `--mcp-op` and the
+like also act on that machine, not on this computer. The dialog is **drawn by the interface you are in**: Kvist asks, the interface shows its own lists and fields (the
+terminal ones, OpenCode's, VS Code's, and so on) and nothing is asked in a separate window. When you have chosen, the interface closes and
+opens again on that machine (in VS Code the panel starts its core there). An interface that cannot do this says how to start Kvist on that
+machine instead. `kvist --machines` is the same dialog on the terminal, for when no interface is open.
+
+The list is in `~/.kvist/machines.json` (private). It holds addresses, key paths and folders, never passwords.
+
+## A server with no Kvist, or an old one
+
+Remote work needs the remote core on **both** ends. When you connect, the interface asks the server first. If there is no Kvist there, or
+the one there is too old to do remote work (an installed release that predates it refuses `--remote-op`), Kvist offers to **copy this
+computer's own Kvist to it** (about 110 MB, over the same ssh) and carries on with it. Before it replaces anything the copy is run once on the
+server (`--version`) from a temporary name: a program built for another kind of system (another processor, not Linux) is refused up front, and one
+built against a newer C library than the server has fails that run and the server is left as it was, with the library error shown. What was there
+is kept as `kvist-core.previous`. The question is asked in the interface you are in (or on the terminal at start-up) and nothing is copied
+unattended.
+
+A program built on a very new Linux may need a newer C library than a stable server such as Debian 12 has; a release build, made on an
+older system, does not. From a source checkout there is no program to copy, so the sources are copied instead and set up there (Python 3.11 or
+newer, and internet on the server; on Debian `apt install python3-venv` first). You can also do that by hand:
+
+```
+python scripts/install_on_machine.py NAME      # NAME is a machine saved with kvist --machines
+```
+
+It puts the sources in `~/kvist-src` and a small script as `~/.local/share/kvist/kvist-core`; the self-update, which only replaces a frozen binary,
+leaves it alone. Run it again after changing the sources.
 
 ## What happens when you leave
 
@@ -70,6 +126,31 @@ manage it. `start` runs the daemon once without a service. One daemon serves one
 After a reboot or a crash the daemon starts with a fresh log and says so in the feed. The task that was
 running is not continued by itself (no edit is repeated unseen): `/resume` continues it.
 
+## An agent that is older than the interface
+
+The agent on a server keeps running after you update Kvist there, so a new interface can meet an old agent. Each side says which
+revision of the interface-to-agent contract it speaks (`wire.REVISION`). Before opening, the interface checks both the installed Kvist and the
+running agent: an installed Kvist that is too old gets the offer to copy this computer's Kvist; a running agent that is older gets **"Restart it?"**
+in the interface's own dialog (it says how many other interfaces are connected, because a restart cancels the turn in progress). If you cannot
+be asked, Kvist stops with the command to restart it by hand. It never connects silently to an agent that cannot do what you ask.
+
+## Your provider
+
+The server works with **the provider you have on this computer**: its name, its models and its key. When an interface connects to a
+daemon that has none yet, it sends them over the ssh connection, and the daemon keeps them **in its memory only**. They are never
+written to the server's disk (`config.json` there is not read for them and not changed), so a server that has its own provider
+is not used for this: its own settings stay for running Kvist directly on it. What a session changes about the provider
+(`/models`, `/provider`) is also kept in that memory. The cost is that a daemon that restarted (the server rebooted) does
+not know the key until an interface connects again, which it does by itself. Only the active provider is sent, never the
+other keys. When you pick **another provider inside a session** (`/provider`), the daemon asks the interface that is writing to
+send that provider's settings from this computer (a key you only have here is not asked for again; a ChatGPT sign-in is never started in a
+browser on the server). **ChatGPT** is lent as a short-lived access token only: its refresh token never leaves this computer (it is replaced
+each time it is used, so a copy used on the server would sign you out here), and the interface sends a new access token before the old one runs
+out, for as long as it stays connected. Left disconnected past the token's life, the server asks you to connect again. With no
+provider here, the server's own provider is used if it has one. Custom providers: only the one in use is lent, so the others are not
+in the `/provider` list while you work on a server. The settings screens and `--config-op` that act on the server
+(`--machine`) read that machine's file and do not see the lent provider.
+
 ## Files on the server
 
 `~/.kvist/remote/<id>/` (or under `KVIST_CONFIG_DIR`), private to you: `events.ndjson` (everything the agent
@@ -81,7 +162,7 @@ the end of a turn with nobody connected. The conversation itself is in the folde
 
 | Interface | State |
 |---|---|
-| Ink (`tui`, `claude`) | works: banner, take over, link state, `/remote`; seen in a real terminal against the real core |
+| Ink (`tui`, `claude`) | works: banner, take over, link state, `/machines`, `/remote`; seen in a real terminal against the real core and a real sshd |
 | OpenCode terminal | banner and take over from the shared code; tested, not seen in a terminal; no `/remote` |
 | VS Code | settings `kvist.remote.host` and `kvist.remote.workspace`; banner and take over in the panel; not run in VS Code |
 | JetBrains | handles the take over message; no setting to choose a server; not run |
@@ -96,9 +177,11 @@ the end of a turn with nobody connected. The conversation itself is in the folde
   were never run on those systems.
 - Approvals that nobody is there to answer wait for ever. Auto mode (`/permissions auto on`) decides them
   without you, with the same warning as everywhere.
-- The interface's own settings screens (providers, keys) still edit the configuration of your computer, not of the
-  server. Change the server's with `ssh -t HOST kvist-core`.
+- A login shell on the server that prints text on every ssh command (a banner, a system summary) is tolerated: Kvist
+  skips what comes before its own lines. Printing on **stdin** would not be.
 - `--resume`, `--role`, `--provider` and the model overrides do not reach a running daemon; it keeps what it
   started with.
+- The key is in the daemon's memory: whoever can read that process as your user on the server can read it, and Kvist does
+  not control the server's swap or core dumps.
 
 Protocol details for interface authors: [UI_API.md](UI_API.md), section 8g.

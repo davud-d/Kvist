@@ -37,6 +37,9 @@ class HelloEvent:
     # The running kvist's own version (version.kvist_version()), for a
     # frontend footer or a bug report — never part of the handshake check.
     kvist_version: str | None = None
+    # The folder this core works in, absolute on the machine the core runs on. For a core on a server the proxy adds
+    # ``location`` (machine name, a colon, that path), which is what a frontend shows instead of its own stand-in folder.
+    workspace: str | None = None
     type: ClassVar[str] = "hello"
 
     def to_dict(self) -> dict:
@@ -62,6 +65,8 @@ class HelloEvent:
             payload["commands"] = self.commands
         if self.kvist_version is not None:
             payload["kvist_version"] = self.kvist_version
+        if self.workspace is not None:
+            payload["workspace"] = self.workspace
         return payload
 
 
@@ -840,6 +845,19 @@ class ErrorEvent:
 
     def to_dict(self) -> dict:
         return {"type": self.type, "message": self.message}
+
+
+@dataclass(slots=True)
+class NoticeEvent:
+    """A short word for the person that is not part of the conversation: a frontend shows it where it shows notifications
+    (a toast, a status line), never as something the agent said. ``level`` is ``info``, ``warn`` or ``error``."""
+
+    text: str
+    level: str = "info"
+    type: ClassVar[str] = "notice"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "text": self.text, "level": self.level}
 
 
 @dataclass(slots=True)

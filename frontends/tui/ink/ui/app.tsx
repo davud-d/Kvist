@@ -15,7 +15,7 @@ import type { Starters } from "../starters.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./skins/claude-code/claude.js"
 import { ViewContext } from "./context.js"
 import { NoticeBar, InputBox } from "./input.js"
-import { remoteNotice } from "../remote.js"
+import { relaunchOf, remoteNotice } from "../remote.js"
 import { JobStrip, ScreenLine } from "./jobs.js"
 import { ItemView } from "./skins/kvist/items.js"
 import { Live } from "./skins/kvist/live.js"
@@ -101,6 +101,8 @@ export function App(props: AppProps) {
   // Ctrl+O in the fullscreen skin: commands with their output instead of a one-line summary.
   const [expanded, setExpanded] = useState(false)
   const core = useRef<KvistCore | null>(null)
+  // What a `relaunch` from the core does (set where `switchRemote` is defined).
+  const relaunchRef = useRef<(choice: string) => void>(() => {})
   const stateRef = useRef(state)
   stateRef.current = state
 
@@ -129,7 +131,11 @@ export function App(props: AppProps) {
     instance.on("event", (event: CoreEvent) => {
       dispatch({ type: "event", event })
       if (event.type === "hello" && props.resume !== undefined) dispatch({ type: "resume_start" })
-      if (event.type === "command_result") void redrawSession(event)
+      if (event.type === "command_result") {
+        void redrawSession(event)
+        const relaunch = relaunchOf(event.effects)
+        if (relaunch) relaunchRef.current(relaunch.switch)
+      }
     })
     instance.on("diagnostic", (text: string) => dispatch({ type: "event", event: { type: "debug", message: text.trim() } }))
     instance.on("fault", (error: Error) => note(error.message, "error"))
@@ -195,12 +201,6 @@ export function App(props: AppProps) {
         const { chars } = copyToClipboard(text)
         return note(`Copied ${chars} character${chars === 1 ? "" : "s"} to the clipboard.`)
       }
-      case "remote": {
-        const [host, ...folder] = args
-        if (host?.toLowerCase() === "off" && folder.length === 0) return switchRemote("local")
-        if (!host || folder.length === 0) return note("Usage: /remote user@host /folder-on-the-server, or /remote off.", "warn")
-        return switchRemote(`${host}\t${folder.join(" ")}`)
-      }
       case "tui":
         // A local dialog: it is answered here, never sent to the core.
         return dispatch({
@@ -217,7 +217,9 @@ export function App(props: AppProps) {
           },
         })
     }
-  }, [note, quit, props.skin, switchRemote])
+  }, [note, quit, props.skin])
+
+  relaunchRef.current = switchRemote
 
   const switchFrontend = useCallback((value: string) => {
     if (value === frontendOf(props.skin)) return

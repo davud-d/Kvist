@@ -61,7 +61,7 @@ export function PromptFooter(props: { armed: boolean; stopArmedColor?: boolean }
           when={state().running}
           fallback={
             <text fg={theme.text.muted} wrapMode="none" truncate flexGrow={1} flexShrink={1}>
-              {state().command ? `running /${state().command}…` : state().taskState === "paused" ? "paused · /resume continues" : abbreviateHome(kvist.workspace)}
+              {state().command ? `running /${state().command}…` : state().taskState === "paused" ? "paused · /resume continues" : state().info.location ?? abbreviateHome(kvist.workspace)}
             </text>
           }
         >

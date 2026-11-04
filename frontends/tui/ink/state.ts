@@ -131,7 +131,7 @@ export interface State {
   remote: RemoteLink | null
   // Background jobs of the session on screen, oldest first; finished ones stay until a new session.
   jobs: JobView[]
-  info: { provider: string; model: string; role: string; session: string; title?: string; routedRole?: string; kvistVersion?: string }
+  info: { provider: string; model: string; role: string; session: string; title?: string; routedRole?: string; kvistVersion?: string; location?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
   startedAt: number | null
@@ -482,6 +482,8 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
         role: event.role ?? state.info.role,
         session: event.session ?? "",
         kvistVersion: event.kvist_version ?? state.info.kvistVersion,
+        // Where a core on a server works, as `machine:/folder` (UI_API.md section 8g); a local core sends none.
+        ...(event.location ? { location: event.location } : {}),
       }
       // Any earlier routed role belonged to a core that is gone.
       const first = state.items.length === 0
@@ -596,6 +598,8 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return push(state, (id) => ({ id, kind: "note", tone: "debug", text: event.message }))
     case "error":
       return push(state, (id) => ({ id, kind: "note", tone: "error", text: event.message }))
+    case "notice":
+      return push(state, (id) => ({ id, kind: "note", tone: event.level === "error" ? "error" : event.level === "warn" ? "warn" : "info", text: event.text }))
     case "input_request":
       return { ...state, pending: event }
     case "input_closed":

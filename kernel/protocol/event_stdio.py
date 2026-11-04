@@ -78,13 +78,13 @@ def _stream_events(session: EventSession, out_stream) -> None:
         out_stream.flush()
 
 
-def _write_manifest(out_stream) -> None:
-    """The catalogue of roles, providers, effort levels and so on, sent once after ``hello`` so
-    frontends fill their pickers from the core instead of keeping their own lists."""
+def _write_manifest(out_stream, commands: list[str] | None = None) -> None:
+    """The catalogue of roles, providers, effort levels, commands and so on, sent once after ``hello`` so
+    frontends fill their pickers and their slash list from the core instead of keeping their own lists."""
     from kernel.protocol.core_manifest import build_manifest
     from kernel.protocol.frontend_protocol import ManifestEvent
 
-    out_stream.write(json.dumps(ManifestEvent(manifest=build_manifest()).to_dict()) + "\n")
+    out_stream.write(json.dumps(ManifestEvent(manifest=build_manifest(commands=commands or ())).to_dict()) + "\n")
     out_stream.flush()
 
 
@@ -112,6 +112,11 @@ def pump(
     )
     reader.start()
     _stream_events(session, out_stream)
+
+
+def _workspace_of(agent) -> str | None:
+    workspace = getattr(getattr(agent, "executor", None), "workspace", None)
+    return str(workspace) if workspace else None
 
 
 def build_session_hello(
@@ -142,6 +147,7 @@ def build_session_hello(
         effort=getattr(config, "reasoning_effort", None),
         commands=commands,
         kvist_version=kvist_version(),
+        workspace=_workspace_of(agent),
     )
 
 
@@ -569,15 +575,16 @@ def serve_session_multi(
     """
     if isinstance(resume, str):
         session.agent.select_resume_session(resume)
+    served = sorted({*(commands or {}), "resume"})
     hello = build_session_hello(
         session.agent,
         routed_role=routed_role,
         approval_mode=approval_mode,
-        commands=sorted({*(commands or {}), "resume"}),
+        commands=served,
     )
     out_stream.write(json.dumps(hello.to_dict()) + "\n")
     out_stream.flush()
-    _write_manifest(out_stream)
+    _write_manifest(out_stream, served)
 
     goal_queue: queue.Queue = queue.Queue()
     if resume:

@@ -10,12 +10,20 @@ import json
 import re
 
 HELLO = "remote_hello"        # proxy -> daemon, first line: {op, client, from?, segment?, lang?}
-ATTACHED = "remote_attached"  # daemon -> proxy: {ok, segment, reason?}
+ATTACHED = "remote_attached"  # daemon -> proxy: {ok, segment, needs_credentials?, reason?}
+CREDENTIALS = "remote_credentials"  # proxy -> daemon: {settings} (the person's provider, memory only) or {use_server: true};
+#                                     {for: provider, settings|null} answers NEED; {renew: settings} replaces a token about to run out
+NEED = "remote_need"                # daemon -> proxy: {provider}: the person picked a provider the daemon was not given
 OFFSET = "remote_offset"      # daemon -> proxy: every event line before it has been forwarded
 PING = "remote_ping"          # proxy -> daemon, every PING_SECONDS
 TAKEOVER = "takeover"         # frontend -> daemon
 CONTROL = "control"           # daemon -> frontend: {role, notice}
 STATE = "remote_state"        # proxy -> frontend, and shim -> proxy when it finds no daemon
+
+# What the proxy and the daemon expect of each other. A daemon outlives the frontends that start it, so one started by an older Kvist
+# can be met by a newer proxy; neither side may assume the other has the same code. Raise it when what they say to each other changes.
+# 2: the proxy lends its provider (CREDENTIALS, NEED); a peer that says nothing is revision 1.
+REVISION = 2
 
 PING_SECONDS = 5.0
 LEASE_SECONDS = 20.0

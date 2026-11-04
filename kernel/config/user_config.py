@@ -203,13 +203,81 @@ def _config_path_and_boundary(config_path: Path | None) -> tuple[Path, Path]:
     return path, boundary.resolve(strict=True)
 
 
+# A core that serves someone else's frontend (kernel/ssh) works with that person's provider, key and models, and must
+# never write them to this machine's disk. While they are held, those keys live here and nowhere else: reads take them
+# from memory (whatever the file says about a provider is ignored), writes put them back into memory, and the file keeps
+# exactly what it had for them.
+_held_in_memory: dict[str, object] | None = None
+# Where the held settings of a provider the core does not have yet come from: the frontend that lent the others.
+_lender: Callable[[str], bool] | None = None
+CHATGPT_OAUTH_KEY = "chatgpt_oauth"
+
+
+def provider_key_is_secret_or_choice(key: str) -> bool:
+    """The keys that say which provider is used and how to reach it."""
+    return key in (LLM_PROVIDER_KEY, LLM_MODELS_KEY, CUSTOM_PROVIDERS_KEY, LEGACY_USER_CONFIG_KEY, CHATGPT_OAUTH_KEY) or key.endswith(
+        ("_api_key", "_base_url")
+    )
+
+
+def hold_provider_in_memory(settings: dict[str, object]) -> None:
+    global _held_in_memory
+    _held_in_memory = {key: value for key, value in settings.items() if provider_key_is_secret_or_choice(key)}
+
+
+def add_to_held(settings: dict[str, object]) -> None:
+    """Add another provider's settings (or a renewed token) to what is held, keeping the provider that is in use."""
+    global _held_in_memory
+    if _held_in_memory is None:
+        return
+    held = dict(_held_in_memory)
+    for key, value in settings.items():
+        if not provider_key_is_secret_or_choice(key) or key == LLM_PROVIDER_KEY:
+            continue
+        if isinstance(value, dict) and isinstance(held.get(key), dict):
+            value = _merged(held[key], value)
+        held[key] = value
+    _held_in_memory = held
+
+
+def _merged(old: dict, new: dict) -> dict:
+    """``new`` over ``old``, a level deeper for what is itself a table (models by provider, accounts by id)."""
+    return {key: {**old[key], **value} if isinstance(value, dict) and isinstance(old.get(key), dict) else value for key, value in {**old, **new}.items()}
+
+
+def set_credential_lender(lender: Callable[[str], bool] | None) -> None:
+    global _lender
+    _lender = lender
+
+
+def provider_is_held_in_memory() -> bool:
+    return _held_in_memory is not None
+
+
+def _with_held(on_disk: dict[str, object]) -> dict[str, object]:
+    if _held_in_memory is None:
+        return on_disk
+    kept = {key: value for key, value in on_disk.items() if not provider_key_is_secret_or_choice(key)}
+    return {**kept, **_held_in_memory}
+
+
+def _take_held_and_keep_the_rest(updated: dict[str, object], on_disk: dict[str, object]) -> dict[str, object]:
+    """Put the provider keys of ``updated`` into memory; what goes to the file is its other keys and the file's own provider keys."""
+    global _held_in_memory
+    _held_in_memory = {key: value for key, value in updated.items() if provider_key_is_secret_or_choice(key)}
+    own = {key: value for key, value in on_disk.items() if provider_key_is_secret_or_choice(key)}
+    return {**{key: value for key, value in updated.items() if not provider_key_is_secret_or_choice(key)}, **own}
+
+
 def load_user_config(config_path: Path | None = None) -> dict[str, object]:
     path, boundary = _config_path_and_boundary(config_path)
     try:
-        return read_json_object(
-            path,
-            boundary=boundary,
-            empty_as_missing=True,
+        return _with_held(
+            read_json_object(
+                path,
+                boundary=boundary,
+                empty_as_missing=True,
+            )
         )
     except JsonStorageCorruptError as error:
         raise RuntimeError("User config is invalid.") from error
@@ -218,6 +286,9 @@ def load_user_config(config_path: Path | None = None) -> dict[str, object]:
 
 
 def save_user_config(payload: dict[str, object], config_path: Path | None = None) -> None:
+    if _held_in_memory is not None:
+        _update_user_config(lambda _current: payload, config_path)
+        return
     path, boundary = _config_path_and_boundary(config_path)
     try:
         write_json_object(path, payload, boundary=boundary)
@@ -253,10 +324,16 @@ def _update_user_config(
     config_path: Path | None = None,
 ) -> dict[str, object]:
     path, boundary = _config_path_and_boundary(config_path)
+
+    def change(on_disk: dict[str, object]) -> dict[str, object]:
+        if _held_in_memory is None:
+            return update(on_disk)
+        return _take_held_and_keep_the_rest(update(_with_held(on_disk)), on_disk)
+
     try:
         return update_json_object(
             path,
-            update,
+            change,
             boundary=boundary,
             empty_as_missing=True,
         )
@@ -607,6 +684,19 @@ def save_web_search_settings(
     _update_user_config(save, config_path)
 
 
+def _held_has_what_it_needs(provider: str, required_keys: tuple[str, ...]) -> bool:
+    normalized = normalize_provider(provider)
+    held = _held_in_memory or {}
+    if normalized == "chatgpt":
+        from kernel.providers.chatgpt_auth import has_credentials
+
+        return has_credentials()
+    if is_custom_provider(normalized):
+        return extract_custom_provider_name(normalized) in (held.get(CUSTOM_PROVIDERS_KEY) or {})
+    keys = required_keys or ((USER_CONFIG_KEY,) if normalized == OPENAI_PROVIDER else ())
+    return all(_resolve_secret(_with_held({}), key) for key in keys)
+
+
 def ensure_provider_credentials(
     provider: str,
     validation_model: str,
@@ -629,9 +719,17 @@ def ensure_provider_credentials(
     feedback as `/change-api` already has, instead of silently dropping to
     this primitive fallback.
     """
+    if _lender is not None and not _held_has_what_it_needs(provider, required_keys):
+        _lender(normalize_provider(provider))
     if normalize_provider(provider) == "chatgpt":
-        from kernel.providers.chatgpt_auth import account_status, has_credentials, login
+        from kernel.providers.chatgpt_auth import ChatGPTAuthError, account_status, has_credentials, login
         if not has_credentials(config_path):
+            if _held_in_memory is not None:
+                # A browser opened on the server is of no use to the person; the sign-in is on their own computer.
+                raise ChatGPTAuthError(
+                    "ChatGPT is not signed in on your computer. Sign in there first (/provider, ChatGPT), then pick it here again. "
+                    "/ ChatGPT не выполнен вход на вашем компьютере. Сначала войдите там (/provider, ChatGPT), затем выберите его здесь."
+                )
             login(config_path, account_id=account_status(config_path)["active"] or None)
         set_provider_secret(LLM_PROVIDER_KEY, "chatgpt", config_path)
         return {}

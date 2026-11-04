@@ -47,7 +47,7 @@ def account_status(config_path: Path | None = None) -> dict:
         "active": active,
         "accounts": [
             {"id": key, "email": value.get("email", ""),
-             "connected": bool(value.get("access_token") and value.get("refresh_token") and PLAN_SCOPE in value.get("scopes", []))}
+             "connected": bool(value.get("access_token") and (value.get("refresh_token") or value.get("lent")) and PLAN_SCOPE in value.get("scopes", []))}
             for key, value in accounts.items()
         ],
     }
@@ -128,9 +128,15 @@ def access_token(account_id: str | None = None, config_path: Path | None = None,
     store = _store(config_path)
     selected = account_id or store.get("active", "")
     current = store.get("accounts", {}).get(selected, {})
-    if (not force_refresh and current.get("access_token") and current.get("refresh_token")
+    if (not force_refresh and current.get("access_token") and (current.get("refresh_token") or current.get("lent"))
             and PLAN_SCOPE in current.get("scopes", []) and current.get("expires_at", 0) > time.time() + 60):
         return current["access_token"]
+    if current.get("lent"):
+        # Lent to a core on a server (kernel/ssh/credentials.py): the refresh token stays with its owner, who sends a new access token.
+        raise ChatGPTAuthError(
+            "The ChatGPT access lent by your computer has run out. Connect Kvist from your computer again. "
+            "/ Доступ к ChatGPT, одолженный вашим компьютером, истёк. Подключитесь к Kvist со своего компьютера снова."
+        )
     def update(payload):
         record = payload.get(STORE_KEY, {}).get("accounts", {}).get(selected)
         if not record or not record.get("refresh_token") or PLAN_SCOPE not in record.get("scopes", []):

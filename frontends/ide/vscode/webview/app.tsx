@@ -6,7 +6,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
 import { contextLabel, formatSeconds, formatTokens, outputLines } from "../../../tui/ink/format"
 import { actionTarget, exploreSummary, initialState, lastInflight, reduce, requestIsRussian } from "../../../tui/ink/state"
-import { remoteNotice } from "../../../tui/ink/remote"
+import { relaunchOf, remoteNotice } from "../../../tui/ink/remote"
 import { findProvider, type ConfigInfo, type ProviderInfo, type SessionInfo, type ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
@@ -122,6 +122,9 @@ export function App() {
             // Switching to an existing session redraws it; a new one has nothing to show.
             if (freshSession && core.name === "session" && typeof effects.session === "string") post({ type: "getHistory", name: effects.session })
             if (core.ok && core.name === "provider") post({ type: "getConfig" })
+            // The core asked this panel to work somewhere else (machines, remote): the extension restarts its core there.
+            const relaunch = relaunchOf(effects)
+            if (relaunch) post({ type: "relaunch", machine: relaunch.machine, host: relaunch.host, folder: relaunch.folder, session: relaunch.session })
           }
           if (core.type === "turn_end") post({ type: "getSessions" })
           // Background generation lands after that turn's own refresh above, so the

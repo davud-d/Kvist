@@ -13,10 +13,21 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 
-from kernel.ssh import messages, wire
+from kernel.config.version import kvist_version
+from kernel.protocol.frontend_protocol import PROTOCOL_VERSION
+from kernel.session.durable_json import JsonStorageError
+from kernel.ssh import credentials, machines, messages, wire
 from kernel.ssh.command import Failure, Target, classify, forward_args, ssh_argv
+from kernel.ssh.commands import NAMES
+from kernel.ssh.local_commands import LocalCommands
+from kernel.ssh.prepare import DialogIO, prepare
+from kernel.ssh.tracker import SessionTracker
 
+_HELD_LINES = 20
+_RENEW_CHECK_SECONDS = 60.0
+_RENEW_BEFORE_SECONDS = 15 * 60.0
 GIVE_UP_SECONDS = 600.0
 MAX_DELAY_SECONDS = 30.0
 
@@ -32,8 +43,14 @@ class Proxy:
         language: str | None = None,
         give_up_seconds: float = GIVE_UP_SECONDS,
         max_delay: float = MAX_DELAY_SECONDS,
+        machine: str | None = None,
+        open_session: str | None = None,
+        record=None,
+        prepare_machine: Callable[..., bool] = prepare,
     ) -> None:
         self.target = target
+        self._machine = machine
+        self._prepare = prepare_machine
         self._frontend_in = stdin if stdin is not None else sys.stdin.buffer
         self._frontend_out = stdout if stdout is not None else sys.stdout.buffer
         self._diagnostics = stderr if stderr is not None else sys.stderr
@@ -50,6 +67,19 @@ class Proxy:
         self._greeted = False
         self._offset: int | None = None
         self._segment: int | None = None
+        options = {"record": record} if record is not None else {}
+        self._sessions = SessionTracker(machine, target.workspace, report=self._say, **options)
+        # What a frontend shows as the place it works: the machine's name, then the folder on it.
+        self._place = machine or target.label
+        # The session the person asked to continue; asked of the daemon once, when this frontend drives and the log is read.
+        self._open_session = open_session
+        self._driver = False
+        self._local = LocalCommands(self._write_event)
+        self._ever_connected = False
+        self._first_attempt_failed = False
+        # When the ChatGPT access token lent to the daemon runs out (None: none was lent).
+        self._token_expires: float | None = None
+        self._held: list[bytes] = []
 
     # --- the frontend side ---------------------------------------------------
 
@@ -78,12 +108,32 @@ class Proxy:
         for raw in self._frontend_in:
             if not raw.endswith(b"\n"):
                 raw += b"\n"
-            if not self._send_to_server(raw):
-                self._not_connected()
+            message = wire.decode(raw)
+            if message is not None and self._local.take(message):
+                continue
+            if self._send_to_server(raw):
+                continue
+            if self._holding(message):
+                self._held.append(raw)
+            else:
+                self._refuse(message)
         self._frontend_closed.set()
         proc = self._proc
         if proc is not None:
             proc.terminate()
+
+    def _holding(self, message: dict | None) -> bool:
+        """While the machine is being made ready and the first connection is being made, a command or a request the frontend sends on its
+        own (or the person types) waits for it instead of being refused. Once an attempt has failed the frontend can see the link is down
+        (it is told), so what is sent then is refused."""
+        kind = message.get("type") if message is not None else "goal"
+        waiting = not self._ever_connected and not self._first_attempt_failed
+        return waiting and kind in ("command", "goal") and len(self._held) < _HELD_LINES
+
+    def _release_held(self) -> None:
+        held, self._held = self._held, []
+        for raw in held:
+            self._send_to_server(raw)
 
     def _send_to_server(self, raw: bytes) -> bool:
         proc = self._proc
@@ -97,12 +147,24 @@ class Proxy:
                 return False
         return True
 
-    def _not_connected(self) -> None:
-        text = messages.text("not_connected", self._language)
+    def _notice(self, text: str, level: str = "info") -> None:
+        """A word for the person that is not part of the conversation; a frontend shows it as a notification."""
         if self._greeted:
-            self._write_event({"type": "error", "message": text})
+            self._write_event({"type": "notice", "text": text, "level": level})
         else:
             self._say(text)
+
+    def _refuse(self, message: dict | None) -> None:
+        """A line that cannot go to the server now. The frontend is told in the way it waits for: a command is answered, a turn ends."""
+        kind = message.get("type") if message is not None else "goal"
+        if kind == "command":
+            name = str(message.get("name", "")).lstrip("/")
+            text = messages.text("not_connected", self._language)
+            self._write_event({"type": "command_result", "name": name, "ok": False, "message": text, "effects": {}})
+        elif kind == "goal":
+            self._notice(messages.text("not_connected", self._language), "warn")
+            self._write_event({"type": "turn_end"})
+        # A cancel, a pause or the answer to a dialog that is gone has nobody to reach, and nothing to say.
 
     # --- one connection ------------------------------------------------------
 
@@ -146,6 +208,9 @@ class Proxy:
                 pass
         connected, shim_state, refusal = False, None, None
         for raw in proc.stdout:
+            raw = _what_the_core_said(raw)
+            if raw is None:
+                continue
             message = wire.decode(raw)
             kind = message.get("type", "") if message is not None else ""
             if kind == wire.ATTACHED:
@@ -155,12 +220,24 @@ class Proxy:
                     continue
                 connected, self._connected = True, True
                 self._segment = message.get("segment")
+                if not self._ever_connected:
+                    self._ever_connected = True
+                    self._release_held()
                 self._state("connected")
                 threading.Thread(target=self._ping, args=(proc,), daemon=True).start()
+                threading.Thread(target=self._renew_loop, args=(proc,), daemon=True).start()
+                if message.get("revision", 1) < wire.REVISION:
+                    # Nobody will ask for a provider: this daemon was started by a Kvist that did not know how.
+                    self._notice(messages.text("daemon_old", self._language, host=self.target.label, path=self.target.workspace), "error")
+                elif message.get("needs_credentials"):
+                    self._send_provider()
             elif kind == wire.OFFSET:
                 self._offset, self._segment = message.get("offset"), message.get("segment")
+                self._switch_to_asked_session()
             elif kind == wire.STATE:
                 shim_state = message.get("state")
+            elif kind == wire.NEED:
+                threading.Thread(target=self._lend, args=(message.get("provider"),), daemon=True).start()
             elif not kind.startswith("remote_"):
                 self._forward(raw)
         self._connected = False
@@ -172,10 +249,59 @@ class Proxy:
             return Failure("interrupted", True), connected
         return classify(proc.returncode, "".join(stderr_lines), shim_state=shim_state), connected
 
+    def _send_provider(self) -> None:
+        """The daemon has no provider yet: lend it this computer's, or tell it to use its own when there is none to lend."""
+        settings = credentials.from_this_computer()
+        message = {"type": wire.CREDENTIALS, "settings": settings} if settings else {"type": wire.CREDENTIALS, "use_server": True}
+        self._token_expires = credentials.chatgpt_expiry(settings) if settings else None
+        self._send_to_server(wire.encode(message))
+
+    def _lend(self, provider: object) -> None:
+        """The person picked a provider the daemon was not given: send this computer's settings for it, or say there are none."""
+        if not isinstance(provider, str):
+            return
+        settings = credentials.from_this_computer(provider)
+        self._token_expires = credentials.chatgpt_expiry(settings) if settings else self._token_expires
+        self._send_to_server(wire.encode({"type": wire.CREDENTIALS, "for": provider, "settings": settings}))
+
+    def _renew_loop(self, proc: subprocess.Popen) -> None:
+        """A lent ChatGPT token is short-lived: send a new one well before it runs out, for as long as this connection lasts."""
+        while proc.poll() is None and not self._frontend_closed.wait(_RENEW_CHECK_SECONDS):
+            if self._token_expires is None or self._token_expires - time.time() > _RENEW_BEFORE_SECONDS:
+                continue
+            renewed = credentials.renewal()
+            if renewed is None:
+                continue
+            self._token_expires = credentials.chatgpt_expiry(renewed)
+            self._send_to_server(wire.encode({"type": wire.CREDENTIALS, "renew": renewed}))
+
+    def _located(self, raw: bytes) -> bytes:
+        """The daemon's ``hello`` with ``location`` added: the frontend's own folder here is only a stand-in."""
+        hello = wire.decode(raw)
+        if hello is None:
+            return raw
+        folder = hello.get("workspace") if isinstance(hello.get("workspace"), str) else self.target.workspace
+        return wire.encode({**hello, "location": f"{self._place}:{folder}"})
+
     def _forward(self, raw: bytes) -> None:
-        self._write_frontend(raw)
-        if not self._greeted and wire.event_type(raw) == "hello":
+        kind = wire.event_type(raw)
+        self._write_frontend(self._located(raw) if kind == "hello" else raw)
+        if not self._greeted and kind == "hello":
             self._greeted = True
+        if kind == wire.CONTROL:
+            message = wire.decode(raw) or {}
+            self._driver = message.get("role") == "driver"
+        self._sessions.see(kind, raw)
+
+    def _switch_to_asked_session(self) -> None:
+        """The log has been read: move the daemon to the session the person chose, if it is not already there."""
+        wanted, self._open_session = self._open_session, None
+        if not wanted or wanted == self._sessions.session:
+            return
+        command = {"type": "command", "name": "session", "args": ["switch", wanted]}
+        if self._driver and self._send_to_server(wire.encode(command)):
+            return
+        self._write_event({"type": "error", "message": messages.text("cannot_switch", self._language, session=wanted)})
 
     # --- the loop ------------------------------------------------------------
 
@@ -195,12 +321,71 @@ class Proxy:
             self._say(reason)
         return wire.EXIT_GAVE_UP
 
+    # --- opening ---------------------------------------------------------------
+
+    def _hello_of_the_proxy(self) -> dict:
+        """What the frontend needs to open at once, before anything is known about the machine; the daemon's own ``hello`` replaces it."""
+        return {
+            "type": "hello",
+            "protocol_version": PROTOCOL_VERSION,
+            "provider": "",
+            "models": {},
+            "role": "auto",
+            "session": "",
+            "commands": list(NAMES),
+            "kvist_version": kvist_version(),
+            "location": f"{self._place}:{self.target.workspace}",
+        }
+
+    def _ask_where_to_go(self, ui) -> str | None:
+        label = f"{self._place} ({self.target.workspace})"
+        options = [
+            {"value": "retry", "label": messages.text("try_again", self._language)},
+            {"value": "local", "label": messages.text("work_here", self._language)},
+            {"value": "close", "label": messages.text("close", self._language)},
+        ]
+        return ui.choose_option(messages.text("not_opened_title", self._language, label=label), options, current_value="retry", help_text="")
+
+    def _open(self) -> int | None:
+        """Open the frontend at once, then make the machine ready, asking in the frontend's own dialogs.
+
+        None when it is ready; otherwise the exit code. A machine that cannot be made ready leaves the choice to the person:
+        try again, work on this computer (the frontend starts again here), or close.
+        """
+        self._write_event(self._hello_of_the_proxy())
+        self._greeted = True
+        self._notice(messages.text("connecting", self._language, label=f"{self._place}:{self.target.workspace}"))
+        while True:
+            if self._local.ask(lambda ui: self._prepare(self.target, io=DialogIO(ui), language=self._language)):
+                self._remember_folder()
+                return None
+            choice = self._local.ask(self._ask_where_to_go)
+            if choice == "retry":
+                continue
+            if choice == "local":
+                self._local.relaunch_here()
+                return 0
+            return wire.EXIT_GAVE_UP
+
+    def _remember_folder(self) -> None:
+        if not self._machine:
+            return
+        try:
+            machines.remember_folder(self._machine, self.target.workspace)
+        except (OSError, JsonStorageError) as error:
+            self._say(f"could not note the folder in the machines file: {error}")
+
     def run(self) -> int:
         threading.Thread(target=self._read_frontend, daemon=True, name="remote-frontend").start()
+        not_ready = self._open()
+        if not_ready is not None:
+            return not_ready
         attempt = 0
         down_since: float | None = None
         while True:
             failure, connected = self._attach_once()
+            if not connected and not self._ever_connected:
+                self._first_attempt_failed = True
             if self._frontend_closed.is_set():
                 return 0
             if failure.definitive:
@@ -217,20 +402,30 @@ class Proxy:
                 return 0
 
 
-def call_op(target: Target, operation: str) -> tuple[int, dict | None, str]:
-    """One ``--remote-op`` on the server: its exit code, its JSON answer if it gave one, and ssh's own complaints."""
-    command = ssh_argv(target, ["--remote-op", operation, "--workspace", target.workspace])
-    done = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
-    lines = [line for line in done.stdout.splitlines() if line.strip()]
-    answer = wire.decode(lines[-1].encode("utf-8")) if lines else None
-    return done.returncode, answer, done.stderr
+def _what_the_core_said(raw: bytes) -> bytes | None:
+    """The JSON of a line, without what the server's login shell printed before it; None for a line that holds none.
+
+    A shell startup file that prints (a banner, a system summary) does so for every ssh command, ahead of the core's
+    own output and sometimes on the same line.
+    """
+    start = raw.find(b'{"')
+    return raw[start:] if start >= 0 else None
+
+
+def _json_from(output: str) -> str:
+    """Output of a forwarded one-shot operation from its first JSON line on: what a login shell printed first is not part of it."""
+    lines = output.splitlines(keepends=True)
+    first = next((index for index, line in enumerate(lines) if line.lstrip().startswith(("{", "["))), None)
+    return "".join(lines[first:]) if first is not None else output
 
 
 def run_forwarded(target: Target, argv: list[str], *, language: str | None = None) -> int:
     """A one-shot operation (``--session-op``, ``--remote-op``): run it on the server and pass its answer through."""
     language = language or messages.ui_language()
     command = ssh_argv(target, forward_args(argv, target.workspace))
-    completed = subprocess.run(command, stderr=subprocess.PIPE, text=True)
+    completed = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace")
+    sys.stdout.write(_json_from(completed.stdout))
+    sys.stdout.flush()
     if completed.returncode:
         failure = classify(completed.returncode, completed.stderr, shim_state=None)
         if failure.definitive or completed.returncode == 255:

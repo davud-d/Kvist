@@ -47,6 +47,8 @@ def test_the_remote_command_survives_a_login_shell_that_is_not_posix():
     assert outer[:2] == ["sh", "-c"]
     assert "'/srv/my app; echo hi'" in outer[2]
     assert "$HOME/.local/share/kvist/kvist-core" in outer[2]
+    # The copy Kvist put there wins over whatever else is in PATH.
+    assert outer[2].index("$core") < outer[2].index("command -v kvist-core")
 
 
 def test_ssh_never_asks_a_question_and_stops_option_parsing_before_the_host():
@@ -83,6 +85,8 @@ def test_the_equals_form_of_the_flags_is_dropped_too():
         (255, "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", None, "host_key", True),
         (255, "me@box: Permission denied (publickey).", None, "auth", True),
         (127, "sh: 1: exec: /root/.local/share/kvist/kvist-core: not found", None, "not_found", True),
+        (2, "main.py: error: unrecognized arguments: --remote-op probe", None, "old_kvist", True),
+        (2, "main.py: error: unrecognized arguments: --remote-attach --workspace /x", None, "old_kvist", True),
         (3, "", None, "no_service", True),
         (0, "", "no_service", "no_service", True),
         # A server that is rebooting refuses connections for a while: waiting is the right answer.

@@ -139,7 +139,7 @@ function Banner() {
               {info.kvistVersion ? <Text color={color.dim}> v{info.kvistVersion}</Text> : null}
             </Text>
             <Text color={color.dim} wrap="truncate-end">{detail}</Text>
-            <Text color={color.dim} wrap="truncate-end">{workspace}</Text>
+            <Text color={color.dim} wrap="truncate-end">{info.location ?? workspace}</Text>
             {isHeistDay() ? (
               <Text wrap="truncate-end">
                 <Text color="#ffd23f">{HEIST_STARS}</Text>

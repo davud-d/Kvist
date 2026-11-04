@@ -35,26 +35,12 @@ export interface CommandDeps {
 
 const SWITCH_CODE = 64
 
-// What the core can do that OpenCode has no name for, reachable under the name the core knows.
-// `aliases` are the names OpenCode gives its nearest command.
-const CORE_COMMANDS: { name: string; title: string; group: string; aliases?: string[] }[] = [
-  { name: "resume", title: "Continue interrupted run", group: "Session" },
-  { name: "changes", title: "Show changes", group: "Session", aliases: ["diff"] },
-  { name: "export", title: "Import sessions from other agents", group: "Session" },
-  { name: "context", title: "Show context size", group: "Session", aliases: ["stats"] },
-  { name: "memory", title: "What Kvist remembers", group: "Session" },
-  { name: "doctor", title: "Check the installation", group: "System" },
-  { name: "permissions", title: "Command rules and auto mode", group: "System" },
-  { name: "style", title: "Working style", group: "Agent" },
-  { name: "provider", title: "Switch or configure provider", group: "Provider" },
-  { name: "change-api", title: "Change API key", group: "Provider" },
-  { name: "settings-api", title: "Request settings", group: "Provider", aliases: ["settings"] },
-  { name: "strime", title: "Streaming for a custom provider", group: "Provider" },
-  { name: "del-provider", title: "Delete the custom provider", group: "Provider" },
-  { name: "full-reset", title: "Erase every saved provider and key", group: "Provider" },
-  { name: "web-search-provider", title: "Web search provider", group: "Provider" },
-  { name: "verbose", title: "Toggle verbose mode", group: "System" },
-]
+// The names OpenCode gives its nearest command for something the core calls differently, so a habit still works.
+const HABITS: Record<string, string[]> = {
+  changes: ["diff"],
+  context: ["stats"],
+  "settings-api": ["settings"],
+}
 
 export function createCommands(deps: CommandDeps): KeymapCommand[] {
   const { kvist, dialog, themes, config, toast } = deps
@@ -173,8 +159,13 @@ export function createCommands(deps: CommandDeps): KeymapCommand[] {
     named({ id: "app.exit", title: "Exit the app", group: "System", slash: { name: "exit", aliases: ["quit", "q", "bye"] }, run: () => deps.quit(0) }),
   ]
 
-  const rest = CORE_COMMANDS.filter((command) => !typed.has(command.name)).map((command) =>
-    named({ id: `kvist.${command.name}`, title: command.title, group: command.group, slash: { name: command.name, aliases: command.aliases }, run: (input) => core(command.name, words(input)) }),
-  )
+  // Everything else the person can type comes from the core's own list (the manifest), not from a copy kept here:
+  // each is sent to the core, whose dialogs this interface draws like any other.
+  const rest = (kvist.manifest()?.slash_commands ?? [])
+    .filter((command) => command.via && !typed.has(command.name))
+    .map((command) => {
+      const aliases = [...(command.aliases ?? []), ...(HABITS[command.name] ?? [])].filter((alias) => !typed.has(alias))
+      return named({ id: `kvist.${command.name}`, title: command.description, group: "Kvist", slash: { name: command.name, aliases }, run: (input) => core(command.name, words(input)) })
+    })
   return [...own, ...rest]
 }

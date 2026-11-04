@@ -130,8 +130,33 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="The folder on the server that --remote works in.",
     )
     parser.add_argument(
+        "--remote-key",
+        metavar="FILE",
+        help="The private key file --remote signs in with (a saved machine remembers its own).",
+    )
+    parser.add_argument(
+        "--machine",
+        metavar="NAME",
+        help="Work on a machine saved with --machines; its folder is used unless --remote-workspace names another.",
+    )
+    parser.add_argument(
+        "--machines",
+        action="store_true",
+        help="Open the dialog that saves, changes and chooses machines, then start where it says.",
+    )
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Work on this computer even when a main machine is saved.",
+    )
+    parser.add_argument(
+        "--open-session",
+        metavar="NAME",
+        help="With --remote or --machine: continue this session of that machine once connected.",
+    )
+    parser.add_argument(
         "--remote-op",
-        choices=("probe", "status", "start", "stop", "install-service", "uninstall-service"),
+        choices=("probe", "status", "start", "stop", "install-service", "uninstall-service", "mkdir"),
         help=(
             "Look at, start, stop or install the daemon of --workspace (on the server; with --remote, "
             "over ssh), print JSON, exit."
@@ -1353,8 +1378,17 @@ def needs_setup(args: argparse.Namespace) -> bool:
 def _core_command(args: argparse.Namespace) -> list[str]:
     """What a frontend runs as the core: this program, which with --remote is the ssh proxy."""
     core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
-    if args.remote:
+    if not args.remote:
+        return core
+    # A saved machine is looked up again by the proxy, which then records its sessions under that name.
+    if args.machine:
+        core += ["--machine", args.machine, "--remote-workspace", args.remote_workspace]
+    else:
         core += ["--remote", args.remote, "--remote-workspace", args.remote_workspace]
+        if args.remote_key:
+            core += ["--remote-key", args.remote_key]
+    if args.open_session:
+        core += ["--open-session", args.open_session]
     return core
 
 
@@ -1487,31 +1521,40 @@ def _use_setup_folder(raw: str, args: argparse.Namespace) -> None:
         args.workspace = folder
 
 
-def _use_remote_choice(raw: str, args: argparse.Namespace) -> bool:
-    """Apply /remote's choice; False when the server cannot be used (the reason is printed)."""
-    host, _, folder = raw.strip().partition("\t")
-    if host == "local":
-        args.remote = args.remote_workspace = None
-        return True
-    from kernel.ssh.command import parse_target
-    from kernel.ssh.paths import RemoteError
-    from kernel.ssh.prepare import prepare
+def _use_remote_choice(raw: str, args: argparse.Namespace) -> None:
+    """Apply the third line of the switch file, which a frontend writes when the core asked it to start again elsewhere
+    (``effects.relaunch``): ``@local``, ``@machine<TAB>name<TAB>folder<TAB>session``, or ``host<TAB>folder``.
 
+    Whether the machine can be used is found out by the interface that opens on it, which asks in its own dialogs.
+    """
+    from kernel.ssh import machines as saved_machines
+    from kernel.ssh.entry import apply_choice
+    from kernel.ssh.paths import RemoteError
+
+    word, *rest = raw.rstrip("\r\n").split("\t")
     try:
-        target = parse_target(host, folder)
+        if word == "@local":
+            apply_choice(args, None)
+        elif word == "@machine":
+            name, folder, session = (rest + ["", "", ""])[:3]
+            machine = saved_machines.get_machine(name)
+            if machine is None:
+                raise RemoteError(f"No machine is saved as {name!r}.")
+            apply_choice(args, machine, folder or None, session or None)
+        else:
+            apply_choice(args, None)
+            args.local, args.remote, args.remote_workspace = False, word, (rest[0] if rest else "")
     except RemoteError as error:
         print(str(error), file=sys.stderr)
-        return False
-    args.remote, args.remote_workspace = host, folder
-    return prepare(target)
+        apply_choice(args, None)
 
 
 def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     """Apply the interface the Node app asked for and start it; None hands over to the classic terminal.
 
     The file holds the interface on its first line and, from the setup screen, the folder to work
-    in on the second. A third line, from /remote, is ``host<TAB>folder`` to work on a server, or
-    ``local`` to come back to this machine.
+    in on the second. A third line, which a frontend writes when the core asked it to start again elsewhere,
+    says where (see ``_use_remote_choice``).
     """
     try:
         lines = switch_file.read_text(encoding="utf-8").split("\n")
@@ -1520,9 +1563,8 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     chosen = lines[0].strip().casefold()
     if len(lines) > 1:
         _use_setup_folder(lines[1], args)
-    if len(lines) > 2 and lines[2].strip() and not _use_remote_choice(lines[2], args):
-        # The reason is printed; the person goes back to this machine instead of to a shell.
-        args.remote = args.remote_workspace = None
+    if len(lines) > 2 and lines[2].strip():
+        _use_remote_choice(lines[2], args)
     try:
         save_frontend(chosen)
     except ValueError:
@@ -4013,6 +4055,20 @@ def _closed_notice(agent) -> str | None:
     return closed_notice(closure_language(agent)) if agent.is_session_closed() else None
 
 
+def _stdio_machines(ctx: CommandContext) -> CommandResult:
+    from kernel.ssh.commands import machines_command
+
+    outcome = machines_command(ctx.ui, ctx.args)
+    return _command_cancelled() if outcome is None else CommandResult(outcome.ok, outcome.message, outcome.effects)
+
+
+def _stdio_remote(ctx: CommandContext) -> CommandResult:
+    from kernel.ssh.commands import remote_command
+
+    outcome = remote_command(ctx.ui, ctx.args)
+    return CommandResult(outcome.ok, outcome.message, outcome.effects)
+
+
 def _stdio_export(ctx: CommandContext) -> CommandResult:
     from kernel.session_import.wizard import run_export
 
@@ -4648,6 +4704,8 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "verbose": _stdio_verbose,
     "style": _stdio_style,
     "session": _stdio_session,
+    "machines": _stdio_machines,
+    "remote": _stdio_remote,
     "export": _stdio_export,
     "new": _stdio_new,
     "rename": _stdio_rename,
@@ -4669,6 +4727,27 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
 }
 
 
+def _choose_machine(args: argparse.Namespace) -> None:
+    """``--machines`` opens the dialog; then ``--machine``, ``--local`` and the main machine decide where this launch works."""
+    from kernel.ssh.entry import apply_choice, resolve_machine
+    from kernel.ssh.paths import RemoteError
+
+    try:
+        if args.machines:
+            if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                raise RemoteError("--machines needs a terminal.")
+            from kernel.ssh.machines_wizard import run_menu
+
+            choice = run_menu(TerminalBannerUI(console=console, verbose=False))
+            if choice is None:
+                raise SystemExit(0)
+            apply_choice(args, choice.machine, choice.folder, choice.session)
+        resolve_machine(args)
+    except RemoteError as error:
+        print(str(error), file=sys.stderr)
+        raise SystemExit(2) from error
+
+
 def main() -> None:
     args = (
         _DIRECT_CLI_ARGS
@@ -4680,6 +4759,7 @@ def main() -> None:
         args.no_banner = False
     args.role = resolve_startup_role(args.role)
 
+    _choose_machine(args)
     if args.remote or args.remote_op or args.remote_attach or args.remote_serve:
         from kernel.ssh.entry import dispatch, refuse_unsupported_frontend
         from kernel.ssh.paths import RemoteError
@@ -4692,11 +4772,6 @@ def main() -> None:
         except RemoteError as error:
             print(str(error), file=sys.stderr)
             raise SystemExit(2) from error
-        from kernel.ssh.command import parse_target
-        from kernel.ssh.prepare import prepare
-
-        if not prepare(parse_target(args.remote, args.remote_workspace)):
-            raise SystemExit(2)
 
     if args.login and not args.acp:
         print("--login only makes sense with --acp.", file=sys.stderr)

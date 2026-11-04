@@ -132,7 +132,7 @@ export function Sidebar() {
         </box>
       </scrollbox>
       <box flexShrink={0} gap={1} paddingTop={1}>
-        <FilePath value={abbreviateHome(kvist.workspace)} maxWidth={38} fg={theme.text.muted} />
+        <FilePath value={kvist.state().info.location ?? abbreviateHome(kvist.workspace)} maxWidth={38} fg={theme.text.muted} />
       </box>
     </box>
   )

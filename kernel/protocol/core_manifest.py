@@ -13,6 +13,7 @@ connection adds no measurable work.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 
@@ -20,6 +21,7 @@ def build_manifest(
     *,
     workspace: str | None = None,
     include_themes: bool = False,
+    commands: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Assemble the full frontend manifest.
 
@@ -32,6 +34,10 @@ def build_manifest(
         If *True*, embed the full theme colour maps (50 slots × 2 modes per
         theme).  Defaults to *False* because themes are large and a frontend
         that only needs names can call ``build_theme_manifest`` separately.
+    commands:
+        The names the serving core carries out (``stdio-multi``'s command table).
+        A slash command among them is marked ``via: "core"``, so a frontend lists
+        what this core can really do instead of keeping its own list.
     """
     return {
         "roles": _roles(),
@@ -40,7 +46,7 @@ def build_manifest(
         "model_roles": _model_roles(),
         "default_models": _default_models(),
         "action_types": _action_types(),
-        "slash_commands": _slash_commands(),
+        "slash_commands": _slash_commands(frozenset(commands)),
         "api_settings": _api_settings(),
         "styles": _styles(),
         "themes": _themes(workspace, include_full=include_themes),
@@ -113,17 +119,24 @@ def _action_types() -> list[str]:
     return list(get_args(ActionType))
 
 
-def _slash_commands() -> list[dict[str, Any]]:
-    from kernel.protocol.slash_commands import SLASH_COMMANDS
+def _slash_commands(served: frozenset[str]) -> list[dict[str, Any]]:
+    """Every command a person can type, and how this core serves it.
+
+    ``via`` is ``"core"`` (send a ``command`` message, which the frontend's own dialogs then follow) or absent (only the
+    Classic Legacy terminal has it, so a frontend does not offer it).
+    """
+    from kernel.protocol.slash_commands import SLASH_COMMANDS, STDIO_ONLY_COMMANDS
 
     result: list[dict[str, Any]] = []
-    for cmd in SLASH_COMMANDS:
+    for cmd in (*SLASH_COMMANDS, *STDIO_ONLY_COMMANDS):
         entry: dict[str, Any] = {
             "name": cmd.name,
             "description": cmd.description,
         }
         if cmd.aliases:
             entry["aliases"] = list(cmd.aliases)
+        if cmd.name in served:
+            entry["via"] = "core"
         result.append(entry)
     return result
 

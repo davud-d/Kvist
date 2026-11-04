@@ -22,6 +22,7 @@ from kernel.protocol.frontend_protocol import (
     TaskStateEvent,
     DebugEvent,
     ErrorEvent,
+    NoticeEvent,
     FinalEvent,
     FrontendChannel,
     JobFinishedEvent,
@@ -508,6 +509,10 @@ class EventStreamUI:
 
     def print_error(self, message: str) -> None:
         self._channel.emit(ErrorEvent(redact_text(message)))
+
+    def print_notice(self, message: str, level: str = "info") -> None:
+        """Something to tell the person that is not part of the conversation (a toast, not a transcript row)."""
+        self._channel.emit(NoticeEvent(redact_text(message), level))
 
     def print_sandbox_notice(self, note: str) -> None:
         if note:

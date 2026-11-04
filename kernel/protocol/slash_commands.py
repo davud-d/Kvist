@@ -100,6 +100,15 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
 )
 
 
+# Commands only a frontend talking to a core has (the Classic Legacy terminal does not): the machines dialog and a
+# server named by hand. The core asks its questions as ordinary dialogs and answers with a request to start the
+# frontend again elsewhere (``effects.relaunch``, UI_API.md section 8g).
+STDIO_ONLY_COMMANDS: tuple[SlashCommand, ...] = (
+    SlashCommand("machines", "Saved machines: add one, choose where to work, open a session on another"),
+    SlashCommand("remote", "Work on a server over ssh: /remote user@host /folder, or /remote off"),
+)
+
+
 def slash_commands_context() -> str:
     """Shared command reference for roles answering questions about Kvist."""
     ink = os.getenv("KVIST_COMMAND_FRONTEND") == "ink"
@@ -121,6 +130,7 @@ def slash_commands_context() -> str:
             "- /copy: Copy the last answer to the clipboard",
             "- /debug: Show or hide debug events",
             "- /clear: Clear the screen",
+            "- /machines: Saved machines over ssh: add one (a key, or a password used once), pick the main one and a folder, open a session on another",
             "- /remote: Work on a server over ssh (/remote user@host /folder, /remote off comes back)",
         ])
     return (

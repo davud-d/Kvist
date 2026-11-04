@@ -23,7 +23,7 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 22] = [
+pub const COMMANDS: [Command; 24] = [
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
     Command { needs_argument: true, ..command("rename", "Set the active session's title", "Задать название сессии") },
@@ -45,6 +45,8 @@ pub const COMMANDS: [Command; 22] = [
     command("strime", "Streaming for a custom provider (on | off)", "Потоковый ответ своего провайдера (on | off)"),
     command("del-provider", "Delete the active custom provider", "Удалить текущего своего провайдера"),
     command("full-reset", "Erase every saved provider and key", "Стереть всех провайдеров и ключи"),
+    command("machines", "Saved machines: add one, choose where to work", "Сохранённые машины: добавить, выбрать, где работать"),
+    command("remote", "Work on a server over ssh: /remote user@host /folder, or off", "Работать на сервере по ssh: /remote user@host /папка, или off"),
     command("tui", "Choose the terminal interface", "Выбрать терминальный интерфейс"),
 ];
 

@@ -38,7 +38,7 @@ export interface InputRequest {
 }
 
 export type CoreEvent =
-  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; kvist_version?: string }
+  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; kvist_version?: string; workspace?: string; location?: string }
   | { type: "live_start" }
   | { type: "live_stop" }
   | { type: "status"; user_message: string; status: string; step: number; progress: number; plan_step: string; is_error: boolean }
@@ -100,6 +100,8 @@ export type CoreEvent =
   | { type: "job_notice"; text: string; job_ids: string[] }
   // end_session closed the active session for good; `closed_notice` goes in place of the input.
   | { type: "session_ended"; session_id: string; warned_msg_id: number | null; closed_msg_id: number; reason: string; closed_notice: string }
+  // A short word for the person that is not part of the conversation: shown where notifications go, never as something the agent said.
+  | { type: "notice"; text: string; level?: "info" | "warn" | "error" }
   // A core on a server (UI_API.md section 8g): who may write. An observer only watches; `notice` goes
   // in place of the input and Enter sends `takeover`.
   | { type: "control"; role: "driver" | "observer"; notice: string; holder_idle_seconds?: number }

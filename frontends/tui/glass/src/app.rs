@@ -162,6 +162,8 @@ pub struct App {
     pub menu_in: Tween,
     pub last_typed: Instant,
     pub workspace: String,
+    /// Where the core works when it is on a server: the machine's name, a colon, the folder there. Empty on this computer.
+    pub location: String,
     pub branch: String,
     pub left_in: Tween,
     pub input_pos: Tween,
@@ -255,6 +257,7 @@ impl App {
             menu_in: Tween::settled(0.0),
             last_typed: now,
             workspace: workspace_label(workspace),
+            location: String::new(),
             branch: git_branch(workspace).unwrap_or_default(),
             left_in: Tween::settled(0.0),
             input_pos: Tween::settled(0.0),
@@ -676,6 +679,8 @@ impl App {
                 self.session.ready = true;
                 self.agent.provider = text("provider");
                 self.agent.effort = text("effort");
+                // A core on a server says where it works (`machine:/folder`); this screen's own folder is only a stand-in.
+                self.location = text("location");
                 self.take_models(event.get("models"));
             }
             "plan" => {
@@ -710,6 +715,8 @@ impl App {
             "command_result" => self.on_command_result(event, now),
             // An error outside a turn (a failed command) is only a notice.
             "error" if !self.session.busy => self.notify(text("message"), true, now),
+            // A word for the person that is not part of the conversation.
+            "notice" => self.notify(text("text"), text("level") != "info", now),
             _ => {
                 for change in protocol::translate(event) {
                     self.on_session(change, now);
@@ -762,6 +769,11 @@ impl App {
             self.close_modal(now);
         }
         let effects = event.get("effects");
+        if let Some(choice) = effects.and_then(|e| e.get("relaunch")).and_then(|r| r.get("switch")).and_then(Value::as_str)
+            && !choice.is_empty()
+        {
+            return self.start_again(choice, now);
+        }
         if let Some(effects) = effects {
             // `/new` and switching sessions: the feed starts over, and a
             // switch refills it from the session's journal.
@@ -1388,10 +1400,20 @@ impl App {
     fn switch_frontend(&mut self, chosen: Option<&str>, now: Instant) {
         self.close_modal(now);
         let Some(chosen) = chosen.filter(|value| *value != "glass") else { return };
+        self.write_switch(format!("{chosen}\n"), now);
+    }
+
+    /// The core asked for this interface to end so the launcher starts it again somewhere else (`effects.relaunch`,
+    /// §8g): leave it a note of where (this interface, an empty line, the choice) and exit with the code that says so.
+    fn start_again(&mut self, choice: &str, now: Instant) {
+        self.write_switch(format!("glass\n\n{choice}"), now);
+    }
+
+    fn write_switch(&mut self, contents: String, now: Instant) {
         let Some(path) = std::env::var_os("KVIST_SWITCH_FILE") else {
             return self.notify(strings().frontend_needs_launcher.to_string(), true, now);
         };
-        match std::fs::write(&path, format!("{chosen}\n")) {
+        match std::fs::write(&path, contents) {
             Ok(()) => {
                 self.exit_code = SWITCH_FRONTEND;
                 self.quit = true;
@@ -2034,6 +2056,45 @@ mod tests {
         // The core re-sends what is still open when this frontend takes over.
         app.on_core(&json!({"type": "input_request", "request_id": "r", "kind": "confirm", "title": "Run it?"}), now);
         assert!(matches!(app.modal, Some(Modal::Ask(Some(_)))));
+    }
+
+    #[test]
+    fn the_core_asking_to_start_again_elsewhere_leaves_the_launcher_a_note_and_ends_this_interface() {
+        let mut app = app();
+        let now = Instant::now();
+        let file = std::env::temp_dir().join(format!("kvist-glass-switch-{}", std::process::id()));
+        // SAFETY: no other test of this crate reads or writes this variable.
+        unsafe { std::env::set_var("KVIST_SWITCH_FILE", &file) };
+        app.on_core(&json!({"type": "command_result", "name": "machines", "ok": true, "message": "Opening work",
+            "effects": {"relaunch": {"switch": "@machine\twork\t/srv/app\t", "label": "work"}}}), now);
+        unsafe { std::env::remove_var("KVIST_SWITCH_FILE") };
+        let written = std::fs::read_to_string(&file).unwrap_or_default();
+        std::fs::remove_file(&file).ok();
+        assert_eq!(written, "glass\n\n@machine\twork\t/srv/app\t");
+        assert!(app.quit);
+        assert_eq!(app.exit_code, SWITCH_FRONTEND);
+    }
+
+    #[test]
+    fn a_core_on_a_server_says_where_it_works_and_this_screens_own_folder_is_then_not_shown() {
+        let mut app = app();
+        assert!(app.location.is_empty());
+
+        app.on_core(&json!({"type": "hello", "protocol_version": 1, "location": "work:/srv/app", "workspace": "/srv/app"}), Instant::now());
+
+        assert_eq!(app.location, "work:/srv/app");
+    }
+
+    #[test]
+    fn a_notice_is_a_toast_and_never_a_row_of_the_conversation() {
+        let mut app = app();
+        let now = Instant::now();
+        app.on_core(&json!({"type": "notice", "text": "Connecting to work:/srv/app…", "level": "info"}), now);
+        let toast = app.toast.as_ref().expect("a toast");
+        assert_eq!((toast.text.as_str(), toast.error), ("Connecting to work:/srv/app…", false));
+        app.on_core(&json!({"type": "notice", "text": "Not connected yet", "level": "warn"}), now);
+        assert!(app.toast.as_ref().unwrap().error);
+        assert!(app.session.items.is_empty());
     }
 
     #[test]

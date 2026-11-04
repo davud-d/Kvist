@@ -25,6 +25,31 @@ describe("home screen", () => {
   })
 })
 
+describe("where the core works", () => {
+  test("a core on a server shows its machine and the folder there under the prompt, not this computer's stand-in folder", async () => {
+    app = await mount({ env: { FAKE_LOCATION: "work:/srv/app" } })
+    await app.waitFor("work:/srv/app")
+    expect(app.frame()).not.toContain(app.workspace)
+  })
+
+  test("a core on this computer shows the folder as before", async () => {
+    app = await mount()
+    await app.waitFor("fake-fast")
+    expect(app.frame()).not.toContain("work:")
+  })
+})
+
+describe("notifications", () => {
+  test("what a proxy says while the machine is made ready is a toast over the home screen, not a row that replaces it", async () => {
+    app = await mount({ env: { FAKE_NOTICE: "Connecting to box:/srv/app…" } })
+    await app.waitFor("Connecting to box")
+    const frame = app.frame()
+    // The home screen is still the home screen: the prompt with its hint, no transcript, no sidebar.
+    expect(frame).toContain("Ask anything")
+    expect(frame).not.toContain("New session")
+  })
+})
+
 describe("a turn", () => {
   test("a chat reply replaces the home screen with the transcript", async () => {
     app = await mount()
@@ -214,6 +239,61 @@ describe("commands and dialogs", () => {
     expect(app.quitCodes).toEqual([64])
   })
 
+  test("the slash list is the core's own: what it carries out is offered with its description, what only Classic Legacy has is not", async () => {
+    app = await mount({ height: 40, env: { FAKE_MANIFEST: "1" } })
+    await app.waitFor("fake-fast")
+    await app.type("/m")
+    await app.waitFor("/machines")
+    const frame = app.frame()
+    expect(frame).toContain("/memory")
+    expect(frame).toContain("/models")
+    expect(frame).toContain("the core's machines")
+    await app.type("achines")
+    expect(app.frame()).toContain("/machines")
+  })
+
+  test("a command the core lists without `via` is not offered, since no running core can carry it out", async () => {
+    app = await mount({ height: 40, env: { FAKE_MANIFEST: "1" } })
+    await app.waitFor("fake-fast")
+    await app.type("/bu")
+    await app.settle(150)
+    expect(app.frame()).not.toContain("/bug")
+    expect(app.frame()).not.toContain("classic only")
+  })
+
+  test("without a manifest only OpenCode's own commands are listed", async () => {
+    app = await mount({ height: 40 })
+    await app.waitFor("fake-fast")
+    await app.type("/me")
+    await app.settle(100)
+    expect(app.frame()).not.toContain("/memory")
+  })
+
+  test("/machines is the core's dialog drawn here, and its answer ends this interface for the launcher to start it again where it says", async () => {
+    app = await mount({ height: 40, env: { FAKE_MANIFEST: "1" } })
+    await app.waitFor("fake-fast")
+    await app.type("/machines")
+    await app.settle(100)
+    app.enter()
+    await app.waitFor("me@box")
+    expect(app.frame()).toContain("This computer")
+    app.enter()
+    for (let tries = 0; tries < 100 && !app.quitCodes.length; tries += 1) await app.settle(50)
+    // This interface, an empty line, then where to open next.
+    expect(readFileSync(path.join(app.workspace, "switch"), "utf8")).toMatch(/^[a-z]+\n\n@machine\twork\t\/srv\/app\t$/)
+    expect(app.quitCodes).toEqual([64])
+  })
+
+  test("/remote names a server and /remote off comes back", async () => {
+    app = await mount({ height: 40, env: { FAKE_MANIFEST: "1" } })
+    await app.waitFor("fake-fast")
+    await app.type("/remote me@box /srv/my app")
+    await app.settle(100)
+    app.enter()
+    for (let tries = 0; tries < 100 && !app.quitCodes.length; tries += 1) await app.settle(50)
+    expect(readFileSync(path.join(app.workspace, "switch"), "utf8")).toMatch(/\n\nme@box\t\/srv\/my app$/)
+  })
+
   test("tab cycles the role", async () => {
     app = await mount({ height: 40, env: { FAKE_MANIFEST: "1" } })
     await app.waitFor("fake-fast")
@@ -382,7 +462,7 @@ describe("a damaged setup", () => {
 
 describe("long lists", () => {
   test("the slash list scrolls past its first rows", async () => {
-    app = await mount({ height: 40 })
+    app = await mount({ height: 40, env: { FAKE_MANIFEST: "1" } })
     await app.waitFor("fake-fast")
     await app.type("/")
     await app.waitFor("/agents")

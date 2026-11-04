@@ -7,7 +7,9 @@ import functools
 import os
 import sys
 
+from kernel.ssh import machines
 from kernel.ssh.command import parse_target
+from kernel.ssh.machines import Machine
 from kernel.ssh.paths import RemoteError
 
 # Frontends that start this program as their core and talk to it over stdio.
@@ -36,11 +38,72 @@ def _serve_daemon(args: argparse.Namespace) -> None:
         approval_mode=args.approval_mode,
         commands=STDIO_COMMANDS,
     )
-    run_daemon(workspace, serve=serve)
+    run_daemon(workspace, serve=serve, wait_for_credentials=True)
+
+
+# What looks at or changes a machine's own state, so with --remote it runs on that machine: its sessions,
+# memory, provider settings, skills, MCP servers, connections.
+_FORWARDED_OPERATIONS = ("session_op", "memory_op", "remote_op", "config_op", "config_info", "skill_op", "mcp_op", "connection_op")
+# Anything that is not a frontend starting; the main machine is for starting a frontend only.
+_NOT_A_LAUNCH = (
+    *_FORWARDED_OPERATIONS, "remote_attach", "remote_serve", "doctor", "commit_message", "complete", "complete_server",
+    "selection_task", "tray_op", "acp", "setup", "installer", "machines",
+)
 
 
 def _is_operation(args: argparse.Namespace) -> bool:
-    return bool(args.session_op or args.memory_op or args.remote_op)
+    return any(getattr(args, name, None) for name in _FORWARDED_OPERATIONS)
+
+
+def target_of(args: argparse.Namespace):
+    """The server this invocation names, checked."""
+    return parse_target(args.remote, args.remote_workspace or "", args.remote_key)
+
+
+def apply_choice(args: argparse.Namespace, machine: Machine | None, folder: str | None = None, session: str | None = None) -> None:
+    """Point this launch at ``machine`` (None: this computer) in ``folder``, opening ``session`` if named."""
+    args.open_session = session
+    if machine is None:
+        args.local = True
+        args.machine = args.remote = args.remote_workspace = args.remote_key = None
+        return
+    args.local = False
+    args.machine, args.remote, args.remote_key = machine.name, machine.spec, machine.key
+    args.remote_workspace = folder or machine.work_folder
+
+
+def _has_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _starts_a_frontend(args: argparse.Namespace) -> bool:
+    from kernel.config.user_config import get_saved_frontend
+
+    if any(getattr(args, name, None) for name in _NOT_A_LAUNCH):
+        return False
+    if not _has_terminal():
+        return False  # a frontend needs one; without it Kvist falls back to the local terminal anyway
+    return (args.frontend or get_saved_frontend()) in ("tui", "claude", "glass", "voice", "opencode")
+
+
+def resolve_machine(args: argparse.Namespace) -> None:
+    """Turn ``--machine NAME``, or the main machine, into the remote flags the rest of the program reads.
+
+    ``--local`` wins over everything. The main machine is only for starting a frontend, never for a headless operation.
+    """
+    if args.local:
+        apply_choice(args, None)
+        return
+    if args.machine:
+        machine = machines.get_machine(args.machine)
+        if machine is None:
+            raise RemoteError(f"No machine is saved as {args.machine!r}. See them with kvist --machines.")
+    elif not args.remote and _starts_a_frontend(args):
+        machine = machines.main_machine()
+    else:
+        return
+    if machine is not None:
+        apply_choice(args, machine, args.remote_workspace, args.open_session)
 
 
 def dispatch(args: argparse.Namespace, argv: list[str]) -> int | None:
@@ -67,7 +130,7 @@ def _dispatch(args: argparse.Namespace, argv: list[str]) -> int | None:
             return run_op(args.remote_op, _server_workspace(args))
         return None
 
-    target = parse_target(args.remote, args.remote_workspace or "")
+    target = target_of(args)
     if _is_operation(args):
         from kernel.ssh.proxy import run_forwarded
 
@@ -75,7 +138,7 @@ def _dispatch(args: argparse.Namespace, argv: list[str]) -> int | None:
     if args.frontend == "stdio-multi":
         from kernel.ssh.proxy import Proxy
 
-        return Proxy(target).run()
+        return Proxy(target, machine=args.machine, open_session=args.open_session).run()
     return None
 
 

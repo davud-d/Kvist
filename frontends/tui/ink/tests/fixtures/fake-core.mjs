@@ -13,7 +13,10 @@ if (args.includes("--session-op")) {
   process.exit(0)
 }
 
-out({ type: "hello", protocol_version: process.env.FAKE_PROTOCOL ? Number(process.env.FAKE_PROTOCOL) : 1, provider: "fake", models: { fast: "fake-fast" }, role: "auto", session: "chat-fake" })
+out({ type: "hello", protocol_version: process.env.FAKE_PROTOCOL ? Number(process.env.FAKE_PROTOCOL) : 1, provider: "fake", models: { fast: "fake-fast" }, role: "auto", session: "chat-fake", ...(process.env.FAKE_LOCATION ? { workspace: "/srv/app", location: process.env.FAKE_LOCATION } : {}) })
+
+// What a proxy to a server says before the machine is ready: a notification, not a message of the agent.
+if (process.env.FAKE_NOTICE) out({ type: "notice", text: process.env.FAKE_NOTICE, level: "info" })
 
 // Only for frontends that fill their pickers from the manifest (UI_API.md §7); the Ink app ignores it.
 if (process.env.FAKE_MANIFEST) {
@@ -31,7 +34,12 @@ if (process.env.FAKE_MANIFEST) {
     model_roles: ["fast", "smart"],
     default_models: {},
     action_types: [],
-    slash_commands: [],
+    // What the real core lists: the commands it carries out say so (`via`), the launcher's are marked, a classic-only one has none.
+    slash_commands: [
+      ...["memory", "permissions", "resume", "doctor", "provider", "web-search-provider", "change-api", "strime", "full-reset", "del-provider", "style", "context", "changes", "export", "verbose", "settings-api", "machines", "remote"]
+        .map((name) => ({ name, description: `the core's ${name}`, via: "core" })),
+      { name: "bug", description: "Save a local bug report (classic only)" },
+    ],
     api_settings: [],
     styles: [],
     themes: { available: [], slots: [] },
@@ -314,6 +322,21 @@ const handlers = {
     const smart = (await ask({ title: "Smart model", options: SMALL_LIST, current_value: "beta" })).value
     if (smart == null) return cancelled("models")
     finish("models", true, `Models updated. / ${TR}`, { provider: "fake", models: { fast, smart }, warnings: [`Model beta is slow. / ${TR}`] })
+  },
+  // The core asks, the frontend draws, and the answer is a request to start the frontend again somewhere else.
+  async machines() {
+    const options = [option("work", "work", "me@box · /srv/app"), option("@local", "This computer", "work here")]
+    const value = (await ask({ title: "Machines", options, current_value: "work" })).value
+    if (value == null) return cancelled("machines")
+    const relaunch = value === "@local"
+      ? { switch: "@local", label: "this computer", machine: null, host: null, folder: null, session: null }
+      : { switch: "@machine\twork\t/srv/app\t", label: "work (/srv/app)", machine: "work", host: "me@box", folder: "/srv/app", session: null }
+    finish("machines", true, `Opening ${relaunch.label}. / ${TR}`, { relaunch })
+  },
+  async remote(args) {
+    if (args.length < 2 && args[0] !== "off") return finish("remote", false, `Usage: /remote user@host /folder, or /remote off. / ${TR}`)
+    const relaunch = args[0] === "off" ? { switch: "@local", label: "this computer" } : { switch: `${args[0]}\t${args.slice(1).join(" ")}`, label: args[0], host: args[0], folder: args.slice(1).join(" ") }
+    finish("remote", true, `Opening ${relaunch.label}. / ${TR}`, { relaunch })
   },
   async session(args) {
     if (args.length) return finish("session", true, `Switched to session ${args[1] ?? args[0]}. / ${TR}`, { session: args[1] ?? args[0], sessions: ["chat-fake", "old"], has_checkpoint: false, changed: true })

@@ -59,6 +59,8 @@ export type ToHost =
     | { type: 'pause' }
     // A core on a server lets one frontend write; this asks to be that one.
     | { type: 'takeover' }
+    // The core asked the panel to work on another machine (a saved one, an address, or null for this computer).
+    | { type: 'relaunch'; machine: string | null; host: string | null; folder: string | null; session: string | null }
     | { type: 'stopHelper'; agentId: string }
     | { type: 'pickFiles' }
     | { type: 'getConfig' }

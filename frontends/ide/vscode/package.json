@@ -163,6 +163,11 @@
           "default": "",
           "markdownDescription": "Path to the Kvist executable. Leave empty to use the binary bundled with the extension."
         },
+        "kvist.remote.machine": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "A machine saved with `/machines` to work on instead of this computer; it brings its own key, port and folder. `/machines` sets it for you. Changes apply when the panel reloads."
+        },
         "kvist.remote.host": {
           "type": "string",
           "default": "",

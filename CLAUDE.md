@@ -708,6 +708,28 @@ frontend -stdio-> proxy -ssh -T-> kvist-core --remote-attach (attach.py: a byte 
   on_ready=)`. One per workspace (`paths.daemon_id`), files in `<config dir>/remote/<id>/` (0700; `events.ndjson`, `sock` 0600,
   `daemon.lock` held with `flock` for its whole life, which is how "is it running" is answered, `daemon.json`, `daemon.log`).
   The core never sees EOF when a client leaves (`ClientInbox` ends only on `remote_stop`/SIGTERM); an approval waits for ever.
+- **A daemon outlives the code that started it** (`wire.REVISION`, reported as `remote_attached.revision`, `remote_status.revision` and `probe.remote_revision`; a peer
+  that says nothing is revision 1): after Kvist is updated on a server the old process keeps running, so `prepare` offers to copy Kvist when the installed one is
+  older, and to **restart** (`--remote-op stop` then `start`) a running daemon that is older; `Proxy` also refuses to lend to one (a `notice` with the manual command).
+  **Raise `REVISION` whenever what the proxy and the daemon say to each other changes**, or a new interface connects silently to an old agent. This was missed once:
+  the provider lending shipped without it and the person's ChatGPT choice kept opening a browser on the server. Tests: `test_ssh_prepare.py`,
+  `scripts/e2e_remote_skew.py` (a real old commit's daemon, a new interface).
+- **The provider is the person's, held in the daemon's memory only** (`credentials.py`, `user_config.hold_provider_in_memory`): the daemon
+  (`run_daemon(wait_for_credentials=True)`) listens first and builds the agent only after a frontend sent `remote_credentials`
+  (`remote_attached.needs_credentials` tells the proxy to; `credentials.from_this_computer()`: active provider, its models, its own key and base URL,
+  never another provider's key; `{use_server: true}` when there is nothing to lend: no provider, no key, ChatGPT OAuth, whose tokens are rewritten by
+  their holder). While held, `user_config` reads every provider-ish key (`provider_key_is_secret_or_choice`: `llm_provider`, `llm_models`,
+  `custom_providers`, `*_api_key`, `*_base_url`) from memory and ignores the file's, and **a save puts them back into memory and leaves the file's own
+  values as they were**, so `ensure_provider_credentials`, `/models`, `/change-api` in a remote session never write a key to the server. The
+  **Switching provider in a session**: `ensure_provider_credentials` calls `user_config._lender` (the daemon's `borrow`) when the held settings lack the
+  provider; the daemon sends `remote_need {provider}` to the driver only, the proxy answers `remote_credentials {for, settings|null}` from this
+  computer's config, `add_to_held` merges it without changing the provider in use. **ChatGPT is lent as an access token with `lent: true` and no
+  refresh token** (`chatgpt_auth.access_token` never refreshes such a record and says to reconnect when it ran out): the refresh token is rotated on use,
+  so a copy used on the server would sign the person out locally. `Proxy._renew_loop` forces a local refresh and sends `{renew}` 15 min before expiry.
+  In held mode a missing ChatGPT sign-in is an error text, never `login()` (a browser on the server). Custom providers: only the one in use is lent,
+  so the others are absent from the `/provider` list remotely. The holder is a module global of the daemon process: do not use it in a process that serves anyone else. A restarted daemon asks again at the next
+  attach. Forwarded `--config-op`/`--skill-op` run in another process and see the server's own file, not the lent provider. Tests:
+  `test_ssh_credentials.py`, `scripts/e2e_remote_smoke.py` (the server has no provider; checks its `config.json` stays clean).
 - **One mechanism for replay and tail** (`event_log.py`): a client thread reads `events.ndjson` from an offset and waits on a
   `Condition` the writer notifies. A fresh attach (`from: null`) gets `fresh_replay`: finished turns lose
   `session_events._TRANSIENT_EVENTS`, the turn in progress stays whole, an `input_request` comes back only while
@@ -731,14 +753,63 @@ frontend -stdio-> proxy -ssh -T-> kvist-core --remote-attach (attach.py: a byte 
   (`parse_target`: nothing that starts with `-`), the remote command is `sh -c <quoted>` (the login shell may be fish) and finds
   `kvist-core` in PATH or `~/.local/share/kvist`. `--session-op`/`--memory-op` are forwarded one-shot with the folder replaced
   (`forward_args`). The local `--workspace` is an empty stand-in (`paths.local_placeholder`).
-- **Launcher** (`prepare.py`): before a frontend opens, `--remote-op probe` over ssh, then, with a terminal and no daemon, a question: install the
-  service / start once / cancel. `/remote HOST /folder` in Ink writes `iface\n\nHOST\tfolder` to `KVIST_SWITCH_FILE` (exit 64); a failed prepare
-  returns to this machine. Voice gets `--continue` (a join must not open a session over the one in progress); VS Code skips `--session-op launch`.
+- **The interface opens first and the proxy asks inside it** (`Proxy._open`, `prepare.py`): the launcher no longer probes or asks anything (an earlier
+  version asked on the raw terminal before the frontend opened; the person rejected that: *the frontend asks, in its own dialogs*). The proxy writes its own
+  `hello` at once (`location` set, `provider` empty; the daemon's real `hello` follows and replaces it, so frontends see two), says "Connecting to …"
+  as a **`notice` event** (a toast/status word, never a `message`: a `message` became a transcript row and threw OpenCode off its home screen), then runs `prepare` through `DialogIO` on `LocalCommands.ask` (input requests to the frontend, replies routed by `request_id`): probe,
+  create the folder, copy Kvist (below), install the service or start once. Failure asks "Could not open X": try again / work on this computer (a
+  `command_result` with `effects.relaunch = @local`) / close (exit 75). A ready machine has its folder remembered. Commands and requests the frontend sends before the first connection (OpenCode may send its own on
+  start, the person may type) are held (`_held`, 20 lines) and sent on the first attach; after the first failed attempt a command is answered with a failed
+  `command_result` and a request with a `notice` + `turn_end`, so the frontend never waits for ever on "running /new…". `remote_state` is not used for this phase:
+  the Ink skin draws it in place of the dialog. `/remote HOST /folder` writes `iface\n\nHOST\tfolder` to `KVIST_SWITCH_FILE` (exit 64). Voice gets `--continue` (a join must not open a session over the one in progress); VS Code skips `--session-op launch`.
+- **Saved machines** (`machines.py`, `access.py`, `machines_wizard.py`, `tracker.py`, `entry.py`): `<config dir>/machines.json` (private, `durable_json`)
+  holds, per machine, `host`/`port`/`key`/`folder`/`folders`, plus `default` (the main machine; null = this computer) and the recent
+  `sessions`. **A password is never stored**: `access.install_key_with_password` makes `<config dir>/ssh/<name>`, signs in once with
+  `SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force` (the password only in that ssh child's environment, argv and disk never), appends the public key to the
+  server's `authorized_keys`, proves the key, and deletes a key it made if anything failed (a key that existed is never deleted). The host key
+  is fetched with `ssh-keyscan`, shown, confirmed and appended to `~/.ssh/known_hosts` (`ssh -G` resolves a `~/.ssh/config` name first).
+  **The dialog is drawn by the frontend, not by the launcher**: `/machines` and `/remote` are core commands (`kernel/ssh/commands.py`, in `STDIO_COMMANDS`)
+  that ask through `ui.choose_option/prompt_text/prompt_secret` (`run_menu` -> `Choice(machine, folder, session)`), i.e. ordinary `input_request`s every
+  frontend already renders, and `prepare` asks its own questions through `DialogIO` the same way (`TerminalIO` for the launcher). They are about *this
+  computer's* machines and ssh, so for a frontend on a server `proxy.Proxy` answers them itself (`local_commands.LocalCommands`: its own `FrontendChannel`
+  and `EventStreamUI`, replies routed by `request_id`, one pump thread so dialogs and the `command_result` stay in order) and the server's core never sees them.
+  The answer is `effects.relaunch = {switch, label, machine, host, folder, session}`: the frontend ends and the launcher starts it again there (no live
+  switch). Ink, OpenCode (`kvist.tsx startAgain`), Glass and Voice write `KVIST_SWITCH_FILE` as `<id>\n\n<switch>` and exit 64; the VS Code panel saves
+  `kvist.remote.machine/host/workspace` and restarts its core; JetBrains, Tauri, Electron and ACP only show the message (it says how to start Kvist there).
+  `switch` is `@local`, `@machine<TAB>name<TAB>folder<TAB>session` or `host<TAB>folder` (`main._use_remote_choice`). `kvist --machines` is the same
+  `run_menu` on `TerminalBannerUI` for use with no interface open.
+  `entry.resolve_machine` turns `--machine` or the main machine into `--remote/--remote-key/--remote-workspace` (`--local` wins; the main machine
+  is for starting a frontend with a terminal only, never for an operation) and `settle_remote` runs `prepare`: a failed main machine opens
+  locally, a named one exits 2. `main._core_command` hands the frontend `--machine NAME` (the proxy looks the machine up again and records its
+  sessions) or the raw `--remote/--remote-key`. `--open-session` is acted on once by the proxy, as the driver, after the first `remote_offset`
+  (the log is read); an observer is told with an `error` event. With `--remote` the operations that touch a machine's own state are forwarded
+  (`entry._FORWARDED_OPERATIONS`: session, memory, config, config-info, skill, mcp, connection, remote). The standard folder is `~/Kvist Workspace`
+  (`--remote-op mkdir` creates it). A server login shell that prints on every command (this user's does, with image bytes) is tolerated:
+  `proxy._what_the_core_said` drops what precedes `{"` and `_json_from` does the same for forwarded operations; subprocess output is decoded with
+  `errors="replace"`. Found only by the real sshd tests: `test_ssh_real_sshd.py` (a user-level `/usr/bin/sshd` with `SetEnv HOME/KVIST_CONFIG_DIR`, a
+  wrapper `KVIST_SSH` that ignores the user's ssh config and known hosts; skipped without sshd). **The password path was only run against a stub**
+  (an unprivileged sshd cannot check passwords). Real-terminal check done through a pty: add a machine by key file, trust the host key, start it once,
+  work, `/machines`, reopen on the machine.
+- **Where it works is shown as `machine:/folder`**: `HelloEvent.workspace` (absolute, from `executor.workspace`) and, added by the proxy only (`proxy._located`),
+  `location` = saved machine name (else `user@host`) + `:` + that path; the frontends that already showed a folder show `location` in its place (Ink claude skin
+  `info.location ?? workspace`, OpenCode footer, Glass status line, which shortens the path but never the machine name). Frontends that showed no folder are
+  untouched. The frontend's own `--workspace` is a stand-in under `<config dir>/remote/local/` and must never be what the person reads.
+- **No Kvist, or an old one, on the server**: a missing core is exit 127 (`not_found`); an installed release without the remote core answers argparse's
+  `unrecognized arguments: --remote-op` and `command.classify` makes that the definitive `old_kvist`, not "not answering". Either way `prepare` (when someone
+  can answer) offers, in the frontend's dialog, `deploy.install_core`: **this computer's own frozen `kvist-core` copied as it is** (`install_binary`: `uname -sm` must match this machine
+  after normalising amd64/aarch64; the stream goes to `kvist-core.new`, is run once there with `--version`, and only then replaces `kvist-core`, the old one
+  becoming `kvist-core.previous`; a program built against a newer glibc than the server's fails that run and nothing is replaced), or, from a checkout (no frozen
+  program), the sources. `remote_command` runs `$HOME/.local/share/kvist/kvist-core` before anything in PATH, so the copy always wins. **A binary built on
+  a current Arch very likely needs a newer glibc than Debian 12's 2.36; that was not run, and the check exists for it.** The by-hand route, `scripts/install_on_machine.py NAME`
+  (`kernel/ssh/deploy.py`) tars `git ls-files -co` of `kernel`, the classic and Zed frontends and the two requirement files (no tests) to `~/kvist-src` on
+  the machine, makes `.venv` there (Python >= 3.11; needs `python3-venv` on Debian) and replaces `~/.local/share/kvist/kvist-core` with a shim marked
+  `kvist-dev-shim` (the release binary becomes `kvist-core.release`, never overwritten twice). Tested through the real sshd with the dependency step
+  off; **the dependency install itself and a real Debian 12 were not run.**
 - **Service** (`service.py`, `--remote-op install-service`): systemd user unit (`Restart=on-failure`, `RestartPreventExitStatus=2` for
   "no provider", linger), macOS LaunchAgent (starts at login, not at boot, said so), crontab `@reboot` (no restart after a crash). Renderers are
   pure and tested; **macOS and BSD were never run**. Windows is not a server (`daemon.require_posix`).
 - **Frontends**: all of them draw `control` (banner in the input's place, Enter = `takeover`) and `remote_state`; see the table in
-  `docs/remote.md` for what was actually seen. Not wired: choosing a server in JetBrains, Tauri, Electron; `/remote` outside Ink; ACP and the classic
+  `docs/remote.md` for what was actually seen. Not wired: choosing a server in JetBrains, Tauri, Electron; `/remote` and `/machines` outside Ink (`kvist --machines` works for every launcher); ACP and the classic
   REPL cannot use it. **`frontends/web-local` (`kvist_web`) has its own, separate paramiko bridge for remote agents; the two were not merged.**
 - Tests: `test_ssh_*.py` (daemon over a fake core, proxy over a stand-in `ssh` that runs the real shim, command/lease/service/prepare),
   `scripts/e2e_remote_smoke.py` (real core + fake provider: a frontend killed mid-turn, the next one takes over and sees it finish),
@@ -1174,8 +1245,7 @@ No build step: `src/main.ts` imports `@opentui/solid/preload` (Solid's JSX trans
   `explored` labels, drawn as OpenCode's "Explored: N reads"), `approval` (SessionQuestion: once / always / reject,
   `ARM_MS` guard, `Allow always` only when the core sent `remember_pattern`), `palette`, `dialogs` (sessions, roles,
   effort, models via the core's `catalog` + fast/smart/both → `models PROVIDER FAST SMART`, rename, status, help),
-  `footers`, `sidebar`. `src/commands.tsx` lists the commands under OpenCode's ids and slash names plus `kvist.<name>`
-  for what only the core has. Route: home until an item other than the banner or a note exists. Notes (a command's result like "Role set to: coder", warnings, skill/helper notices) are toasts everywhere and never transcript rows (`visibleItems`); only an error note stays on the page (and is a toast on Home).
+  `footers`, `sidebar`. `src/commands.tsx` lists the commands under OpenCode's ids and slash names; every other slash command comes from **the core's manifest** (`slash_commands` with `via: "core"`; an entry without `via` is classic-only and not offered), not from a copy kept here, so a command the core gains appears without touching OpenCode (`createCommands` runs in a memo, rebuilt when the manifest arrives). **The compiled `frontends/tui/opencode/dist/kvist-opencode` is what the launcher prefers over Bun on the sources: rebuild it (`bun build.ts dist/kvist-opencode`) after a change or the old list keeps showing.** Route: home until an item other than the banner or a note exists. Notes (a command's result like "Role set to: coder", warnings, skill/helper notices) are toasts everywhere and never transcript rows (`visibleItems`); only an error note stays on the page (and is a toast on Home).
 - **Home logo** (`oc/tui/component/logo.tsx`): the wordmark Kvist prints on exit, i.e. Ink's `logoRows` (`ink/ui/logo.ts`, 48×6 cells large / 24×3 compact) in `LOGO_COLORS`, imported so the two never drift; OpenCode's own `go` mark only on a tiny window. The user rejected, in order: a smooth picture (clashes with OpenCode's pixel design; kitty graphics also drops alpha and left a patch on the terminal's background image), then a down-scaled pixel-art copy of `branding/logo.png` (unreadable). Keep it the crisp exit mark.
 - **Themes:** `oc/tui/theme/discovery.ts` skips any `system.json`. The core ships `kernel/themes/system.json`, and a custom theme named like the generated "system" made an endless reactive loop (GBs of memory, frozen, deaf to SIGHUP).
 - **Arrows** (`screens/prompt.tsx`): `prompt.history.previous/next` are a keymap layer (priority 1, target the textarea, off while the `/`/`@` list is open) copied in logic from OpenCode's own prompt: inside the text they move lines; at the edge the first press goes to the start/end, the next walks `kvist.history()` (recalled text puts the cursor at 0 for Up, at the end for Down). A handler in the textarea's `onKeyDown` never sees arrows (the managed textarea layer takes them first). Under an empty box on Home, with no typed history and no request, the Ink interface's `starterSet` (`ink/starters.ts`) offers three first requests that the same two commands choose among; `kvist.historyRead()` makes them wait for the history so they do not flash.

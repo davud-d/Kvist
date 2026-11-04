@@ -40,3 +40,39 @@ test("the notice counts down in the person's language, and giving up has no coun
   assert.equal(remoteNotice({ ...link, state: "gave_up", retryIn: null }, false), "h is not answering")
   assert.equal(remoteNotice({ state: "gave_up", host: "box", reason: "", retryIn: null }, false), "box")
 })
+
+test("a command result that asks the frontend to start again elsewhere says where, and anything else asks nothing", async () => {
+  const { relaunchOf } = await import("../remote.js")
+  const ask = { relaunch: { switch: "@machine\twork\t/srv/app\tchat-1", label: "work (/srv/app)", machine: "work", host: "me@box", folder: "/srv/app", session: "chat-1" } }
+
+  assert.deepEqual(relaunchOf(ask), { switch: "@machine\twork\t/srv/app\tchat-1", label: "work (/srv/app)", machine: "work", host: "me@box", folder: "/srv/app", session: "chat-1" })
+  assert.deepEqual(relaunchOf({ relaunch: { switch: "@local" } }), { switch: "@local", label: "@local", machine: null, host: null, folder: null, session: null })
+  for (const nothing of [undefined, {}, { relaunch: null }, { relaunch: "x" }, { relaunch: { switch: "" } }, { relaunch: { label: "no switch" } }]) {
+    assert.equal(relaunchOf(nothing as Record<string, unknown> | undefined), null)
+  }
+})
+
+test("the machines commands are the core's: they are sent to it, and its dialogs are drawn like any other", async () => {
+  const { routeOf } = await import("../commands.js")
+
+  assert.equal(routeOf("machines"), "core")
+  assert.equal(routeOf("remote"), "core")
+})
+
+test("a core on a server says where it works, a local core does not, and a new hello replaces what the old one said", () => {
+  const hello = { type: "hello", protocol_version: 1, session: "s" } as const
+  assert.equal(feed(hello).info.location, undefined)
+  assert.equal(feed({ ...hello, workspace: "/srv/app", location: "work:/srv/app" }).info.location, "work:/srv/app")
+  assert.equal(feed({ ...hello, location: "work:/srv/app" }, hello).info.location, undefined)
+})
+
+test("a notice is a note for the person, with the weight it says, and never a message of the agent", () => {
+  const info = feed({ type: "notice", text: "Connecting to box…" }).items.at(-1)
+  const warn = feed({ type: "notice", text: "Not connected yet", level: "warn" }).items.at(-1)
+  const error = feed({ type: "notice", text: "Broken", level: "error" }).items.at(-1)
+
+  assert.deepEqual([info?.kind, (info as { tone: string }).tone], ["note", "info"])
+  assert.equal((warn as { tone: string }).tone, "warn")
+  assert.equal((error as { tone: string }).tone, "error")
+  assert.ok(!feed({ type: "notice", text: "x" }).items.some((item) => item.kind === "answer" || item.kind === "reply"))
+})

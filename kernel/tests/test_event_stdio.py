@@ -90,6 +90,8 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
 
     assert events[0].pop("effort") in {"false", "low", "medium", "high", "xhigh", "max"}
     assert events[0].pop("kvist_version") == kvist_version()
+    # The core says which folder it works in, so a frontend can show it.
+    assert events[0].pop("workspace") == str(tmp_path.resolve())
     assert events[0] == {
         "type": "hello",
         "protocol_version": 1,

@@ -113,6 +113,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.send(() => this.core?.cancel());
             case 'pause':
                 return this.send(() => this.core?.pause());
+            case 'relaunch':
+                return this.workElsewhere(message.machine, message.host, message.folder);
             case 'takeover':
                 return this.send(() => this.core?.takeOver());
             case 'stopHelper':
@@ -168,8 +170,13 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         // With a server named, the core this panel starts is the ssh proxy to the one running there;
         // the open folder is then only where the process starts.
         const settings = vscode.workspace.getConfiguration('kvist');
+        const machine = settings.get<string>('remote.machine', '').trim();
         const host = settings.get<string>('remote.host', '').trim();
         const folder = settings.get<string>('remote.workspace', '').trim();
+        // A saved machine carries its own key and port; the binary looks it up where it was saved (this computer).
+        if (machine) {
+            return { command: binaryPath, prefixArgs: ['--machine', machine, ...(folder ? ['--remote-workspace', folder] : [])] };
+        }
         return { command: binaryPath, prefixArgs: host && folder ? ['--remote', host, '--remote-workspace', folder] : [] };
     }
 
@@ -265,7 +272,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
 
         // A window opens its own session, so a new run is never planned against an older launch's history.
         // A core on a server is already working in its session, and a window that joins must not start another over it.
-        if (!command.prefixArgs.includes('--remote')) {
+        if (!command.prefixArgs.includes('--remote') && !command.prefixArgs.includes('--machine')) {
             await sessionOp(command, workspace, 'launch');
         }
 
@@ -297,6 +304,19 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         }
         await vscode.workspace.getConfiguration('kvist').update('environment', valid, vscode.ConfigurationTarget.Global);
         this.post({ type: 'environment', env: valid });
+        const previous = this.core;
+        this.core = undefined;
+        await previous?.stop();
+        await this.startCore();
+    }
+
+    // The core's `relaunch`: this panel is its own launcher, so it saves where to work and starts its core again there.
+    private async workElsewhere(machine: string | null, host: string | null, folder: string | null): Promise<void> {
+        const settings = vscode.workspace.getConfiguration('kvist');
+        const target = vscode.ConfigurationTarget.Global;
+        await settings.update('remote.machine', machine ?? '', target);
+        await settings.update('remote.host', machine ? '' : host ?? '', target);
+        await settings.update('remote.workspace', machine || host ? folder ?? '' : '', target);
         const previous = this.core;
         this.core = undefined;
         await previous?.stop();

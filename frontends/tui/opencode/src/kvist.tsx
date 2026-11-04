@@ -2,11 +2,14 @@
 // into the shared reducer (frontends/tui/ink/state.ts) and offers the UI what it may do.
 // Everything OpenCode keeps behind its server and SDK is this file here.
 
+import { writeFileSync } from "node:fs"
+
 import { batch, createContext, createSignal, onCleanup, onMount, useContext, type Accessor, type ParentProps } from "solid-js"
 
 import { parseSlash, routeOf, sessionArgs } from "../../ink/commands.js"
 import { KvistCore, type CoreCommand, type CoreOptions } from "../../ink/core.js"
 import { englishOnly } from "../../ink/format.js"
+import { relaunchOf } from "../../ink/remote.js"
 import type { CoreEvent, InputRequest } from "../../ink/protocol.js"
 import { addInputHistory, inputHistory, sessionHistory } from "../../ink/session.js"
 import { initialState, reduce, type Action, type State, type Tone } from "../../ink/state.js"
@@ -16,7 +19,8 @@ export interface Manifest {
   effort_levels: { value: string; description: string; default?: string }[]
   providers: { value: string; label: string }[]
   styles: { value: string; description: string }[]
-  slash_commands: { name: string; description: string; aliases?: string[] }[]
+  // `via: "core"`: the running core carries it out; absent: only Classic Legacy has it, so it is not offered (UI_API.md, manifest).
+  slash_commands: { name: string; description: string; aliases?: string[]; via?: "core" }[]
 }
 
 export interface CommandResult {
@@ -112,6 +116,8 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
   }
 
   const settle = (event: Extract<CoreEvent, { type: "command_result" }>) => {
+    const relaunch = relaunchOf(event.effects)
+    if (relaunch) startAgain(relaunch.switch)
     if (event.ok && event.effects?.changed === true && event.name !== "new" && typeof event.effects.session === "string") {
       void redraw(event.effects.session, event.message)
     }
@@ -119,6 +125,19 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
     const done = waiting
     waiting = null
     done.resolve({ name: event.name, ok: event.ok, message: event.message, effects: (event.effects ?? {}) as Record<string, unknown> })
+  }
+
+  // The core asked this interface to end so the launcher starts it again somewhere else: leave the launcher a note of
+  // where (this interface, an empty line, the choice) and end with the code that says "start another".
+  const startAgain = (choice: string) => {
+    const target = process.env.KVIST_SWITCH_FILE
+    if (!target) return note("Switching needs Kvist to be started through its launcher (kvist).", "warn")
+    try {
+      writeFileSync(target, `${options.frontend}\n\n${choice}`, "utf8")
+    } catch (error) {
+      return note(`Could not record the choice: ${error instanceof Error ? error.message : String(error)}`, "error")
+    }
+    void quit(64)
   }
 
   async function redraw(name: string, message = ""): Promise<void> {

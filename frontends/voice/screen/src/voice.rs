@@ -444,6 +444,7 @@ impl Voice {
                     self.context = Some((used / limit).clamp(0.0, 1.0) as f32);
                 }
             }
+            "notice" => self.toast(text("text"), text("level") == "info", now),
             "wake" | "reasoning_start" | "reasoning_chunk" => self.turn = Turn::Thinking,
             "step" if !ENDINGS.contains(&text("action_type")) => self.turn = Turn::Working,
             "stream_start" => self.stream_text.clear(),
@@ -562,10 +563,20 @@ impl Voice {
     /// when this program exits with status 64.
     fn switch_frontend(&mut self, chosen: Option<&str>, now: Instant) {
         let Some(chosen) = chosen.filter(|value| *value != "voice") else { return };
+        self.write_switch(format!("{chosen}\n"), now);
+    }
+
+    /// The core asked for this screen to end so the launcher starts it again somewhere else (`effects.relaunch`):
+    /// leave it a note of where (this interface, an empty line, the choice).
+    fn start_again(&mut self, choice: &str, now: Instant) {
+        self.write_switch(format!("voice\n\n{choice}"), now);
+    }
+
+    fn write_switch(&mut self, contents: String, now: Instant) {
         let Some(path) = std::env::var_os("KVIST_SWITCH_FILE") else {
             return self.toast(strings().voice_needs_launcher, false, now);
         };
-        match std::fs::write(&path, format!("{chosen}\n")) {
+        match std::fs::write(&path, contents) {
             Ok(()) => {
                 self.exit_code = SWITCH_FRONTEND;
                 self.quit = true;
@@ -607,6 +618,11 @@ impl Voice {
         let message = core::localized(event.get("message").and_then(Value::as_str).unwrap_or(""), crate::strings::russian());
         let effects = event.get("effects");
         let effect = |key: &str| effects.and_then(|e| e.get(key));
+        if let Some(choice) = effect("relaunch").and_then(|r| r.get("switch")).and_then(Value::as_str)
+            && !choice.is_empty()
+        {
+            return self.start_again(choice, now);
+        }
         if let Some(provider) = effect("provider").and_then(Value::as_str) {
             self.provider = provider.to_string();
         }
@@ -2021,6 +2037,17 @@ mod tests {
     }
 
     #[test]
+    fn a_notice_is_shown_as_a_toast_and_is_not_spoken() {
+        let mut voice = voice();
+        let now = Instant::now();
+
+        voice.on_core(&json!({"type": "notice", "text": "Connecting to work:/srv/app…", "level": "info"}), now);
+
+        assert_eq!(voice.toast.as_ref().map(|(text, ok, _)| (text.as_str(), *ok)), Some(("Connecting to work:/srv/app…", true)));
+        assert!(voice.take_outbox().is_empty());
+    }
+
+    #[test]
     fn a_session_another_frontend_drives_is_watched_not_written_to() {
         let mut voice = voice();
         let now = Instant::now();
@@ -2215,6 +2242,13 @@ mod tests {
         assert!(voice.quit && voice.exit_code == SWITCH_FRONTEND);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "opencode\n");
         assert!(voice.take_outbox().is_empty(), "the choice never goes to the core");
+
+        // The core asking to start again somewhere else ends the screen the same way.
+        let mut again = self::voice();
+        again.on_core(&json!({"type": "command_result", "name": "machines", "ok": true, "message": "Opening work",
+            "effects": {"relaunch": {"switch": "@machine\twork\t/srv/app\t", "label": "work"}}}), now);
+        assert!(again.quit && again.exit_code == SWITCH_FRONTEND);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "voice\n\n@machine\twork\t/srv/app\t");
         let _ = std::fs::remove_file(&file);
     }
 

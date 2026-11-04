@@ -396,3 +396,13 @@ def test_without_the_wake_flag_the_agent_gets_no_listener():
     event_stdio.serve_session_multi(EventSession(channel, agent), out_stream=_Collector(), in_reader=reader)
 
     assert agent.wake_listener is None
+
+
+def test_hello_says_which_folder_the_core_works_in():
+    from types import SimpleNamespace
+
+    agent = _ScriptAgent(EventStreamUI(FrontendChannel()), lambda *args: "")
+    assert event_stdio.build_session_hello(agent).to_dict().get("workspace") is None
+
+    agent.executor = SimpleNamespace(workspace="/srv/app")
+    assert event_stdio.build_session_hello(agent).to_dict()["workspace"] == "/srv/app"

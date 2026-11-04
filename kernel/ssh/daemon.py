@@ -15,9 +15,10 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from kernel.config import user_config
 from kernel.config.version import kvist_version
 from kernel.protocol.frontend_protocol import PROTOCOL_VERSION
-from kernel.ssh import messages, wire
+from kernel.ssh import credentials, messages, wire
 from kernel.ssh.event_log import EventLog, fresh_replay, lines_from, request_id
 from kernel.ssh.inbox import ClientInbox
 from kernel.ssh.lease import Lease
@@ -27,6 +28,7 @@ _MAX_LINE = 64 * 1024 * 1024
 _FLUSH_BYTES = 64 * 1024
 _HELLO_SECONDS = 10.0
 _REAP_SECONDS = 2.0
+_BORROW_SECONDS = 30.0
 
 
 def require_posix() -> None:
@@ -113,6 +115,12 @@ class Daemon:
         self._server: socket.socket | None = None
         self._stopping = threading.Event()
         self.since = time.time()
+        # A daemon that works with the frontend's provider has none of its own until one arrives (credentials.py).
+        self.needs_credentials = False
+        self._credentials_arrived = threading.Event()
+        self._stop_asked = False
+        self._borrowing: tuple[str, threading.Event] | None = None
+        self._borrow_lock = threading.Lock()
 
     # --- the core side -------------------------------------------------------
 
@@ -121,6 +129,47 @@ class Daemon:
 
     def _open_requests(self) -> set[str]:
         return set(self.session.open_request_ids()) if self.session is not None else set()
+
+    def wait_for_credentials(self) -> bool:
+        """Block until a frontend sends its provider (or says to use this machine's own); False when told to stop first."""
+        self.needs_credentials = True
+        while not self._credentials_arrived.wait(1.0):
+            if self._stop_asked:
+                return False
+        return not self._stop_asked
+
+    def borrow(self, provider: str) -> bool:
+        """Ask the frontend for a provider that was not lent yet (the person picked it in a session); True when it came."""
+        arrived = threading.Event()
+        with self._borrow_lock:
+            self._borrowing = (provider, arrived)
+            self._ask_the_driver({"type": wire.NEED, "provider": provider})
+            got = arrived.wait(_BORROW_SECONDS)
+            self._borrowing = None
+        return got
+
+    def _ask_the_driver(self, payload: dict) -> None:
+        """Only the frontend that writes may lend, so a watching one on another computer cannot swap the person's account."""
+        with self._clients_lock:
+            drivers = [client for client in self._clients if self.lease.is_driver(client.id)]
+        for client in drivers:
+            client.send(payload)
+
+    def _credentials(self, message: dict) -> None:
+        if message.get("renew") is not None:
+            credentials.add(message["renew"])
+        elif message.get("for") is not None:
+            self._lent_on_request(message)
+        elif self.needs_credentials and (message.get("use_server") is True or credentials.hold(message.get("settings"))):
+            self.needs_credentials = False
+            self._credentials_arrived.set()
+
+    def _lent_on_request(self, message: dict) -> None:
+        asked = self._borrowing
+        if asked is None or asked[0] != message["for"]:
+            return
+        credentials.add(message.get("settings"))
+        asked[1].set()
 
     # --- sockets -------------------------------------------------------------
 
@@ -208,6 +257,7 @@ class Daemon:
             "pid": os.getpid(),
             "kvist_version": kvist_version(),
             "protocol_version": PROTOCOL_VERSION,
+            "revision": wire.REVISION,
             "segment": self.log.segment,
             "since": self.since,
             "attached": attached,
@@ -216,6 +266,7 @@ class Daemon:
         }
 
     def request_stop(self) -> None:
+        self._stop_asked = True
         # A turn in flight would keep the loop from noticing the end of input.
         if self.session is not None:
             self.session.cancel()
@@ -240,7 +291,7 @@ class Daemon:
         try:
             self._register(client)
             self.lease.claim_if_free(client.id)
-            client.send({"type": wire.ATTACHED, "ok": True, "segment": segment})
+            client.send({"type": wire.ATTACHED, "ok": True, "segment": segment, "revision": wire.REVISION, "needs_credentials": self.needs_credentials})
             threading.Thread(target=self._stream, args=(client, start), daemon=True, name="remote-stream").start()
             self._read_loop(client, reader)
         finally:
@@ -282,6 +333,8 @@ class Daemon:
             self.lease.take(client.id)
             self._broadcast_control()
             self._resend_open_requests(client)
+        elif kind == wire.CREDENTIALS:
+            self._credentials(message)
         elif kind.startswith("remote_"):
             return
         elif self.lease.is_driver(client.id):
@@ -388,9 +441,13 @@ def run_daemon(
     workspace: str,
     *,
     serve: Callable[..., None],
+    wait_for_credentials: bool = False,
     **serve_options,
 ) -> None:
-    """Serve ``workspace`` until a stop request; ``serve`` is ``event_stdio.launch_multi`` with its agent builder bound."""
+    """Serve ``workspace`` until a stop request; ``serve`` is ``event_stdio.launch_multi`` with its agent builder bound.
+
+    With ``wait_for_credentials`` the agent is built only once a frontend has sent its provider (see ``credentials.py``).
+    """
     require_posix()
     paths = daemon_paths(workspace)
     private_directory(paths.root)
@@ -404,6 +461,10 @@ def run_daemon(
     try:
         daemon.listen()
         write_info(paths, workspace, daemon)
+        if wait_for_credentials:
+            user_config.set_credential_lender(daemon.borrow)
+            if not daemon.wait_for_credentials():
+                return
         serve(
             workspace,
             in_stream=daemon.inbox,
@@ -413,6 +474,7 @@ def run_daemon(
             **serve_options,
         )
     finally:
+        user_config.set_credential_lender(None)
         daemon.close()
         paths.info.unlink(missing_ok=True)
         lock.close()

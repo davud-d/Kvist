@@ -110,7 +110,7 @@ def start_proxy(workspace: str, **options) -> tuple[Proxy, Frontend, threading.T
         stdout=frontend,
         stderr=frontend.stderr,
         language="en",
-        **{"give_up_seconds": 20.0, "max_delay": 0.2, **options},
+        **{"give_up_seconds": 20.0, "max_delay": 0.2, "prepare_machine": lambda *a, **k: True, **options},
     )
     exit_code: list[int] = []
     thread = threading.Thread(target=lambda: exit_code.append(proxy.run()), daemon=True)
@@ -138,7 +138,8 @@ def test_a_frontend_talks_to_the_daemon_through_ssh_and_leaves_it_running(server
     assert final["message"] == "done hello server"
     assert exit_code == [0]
     assert core.thread.is_alive()
-    assert not any(kind.startswith("remote_") for kind in frontend.types())
+    # What the proxy and the daemon say to each other stays between them; only the link's state reaches the frontend.
+    assert not {"remote_hello", "remote_attached", "remote_offset", "remote_ping"} & set(frontend.types())
 
 
 def test_after_a_broken_connection_it_continues_where_it_was_without_repeating(server_tools, core):
@@ -149,15 +150,16 @@ def test_after_a_broken_connection_it_continues_where_it_was_without_repeating(s
     time.sleep(0.5)
 
     proxy._proc.kill()
-    frontend.wait_for(lambda line: line["type"] == "remote_state" and line["state"] == "reconnecting")
-    frontend.wait_for(lambda line: line["type"] == "remote_state" and line["state"] == "connected")
+    states = lambda: [event["state"] for event in frontend.events("remote_state")]  # noqa: E731
+    frontend.wait_for(lambda line: states()[-2:] == ["reconnecting", "connected"])
     frontend.say("two")
     frontend.wait_for(lambda line: line["type"] == "final" and line["message"] == "done two")
     frontend.leave()
     thread.join(timeout=10)
 
     assert [event["message"] for event in frontend.events("final")] == ["done one", "done two"]
-    assert frontend.types().count("hello") == 1
+    # The proxy's own hello opened the frontend; the daemon's followed once, and a reconnect sent none.
+    assert frontend.types().count("hello") == 2
     assert core.agent.goals == ["one", "two"]
 
 
@@ -222,7 +224,9 @@ def test_a_message_typed_while_disconnected_is_refused_loudly(server_tools, tmp_
     frontend.leave()
     thread.join(timeout=10)
 
-    assert "your message was not sent" in frontend.stderr.getvalue()
+    assert any("your message was not sent" in event["text"] for event in frontend.events("notice"))
+    # The frontend is waiting for the turn to end; it is told it did, or it would wait for ever.
+    assert "turn_end" in frontend.types()
 
 
 def test_a_one_shot_operation_runs_on_the_server_with_the_servers_folder(server_tools, core, capfd):
@@ -255,3 +259,280 @@ def test_probe_reports_what_the_server_has(server_tools, core, capfd):
     assert answer["daemon"]["type"] == "remote_status"
     assert answer["protocol_version"] == 1
     assert "provider_ready" in answer and "service" in answer
+
+
+class SessionCommands:
+    """The one command a test core knows: ``session``, which only notes what it was asked."""
+
+    def __init__(self) -> None:
+        self.asked: list[list[str]] = []
+
+    def handlers(self) -> dict:
+        from kernel.protocol.event_stdio import CommandResult
+
+        def session(context) -> CommandResult:
+            self.asked.append(list(context.args))
+            return CommandResult(True, "switched", {})
+
+        return {"session": session}
+
+
+def test_the_session_the_person_chose_is_opened_once_the_log_has_been_read(server_tools, tmp_path):
+    commands = SessionCommands()
+    daemon = FakeCoreDaemon(tmp_path, commands=commands.handlers())
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, open_session="chat-from-before")
+        frontend.wait_for(lambda line: line["type"] == "command_result")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert commands.asked == [["switch", "chat-from-before"]]
+
+
+def test_nothing_is_asked_when_the_daemon_is_already_in_that_session(server_tools, tmp_path):
+    commands = SessionCommands()
+    daemon = FakeCoreDaemon(tmp_path, commands=commands.handlers())
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, open_session="default")
+        frontend.wait_for(lambda line: line["type"] == "control")
+        time.sleep(0.5)
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert commands.asked == []
+
+
+def test_an_observer_cannot_switch_the_session_and_is_told_so(server_tools, tmp_path):
+    commands = SessionCommands()
+    daemon = FakeCoreDaemon(tmp_path, commands=commands.handlers())
+    try:
+        _, driver, driver_thread, _ = start_proxy(daemon.workspace)
+        driver.wait_for(lambda line: line["type"] == "control")
+        _, watcher, watcher_thread, _ = start_proxy(daemon.workspace, open_session="chat-from-before")
+        told = watcher.wait_for(lambda line: line["type"] == "error")
+        driver.leave()
+        watcher.leave()
+        driver_thread.join(timeout=10)
+        watcher_thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert "chat-from-before" in told["message"]
+    assert commands.asked == []
+
+
+def test_a_session_that_had_a_turn_is_written_down_under_its_machine(server_tools, tmp_path):
+    book: list[tuple] = []
+    daemon = FakeCoreDaemon(tmp_path)
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, machine="work", record=lambda *record: book.append(record))
+        frontend.wait_for(lambda line: line["type"] == "control")
+        frontend.say("do it")
+        frontend.wait_for(lambda line: line["type"] == "turn_end")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert book and book[-1][:3] == ("work", daemon.workspace, "default")
+
+
+def test_machines_is_answered_by_the_proxy_with_dialogs_and_never_reaches_the_server(server_tools, tmp_path):
+    commands = SessionCommands()
+    daemon = FakeCoreDaemon(tmp_path, commands=commands.handlers())
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace)
+        frontend.wait_for(lambda line: line["type"] == "control")
+
+        frontend.say(json.dumps({"type": "command", "name": "machines", "args": []}))
+        request = frontend.wait_for(lambda line: line["type"] == "input_request")
+        frontend.say(json.dumps({"request_id": request["request_id"], "value": "@local"}))
+        result = frontend.wait_for(lambda line: line["type"] == "command_result")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert request["title"] == "Machines"
+    assert result["effects"]["relaunch"]["switch"] == "@local"
+    # The server's core would have answered "unknown command"; it was never asked.
+    assert [line["name"] for line in frontend.events("command_result")] == ["machines"]
+
+
+def test_a_command_for_the_server_still_goes_to_the_server(server_tools, tmp_path):
+    commands = SessionCommands()
+    daemon = FakeCoreDaemon(tmp_path, commands=commands.handlers())
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace)
+        frontend.wait_for(lambda line: line["type"] == "control")
+
+        frontend.say(json.dumps({"type": "command", "name": "session", "args": ["switch", "x"]}))
+        frontend.wait_for(lambda line: line["type"] == "command_result")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert commands.asked == [["switch", "x"]]
+
+
+def test_the_frontend_is_told_where_the_core_works_as_machine_then_folder(server_tools, tmp_path):
+    daemon = FakeCoreDaemon(tmp_path)
+    try:
+        _, saved, saved_thread, _ = start_proxy(daemon.workspace, machine="work")
+        hello_saved = saved.wait_for(lambda line: line["type"] == "hello" and line.get("session") == "default")
+        saved.leave()
+        saved_thread.join(timeout=10)
+        _, by_hand, by_hand_thread, _ = start_proxy(daemon.workspace)
+        hello_by_hand = by_hand.wait_for(lambda line: line["type"] == "hello" and line.get("session") == "default")
+        by_hand.leave()
+        by_hand_thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert hello_saved["location"] == f"work:{daemon.workspace}"
+    assert hello_by_hand["location"] == f"me@box:{daemon.workspace}"
+    # Nothing else of the hello is changed.
+    assert hello_saved["protocol_version"] == 1 and hello_saved["session"] == "default"
+
+
+# --- the interface opens first and asks its questions itself ---------------------------------------------
+
+
+def asking_prepare(*answers_wanted):
+    """A check of the machine that puts one question to the person, as the real one does, and reports what was answered."""
+    seen: list = []
+
+    def prepare(target, io, language):
+        seen.append(io.menu("Kvist is not running here.", [("install-service", "Install it as a service"), ("cancel", "Cancel")]))
+        return seen[-1] == "install-service"
+
+    prepare.seen = seen
+    return prepare
+
+
+def test_the_interface_gets_its_hello_at_once_and_the_machine_is_prepared_in_dialogs_it_draws_itself(server_tools, tmp_path):
+    daemon = FakeCoreDaemon(tmp_path)
+    check = asking_prepare()
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, machine="work", prepare_machine=check)
+        first = frontend.wait_for(lambda line: True)
+        request = frontend.wait_for(lambda line: line["type"] == "input_request")
+        frontend.say(json.dumps({"request_id": request["request_id"], "value": "install-service"}))
+        frontend.wait_for(lambda line: line["type"] == "control")
+        frontend.say("go")
+        frontend.wait_for(lambda line: line["type"] == "final")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert first["type"] == "hello" and first["location"] == f"work:{daemon.workspace}"
+    assert request["kind"] == "choice" and request["title"] == "Kvist is not running here."
+    assert check.seen == ["install-service"]
+    # The daemon's own hello followed the proxy's, and the person's goal ran once the machine was ready.
+    assert frontend.types().count("hello") == 2
+    # "Connecting…" is a notification, not something said in the conversation.
+    assert frontend.events("notice")[0]["text"].startswith("Connecting to")
+    assert frontend.events("message") == []
+
+
+def test_when_the_machine_cannot_be_made_ready_the_person_chooses_and_working_here_asks_the_interface_to_start_again(server_tools, tmp_path):
+    daemon = FakeCoreDaemon(tmp_path)
+    try:
+        _, frontend, thread, exit_code = start_proxy(daemon.workspace, prepare_machine=lambda target, io, language: False)
+        menu = frontend.wait_for(lambda line: line["type"] == "input_request")
+        frontend.say(json.dumps({"request_id": menu["request_id"], "value": "local"}))
+        result = frontend.wait_for(lambda line: line["type"] == "command_result")
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert "Could not open" in menu["title"]
+    assert [option["value"] for option in menu["options"]] == ["retry", "local", "close"]
+    assert result["effects"]["relaunch"]["switch"] == "@local"
+    assert exit_code == [0]
+
+
+def test_trying_again_asks_the_machine_again_and_closing_ends_with_the_give_up_code(server_tools, tmp_path):
+    daemon = FakeCoreDaemon(tmp_path)
+    attempts = []
+
+    def prepare(target, io, language):
+        attempts.append(1)
+        return False
+
+    try:
+        _, frontend, thread, exit_code = start_proxy(daemon.workspace, prepare_machine=prepare)
+        for number, answer in enumerate(("retry", "close")):
+            menu = frontend.wait_for(lambda line, n=number: line["type"] == "input_request" and frontend.events("input_request").index(line) == n)
+            frontend.say(json.dumps({"request_id": menu["request_id"], "value": answer}))
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert len(attempts) == 2
+    assert exit_code == [wire.EXIT_GAVE_UP]
+
+
+def test_a_machine_that_is_ready_has_its_folder_remembered(server_tools, tmp_path):
+    from kernel.ssh import machines
+    from kernel.ssh.machines import Machine
+
+    machines.save_machine(Machine("work", "me@box"))
+    daemon = FakeCoreDaemon(tmp_path)
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, machine="work")
+        frontend.wait_for(lambda line: line["type"] == "control")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        daemon.close()
+
+    assert machines.get_machine("work").folders[0] == daemon.workspace
+
+
+def test_what_the_frontend_sends_on_its_own_while_the_machine_is_being_made_ready_waits_and_is_not_refused(server_tools, tmp_path):
+    daemon = FakeCoreDaemon(tmp_path)
+    release = threading.Event()
+
+    def slow_prepare(target, io, language):
+        release.wait(20)
+        return True
+
+    try:
+        _, frontend, thread, _ = start_proxy(daemon.workspace, prepare_machine=slow_prepare)
+        frontend.wait_for(lambda line: line["type"] == "hello")
+        frontend.say("typed while the machine is made ready")
+        time.sleep(0.5)
+        assert frontend.events("notice") == [{"type": "notice", "text": frontend.events("notice")[0]["text"], "level": "info"}]
+        release.set()
+        final = frontend.wait_for(lambda line: line["type"] == "final")
+        frontend.leave()
+        thread.join(timeout=10)
+    finally:
+        release.set()
+        daemon.close()
+
+    assert final["message"] == "done typed while the machine is made ready"
+    assert not any(event["level"] == "warn" for event in frontend.events("notice"))
+
+
+def test_a_command_refused_after_a_break_is_answered_so_the_frontend_does_not_wait_for_ever(server_tools, tmp_path):
+    (tmp_path / "ssh-fails").write_text("ssh: connect to host box port 22: Connection refused\n")
+    _, frontend, thread, _ = start_proxy(str(tmp_path), give_up_seconds=5, max_delay=0.3)
+    frontend.wait_for(lambda line: line["type"] == "hello")
+    time.sleep(1.0)
+
+    frontend.say(json.dumps({"type": "command", "name": "new", "args": []}))
+    frontend.say(json.dumps({"type": "cancel"}))
+    result = frontend.wait_for(lambda line: line["type"] == "command_result")
+    frontend.leave()
+    thread.join(timeout=10)
+
+    # The link is down and the frontend was told; what it sends meanwhile is answered, not left to wait.
+    assert result["name"] == "new" and result["ok"] is False

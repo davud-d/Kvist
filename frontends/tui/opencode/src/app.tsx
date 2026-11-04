@@ -168,7 +168,8 @@ function Shell(props: { onSession?(name: string): void; copy(text: string): Prom
   }
 
   const dimensions = useTerminalDimensions()
-  const commands = createCommands({ kvist, dialog, themes, config, toast, quit, copy: props.copy, columns: () => dimensions().width })
+  // Rebuilt when the core's manifest arrives: its list of commands is what `/` offers.
+  const commands = createMemo(() => createCommands({ kvist, dialog, themes, config, toast, quit, copy: props.copy, columns: () => dimensions().width }))
   const interrupt = () => {
     if (state().command) return
     if (state().running) return kvist.cancel()
@@ -190,7 +191,7 @@ function Shell(props: { onSession?(name: string): void; copy(text: string): Prom
   Keymap.createLayer(() => ({
     mode: "global",
     commands: [
-      ...commands,
+      ...commands(),
       { id: "prompt.clear", title: "Clear input field", bind: false, run: () => promptRef()?.set("") },
       { id: "kvist.interrupt", title: "Stop everything", bind: "ctrl+c,ctrl+d", run: interrupt },
       { id: "session.interrupt", title: "Interrupt current session", bind: false, run: pause },
@@ -296,11 +297,11 @@ function Shell(props: { onSession?(name: string): void; copy(text: string): Prom
       <Toast />
       <Show
         when={route() === "session"}
-        fallback={<Home ref={setPromptRef} commands={commands} disabled={state().pending !== null && !approval()} approval={approvalView()} />}
+        fallback={<Home ref={setPromptRef} commands={commands()} disabled={state().pending !== null && !approval()} approval={approvalView()} />}
       >
         <Session
           ref={setPromptRef}
-          commands={commands}
+          commands={commands()}
           disabled={state().pending !== null && !approval()}
           approval={approvalView()}
           stopArmed={stopArmedAt() > 0}

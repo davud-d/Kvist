@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from kernel.config.user_config import get_saved_provider_or_none
 from kernel.config.version import kvist_version
@@ -20,7 +21,7 @@ from kernel.ssh import service, wire
 from kernel.ssh.daemon import daemon_running, require_posix
 from kernel.ssh.paths import DaemonPaths, RemoteError, daemon_paths
 
-OPERATIONS = ("probe", "status", "start", "stop", "install-service", "uninstall-service")
+OPERATIONS = ("probe", "status", "start", "stop", "install-service", "uninstall-service", "mkdir")
 _START_SECONDS = 20.0
 _ASK_SECONDS = 5.0
 
@@ -55,6 +56,7 @@ def probe(workspace: str) -> dict:
     return {
         "kvist_version": kvist_version(),
         "protocol_version": PROTOCOL_VERSION,
+        "remote_revision": wire.REVISION,
         "platform": sys.platform,
         "provider_ready": bool(os.environ.get("AGENT_LLM_PROVIDER") or get_saved_provider_or_none()),
         "workspace_exists": os.path.isdir(os.path.expanduser(workspace)),
@@ -103,6 +105,13 @@ def stop(workspace: str) -> dict:
     return {"stopped": True}
 
 
+def make_folder(workspace: str) -> dict:
+    """Create the folder the daemon will work in (and the ones above it)."""
+    folder = Path(workspace).expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    return {"folder": str(folder)}
+
+
 def install_service(workspace: str) -> dict:
     result = service.install(workspace)
     # cron only starts the daemon at the next boot.
@@ -122,6 +131,7 @@ _HANDLERS = {
     "stop": stop,
     "install-service": install_service,
     "uninstall-service": uninstall_service,
+    "mkdir": make_folder,
 }
 
 

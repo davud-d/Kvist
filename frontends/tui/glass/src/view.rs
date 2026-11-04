@@ -874,7 +874,12 @@ fn draw_hints(p: &mut Painter, app: &App) {
 /// opens its picker); a notice in the middle.
 fn draw_status(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let y = app.layout.status_row as i32;
-    let folder = short_path(&app.workspace, (app.grid.cols / 4) as usize);
+    let budget = (app.grid.cols / 4) as usize;
+    // On a server: the machine's name first, then the folder there (shortened from the left, the name never is).
+    let folder = match app.location.split_once(':') {
+        Some((machine, path)) => format!("{machine}:{}", short_path(path, budget.saturating_sub(machine.chars().count() + 1).max(8))),
+        None => short_path(&app.workspace, budget),
+    };
     let mut left = vec![span(theme::I_FOLDER, DUSK), span(format!(" {folder}"), MIST)];
     if !app.branch.is_empty() {
         left.extend([span("    ", DUSK), span(theme::I_BRANCH, DUSK), span(format!(" {}", app.branch), MIST)]);

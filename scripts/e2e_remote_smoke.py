@@ -35,7 +35,8 @@ class Frontend(Kvist):
             sys.executable, "-m", "kernel", "--remote", "me@box", "--remote-workspace", str(workspace),
             "--workspace", str(stand_in), "--frontend", "stdio-multi", "--wake", "--role", "coder",
         ]
-        env = dict(os.environ, HOME=str(env_home), USERPROFILE=str(env_home), PYTHONUTF8="1",
+        # The provider is this computer's: the proxy lends it to the daemon, which has none of its own.
+        env = dict(os.environ, HOME=str(env_home), USERPROFILE=str(env_home), PYTHONUTF8="1", AGENT_LLM_PROVIDER="custom:fake",
                    PYTHONUNBUFFERED="1", KVIST_SSH=str(tools / "ssh"), PATH=f"{tools}:{os.environ['PATH']}")
         self.process = subprocess.Popen(
             self._argv, cwd=ROOT, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -46,9 +47,10 @@ class Frontend(Kvist):
         threading.Thread(target=self._read_stderr, daemon=True).start()
 
 
-def build_tools(directory: Path) -> None:
+def build_tools(directory: Path, server_home: Path) -> None:
     ssh = directory / "ssh"
-    ssh.write_text('#!/bin/sh\nfor last; do :; done\nexec sh -c "$last"\n')
+    # What ssh runs is "on the server", so it sees the server's home and not the frontend's.
+    ssh.write_text(f'#!/bin/sh\nfor last; do :; done\nHOME="{server_home}" USERPROFILE="{server_home}" exec sh -c "$last"\n')
     core = directory / "kvist-core"
     core.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{ROOT / "kernel" / "__main__.py"}" "$@"\n')
     for script in (ssh, core):
@@ -57,7 +59,8 @@ def build_tools(directory: Path) -> None:
 
 def operation(name: str, workspace: Path, home: Path) -> dict:
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), PYTHONUTF8="1", AGENT_SANDBOX_NET="allow",
-               AGENT_WRITE_APPROVAL="0", AGENT_API_INTERVAL="0", AGENT_LLM_PROVIDER="custom:fake")
+               AGENT_WRITE_APPROVAL="0", AGENT_API_INTERVAL="0")
+    env.pop("AGENT_LLM_PROVIDER", None)
     done = subprocess.run(
         [sys.executable, "-m", "kernel", "--remote-op", name, "--workspace", str(workspace)],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
@@ -79,10 +82,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="kvist-remote-") as scratch:
         base = Path(scratch)
         home, workspace, tools, stand_in = base / "home", base / "workspace", base / "tools", base / "stand-in"
-        for folder in (home, workspace, tools, stand_in):
+        local_home = base / "this-computer"
+        for folder in (home, workspace, tools, stand_in, local_home):
             folder.mkdir()
-        configure(home, provider.url)
-        build_tools(tools)
+        configure(local_home, provider.url)
+        build_tools(tools, home)
         daemon_env = dict(os.environ, HOME=str(home), AGENT_SANDBOX_NET="allow", AGENT_WRITE_APPROVAL="0",
                           AGENT_API_INTERVAL="0", PYTHONUTF8="1")
         os.environ.update(daemon_env)
@@ -94,7 +98,7 @@ def main() -> int:
         print("ok  daemon started")
         first = second = None
         try:
-            first = Frontend(home, tools, workspace, stand_in)
+            first = Frontend(local_home, tools, workspace, stand_in)
             first.collect_until("hello", TIMEOUT)
             become_driver(first)
             first.send_goal(SCENARIOS[0][0])
@@ -109,7 +113,7 @@ def main() -> int:
             first.process.wait(timeout=5)
             print("ok  frontend killed in the middle of a turn")
 
-            second = Frontend(home, tools, workspace, stand_in)
+            second = Frontend(local_home, tools, workspace, stand_in)
             events = second.collect_until("hello", TIMEOUT)
             become_driver(second)
             more = second.collect_until("turn_end", TIMEOUT)
@@ -126,6 +130,11 @@ def main() -> int:
             content = (workspace / "hello.txt").read_bytes()
             assert content == SCENARIOS[2][2], f"hello.txt is {content!r}"
             print("ok  the new frontend drives")
+
+            # The server never had a provider and was never given one to keep.
+            kept = [path.read_text(errors="replace") for path in home.rglob("config.json")]
+            assert not any("smoke-test-key" in text or "fake-fast" in text for text in kept), "the provider reached the server's disk"
+            print("ok  the lent provider is not on the server's disk")
         except (AssertionError, TimeoutError) as error:
             print(f"FAIL: {error}")
             for frontend in (first, second):
