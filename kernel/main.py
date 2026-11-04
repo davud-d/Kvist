@@ -156,11 +156,17 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--remote-op",
-        choices=("probe", "status", "start", "stop", "install-service", "uninstall-service", "mkdir"),
+        choices=("probe", "status", "start", "stop", "install-service", "uninstall-service", "mkdir", "lanes", "new-lane"),
         help=(
             "Look at, start, stop or install the daemon of --workspace (on the server; with --remote, "
             "over ssh), print JSON, exit."
         ),
+    )
+    parser.add_argument(
+        "--remote-lane",
+        default="",
+        metavar="LANE",
+        help="Internal: which of the sessions working in --workspace at the same time (empty: the first).",
     )
     parser.add_argument(
         "--remote-attach",

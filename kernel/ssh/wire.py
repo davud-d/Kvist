@@ -23,7 +23,8 @@ STATE = "remote_state"        # proxy -> frontend, and shim -> proxy when it fin
 # What the proxy and the daemon expect of each other. A daemon outlives the frontends that start it, so one started by an older Kvist
 # can be met by a newer proxy; neither side may assume the other has the same code. Raise it when what they say to each other changes.
 # 2: the proxy lends its provider (CREDENTIALS, NEED); a peer that says nothing is revision 1.
-REVISION = 2
+# 3: lanes (several daemons for one folder): --remote-lane, the lanes and new-lane operations, lane/busy/session in a daemon's status.
+REVISION = 3
 
 PING_SECONDS = 5.0
 LEASE_SECONDS = 20.0

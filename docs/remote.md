@@ -132,6 +132,15 @@ manage it. `start` runs the daemon once without a service. One daemon serves one
 After a reboot or a crash the daemon starts with a fresh log and says so in the feed. The task that was
 running is not continued by itself (no edit is repeated unseen): `/resume` continues it.
 
+## Several sessions at the same time
+
+An agent works on one session at a time, so for a second session beside it in the same folder Kvist starts **another agent process** on the server (a *lane*;
+up to 8). When you open an interface and something is already going on there (a session that is working, one that finished while you were away, one open in another
+window), the interface asks in its own dialog: **join** one of them, or start **a new session** that works beside them. A session you chose under *Recent sessions* is joined where it runs.
+Nothing busy: you simply get a new session, as always. Only the first agent is a service that comes back after a reboot. An extra one ends by itself after 15 minutes with nobody
+connected, nothing running, no unseen result, no stopped task and no timer, so they do not pile up in a small server's memory; the session itself stays on the disk. Two sessions in one folder can
+change the same files, so give them different parts of the work.
+
 ## An agent that is older than the interface
 
 The agent on a server keeps running after you update Kvist there, so a new interface can meet an old agent. Each side says which

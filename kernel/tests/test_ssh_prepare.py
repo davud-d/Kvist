@@ -241,3 +241,20 @@ def test_an_old_agent_is_left_alone_when_the_person_says_no_or_nobody_can_be_ask
     silent, io = Server(probe={**HEALTHY, "daemon": OLD_DAEMON}), ScriptIO(interactive=False)
     assert run(silent, io) is False
     assert "older than this Kvist" in io.said[-1] and "--remote-op stop" in io.said[-1]
+
+
+def test_an_agent_one_revision_behind_is_old_too_because_it_does_not_know_the_newest_exchange():
+    server = Server(probe={**HEALTHY, "daemon": {"pid": 1, "attached": 0, "revision": wire.REVISION - 1}}, stop={"ok": True}, start={"ok": True})
+
+    assert run(server, ScriptIO("restart")) is True
+    assert server.asked == ["probe", "stop", "start"]
+
+
+def test_what_the_probe_saw_of_the_daemons_is_dropped_once_one_was_started_or_restarted():
+    started, seen = Server(probe={**HEALTHY, "lanes": [{"lane": ""}]}, start={"ok": True}), {}
+    assert prepare(TARGET, io=ScriptIO("start"), call=started, language="en", probed=seen) is True
+    assert seen["lanes"] == []
+
+    restarted, seen = Server(probe={**HEALTHY, "daemon": OLD_DAEMON, "lanes": [OLD_DAEMON]}, stop={"ok": True}, start={"ok": True}), {}
+    assert prepare(TARGET, io=ScriptIO("restart"), call=restarted, language="en", probed=seen) is True
+    assert seen["lanes"] == []

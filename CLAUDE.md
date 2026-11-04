@@ -708,6 +708,14 @@ frontend -stdio-> proxy -ssh -T-> kvist-core --remote-attach (attach.py: a byte 
   on_ready=)`. One per workspace (`paths.daemon_id`), files in `<config dir>/remote/<id>/` (0700; `events.ndjson`, `sock` 0600,
   `daemon.lock` held with `flock` for its whole life, which is how "is it running" is answered, `daemon.json`, `daemon.log`).
   The core never sees EOF when a client leaves (`ClientInbox` ends only on `remote_stop`/SIGTERM); an approval waits for ever.
+- **Parallel sessions in one folder are lanes: one daemon per working session** (`paths.daemon_id(workspace, lane)`, lane "" is the first and keeps the old id; `--remote-lane`; at most
+  `MAX_LANES` = 8). A daemon has one agent and one session, so while it works `/new` is refused; a second session beside it needs its own process, as the Tauri app does with one core per agent.
+  `ops.running_lanes` answers every lane's `status` (`lane`, `busy`, `unseen_work` peeked not used up, `session`, `title`, `attached`); `probe` carries it, `prepare(probed=)` hands the answer to the
+  proxy, and `Proxy._pick_lane` decides in the **interface's own dialog**: nothing busy, unseen or open elsewhere → the first free lane with a new session (as before); otherwise "join one of these or start a new one"
+  (`@first` is lane "", others by number, `@new`); `new-lane` starts one more daemon, which opens in a session of its own (`start_fresh_session` in `run_daemon`'s `ready`). A session named by `--open-session` is joined
+  where it runs and otherwise opened beside the busy ones. **Only the first lane is a service** (it survives a reboot); an extra lane ends by itself after `_IDLE_LANE_SECONDS` (15 min) with nobody attached, nothing
+  working, no unseen result, no stopped task and no schedule, so parallel sessions do not pile up in a small server's memory (each daemon is some hundred MB; not measured). Two agents write one folder: the same
+  as the Tauri app's parallel agents. Tests: `test_ssh_lanes.py`, `scripts/e2e_remote_lanes.py` (real daemons: A held by the provider, B asked and started beside it, B finishes while A is held, C joins A's finished work).
 - **A daemon outlives the code that started it** (`wire.REVISION`, reported as `remote_attached.revision`, `remote_status.revision` and `probe.remote_revision`; a peer
   that says nothing is revision 1): after Kvist is updated on a server the old process keeps running, so `prepare` offers to copy Kvist when the installed one is
   older, and to **restart** (`--remote-op stop` then `start`) a running daemon that is older; `Proxy` also refuses to lend to one (a `notice` with the manual command).

@@ -127,7 +127,9 @@ def prepare(
     call: Call = call_op,
     language: str | None = None,
     install: Callable[[Target], str] = deploy.install_core,
+    probed: dict | None = None,
 ) -> bool:
+    """``probed``, when given, receives the server's last answer to the probe (what runs there, in which lane, doing what)."""
     language = language or messages.ui_language()
     code, answer, stderr = call(target, "probe")
     if answer is None and io.interactive:
@@ -151,11 +153,23 @@ def prepare(
         answer = {**answer, "workspace_exists": True}
     if _problem(io, answer, target, language):
         return False
+    if probed is not None:
+        probed.update(answer)
     if answer.get("daemon"):
         if answer["daemon"].get("revision", 1) < wire.REVISION:
-            return _restart_old_daemon(io, call, target, language, answer["daemon"])
+            ready = _restart_old_daemon(io, call, target, language, answer["daemon"])
+            _forget_the_lanes_seen(probed, ready)
+            return ready
         return True
     if not io.interactive:
         _say(io, "no_service", target, language)
         return False
-    return _offer_to_run(io, call, target, language)
+    ready = _offer_to_run(io, call, target, language)
+    _forget_the_lanes_seen(probed, ready)
+    return ready
+
+
+def _forget_the_lanes_seen(probed: dict | None, started: bool) -> None:
+    """What the probe saw of the running daemons is no longer true once one was started or restarted: the first lane is new and free."""
+    if probed is not None and started:
+        probed["lanes"] = []

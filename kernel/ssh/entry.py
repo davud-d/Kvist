@@ -38,7 +38,7 @@ def _serve_daemon(args: argparse.Namespace) -> None:
         approval_mode=args.approval_mode,
         commands=STDIO_COMMANDS,
     )
-    run_daemon(workspace, serve=serve, wait_for_credentials=True)
+    run_daemon(workspace, serve=serve, wait_for_credentials=True, lane=args.remote_lane)
 
 
 # What looks at or changes a machine's own state, so with --remote it runs on that machine: its sessions,
@@ -119,7 +119,7 @@ def _dispatch(args: argparse.Namespace, argv: list[str]) -> int | None:
     if args.remote_attach:
         from kernel.ssh.attach import run_attach
 
-        return run_attach(_server_workspace(args))
+        return run_attach(_server_workspace(args), args.remote_lane)
     if args.remote_serve:
         _serve_daemon(args)
         return 0
@@ -127,7 +127,7 @@ def _dispatch(args: argparse.Namespace, argv: list[str]) -> int | None:
         if args.remote_op:
             from kernel.ssh.ops import run_op
 
-            return run_op(args.remote_op, _server_workspace(args))
+            return run_op(args.remote_op, _server_workspace(args), args.remote_lane)
         return None
 
     target = target_of(args)

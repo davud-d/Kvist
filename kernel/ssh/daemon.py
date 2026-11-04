@@ -29,6 +29,11 @@ _FLUSH_BYTES = 64 * 1024
 _HELLO_SECONDS = 10.0
 _REAP_SECONDS = 2.0
 _BORROW_SECONDS = 30.0
+_WORKING_STATES = frozenset({"running", "awaiting_input", "resuming", "pause_requested", "cancelling"})
+# An extra lane that nobody uses and that has nothing left to do ends, so parallel sessions do not pile up in a small server's memory.
+_IDLE_LANE_SECONDS = 15 * 60.0
+# Several missed pings (every wire.PING_SECONDS): the connection is dead even if nobody closed it.
+_SILENT_SECONDS = 30.0
 
 
 def require_posix() -> None:
@@ -79,6 +84,8 @@ class _Client:
         self.language = language
         # A frontend refuses a stream that does not open with ``hello``, so nothing else goes before it.
         self.greeted = False
+        # The proxy pings every few seconds; a connection that went quiet without being closed (a lid shut, a network gone) is not a frontend.
+        self.heard = time.monotonic()
         self.closed = False
         self._send_lock = threading.Lock()
 
@@ -104,8 +111,11 @@ class _Client:
 
 
 class Daemon:
-    def __init__(self, paths: DaemonPaths, log: EventLog, inbox: ClientInbox, lease: Lease | None = None) -> None:
+    def __init__(
+        self, paths: DaemonPaths, log: EventLog, inbox: ClientInbox, lease: Lease | None = None, *, lane: str = ""
+    ) -> None:
         self.paths = paths
+        self.lane = lane
         self.log = log
         self.inbox = inbox
         self.lease = lease or Lease()
@@ -197,13 +207,43 @@ class Daemon:
             threading.Thread(target=self._handle, args=(connection,), daemon=True, name="remote-client").start()
 
     def _reap_loop(self) -> None:
+        idle_since: float | None = None
         while not self._stopping.wait(_REAP_SECONDS):
+            self._close_the_silent()
+            if self.lane:
+                idle_since = self._end_an_idle_lane(idle_since)
             lost = self.lease.reap()
             if lost is None:
                 continue
             for client in self._clients_named(lost):
                 client.close()
             self._broadcast_control()
+
+    def _close_the_silent(self) -> None:
+        now = time.monotonic()
+        with self._clients_lock:
+            silent = [client for client in self._clients if now - client.heard > _SILENT_SECONDS]
+        for client in silent:
+            client.close()
+
+    def _nothing_left_to_do(self) -> bool:
+        with self._clients_lock:
+            watched = bool(self._clients)
+        agent = getattr(self.session, "agent", None)
+        if watched or agent is None or self.busy() or self.log.peek_unseen():
+            return False
+        # A stopped task and a timer both mean work that is still coming.
+        return agent._peek_checkpoint() is None and (agent.scheduler is None or not agent.scheduler.list()["schedules"])
+
+    def _end_an_idle_lane(self, idle_since: float | None) -> float | None:
+        """The time since which this lane has had nothing to do (None while it has); it ends once that is long enough."""
+        if not self._nothing_left_to_do():
+            return None
+        now = time.monotonic()
+        idle_since = idle_since if idle_since is not None else now
+        if now - idle_since >= _IDLE_LANE_SECONDS:
+            self.request_stop()
+        return idle_since
 
     def _clients_named(self, client_id: str) -> list[_Client]:
         with self._clients_lock:
@@ -249,11 +289,29 @@ class Daemon:
             pass
         connection.close()
 
+    def busy(self) -> bool:
+        """Whether the agent is working: a turn, a question waiting for an answer, or a command left running in the background."""
+        agent = getattr(self.session, "agent", None)
+        if agent is None:
+            return False
+        working = agent.control.state in _WORKING_STATES
+        return working or bool(agent.executor.jobs.running())
+
+    def _session_facts(self) -> dict:
+        agent = getattr(self.session, "agent", None)
+        if agent is None:
+            return {"session": "", "title": ""}
+        return {"session": agent.current_session or "", "title": getattr(agent, "_session_title", None) or ""}
+
     def status(self) -> dict:
         with self._clients_lock:
             attached = len(self._clients)
         return {
             "type": "remote_status",
+            "lane": self.lane,
+            "busy": self.busy(),
+            "unseen_work": self.log.peek_unseen(),
+            **self._session_facts(),
             "pid": os.getpid(),
             "kvist_version": kvist_version(),
             "protocol_version": PROTOCOL_VERSION,
@@ -329,6 +387,7 @@ class Daemon:
                 return
             if not raw:
                 return
+            client.heard = time.monotonic()
             self._route(client, raw)
 
     def _route(self, client: _Client, raw: bytes) -> None:
@@ -449,20 +508,28 @@ def run_daemon(
     *,
     serve: Callable[..., None],
     wait_for_credentials: bool = False,
+    lane: str = "",
     **serve_options,
 ) -> None:
     """Serve ``workspace`` until a stop request; ``serve`` is ``event_stdio.launch_multi`` with its agent builder bound.
 
     With ``wait_for_credentials`` the agent is built only once a frontend has sent its provider (see ``credentials.py``).
+    A ``lane`` other than the first is one more session working in the same folder at the same time: it starts in a session of its own.
     """
     require_posix()
-    paths = daemon_paths(workspace)
+    paths = daemon_paths(workspace, lane)
     private_directory(paths.root)
     lock = hold_lock(paths.lock)
     redirect_stderr(paths)
     language = messages.ui_language()
     log = EventLog(paths.log, after_manifest=_restart_line(language) if paths.info.exists() else None)
-    daemon = Daemon(paths, log, ClientInbox())
+    daemon = Daemon(paths, log, ClientInbox(), lane=lane)
+
+    def ready(session) -> None:
+        daemon.adopt_session(session)
+        if lane:
+            session.agent.start_fresh_session()
+
     # The service manager stops a daemon with SIGTERM; ending like a stop request lets the agent clean up.
     signal.signal(signal.SIGTERM, lambda *_: daemon.request_stop())
     try:
@@ -477,7 +544,7 @@ def run_daemon(
             in_stream=daemon.inbox,
             out_stream=log,
             wake=True,
-            on_ready=daemon.adopt_session,
+            on_ready=ready,
             **serve_options,
         )
     finally:

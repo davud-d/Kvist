@@ -29,9 +29,9 @@ def _stdin_to_socket(connection: socket.socket) -> None:
         pass
 
 
-def run_attach(workspace: str) -> int:
+def run_attach(workspace: str, lane: str = "") -> int:
     require_posix()
-    paths = daemon_paths(workspace)
+    paths = daemon_paths(workspace, lane)
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         connection.connect(str(paths.socket))

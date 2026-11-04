@@ -13,13 +13,14 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import replace
 from collections.abc import Callable
 
 from kernel.config.version import kvist_version
 from kernel.protocol.frontend_protocol import PROTOCOL_VERSION
 from kernel.session.durable_json import JsonStorageError
 from kernel.ssh import credentials, machines, messages, wire
-from kernel.ssh.command import Failure, Target, classify, forward_args, ssh_argv
+from kernel.ssh.command import Failure, Target, call_op, classify, forward_args, meaningful, ssh_argv
 from kernel.ssh.commands import NAMES
 from kernel.ssh.local_commands import LocalCommands
 from kernel.ssh.prepare import DialogIO, prepare
@@ -188,7 +189,7 @@ class Proxy:
 
     def _attach_once(self) -> tuple[Failure, bool]:
         proc = subprocess.Popen(
-            ssh_argv(self.target, ["--remote-attach", "--workspace", self.target.workspace]),
+            ssh_argv(self.target, ["--remote-attach", "--workspace", self.target.workspace, *self.target.lane_args()]),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -382,9 +383,12 @@ class Proxy:
         self._write_event(self._hello_of_the_proxy())
         self._greeted = True
         self._notice(messages.text("connecting", self._language, label=f"{self._place}:{self.target.workspace}"))
+        probed: dict = {}
         while True:
-            if self._local.ask(lambda ui: self._prepare(self.target, io=DialogIO(ui), language=self._language)):
+            probed.clear()
+            if self._local.ask(lambda ui: self._prepare(self.target, io=DialogIO(ui), language=self._language, probed=probed)):
                 self._remember_folder()
+                self._local.ask(lambda ui: self._pick_lane(ui, probed.get("lanes") or []))
                 return None
             choice = self._local.ask(self._ask_where_to_go)
             if choice == "retry":
@@ -393,6 +397,62 @@ class Proxy:
                 self._local.relaunch_here()
                 return 0
             return wire.EXIT_GAVE_UP
+
+    def _lane_state(self, lane: dict) -> str | None:
+        """Why a running session is not simply free to take: it is working, has a result nobody saw, or is open in another window."""
+        # A daemon of an older Kvist says none of this, and is not busy as far as anyone can tell.
+        for key, word in (("busy", "lane_running"), ("unseen_work", "lane_unseen"), ("attached", "lane_watched")):
+            if lane.get(key):
+                return messages.text(word, self._language)
+        return None
+
+    def _use_lane(self, lane: str, *, starts_fresh: bool) -> None:
+        """Work in this lane; ``starts_fresh`` when its session is already new (or the one the person chose), so no ``new`` is sent."""
+        self.target = replace(self.target, lane=lane)
+        self._fresh_session_due = self._fresh_session_due and not starts_fresh
+
+    def _another_lane(self, free: list[dict]) -> None:
+        """A session for a start that must not join one that is busy: a free lane is reused, else one more daemon is started."""
+        if free:
+            return self._use_lane(free[0].get("lane", ""), starts_fresh=False)
+        code, answer, stderr = call_op(self.target, "new-lane")
+        if answer is not None and answer.get("ok"):
+            return self._use_lane(answer["lane"], starts_fresh=True)
+        error = (answer or {}).get("error") or (meaningful(stderr).splitlines() or [f"exit {code}"])[-1]
+        self._notice(messages.text("lane_failed", self._language, error=error), "error")
+        self._use_lane("", starts_fresh=False)
+
+    def _pick_lane(self, ui, lanes: list[dict]) -> None:
+        """Which of the sessions working in this folder this interface belongs to.
+
+        A daemon works on one session at a time, so a second session working beside the first needs its own daemon (a lane).
+        Nothing busy, unseen or open elsewhere: the first lane is used and gets a new session. Otherwise the person is asked:
+        join one of those, or start a new one beside them.
+        """
+        taken = [lane for lane in lanes if self._lane_state(lane)]
+        free = [lane for lane in lanes if lane not in taken]
+        asked = self._open_session
+        running_it = next((lane for lane in lanes if asked and lane.get("session") == asked), None)
+        if running_it is not None:
+            self._open_session = None
+            return self._use_lane(running_it.get("lane", ""), starts_fresh=True)
+        if not taken:
+            return self._use_lane(free[0].get("lane", "") if free else "", starts_fresh=False)
+        if asked:
+            return self._another_lane(free)
+        options = [
+            {
+                "value": lane.get("lane") or "@first",
+                "label": f"{lane.get('title') or messages.text('lane_untitled', self._language)} — {self._lane_state(lane)}",
+            }
+            for lane in taken
+        ]
+        options.append({"value": "@new", "label": messages.text("lane_new", self._language)})
+        title = messages.text("lanes_title", self._language, label=f"{self._place}:{self.target.workspace}")
+        choice = ui.choose_option(title, options, current_value="@new", help_text="")
+        if choice in (None, "@new"):
+            return self._another_lane(free)
+        self._use_lane("" if choice == "@first" else choice, starts_fresh=True)
 
     def _remember_folder(self) -> None:
         if not self._machine:

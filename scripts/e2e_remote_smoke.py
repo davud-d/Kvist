@@ -77,6 +77,25 @@ def become_driver(frontend: Frontend) -> None:
                 return
 
 
+def hello_of_the_daemon(frontend: Frontend) -> list[dict]:
+    """Events up to the daemon's own hello. When sessions are already working there the interface asks which to join: this joins the first."""
+    seen: list[dict] = []
+    deadline = time.monotonic() + TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            event = frontend.events.get(timeout=1)
+        except queue.Empty:
+            continue
+        seen.append(event)
+        if event.get("type") == "input_request":
+            reply = {"request_id": event["request_id"], "value": "@first"}
+            frontend.process.stdin.write(json.dumps(reply) + "\n")
+            frontend.process.stdin.flush()
+        if event.get("type") == "hello" and event.get("provider"):
+            return seen
+    raise TimeoutError(f"no hello from the daemon in {TIMEOUT}s; got {[event.get('type') for event in seen]}")
+
+
 def main() -> int:
     provider = FakeProvider()
     with tempfile.TemporaryDirectory(prefix="kvist-remote-") as scratch:
@@ -118,7 +137,7 @@ def main() -> int:
             while (workspace / "hello.txt").read_bytes() != SCENARIOS[1][2] and time.monotonic() < deadline:
                 time.sleep(0.2)
             second = Frontend(local_home, tools, workspace, stand_in)
-            events = second.collect_until("hello", TIMEOUT)
+            events = hello_of_the_daemon(second)
             become_driver(second)
             more = second.collect_until("turn_end", TIMEOUT)
             types = [event["type"] for event in events + more]
@@ -141,9 +160,12 @@ def main() -> int:
 
             # Every launch begins with a new session: a third interface comes after the second one has left.
             second.stop()
+            deadline = time.monotonic() + TIMEOUT
+            while (operation("status", workspace, home)["daemon"] or {}).get("attached") and time.monotonic() < deadline:
+                time.sleep(0.2)
             third = Frontend(local_home, tools, workspace, stand_in)
             try:
-                seen = third.collect_until("hello", TIMEOUT) + third.collect_until("hello", TIMEOUT)
+                seen = hello_of_the_daemon(third)
                 become_driver(third)
                 opened = third.collect_until("command_result", TIMEOUT)[-1]
                 assert opened["name"] == "new" and opened["ok"] and opened["effects"].get("changed"), opened

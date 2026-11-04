@@ -32,13 +32,14 @@ class InstallResult:
     notes: list[str] = field(default_factory=list)
 
 
-def daemon_argv(workspace: str) -> list[str]:
+def daemon_argv(workspace: str, lane: str = "") -> list[str]:
     """The command that runs the daemon: this very program, so the service follows an updated binary."""
     if getattr(sys, "frozen", False):
         base = [sys.executable]
     else:
         base = [sys.executable, str(Path(__file__).resolve().parents[1] / "__main__.py")]
-    return [*base, "--remote-serve", "--workspace", str(Path(workspace).expanduser().resolve())]
+    lane_flag = ["--remote-lane", lane] if lane else []
+    return [*base, "--remote-serve", "--workspace", str(Path(workspace).expanduser().resolve()), *lane_flag]
 
 
 def _environment() -> dict[str, str]:

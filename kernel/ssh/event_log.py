@@ -91,6 +91,10 @@ class EventLog:
         with self._grown:
             return self._size
 
+    def peek_unseen(self) -> bool:
+        with self._grown:
+            return self._unseen_turns > 0
+
     def take_unseen(self) -> bool:
         """Whether a turn ended with nobody attached since the last call; asking clears it."""
         with self._grown:

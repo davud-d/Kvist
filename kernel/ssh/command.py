@@ -21,6 +21,10 @@ class Target:
     port: int | None
     workspace: str  # a folder on the server
     key: str | None = None  # a private key file to sign in with; None means whatever ssh would use
+    lane: str = ""  # which of the sessions working in that folder at the same time; "" is the first
+
+    def lane_args(self) -> list[str]:
+        return ["--remote-lane", self.lane] if self.lane else []
 
     @property
     def label(self) -> str:
@@ -127,7 +131,7 @@ def classify(returncode: int, stderr: str, *, shim_state: str | None) -> Failure
 
 def call_op(target: Target, operation: str) -> tuple[int, dict | None, str]:
     """One ``--remote-op`` on the server: its exit code, its JSON answer if it gave one, and ssh's own complaints."""
-    command = ssh_argv(target, ["--remote-op", operation, "--workspace", target.workspace])
+    command = ssh_argv(target, ["--remote-op", operation, "--workspace", target.workspace, *target.lane_args()])
     done = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace", timeout=120, check=False)
     lines = [line for line in done.stdout.splitlines() if line.strip()]
     answer = wire.decode(lines[-1].encode("utf-8")) if lines else None

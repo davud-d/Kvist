@@ -25,8 +25,23 @@ def _digest(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
 
 
-def daemon_id(workspace: str | Path) -> str:
-    return _digest(os.path.realpath(os.path.expanduser(str(workspace))))
+MAX_LANES = 8
+
+
+def daemon_id(workspace: str | Path, lane: str = "") -> str:
+    """One daemon serves one session at a time; more sessions in the same folder are more daemons, told apart by ``lane`` ("" is the first)."""
+    base = _digest(os.path.realpath(os.path.expanduser(str(workspace))))
+    return f"{base}-{lane}" if lane else base
+
+
+def lanes_of(workspace: str | Path) -> list[str]:
+    """The lanes that have left files for this folder, the first ("") included when it has."""
+    base = daemon_id(workspace)
+    root = remote_root()
+    if not root.is_dir():
+        return []
+    found = [entry.name for entry in root.iterdir() if entry.is_dir() and (entry.name == base or entry.name.startswith(base + "-"))]
+    return sorted(("" if name == base else name[len(base) + 1 :]) for name in found)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +55,8 @@ class DaemonPaths:
     stderr: Path
 
 
-def daemon_paths(workspace: str | Path) -> DaemonPaths:
-    identity = daemon_id(workspace)
+def daemon_paths(workspace: str | Path, lane: str = "") -> DaemonPaths:
+    identity = daemon_id(workspace, lane)
     root = remote_root() / identity
     socket_path = root / "sock"
     if len(str(socket_path)) > _MAX_SOCKET_PATH:

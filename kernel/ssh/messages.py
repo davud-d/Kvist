@@ -60,6 +60,19 @@ _TEXTS = {
         "en": "The agent on {host} is older than this Kvist and cannot work with your provider. Restart it: ssh {host} kvist-core --remote-op stop --workspace {path}, then connect again.",
         "ru": "Агент на {host} старше этого Kvist и не умеет работать с вашим провайдером. Перезапустите его: ssh {host} kvist-core --remote-op stop --workspace {path}, затем подключитесь снова.",
     },
+    "lanes_title": {
+        "en": "Sessions are already open on {label}. Join one, or start a new one that works beside them?",
+        "ru": "На {label} уже есть сессии. Подключиться к одной из них или начать новую, которая будет работать рядом?",
+    },
+    "lane_new": {"en": "A new session", "ru": "Новая сессия"},
+    "lane_running": {"en": "working now", "ru": "идёт работа"},
+    "lane_unseen": {"en": "finished, the result has not been seen", "ru": "закончена, результат не просмотрен"},
+    "lane_watched": {"en": "open in another window", "ru": "открыта в другом окне"},
+    "lane_untitled": {"en": "(no title yet)", "ru": "(пока без названия)"},
+    "lane_failed": {
+        "en": "Could not start another session beside the others: {error}",
+        "ru": "Не удалось начать ещё одну сессию рядом с остальными: {error}",
+    },
     "install_copy": {
         "en": "Copy this computer's Kvist to {host} (about {mb} MB)",
         "ru": "Скопировать на {host} Kvist с этого компьютера (около {mb} МБ)",

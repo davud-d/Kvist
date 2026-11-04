@@ -27,15 +27,33 @@ class _Config:
     smart_model = "s"
 
 
+class _Jobs:
+    def running(self) -> list:
+        return []
+
+
+class _Executor:
+    jobs = _Jobs()
+
+
 class _Agent:
     def __init__(self, ui: EventStreamUI, handler) -> None:
         self._ui = ui
         self._handler = handler
         self.control = TaskControl()
         self.config = _Config()
+        self.executor = _Executor()
+        self.scheduler = None
         self.current_session = "default"
+        self._session_title = None
         self.goals: list[str] = []
         self.cancelled = threading.Event()
+        self.fresh_sessions = 0
+
+    def start_fresh_session(self) -> tuple[str, None]:
+        self.fresh_sessions += 1
+        self.current_session = f"fresh-{self.fresh_sessions}"
+        return self.current_session, None
 
     def _peek_checkpoint(self):
         return None
@@ -58,15 +76,15 @@ class FakeCoreDaemon:
     """The daemon's own classes, a scripted agent in place of the model."""
 
     def __init__(
-        self, tmp_path: Path, handler=echo, *, lease_seconds: float = 20.0, log_limit: int | None = None, commands=None
+        self, tmp_path: Path, handler=echo, *, lease_seconds: float = 20.0, log_limit: int | None = None, commands=None, lane: str = ""
     ) -> None:
         self.workspace = str(tmp_path / "workspace")
-        Path(self.workspace).mkdir()
-        self.paths = daemon_paths(self.workspace)
+        Path(self.workspace).mkdir(exist_ok=True)
+        self.paths = daemon_paths(self.workspace, lane)
         private_directory(self.paths.root)
         kwargs = {"limit": log_limit} if log_limit else {}
         self.log = EventLog(self.paths.log, **kwargs)
-        self.daemon = Daemon(self.paths, self.log, ClientInbox(), Lease(lease_seconds))
+        self.daemon = Daemon(self.paths, self.log, ClientInbox(), Lease(lease_seconds), lane=lane)
         channel = FrontendChannel()
         ui = EventStreamUI(channel)
         self.agent = _Agent(ui, handler)

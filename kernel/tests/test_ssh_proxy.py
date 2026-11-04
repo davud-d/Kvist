@@ -408,7 +408,7 @@ def asking_prepare(*answers_wanted):
     """A check of the machine that puts one question to the person, as the real one does, and reports what was answered."""
     seen: list = []
 
-    def prepare(target, io, language):
+    def prepare(target, io, language, probed=None):
         seen.append(io.menu("Kvist is not running here.", [("install-service", "Install it as a service"), ("cancel", "Cancel")]))
         return seen[-1] == "install-service"
 
@@ -445,7 +445,7 @@ def test_the_interface_gets_its_hello_at_once_and_the_machine_is_prepared_in_dia
 def test_when_the_machine_cannot_be_made_ready_the_person_chooses_and_working_here_asks_the_interface_to_start_again(server_tools, tmp_path):
     daemon = FakeCoreDaemon(tmp_path)
     try:
-        _, frontend, thread, exit_code = start_proxy(daemon.workspace, prepare_machine=lambda target, io, language: False)
+        _, frontend, thread, exit_code = start_proxy(daemon.workspace, prepare_machine=lambda target, io, language, probed=None: False)
         menu = frontend.wait_for(lambda line: line["type"] == "input_request")
         frontend.say(json.dumps({"request_id": menu["request_id"], "value": "local"}))
         result = frontend.wait_for(lambda line: line["type"] == "command_result")
@@ -463,7 +463,7 @@ def test_trying_again_asks_the_machine_again_and_closing_ends_with_the_give_up_c
     daemon = FakeCoreDaemon(tmp_path)
     attempts = []
 
-    def prepare(target, io, language):
+    def prepare(target, io, language, probed=None):
         attempts.append(1)
         return False
 
@@ -501,7 +501,7 @@ def test_what_the_frontend_sends_on_its_own_while_the_machine_is_being_made_read
     daemon = FakeCoreDaemon(tmp_path)
     release = threading.Event()
 
-    def slow_prepare(target, io, language):
+    def slow_prepare(target, io, language, probed=None):
         release.wait(20)
         return True
 
