@@ -80,25 +80,92 @@ function demoVideos(t) {
       </div>`;
 }
 
-/** One replay: server-rendered final frame plus the controls that drive it. */
-function replay({ t, cast, source, label, autoplay }) {
-  return `<div class="replay" data-replay data-cast="${esc(source)}"
-           data-play="${esc(t.demo.play)}" data-pause="${esc(t.demo.pause)}"
-           ${autoplay ? "" : 'data-autoplay="false"'}>
-        <div class="replay-wrap">
-          <pre class="replay-screen" data-screen tabindex="0"
-               style="--rows:${esc(cast.h)}"
-               aria-label="${esc(label)}">${finalFrame(cast)}</pre>
-        </div>
-        <div class="replay-bar">
-          <button class="chip" type="button" data-play aria-pressed="false">${esc(t.demo.play)}</button>
-          <button class="chip" type="button" data-restart>${esc(t.demo.restart)}</button>
-          <button class="chip" type="button" data-speed aria-label="${esc(t.demo.speed)}">1&#215;</button>
-          <input class="scrub" type="range" min="0" max="${esc(cast.duration)}" value="0" step="100"
-                 data-scrub disabled aria-label="${esc(t.demo.progress)}">
-          <span class="replay-time" data-time>0:00 / 0:00</span>
-        </div>
-      </div>`;
+/** Colours a shell command at build time, so it needs no script and the copy
+    button still carries the plain text. Only the shapes these commands have are
+    recognised: the program at the start of each pipe segment, flags, URLs and
+    the pipe itself. Everything else stays plain. */
+function highlight(cmd) {
+  let startOfSegment = true;
+  return cmd
+    .split(/(\s+)/)
+    .map((part) => {
+      if (!part.trim()) return esc(part);
+      let kind = "";
+      if (part === "|") {
+        kind = "pipe";
+        startOfSegment = true;
+        return `<span class="tk-${kind}">${esc(part)}</span>`;
+      }
+      if (startOfSegment) kind = "cmd";
+      else if (/^https?:\/\//.test(part)) kind = "url";
+      else if (part.startsWith("-")) kind = "flag";
+      startOfSegment = false;
+      return kind ? `<span class="tk-${kind}">${esc(part)}</span>` : esc(part);
+    })
+    .join("");
+}
+
+/** A command the reader will paste. The text sits in a <code> that selects whole
+    on a click, so copying works with no script and no clipboard permission; the
+    button is the convenience on top, added to the page by main.js. */
+function cmdBlock(t, { label, cmd }) {
+  return `<div class="cmd">
+          ${label ? `<span class="cmd-label">${esc(label)}</span>` : ""}
+          <div class="cmd-row">
+            <code class="cmd-text" tabindex="0">${highlight(cmd)}</code>
+            <button class="chip" type="button" data-copy="${esc(cmd)}"
+                    data-done="${esc(t.installPage.copied)}"
+                    aria-label="${esc(t.installPage.copyLabel)}: ${esc(cmd)}" hidden>${esc(t.installPage.copy)}</button>
+          </div>
+        </div>`;
+}
+
+/** Where to look in each screenshot: its size in pixels and the outlined boxes as
+    [x, y, width, height, side?] in that size, in the order the legend lists them.
+    `side` "r" puts the number on the right edge, for boxes at the image's left
+    edge where the default (left of the box) would be cut off. Geometry is not
+    copy, so it lives here and the two locales only translate the legend. */
+const FULL = [1500, 900];
+const SHOTS = {
+  run: { size: [1596, 200], boxes: [[44, 50, 608, 26], [44, 76, 1508, 50]] },
+  components: { size: FULL, boxes: [[430, 318, 640, 24], [430, 366, 640, 24], [430, 538, 640, 120], [430, 678, 92, 24]] },
+  progress: { size: FULL, boxes: [[430, 415, 260, 72], [430, 508, 420, 52]] },
+  welcome: { size: FULL, boxes: [[430, 271, 130, 24], [430, 583, 440, 24], [430, 630, 130, 26]] },
+  provider: { size: FULL, boxes: [[430, 414, 640, 24], [430, 438, 640, 24], [430, 582, 640, 24]] },
+  key: { size: FULL, boxes: [[430, 391, 570, 24], [430, 438, 640, 26], [430, 486, 280, 26], [430, 534, 100, 26]] },
+  start: { size: FULL, boxes: [[450, 390, 600, 72], [450, 488, 600, 22], [1148, 846, 325, 26], [28, 846, 115, 26]] },
+  task: { size: FULL, boxes: [[450, 390, 600, 72]] },
+  commands: { size: FULL, boxes: [[450, 127, 600, 238]] },
+};
+
+/** Empty ${} slots leave indented blank lines behind. */
+const tidy = (html) => html.replace(/[ \t]+$/gm, "");
+
+const pct = (value, whole) => `${((value / whole) * 100).toFixed(3)}%`;
+
+/** A screenshot with numbered outlines and the legend that explains them. The
+    outlines are positioned in percentages of the image, so they stay on their
+    targets at any width; the numbers carry the meaning, the colour only helps. */
+function shot({ shot: item }) {
+  const { size, boxes } = SHOTS[item.id];
+  if (boxes.length !== item.marks.length) {
+    throw new Error(`shot "${item.id}": ${boxes.length} boxes, ${item.marks.length} legend lines`);
+  }
+  const [w, h] = size;
+  return `<figure class="shot">
+          <div class="shot-frame" style="aspect-ratio:${w}/${h}">
+            <img src="/assets/install/${esc(item.id)}.webp" width="${w}" height="${h}" loading="lazy" decoding="async" alt="${esc(item.alt)}">
+            ${boxes
+              .map(
+                ([x, y, bw, bh, side], index) =>
+                  `<span class="shot-mark${side === "r" ? " shot-mark-r" : ""}" aria-hidden="true" style="left:${pct(x, w)};top:${pct(y, h)};width:${pct(bw, w)};height:${pct(bh, h)}"><i>${index + 1}</i></span>`,
+              )
+              .join("\n            ")}
+          </div>
+          <ol class="legend">
+            ${item.marks.map((text) => `<li>${esc(text)}</li>`).join("\n            ")}
+          </ol>
+        </figure>`;
 }
 
 const cards = (items) =>
@@ -162,11 +229,11 @@ function head({ t, css, meta, path, otherPath }) {
 }
 
 /** The header is shared; only the rail contents differ between the pages. */
-function header({ t, home, rail }) {
+function header({ t, home, rail, label = t.meta.title }) {
   return `<header class="top">
   <div class="wrap top-row">
     <a class="mark" href="${esc(home)}"><span class="dot" aria-hidden="true"></span>Kvist</a>
-    <nav class="rail" aria-label="${esc(t.meta.title)}">
+    <nav class="rail" aria-label="${esc(label)}">
       ${rail}
     </nav>
     <div class="tools">
@@ -195,9 +262,9 @@ export function render({ t, css, buildId }) {
   const rail = ["demo", "loop", "boundary", "recovery", "control", "install"]
     .map((key) => `<a href="#${key}">${esc(t.nav[key])}</a>`)
     .join("\n      ") +
-    `\n      <a href="${esc(t.dir)}guides/">${esc(t.guides.nav)}</a>`;
+    `\n      <a class="rail-cta" href="${esc(t.dir)}install/">${esc(t.nav.howto)}</a>`;
 
-  return `<!DOCTYPE html>
+  return tidy(`<!DOCTYPE html>
 <html lang="${esc(t.lang)}" class="no-js">
 <head>
 ${head({ t, css, meta: t.meta, path: t.dir, otherPath: t.other.dir })}
@@ -218,9 +285,10 @@ ${header({ t, home: t.dir, rail })}
       <h1>${esc(t.hero.h1)}</h1>
       <p class="lede">${esc(t.hero.lede)}</p>
 
+      <p class="hero-cta"><a class="btn" href="${esc(t.dir)}install/">${esc(t.hero.installLink)}</a></p>
+
       <div class="hero-links">
         <a class="linkout" href="#demo">${esc(t.hero.cta)}</a>
-        <a class="linkout" href="${esc(t.dir)}guides/">${esc(t.hero.guidesLink)}</a>
         <a class="linkout" href="https://github.com/davud-d/Kvist">${esc(t.hero.repo)}</a>
       </div>
       <p class="hero-note">${esc(t.hero.note)}</p>
@@ -267,11 +335,14 @@ ${header({ t, home: t.dir, rail })}
           .map(
             (step) => `<li class="step">
           <span class="n">${esc(step.n)}</span>
-          <div><span class="term">${esc(step.term)}</span><p>${esc(step.text)}</p></div>
+          <div><span class="term">${esc(step.term)}</span>${
+            step.cmd ? cmdBlock(t, { cmd: step.cmd }) : `<p>${esc(step.text)}</p>`
+          }</div>
         </li>`,
           )
           .join("\n        ")}
       </ol>
+      <p class="hero-links" style="margin-top:var(--s-5)"><a class="linkout" href="${esc(t.dir)}install/">${esc(t.install.more)}</a></p>
 
       <h3 class="term" style="margin-top:var(--s-6)">${esc(t.install.reqTitle)}</h3>
       <ul class="req">
@@ -298,88 +369,84 @@ ${langbar(t, t.other.dir)}
 <script type="module" src="/assets/app.js?v=${buildId}"></script>
 </body>
 </html>
-`;
+`);
 }
 
 export { SITE, BOOT };
 
 /**
- * The guides page: one section per recording, each a short piece of prose and
- * the terminal it describes. Same header, same replay component, same rules —
- * the final frame is server-rendered, so the page is complete without
- * JavaScript here too.
+ * The install page: one section per step, each a short text, the commands to
+ * paste and a screenshot of the real screen. Same header and footer as the front
+ * page, and complete without JavaScript (the copy buttons are the only addition).
  */
-export function renderGuides({ t, css, casts, buildId }) {
-  const path = `${t.dir}guides/`;
-  const otherPath = `${t.other.dir}guides/`;
-  /* Twelve entries do not fit a rail, so it lists the four groups. */
-  const rail = t.guides.groups
-    .map((group) => `<a href="#${esc(group.id)}">${esc(group.title)}</a>`)
+export function renderInstall({ t, css, buildId }) {
+  const page = t.installPage;
+  const path = `${t.dir}install/`;
+  const otherPath = `${t.other.dir}install/`;
+  const rail = page.steps
+    .map((step) => `<a href="#${esc(step.id)}">${esc(step.n)}</a>`)
     .join("\n      ");
 
-  return `<!DOCTYPE html>
-<html lang="${esc(t.lang)}" class="no-js guides">
+  return tidy(`<!DOCTYPE html>
+<html lang="${esc(t.lang)}" class="no-js install">
 <head>
-${head({ t, css, meta: t.guides.meta, path, otherPath })}
+${head({ t, css, meta: page.meta, path, otherPath })}
 </head>
 <body>
-<a class="skip" href="#${esc(t.guides.items[0].id)}">${esc(t.guides.skip)}</a>
+<a class="skip" href="#${esc(page.steps[0].id)}">${esc(page.skip)}</a>
 <div class="texture" aria-hidden="true"></div>
 <div class="cursor-glow" data-cursor-glow aria-hidden="true"></div>
 
-${header({ t, home: t.dir, rail })}
+${header({ t, home: t.dir, rail, label: page.meta.title })}
 
 <main>
   <section class="section section-lead">
     <div class="wrap">
-      <p class="kicker">${esc(t.guides.kicker)}</p>
-      <h1 class="h1-page">${esc(t.guides.h1)}</h1>
-      <p class="lede">${esc(t.guides.lede)}</p>
+      <p class="kicker">${esc(page.kicker)}</p>
+      <h1 class="h1-page">${esc(page.h1)}</h1>
+      <p class="lede">${esc(page.lede)}</p>
+      <h2 class="term" style="margin-top:var(--s-5)">${esc(page.needTitle)}</h2>
+      <ul class="req" style="margin-top:var(--s-3)">
+        ${page.need.map((item) => `<li>${esc(item)}</li>`).join("\n        ")}
+      </ul>
       <p class="note">
-        <span class="term">${esc(t.guides.caveat.term)}</span>
-        ${esc(t.guides.caveat.text)}
+        <span class="term">${esc(page.caveat.term)}</span>
+        ${esc(page.caveat.text)}
       </p>
     </div>
   </section>
 
-  ${t.guides.groups
-    .map((group) => {
-      const items = t.guides.items.filter((item) => item.group === group.id);
-      return `<section class="section" id="${esc(group.id)}">
+  ${page.steps
+    .map(
+      (step) => `<section class="section istep" id="${esc(step.id)}" aria-labelledby="${esc(step.id)}-h">
     <div class="wrap">
-      <p class="kicker">${esc(group.title)}</p>
-    </div>
-    ${items
-      .map(
-        (item) => `<div class="guide" id="${esc(item.id)}">
-      <div class="wrap">
-        <div class="guide-head">
-          <span class="n">${esc(item.n)}</span>
-          <div>
-            <h2 class="h2">${esc(item.term)}</h2>
-            <p class="lede">${esc(item.text)}</p>
-          </div>
+      <div class="guide-head">
+        <span class="n"><span class="visually-hidden">${esc(page.stepWord)} </span>${esc(step.n)}</span>
+        <div>
+          <h2 class="h2" id="${esc(step.id)}-h">${esc(step.term)}</h2>
+          <p class="lede">${esc(step.text)}</p>
         </div>
-        ${replay({
-          t,
-          cast: casts[item.id],
-          source: `/assets/demo/guide-${item.id}.json`,
-          label: item.term,
-          autoplay: false,
-        })}
       </div>
-    </div>`,
-      )
-      .join("\n    ")}
-  </section>`;
-    })
+      ${(step.cmds ?? []).map((cmd) => cmdBlock(t, cmd)).join("\n      ")}${
+        step.note ? `\n      <p class="note">${esc(step.note)}</p>` : ""
+      }
+      ${step.shots.map((item) => shot({ shot: item })).join("\n      ")}
+    </div>
+  </section>`,
+    )
     .join("\n\n  ")}
+
+  <section class="section">
+    <div class="wrap">
+      <p class="note" style="margin-top:0">${esc(page.alt)}</p>
+    </div>
+  </section>
 </main>
 
 <footer class="foot">
   <div class="wrap">
     <div class="foot-row">
-      <a class="linkout" href="${esc(t.dir)}">${esc(t.guides.back)}</a>
+      <a class="linkout" href="${esc(t.dir)}">${esc(page.back)}</a>
       <a href="https://github.com/davud-d/Kvist">${esc(t.footer.repo)}</a>
       <span>${esc(t.footer.license)}</span>
     </div>
@@ -391,5 +458,5 @@ ${langbar(t, otherPath)}
 <script type="module" src="/assets/app.js?v=${buildId}"></script>
 </body>
 </html>
-`;
+`);
 }

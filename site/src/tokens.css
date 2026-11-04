@@ -37,6 +37,11 @@
   --acc:    #4fc3f7;   /* accent 1                                          */
   --ok:     #3fc47a;   /* accent 2                                          */
 
+  /* -- screenshot outlines: the pictures are always a dark terminal, so these
+        do not change with the theme ------------------------------------- */
+  --mark:      #ffd24a;
+  --ink-fixed: #000000;   /* text on --mark */
+
   /* ------------------------------------------------------------------
      ACCENT BUDGET — five slots for the whole page, one spent so far.
        1. (unused — the install command it lit up is gone with the repo link)

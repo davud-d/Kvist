@@ -23,7 +23,8 @@
     "repo": "Repository",
     "theme": "Switch theme",
     "themeDark": "Dark",
-    "themeLight": "Light"
+    "themeLight": "Light",
+    "howto": "How to install"
   },
   "langbar": {
     "text": "This page is also in Russian.",
@@ -35,19 +36,14 @@
     "h1": "One workspace. One gate for every action.",
     "lede": "Kvist is a terminal coding agent that works in a single project directory. It works through tool calling — read, edit, run, verify — and feeds the results back before deciding the next step. Models without tool calling fall back to JSON. Every action goes through one executor that can refuse it.",
     "cta": "Watch it run",
-    "guidesLink": "Browse the guides",
+    "installLink": "How to install",
     "repo": "Open the repository",
-    "note": "Kvist is released, with source available under the MIT license. The run and twelve guides below show the real interface. Linux and Windows · macOS without guarantees"
+    "note": "Kvist is released, with source available under the MIT license. The recorded run below shows the real interface. Linux and Windows · macOS without guarantees"
   },
   "demo": {
     "kicker": "Recorded run",
     "h2": "A real run, not a rehearsal",
     "lede": "Screen recordings of Kvist building a small Python project from a single request, in two of its interfaces. Same agent, same core; pick the look you prefer. The video loads only when you press play.",
-    "play": "Play",
-    "pause": "Pause",
-    "restart": "Restart",
-    "speed": "Speed",
-    "progress": "Position in the run",
     "tabsLabel": "Interface",
     "tabClassic": "Classic",
     "tabClaude": "Claude style"
@@ -164,13 +160,13 @@
     "steps": [
       {
         "n": "01",
-        "term": "Install the release",
-        "text": "Linux / macOS: curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash"
+        "term": "Install the release (Linux / macOS)",
+        "cmd": "curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash"
       },
       {
         "n": "02",
-        "term": "Windows (PowerShell)",
-        "text": "irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.ps1 | iex"
+        "term": "Install the release (Windows, PowerShell)",
+        "cmd": "irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.ps1 | iex"
       },
       {
         "n": "03",
@@ -189,7 +185,8 @@
       "A terminal for setup and approvals",
       "Linux and Windows; macOS without guarantees"
     ],
-    "alt": "Running from source requires Python 3.11+: clone the repository, install requirements.txt in a venv, and run main.py --workspace <path>. See the repository README for details."
+    "alt": "Running from source requires Python 3.11+: clone the repository, install requirements.txt in a venv, and run main.py --workspace <path>. See the repository README for details.",
+    "more": "Step-by-step guide with screenshots"
   },
   "footer": {
     "license": "MIT, © 2026 Davud",
@@ -197,136 +194,206 @@
     "builtWith": "This page ships no third-party requests, no analytics and no fonts from a CDN.",
     "release": "Kvist is available to install. The source code is open under the MIT license."
   },
-  "guides": {
-    "nav": "Guides",
+  "installPage": {
     "meta": {
-      "title": "Kvist guides — configuring and driving the agent",
-      "description": "Short terminal recordings of the real Kvist interface: picking a provider, the command list, roles, reasoning effort, named sessions, and reverting what the agent wrote."
+      "title": "Install Kvist — step by step",
+      "description": "A step-by-step guide to installing Kvist on Linux, macOS and Windows: one command, the installer screen, the first-run setup, and your first task. Every screen is a real screenshot and every command can be copied."
     },
-    "kicker": "Guides",
-    "h1": "Twelve recordings of the real interface",
-    "lede": "Each one is the terminal, not a diagram — a spoiler of the interface, not a mockup of it. They're recorded the same way as the run on the front page, with the same script every time, so nothing here is staged for the screenshot.",
-    "back": "Back to the front page",
+    "nav": "Install",
+    "skip": "Skip to the first step",
+    "kicker": "Install guide",
+    "h1": "Install Kvist, step by step",
+    "lede": "Eight steps from an empty terminal to your first task. Every screenshot is the real installer and the real interface, with the parts to look at outlined and numbered. Every command has a Copy button.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyLabel": "Copy command",
+    "needTitle": "Before you start",
+    "need": [
+      "A terminal on Linux, macOS or Windows (macOS without guarantees)",
+      "No Python and no administrator rights are needed",
+      "A provider API key, or a ChatGPT Plus/Pro subscription to sign in with"
+    ],
     "caveat": {
-      "term": "About these recordings",
-      "text": "They show the interface, so they do not need a model: each one runs under a throwaway HOME against a small OpenAI-compatible gateway on localhost — which is what OmniRoute, the built-in local gateway option, is for. No real provider is called and no real key is typed, which is why the models are called local-fast and local-smart. Everything else on screen is the agent you install."
+      "term": "About the screenshots",
+      "text": "They were taken from the release installer in a clean home directory. The last two show a local test gateway instead of a real provider, so the provider and model names there are not what you will see; the layout is."
     },
-    "items": [
+    "stepWord": "Step",
+    "steps": [
+      {
+        "id": "run",
+        "n": "01",
+        "term": "Run the installer",
+        "text": "Open a terminal and paste one command. It downloads the agent and Node.js into a temporary folder and writes nothing until you confirm on the next screen.",
+        "cmds": [
+          {
+            "label": "Linux and macOS",
+            "cmd": "curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash"
+          },
+          {
+            "label": "Windows (PowerShell)",
+            "cmd": "irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.ps1 | iex"
+          }
+        ],
+        "note": "On Windows the installer has no component screen yet: it installs the defaults and finishes. Skip to step 07.",
+        "shots": [
+          {
+            "id": "run",
+            "alt": "Terminal showing the installer downloading the Kvist binary and Node.js",
+            "marks": [
+              "Nothing is installed until you choose it on the next screen",
+              "The agent binary downloads into a temporary folder"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "components",
+        "n": "02",
+        "term": "Choose what to install",
+        "text": "Arrow keys move, Space ticks or unticks, Enter installs. The defaults are fine: the Kvist agent is required, and Node.js runs the terminal interface. Untick anything you do not want, such as the desktop app or an editor extension.",
+        "shots": [
+          {
+            "id": "components",
+            "alt": "The installer screen listing components with checkboxes",
+            "marks": [
+              "The Kvist agent: the kvist command itself",
+              "Node.js 22: runs the terminal interface",
+              "Exactly what will be written, and where",
+              "Install starts it; Esc quits with nothing written"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "progress",
+        "n": "03",
+        "term": "Wait for it to finish",
+        "text": "Each component shows its own state and the bar counts finished ones. Files go under ~/.local/share/kvist and the launcher goes to ~/.local/bin. It usually takes a minute or two.",
+        "shots": [
+          {
+            "id": "progress",
+            "alt": "The installer showing each component as working, with a progress bar",
+            "marks": [
+              "One line per component you ticked",
+              "Progress and what is downloading right now"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "welcome",
+        "n": "04",
+        "term": "Start the first-run setup",
+        "text": "When the installer says Installed, the same window continues into setup. It tells you what Kvist will not do: it does not read .env files or SSH keys, it asks before risky commands, and /revert undoes what it changed. Press Enter on Get started.",
+        "shots": [
+          {
+            "id": "welcome",
+            "alt": "The setup welcome screen with an Installed confirmation",
+            "marks": [
+              "The installation is done",
+              "The folder Kvist will work in; press F to change it",
+              "Get started continues"
+            ]
+          }
+        ]
+      },
       {
         "id": "provider",
-        "n": "01",
-        "term": "First run: pick a provider",
-        "text": "On the first launch in a project Kvist asks which provider to use. The list carries every built-in one plus an entry for adding your own OpenAI- or Anthropic-compatible endpoint. Arrow keys move, Enter confirms, and then it asks for that provider's key at a masked prompt and writes it to ~/.kvist/config.json — never into the project. The recording picks OmniRoute because that is the local-gateway option; picking OpenAI or Anthropic is the same three keystrokes.",
-        "short": "Provider",
-        "group": "setup"
-      },
-      {
-        "id": "custom",
-        "term": "Add your own endpoint",
-        "text": "The last entry in the provider list adds an OpenAI- or Anthropic-compatible endpoint of your own: an id, the protocol, the base URL, whether it survives streaming, a key, a display name, and the model ids it serves. The key is whatever that endpoint expects — a gateway on your own machine usually ignores it. Streaming starts off, because many third-party gateways answer plain requests correctly and break on stream=true.",
-        "short": "Custom",
-        "n": "02",
-        "group": "setup"
-      },
-      {
-        "id": "models",
-        "term": "Two models, two jobs",
-        "text": "fast carries routing, chat and the simple steps; smart takes complex work and error recovery. /models sets both, together or one at a time. Providers with a fixed catalogue offer a list; ones with dynamic ids — a local gateway, for instance — take the id you type.",
-        "short": "Models",
-        "n": "03",
-        "group": "setup"
-      },
-      {
-        "id": "changeapi",
-        "term": "Replace a key",
-        "text": "/change-api replaces the key for the provider you are on, at the same masked prompt as the first launch. It never prints the old one; the panel says only that one is configured. Leaving the field empty keeps what is already there.",
-        "short": "Keys",
-        "n": "04",
-        "group": "setup"
-      },
-      {
-        "id": "commands",
         "n": "05",
-        "term": "Every command in one place",
-        "text": "Typing / opens completion; /commands prints the whole list with what each one does. Sixteen commands cover providers, models, roles, effort, sessions, the change journal and the verbose-output toggle.",
-        "short": "Commands",
-        "group": "driving"
+        "term": "Pick where the model comes from",
+        "text": "Choose a provider with the arrow keys or the number, then Enter. You can add more or switch later with /provider. ChatGPT Plus/Pro signs in with your subscription instead of a key; More providers opens the longer list.",
+        "shots": [
+          {
+            "id": "provider",
+            "alt": "The provider list: AnyModel, ChatGPT Plus/Pro, OpenAI, Anthropic, DeepSeek and more",
+            "marks": [
+              "AnyModel, Kvist's own router, is the recommended start",
+              "Sign in with a ChatGPT Plus or Pro subscription",
+              "Forty more providers, set up in the classic terminal"
+            ]
+          }
+        ]
       },
       {
-        "id": "role",
+        "id": "key",
         "n": "06",
-        "term": "Roles decide what it may touch",
-        "text": "/role pins the run to coder, reader, devops or chat, or leaves it on auto. Auto routes each request itself: explicit rules first, then a small model, then keywords. Pinning devops here is the difference between an agent that edits your source and one that works on services and deployment.",
-        "short": "Roles",
-        "group": "driving"
+        "term": "Paste your key",
+        "text": "Paste the key and press Enter; Tab shows or hides it. It is saved only in ~/.kvist/config.json on this computer, never in a project. Without a key yet, the registration button opens the provider's page. After that the setup may ask for models and which interface to use; the first interface in the list is the one most people want.",
+        "shots": [
+          {
+            "id": "key",
+            "alt": "The key prompt with a masked input field and a registration button",
+            "marks": [
+              "Where the key is kept",
+              "Paste it here",
+              "Opens the registration page if you have no key",
+              "Continue saves it"
+            ]
+          }
+        ]
       },
       {
-        "id": "effort",
+        "id": "start",
         "n": "07",
-        "term": "Reasoning effort, one knob",
-        "text": "/effort sets how hard the model thinks, on one scale from false to max — six levels, one command, whatever the provider underneath calls them. Providers slice it differently, so when your choice collapses into something coarser Kvist says so at the moment you make it rather than leaving you to wonder: DeepSeek, for instance, answers that only false, high and max are actually distinct there.",
-        "short": "Effort",
-        "group": "driving"
+        "term": "Start Kvist in a project",
+        "text": "Go to your project folder and run kvist. The current folder becomes the workspace: Kvist reads, edits and runs commands only inside it.",
+        "cmds": [
+          {
+            "label": "In your project folder",
+            "cmd": "cd ~/project"
+          },
+          {
+            "label": "Start the agent",
+            "cmd": "kvist"
+          }
+        ],
+        "shots": [
+          {
+            "id": "start",
+            "alt": "Kvist Glass, ready for a task",
+            "marks": [
+              "Where you type your request",
+              "Enter sends, Ctrl+P picks the model, Ctrl+T shows helpers",
+              "The provider, model and reasoning effort in use",
+              "The workspace: the only folder Kvist works in"
+            ]
+          }
+        ]
       },
       {
-        "id": "style",
-        "term": "Working styles",
-        "text": "/style picks how the agent works and how it writes: nine styles for the action loop — minimalist, paranoid, architect, perfectionist, senior-dev among them — and five for chat. One session keeps one style, stamped when it starts, so the plan and the steps that follow it come from the same beliefs.",
-        "short": "Styles",
+        "id": "task",
         "n": "08",
-        "group": "driving"
-      },
-      {
-        "id": "toggles",
-        "term": "A diagnostic switch",
-        "text": "/verbose turns on the diagnostic output. It says what it did, so you are never guessing which state you are in.",
-        "short": "Switches",
-        "n": "09",
-        "group": "driving"
-      },
-      {
-        "id": "session",
-        "n": "10",
-        "term": "Named sessions",
-        "text": "/session lists what the workspace has and creates a new one. Each session keeps its own history, checkpoint and style. Creating one does not erase the old conversation — it stays on disk and is one /session away. An auto-named session left empty is dropped, so opening and quitting cannot litter the list.",
-        "short": "Sessions",
-        "group": "state"
-      },
-      {
-        "id": "changes",
-        "n": "11",
-        "term": "See what changed, put it back",
-        "text": "/changes prints a diff of everything the agent wrote in this workspace, across sessions. /revert restores it — after a confirmation that opens on “No”, because it is a decision. It only overwrites content the journal can prove the agent wrote; anything you changed yourself is kept.",
-        "short": "Revert",
-        "group": "state"
-      },
-      {
-        "id": "headless",
-        "term": "No interface at all",
-        "text": "Kvist answers one-shot commands for scripts and other frontends: --config-info reports the saved provider and models without an LLM call, --session-op manages sessions, --journal-op prints or reverts the change journal. All of it is JSON on stdout. The Electron GUI is built on the same protocol and nothing else.",
-        "short": "Headless",
-        "n": "12",
-        "group": "script"
+        "term": "Give it a task",
+        "text": "Type what you want in plain words and press Enter. Type / to see the commands. Approvals appear inline: answer them and the run continues. When it is done, /changes shows what was written and /revert puts it back.",
+        "cmds": [
+          {
+            "label": "See what the agent wrote",
+            "cmd": "/changes"
+          },
+          {
+            "label": "Put it back",
+            "cmd": "/revert"
+          }
+        ],
+        "shots": [
+          {
+            "id": "task",
+            "alt": "A task typed into the Kvist Glass input",
+            "marks": [
+              "Your request, in plain words"
+            ]
+          },
+          {
+            "id": "commands",
+            "alt": "The slash command list above the input",
+            "marks": [
+              "Typing / lists the commands; /commands prints them all"
+            ]
+          }
+        ]
       }
     ],
-    "skip": "Skip to the first guide",
-    "groups": [
-      {
-        "id": "setup",
-        "title": "Setting it up"
-      },
-      {
-        "id": "driving",
-        "title": "Driving a run"
-      },
-      {
-        "id": "state",
-        "title": "Sessions and undo"
-      },
-      {
-        "id": "script",
-        "title": "Without an interface"
-      }
-    ]
+    "alt": "Prefer to run from source? It needs Python 3.11+: clone the repository, install requirements.txt in a venv and run main.py --workspace <path>. See the repository README.",
+    "back": "Back to the front page"
   }
 }

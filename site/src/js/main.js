@@ -4,7 +4,6 @@
  * page is complete before this file runs.
  */
 import { mountHero } from "./hero.js";
-import { mountPlayer } from "./player.js";
 import { mountCursorGlow } from "./cursor-glow.js";
 
 const THEME_KEY = "kvist.theme";
@@ -148,13 +147,42 @@ if (canvas) mountHero(canvas, { reducedMotion });
 
 mountCursorGlow(document.querySelector("[data-cursor-glow]"), { reducedMotion });
 
-for (const replay of document.querySelectorAll("[data-replay]")) {
-  mountPlayer(replay, {
-    reducedMotion,
-    strings: {
-      play: replay.dataset.play,
-      pause: replay.dataset.pause,
-    },
+/* -- copy buttons ---------------------------------------------------------- */
+/* The buttons ship hidden: without JavaScript the command is still selectable
+   text, and a button that does nothing is worse than none. */
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* not a secure context, or permission refused: fall through */
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  return ok;
+}
+
+for (const button of document.querySelectorAll("[data-copy]")) {
+  button.hidden = false;
+  const label = button.textContent;
+  let timer = 0;
+  button.addEventListener("click", async () => {
+    if (!(await copyText(button.dataset.copy))) return;
+    button.textContent = button.dataset.done;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      button.textContent = label;
+    }, 1600);
   });
 }
 

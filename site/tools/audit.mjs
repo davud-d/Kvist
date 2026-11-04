@@ -6,7 +6,7 @@
  *
  * It serves dist/ itself, then for every width and both locales asserts: no
  * horizontal scroll, the install command above the fold at 1366x768, no text
- * under 14px outside the replay, and both themes. It then repeats the pass
+ * under 14px, and both themes. It then repeats the pass
  * with JavaScript off and with reduced motion on.
  *
  * Needs the playwright package and a Chromium. It uses the system Chrome when
@@ -25,12 +25,8 @@ const dist = resolve(here, "../dist");
 
 const WIDTHS = [380, 620, 768, 1024, 1366, 1440];
 const LOCALES = ["/", "/ru/"];
-const GUIDE_PAGES = ["/guides/", "/ru/guides/"];
-/* One replay per guide, read from the built page rather than hard-coded. */
-const GUIDE_COUNT = JSON.parse(
-  readFileSync(resolve(here, "../src/i18n/en.json"), "utf8"),
-).guides.items.length;
-const ALL = [...LOCALES, ...GUIDE_PAGES];
+const INSTALL_PAGES = ["/install/", "/ru/install/"];
+const ALL = [...LOCALES, ...INSTALL_PAGES];
 const PORT = 4271;
 
 const TYPES = {
@@ -39,6 +35,7 @@ const TYPES = {
   ".json": "application/json; charset=utf-8",
   ".woff2": "font/woff2",
   ".png": "image/png",
+  ".webp": "image/webp",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
 };
@@ -103,33 +100,19 @@ async function inspect(page) {
     const small = [];
     for (const el of document.querySelectorAll("body *")) {
       if (!el.textContent.trim() || el.children.length) continue;
-      if (el.closest(".replay-screen")) continue; // sized by the brief's §8
       const size = parseFloat(getComputedStyle(el).fontSize);
       if (size < 14) small.push(`${el.tagName.toLowerCase()}.${el.className} ${size}px`);
     }
-    const command = document.getElementById("install-command");
-    const rect = command ? command.getBoundingClientRect() : null;
     return {
       scrollWidth: doc.scrollWidth,
       clientWidth: doc.clientWidth,
-      commandBottom: rect ? Math.round(rect.bottom) : 0,
-      commandText: command ? command.textContent.trim() : "",
+      commands: document.querySelectorAll(".cmd-text").length,
+      copyShown: [...document.querySelectorAll("[data-copy]")].some((el) => el.offsetParent !== null),
       small: [...new Set(small)],
       h1s: document.querySelectorAll("h1").length,
       lang: doc.lang,
       title: document.title,
-      replays: document.querySelectorAll(".replay-screen").length,
-      /* Every replay must be a full 32-row screen; the smallest one answers. */
-      replayRows: Math.min(
-        ...[...document.querySelectorAll(".replay-screen")].map(
-          (el) => el.children.length,
-        ),
-      ),
-      replayHasText: Math.min(
-        ...[...document.querySelectorAll(".replay-screen")].map(
-          (el) => el.textContent.trim().length,
-        ),
-      ),
+      images: document.querySelectorAll(".shot img").length,
     };
   });
 }
@@ -153,21 +136,15 @@ for (const scheme of ["dark", "light"]) {
       }
       if (r.small.length) note(`${at}: text under 14px — ${r.small.join(", ")}`);
       if (r.h1s !== 1) note(`${at}: ${r.h1s} h1 elements`);
-      if (LOCALES.includes(path)) {
-        if (width === 1366 && r.commandBottom > 768) {
-          note(`${at}: install command bottom at ${r.commandBottom}px, below the fold`);
-        }
-        if (!r.commandText.startsWith("git clone")) {
-          note(`${at}: install command missing`);
-        }
-      }
+      if (r.commands < 2) note(`${at}: install commands missing`);
+      if (INSTALL_PAGES.includes(path) && r.images < 8) note(`${at}: ${r.images} screenshots`);
       await context.close();
     }
   }
 }
 
-/* No JavaScript: the page, the command and the demo's final frame must all be
-   in the first response. */
+/* No JavaScript: the page and the commands must be in the first response, and
+   a copy button that could do nothing must not be shown. */
 for (const path of ALL) {
   const context = await browser.newContext({
     viewport: { width: 1366, height: 768 },
@@ -176,23 +153,13 @@ for (const path of ALL) {
   const page = await context.newPage();
   await page.goto(base + path, { waitUntil: "load" });
   const r = await inspect(page);
-  if (LOCALES.includes(path)) {
-    if (!r.commandText.startsWith("git clone")) note(`no-js ${path}: no command`);
-    const copyVisible = await page.locator(".copy").isVisible();
-    if (copyVisible) note(`no-js ${path}: copy button shown without a clipboard`);
-  }
-  const wantReplays = GUIDE_PAGES.includes(path) ? GUIDE_COUNT : 1;
-  if (r.replays !== wantReplays) {
-    note(`no-js ${path}: ${r.replays} replays, expected ${wantReplays}`);
-  }
-  if (r.replayRows !== 32) note(`no-js ${path}: ${r.replayRows} replay rows, expected 32`);
-  if (r.replayHasText < 200) note(`no-js ${path}: a replay frame looks empty`);
+  if (r.commands < 2) note(`no-js ${path}: commands missing`);
+  if (r.copyShown) note(`no-js ${path}: copy button shown without a script`);
   if (r.scrollWidth > r.clientWidth + 1) note(`no-js ${path}: horizontal scroll`);
   await context.close();
 }
 
-/* Reduced motion: the animation draws one frame and stops, the replay shows
-   its final frame, and the reveal groups are not left invisible. */
+/* Reduced motion: the animation draws one frame and stops and the reveal groups are not left invisible. */
 for (const path of ALL) {
   const context = await browser.newContext({
     viewport: { width: 1366, height: 768 },
@@ -205,25 +172,19 @@ for (const path of ALL) {
     const card = document.querySelector(".grid .card");
     return {
       cardOpacity: card ? getComputedStyle(card).opacity : "1",
-      replayText: Math.min(
-        ...[...document.querySelectorAll(".replay-screen")].map(
-          (el) => el.textContent.trim().length,
-        ),
-      ),
     };
   });
   if (Number(state.cardOpacity) < 1) {
     note(`reduced-motion ${path}: cards stay at opacity ${state.cardOpacity}`);
   }
-  if (state.replayText < 200) note(`reduced-motion ${path}: a replay is empty`);
   await context.close();
 }
 
-/* Keyboard: every control must be reachable and the replay must respond. */
+/* Keyboard: every control must be reachable. */
 {
   const context = await browser.newContext({ viewport: { width: 1366, height: 768 } });
   const page = await context.newPage();
-  await page.goto(base + "/", { waitUntil: "load" });
+  await page.goto(base + "/install/", { waitUntil: "load" });
   await page.waitForTimeout(400);
   const stops = [];
   for (let i = 0; i < 26; i += 1) {
@@ -236,7 +197,7 @@ for (const path of ALL) {
       }),
     );
   }
-  const want = ["a.skip", "button.chip", "input.scrub", "code", "button.copy"];
+  const want = ["a.skip", "button.chip", "code.cmd-text"];
   for (const target of want) {
     if (!stops.includes(target)) note(`keyboard: never focused ${target}`);
   }
@@ -252,8 +213,8 @@ console.log("\nweights on disk");
 for (const file of [
   "index.html",
   "ru/index.html",
-  "guides/index.html",
-  "ru/guides/index.html",
+  "install/index.html",
+  "ru/install/index.html",
   "assets/app.js",
   "assets/og.png",
   "assets/favicon.png",

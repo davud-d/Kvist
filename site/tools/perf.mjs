@@ -93,7 +93,7 @@ try {
 
 const rows = [];
 
-for (const path of ["/", "/ru/", "/guides/", "/ru/guides/"]) {
+for (const path of ["/", "/ru/", "/install/", "/ru/install/"]) {
   const context = await browser.newContext({
     viewport: { width: 1366, height: 768 },
     colorScheme: "dark",

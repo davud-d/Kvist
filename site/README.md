@@ -1,6 +1,6 @@
 # kvist.site — the landing page
 
-Four static pages — `/` and `/guides/` in English, `/ru/` and `/ru/guides/` in
+Four static pages — `/` and `/install/` in English, `/ru/` and `/ru/install/` in
 Russian — built by one Node script. No framework, no CSS library, no
 third-party request at runtime.
 
@@ -14,12 +14,13 @@ npm install
 node build.mjs --serve
 ```
 
-`http://localhost:4173/`, `/ru/`, `/guides/` and `/ru/guides/`. `node build.mjs`
+`http://localhost:4173/`, `/ru/`, `/install/` and `/ru/install/`. `node build.mjs`
 alone builds into `dist/` and stops.
 
 The build refuses to finish if a gate fails: the two locales must have the same
 key set, every text token pair must clear 4.5:1, the hero animation must clear
-4.5:1 behind the hero text, and the four weight budgets must hold.
+4.5:1 behind the hero text, and the four weight budgets must hold. A screenshot
+legend with a different number of lines than its outlined boxes also fails it.
 
 ## Layout
 
@@ -29,28 +30,24 @@ web/
   src/
     tokens.css           every colour on the site, and nothing else has one
     base.css             reset, type, page frame, grain and scanline texture
-    components.css       header, hero, replay, cards, footer
-    template.mjs         both pages, rendered once per locale
-    i18n/*.json          copy; the guides section drives /guides/
+    components.css       header, hero, cards, install page, footer
+    template.mjs         both pages, rendered once per locale; the outlined
+                         boxes of each screenshot are the SHOTS table there
+    i18n/*.json          copy; installPage drives /install/
     font5x7.json         the terminal's bitmap font, exported from banner.py
     js/hero-frames.js    the banner animation, ported from banner_frames.py
     js/hero.js           draws those frames into the hero canvas
-    js/player.js         replays a compiled cast into a <pre>
-    js/main.js           theme, language bar, reveal, copy, nav state
+    js/main.js           theme, language bar, reveal, copy buttons, nav state
   assets/
     fonts/               JetBrains Mono subsets, latin and cyrillic
     demo/record.fish     re-records the front page's two casts
-    demo/record-guides.fish  re-records the twelve guide casts
-    demo/seed-config.py  the throwaway config a guide starts from
+    install/             the install page's screenshots (WebP, 1500 px wide)
+    demo/seed-config.py  the throwaway config a recording starts from
     demo/stub_gateway.py the local gateway the recordings talk to
-    demo/headless.sh     the one guide that is a shell session, not a TUI
     demo/fixture.py      the throwaway workspace the demo runs against
     demo/drive.py        types the goal into the TUI over a pty
-    demo/guide.py        presses the keys for one guide, over a pty
     demo/run-*.cast      the raw asciinema recordings
     demo/run-*.json      the compiled replays the front page loads
-    demo/guide-*.cast    the raw guide recordings
-    demo/guide-*.json    the compiled guide replays
   tools/
     contrast.mjs         WCAG over every token pair, plus the border floor
     hero-contrast.mjs    the hero text against the animation, frame by frame
@@ -90,37 +87,20 @@ the hero text. Both run again inside `node build.mjs`.
 Accents are budgeted: five places on the whole page, listed by name in a
 comment in `tokens.css`. Adding a sixth is a decision, not a detail.
 
-## Re-recording the guides
+## Retaking the install page's screenshots
 
-The six recordings on `/guides/` show the interface, not a model, so they need
-no provider and no key:
+They are real screens, not mock-ups. Take them on a private X server, never the
+desktop: `Xvfb :97`, a `kitty` on it, the release `install.sh` served by
+`scripts/release/mock_release_server.py` (`KVIST_RELEASE_URL` points the script
+at it), and a clean HOME. Run the installer inside `bwrap --tmpfs /home --bind
+<scratch> /home/dev` so every path on screen reads `/home/dev/...`, not yours.
+Grab the window with `import -window <id>`, convert to WebP into
+`assets/install/`, and set each image's outlined boxes in `SHOTS`
+(`src/template.mjs`): pixels in that image, one box per legend line.
 
-```fish
-cd web/assets/demo
-./record-guides.fish            # all six
-./record-guides.fish role effort
-```
-
-Every guide runs under a throwaway HOME in `/tmp`, so your real
-`~/.kvist/config.json` is neither read nor written.
-
-Kvist asks its provider for a model list on every launch, so a recording needs
-something that answers or the screen carries an authentication error that has
-nothing to do with the guide. `stub_gateway.py` is that something: a real, tiny
-OpenAI-compatible gateway, which is exactly what OmniRoute — the built-in local
-gateway option — expects to find. `record-guides.fish` starts it, points the
-throwaway config at it, and stops it afterwards.
-
-It listens on **20129**, not OmniRoute's default 20128, so a gateway you already
-run on the default port is neither disturbed nor recorded.
-
-The `changes` guide needs a workspace that already carries a change journal, so
-run `./record.fish en` first; it leaves one in `/tmp/kvist-demo-en`.
-
-Which frame a guide shows before anybody presses Play is set in `build.mjs`
-(`GUIDE_POSTERS`), by the text that frame contains rather than by a timestamp —
-so re-recording does not silently move the poster to the wrong moment. If a
-marker stops matching, the build fails and names the guide.
+The last two screens (`start`, `task`, `commands`) run the real `kvist` against
+`demo/stub_gateway.py` on port 20129 with a config from
+`demo/seed-config.py <home> ready`, which is why they name a local provider.
 
 ## Re-recording the front page's run
 

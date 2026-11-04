@@ -25,7 +25,7 @@ import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { render, renderGuides, SITE, BOOT } from "./src/template.mjs";
+import { render, renderInstall, SITE, BOOT } from "./src/template.mjs";
 import { resolveRequest } from "./tools/static-path.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,34 +40,8 @@ const BUDGET = {
   firstScreen: 400 * 1024,
 };
 
-/* Each guide is one recording of one flow; the ids double as file names. */
-const GUIDES = [
-  "provider", "custom", "models", "changeapi",
-  "commands", "role", "effort", "style", "toggles",
-  "session", "changes", "headless",
-];
-
-/* The frame a guide is shown on before anybody presses Play, and the frame a
-   reader without JavaScript gets. The last frame of a recording is its least
-   interesting one — the flow is already over — so each guide names the moment
-   that shows what it is about. Matching on text rather than a timestamp keeps
-   these working after the guides are re-recorded. */
-const GUIDE_POSTERS = {
-  provider: "❯ OmniRoute — Local OpenAI-compatible",
-  custom: "❯ + Create custom provider...",
-  models: "❯ Enter a separate model id per role",
-  changeapi: "New OmniRoute API key",
-  commands: "/revert — Restore agent-changed files",
-  role: "❯ DevOps — Infrastructure",
-  effort: "❯ xhigh — Extended reasoning",
-  style: "❯ Paranoid — An outage costs more",
-  toggles: "Planning stage disabled",
-  session: "❯ + Create new session...",
-  changes: "Agent changes in this workspace",
-  headless: "journal-op changes",
-};
 /* Every page the site publishes, for the sitemap. */
-const PATHS = ["/", "/ru/", "/guides/", "/ru/guides/"];
+const PATHS = ["/", "/ru/", "/install/", "/ru/install/"];
 
 const KB = (n) => `${(n / 1024).toFixed(1)} KB`;
 const gz = (data) => gzipSync(Buffer.from(data), { level: 9 }).length;
@@ -138,29 +112,16 @@ async function main() {
       { dereference: true },
     );
   }
-  for (const guide of GUIDES) {
-    cpSync(
-      resolve(here, `assets/demo/guide-${guide}.json`),
-      join(dist, `assets/demo/guide-${guide}.json`),
-      { dereference: true },
-    );
-  }
+  cpSync(resolve(here, "assets/install"), join(dist, "assets/install"), {
+    recursive: true,
+    dereference: true,
+  });
   execFileSync(process.execPath, [
     resolve(here, "tools/og.mjs"),
     join(dist, "assets/og.png"),
   ]);
 
-  // Pages: the front page and the guides page, once per locale.
-  const guideCasts = Object.fromEntries(
-    GUIDES.map((guide) => {
-      const cast = JSON.parse(
-        readFileSync(resolve(here, `assets/demo/guide-${guide}.json`), "utf8"),
-      );
-      cast.final = posterFrame(cast, GUIDE_POSTERS[guide], guide);
-      return [guide, cast];
-    }),
-  );
-
+  // Pages: the front page and the install page, once per locale.
   const pages = [];
   const write = (name, target, html) => {
     const full = join(dist, target);
@@ -176,9 +137,9 @@ async function main() {
     const prefix = locale === "en" ? "" : "ru/";
     write(locale, `${prefix}index.html`, render({ t, css, buildId }));
     write(
-      `${locale} guides`,
-      `${prefix}guides/index.html`,
-      renderGuides({ t, css, casts: guideCasts, buildId }),
+      `${locale} install`,
+      `${prefix}install/index.html`,
+      renderInstall({ t, css, buildId }),
     );
   }
 
@@ -269,20 +230,6 @@ ${Object.entries(headers)
 `;
 }
 
-/** The first frame whose screen contains `marker`, as dictionary ids. */
-function posterFrame(cast, marker, name) {
-  const screen = new Array(cast.h).fill(0);
-  const text = (id) => cast.rows[id].map((span) => span[0]).join("");
-  for (const frame of cast.frames) {
-    for (let i = 1; i < frame.length; i += 2) screen[frame[i]] = frame[i + 1];
-    if (screen.some((id) => text(id).includes(marker))) return [...screen];
-  }
-  console.error(
-    `\nbuild stopped: guide "${name}" has no frame containing ${JSON.stringify(marker)}`,
-  );
-  process.exit(1);
-}
-
 /* -- report and budgets ---------------------------------------------------- */
 
 /** Bytes of the actual font files; the licence and notes ship but do not count. */
@@ -345,13 +292,11 @@ function report({ css, js, pages }) {
       ` raw / ${KB(gz(readFileSync(file)))} gzip`,
     );
   }
-  const guideTotal = GUIDES.reduce(
-    (sum, guide) => sum + gz(readFileSync(join(dist, `assets/demo/guide-${guide}.json`))),
+  const shots = readdirSync(join(dist, "assets/install")).reduce(
+    (sum, name) => sum + statSync(join(dist, "assets/install", name)).size,
     0,
   );
-  console.log(
-    `  ${`${GUIDES.length} guides (deferred)`.padEnd(18)}${KB(guideTotal).padStart(9)} gzip, loaded on view`,
-  );
+  console.log(`  ${"install shots".padEnd(18)}${KB(shots).padStart(9)} (lazy, below the fold)`);
 
   if (broke) {
     console.error("\nbuild stopped: a budget was exceeded");
@@ -369,6 +314,7 @@ const TYPES = {
   ".woff2": "font/woff2",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".webp": "image/webp",
   ".mp4": "video/mp4",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
