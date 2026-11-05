@@ -220,7 +220,7 @@
     "stopYes": "Stop the task",
     "keepGoing": "Keep going",
     "resume": "Continue",
-    "queuedNote": "Waiting for a free slot: your plan runs {n} at once. It starts by itself.",
+    "queuedNote": "Waiting for a free slot: your plan runs a set number of tasks at once. It starts by itself, free until then.",
     "startingNote": "The machine is starting the agent…",
     "emptyFeed": "Nothing yet: the agent is getting ready.",
     "reconnecting": "Connection lost, reconnecting…",

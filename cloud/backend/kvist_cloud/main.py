@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import auth, billing, gateway, keys, machines, tasks, web
+from . import auth, billing, gateway, keys, ledger, machines, tasks, web
 from .config import Settings, load_settings
 from .db import make_engine, make_session_factory, upgrade
 from .errors import ApiError, api_error_handler, unhandled_error_handler, validation_error_handler
@@ -102,6 +102,7 @@ def create_app(
     app.include_router(gateway.router)
     app.include_router(tasks.router)
     app.include_router(billing.router)
+    app.include_router(ledger.router)
     web.install(app)
     app.include_router(web.router)
     return app

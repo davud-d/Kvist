@@ -205,7 +205,8 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
 }
 .tile input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
 .tile .name { font-weight: 700; display: block; }
-.tile .where { font-size: var(--t-13); position: relative; z-index: 1; }
+.tile .where { font-size: var(--t-13); pointer-events: none; }
+.tile a.where { position: relative; z-index: 1; pointer-events: auto; }
 .tile:has(input:checked) { border-color: var(--tx); background: var(--panel-2); }
 .tile:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
 
@@ -331,6 +332,11 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
   padding-block: var(--s-2);
+}
+/* Phone: the header takes two rows and scrolls away; the task's own bar is what stays. */
+@media (max-width: 619px) {
+  .top { position: static; }
+  .taskbar { top: 0; }
 }
 .goal { white-space: pre-wrap; overflow-wrap: anywhere; }
 .goal.clamped { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

@@ -10,10 +10,27 @@ import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .models import LedgerEntry, LedgerKind, Machine, Subscription, SubscriptionStatus, Task, TaskStatus
+from .auth import current_user
+from .db import get_db
+from .errors import not_found
+from .models import (
+    Dispute,
+    LedgerEntry,
+    LedgerKind,
+    Machine,
+    Subscription,
+    SubscriptionStatus,
+    Task,
+    TaskStatus,
+    User,
+)
+
+router = APIRouter()
 
 
 class LedgerError(ValueError):
@@ -279,3 +296,36 @@ def period_feed(db: Session, user_id: int, period_start: datetime) -> list[dict[
     )
     feed.sort(key=lambda item: str(item["at"]), reverse=True)
     return feed
+
+
+# -- API: the person's own feed, and disputing a charge ------------------------------------
+
+
+class DisputeIn(BaseModel):
+    task_id: int | None = None
+    message: str = Field(min_length=3, max_length=4000)
+
+
+@router.get("/api/ledger")
+def get_ledger(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
+    from .billing import subscription_view
+
+    subscription = current_subscription(db, user.id)
+    feed = period_feed(db, user.id, subscription.current_period_start) if subscription is not None else []
+    disputed = set(db.scalars(select(Dispute.task_id).where(Dispute.user_id == user.id)))
+    for item in feed:
+        item["disputed"] = item.get("task_id") in disputed
+    return {"subscription": subscription_view(db, user), "feed": feed}
+
+
+@router.post("/api/disputes", status_code=201)
+def open_dispute(payload: DisputeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """A request for a person to look at a charge. A refund, if any, is a new ledger row."""
+    if payload.task_id is not None:
+        task = db.get(Task, payload.task_id)
+        if task is None or task.user_id != user.id:
+            raise not_found("task")
+    dispute = Dispute(user_id=user.id, task_id=payload.task_id, message=payload.message.strip())
+    db.add(dispute)
+    db.commit()
+    return {"id": dispute.id, "status": dispute.status}
