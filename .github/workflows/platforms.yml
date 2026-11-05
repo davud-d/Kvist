@@ -80,6 +80,22 @@ jobs:
         if: matrix.bubblewrap
         run: sudo apt-get install -y --no-install-recommends bubblewrap
 
+      # PuTTY is the ssh client on Windows, so the tests that run its plink and puttygen need it on every system.
+      - name: Install PuTTY (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends putty-tools
+
+      - name: Install PuTTY (macOS)
+        if: runner.os == 'macOS'
+        run: brew install putty
+
+      - name: Install PuTTY (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install putty.install -y --no-progress
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\PuTTY'
+
       - name: Install development dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
 

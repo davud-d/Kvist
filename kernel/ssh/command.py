@@ -2,13 +2,12 @@
 """The ssh command line the proxy runs, and what its failures mean. Pure functions."""
 from __future__ import annotations
 
-import os
 import re
 import shlex
 import subprocess
 from dataclasses import dataclass
 
-from kernel.ssh import wire
+from kernel.ssh import putty, wire
 from kernel.ssh.paths import RemoteError
 
 _HOST = re.compile(r"^[A-Za-z0-9._@\[\]:-]+$")
@@ -65,7 +64,9 @@ def remote_command(remote_args: list[str]) -> str:
 
 def ssh_prefix(target: Target) -> list[str]:
     """ssh as Kvist always runs it: no terminal, no questions, only the chosen key, up to the host."""
-    program = os.environ.get("KVIST_SSH") or "ssh"
+    if putty.uses_putty():
+        return putty.plink_prefix(target.host, target.port, target.key)
+    program = putty.ssh_program()
     options = [
         "-T",
         "-o", "BatchMode=yes",
@@ -107,6 +108,14 @@ def meaningful(stderr: str) -> str:
     return "\n".join(kept).strip()
 
 
+# What OpenSSH says, then what PuTTY's plink says.
+_HOST_KEY_FAILURES = (
+    "Host key verification failed", "REMOTE HOST IDENTIFICATION HAS CHANGED",
+    "host key is not cached", "Host key did not match", "Cannot confirm a host key in batch mode",
+)
+_AUTH_FAILURES = ("Permission denied", "Unable to authenticate", "No supported authentication methods available", "Access denied")
+
+
 @dataclass(frozen=True, slots=True)
 class Failure:
     kind: str
@@ -122,9 +131,9 @@ def classify(returncode: int, stderr: str, *, shim_state: str | None) -> Failure
     if "unrecognized arguments" in stderr and "--remote" in stderr:
         # An installed Kvist that predates the remote core: argparse refuses the flag and exits.
         return Failure("old_kvist", True)
-    if "Host key verification failed" in stderr or "REMOTE HOST IDENTIFICATION HAS CHANGED" in stderr:
+    if any(text in stderr for text in _HOST_KEY_FAILURES):
         return Failure("host_key", True)
-    if "Permission denied" in stderr:
+    if any(text in stderr for text in _AUTH_FAILURES):
         return Failure("auth", True)
     return Failure("unreachable", False)
 

@@ -216,6 +216,13 @@ def _short_config_dir_for_daemon_sockets(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _openssh_is_the_default_client_in_ssh_tests(request, monkeypatch):
+    """Windows with PuTTY installed would pick plink by itself; a test that wants plink says so (it sets KVIST_SSH after this)."""
+    if request.module.__name__.rsplit(".", 1)[-1].startswith("test_ssh_"):
+        monkeypatch.setenv("KVIST_SSH", "ssh")
+
+
+@pytest.fixture(autouse=True)
 def _never_start_the_tray(monkeypatch):
     """Keep any agent a test builds from launching the real tray daemon.
 

@@ -17,7 +17,8 @@ interface ── ssh ──> server: kvist daemon (a service) ── writes ever
 - Key login over ssh (ssh-agent or a key without a prompt). Passwords cannot be typed: the connection is
   made without a terminal, and Kvist never asks ssh a question. The first time, run `ssh HOST` yourself once
   so the host key is accepted.
-- The interface on your computer needs only `ssh`. The server cannot be Windows.
+- The interface on your computer needs an ssh client: `ssh` (OpenSSH) on Linux, macOS and BSD, and on Windows either
+  OpenSSH or **PuTTY** (0.77 or newer, with `plink` and `puttygen`; see *PuTTY on Windows*). The server cannot be Windows.
 
 ## Start
 
@@ -54,7 +55,7 @@ you asked to go on with it: `--resume`, or a session chosen under *Recent sessio
 Signing in, when you add a machine:
 
 - **Host key.** Kvist fetches the machine's key and shows its fingerprint; you confirm it once and it goes to
-  `~/.ssh/known_hosts`. No more running `ssh HOST` by hand first.
+  `~/.ssh/known_hosts` (with PuTTY, to a file of Kvist's own). No more running `ssh HOST` by hand first.
 - **As ssh does** (agent, `~/.ssh/config`), or **a key file**: tried at once.
 - **A password**, once. Kvist makes a key for that machine under `~/.kvist/ssh/`, signs in with the password (it
   exists only in the environment of that one ssh process), puts the key in the machine's `authorized_keys`,
@@ -185,11 +186,25 @@ the end of a turn with nobody connected. The conversation itself is in the folde
 | Pixel app (Tauri), Electron | show the banner and take over; no way to choose a server from them |
 | Classic Legacy, Zed (ACP) | not supported: the agent runs inside them |
 
+## PuTTY on Windows
+
+Kvist uses whichever client it finds. On Windows it takes `plink` when PuTTY is installed and `ssh` otherwise; on every other system it
+uses `ssh`. `KVIST_SSH` forces one: a program whose name starts with `plink` is run the PuTTY way, anything else the OpenSSH way.
+
+- Connections run `plink -batch`: no terminal, no questions, as with ssh. Keys are PuTTY's `.ppk`; with **a password** Kvist makes one
+  (with `puttygen`, no passphrase) and installs it, as above. The password reaches plink in a file (`-pwfile`, PuTTY 0.77+) that exists
+  for that one call and is deleted at once, never on the command line.
+- plink has no `known_hosts` and no `ssh-keyscan`. Kvist reads the fingerprint plink reports, you confirm it, and Kvist keeps it in
+  `~/.kvist/ssh/putty_hosts.json` and passes it with `-hostkey` on every connection. PuTTY's registry is not touched, and a
+  machine whose key changed is refused.
+- `~/.ssh/config` is not read by plink, so *As ssh does* means: Pageant, or the default of the PuTTY version you have.
+
 ## Limits, honestly
 
-- Windows is not a server. A Windows computer as the *interface* only needs `ssh.exe`; it has not been tried.
-- macOS and BSD code paths (LaunchAgent, crontab, `AF_UNIX` paths) are covered by text-level tests only and
-  were never run on those systems.
+- Windows is not a server. A Windows computer as the *interface* needs `ssh.exe` or PuTTY; the PuTTY path is checked in CI against
+  the real `plink` and `puttygen` (a real sshd on Linux and macOS, the key tools on Windows), not yet by a person at a Windows machine.
+- macOS and BSD code paths (LaunchAgent, crontab, `AF_UNIX` paths) run in CI against a real sshd on macOS, FreeBSD, OpenBSD
+  and NetBSD (the BSD job is experimental); service installation itself is covered by text-level tests only.
 - Approvals that nobody is there to answer wait for ever. Auto mode (`/permissions auto on`) decides them
   without you, with the same warning as everywhere.
 - A login shell on the server that prints text on every ssh command (a banner, a system summary) is tolerated: Kvist
