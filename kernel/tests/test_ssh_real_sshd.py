@@ -36,6 +36,8 @@ def server(tmp_path, monkeypatch):
     try:
         sshd = LocalSshd(tmp_path / "sshd", tmp_path, config_dir)
     except (OSError, RuntimeError) as error:
+        if os.environ.get("KVIST_REQUIRE_SSHD"):  # a system that claims to work must show it
+            raise
         pytest.skip(f"sshd could not run here: {error}")
     wrapper = sshd.ssh_wrapper(tmp_path, tmp_path / ".ssh" / "known_hosts")
     monkeypatch.setenv("KVIST_SSH", str(wrapper))

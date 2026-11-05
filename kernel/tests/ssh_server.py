@@ -50,8 +50,8 @@ class LocalSshd:
                     f"AuthorizedKeysFile {root / 'authorized_keys'}",
                     "PasswordAuthentication no",
                     "KbdInteractiveAuthentication no",
-                    "UsePAM no",
                     "StrictModes no",
+                    *(["UsePAM no"] if not sys.platform.startswith("openbsd") else []),  # OpenBSD's sshd has no PAM and rejects the option
                     "PidFile none",
                     "SetEnv " + " ".join(f'{name}="{value}"' for name, value in {"HOME": home, "PATH": self._server_path(), "KVIST_CONFIG_DIR": config_dir, **(extra_env or {})}.items()),
                 ]
