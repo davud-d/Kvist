@@ -26,6 +26,17 @@ replaces the key. `AGENT_LLM_PROVIDER` overrides the saved provider for one laun
 
 ### AnyModel
 
+[AnyModel](https://anymodel.org) is the default provider on a clean machine:
+
+- **Prices up to 90% lower** than the original providers. The per-model billing
+  coefficient from the catalog drives the cost shown for every step.
+- **Many models behind one key**: OpenAI, Anthropic, DeepSeek and other families
+  share one endpoint; pick the fast and smart models with `/models`.
+- **Features only AnyModel has**: image generation. The `generate_image` action
+  draws a picture with AnyModel's image models and saves it into the workspace
+  (`high_quality` selects the better model). It is offered only when the session
+  talks to AnyModel.
+
 If `ANYMODEL_API_KEY` is set, Kvist starts without prompts. Otherwise the first
 launch shows a screen: Enter opens the registration page and asks for the key,
 Esc goes to the provider list. The key is checked against AnyModel's catalog

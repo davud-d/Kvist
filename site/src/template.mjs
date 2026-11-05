@@ -259,7 +259,7 @@ function langbar(t, otherPath) {
 }
 
 export function render({ t, css, buildId }) {
-  const rail = ["demo", "loop", "boundary", "recovery", "control", "install"]
+  const rail = ["demo", "loop", "boundary", "recovery", "control", "anymodel", "install"]
     .map((key) => `<a href="#${key}">${esc(t.nav[key])}</a>`)
     .join("\n      ") +
     `\n      <a class="rail-cta" href="${esc(t.dir)}install/">${esc(t.nav.howto)}</a>`;
@@ -305,7 +305,7 @@ ${header({ t, home: t.dir, rail })}
     </div>
   </section>
 
-  ${["loop", "boundary", "recovery", "control"]
+  ${["loop", "boundary", "recovery", "control", "anymodel"]
     .map(
       (key) => `<section class="section" id="${key}">
     <div class="wrap">

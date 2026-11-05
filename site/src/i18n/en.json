@@ -19,6 +19,7 @@
     "boundary": "Boundary",
     "recovery": "Recovery",
     "control": "Control",
+    "anymodel": "AnyModel",
     "install": "Install",
     "repo": "Repository",
     "theme": "Switch theme",
@@ -150,6 +151,29 @@
       {
         "term": "Headless when you need it",
         "text": "A newline-delimited JSON frontend runs Kvist from another process, with session and journal operations available as one-shot commands. The Electron GUI uses that same protocol and nothing else."
+      }
+    ]
+  },
+  "anymodel": {
+    "kicker": "AnyModel",
+    "h2": "One key, many models, lower prices",
+    "lede": "AnyModel is the provider Kvist suggests on a clean machine. One key opens a large catalog, and some features exist only through it.",
+    "items": [
+      {
+        "term": "Prices up to 90% lower",
+        "text": "AnyModel resells models at prices well below the original providers. Kvist reads the per-model billing coefficient from the catalog and shows the real cost of every step."
+      },
+      {
+        "term": "Many models behind one key",
+        "text": "OpenAI, Anthropic, DeepSeek and other families share one endpoint. Switch the fast and smart models with /models without registering anywhere else."
+      },
+      {
+        "term": "Image generation",
+        "text": "The generate_image action draws a picture from a prompt with AnyModel's image models and saves it into the workspace. A high-quality mode is available for the pictures that matter. With other providers the action is not offered."
+      },
+      {
+        "term": "Set up in one Enter",
+        "text": "On the first launch Enter opens the registration page and asks for the key. The key is checked against the catalog at once, so a wrong key fails on the spot."
       }
     ]
   },
