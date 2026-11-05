@@ -684,6 +684,21 @@ def test_resumed_turn_is_journaled_with_its_goal(agent_factory):
     assert events[-1]["type"] == "turn_end"
 
 
+def test_a_follow_up_to_an_unfinished_task_is_journaled_as_typed(agent_factory):
+    # The checkpoint's goal is the task's first request; the journal must keep
+    # what the person just wrote, or a reopened chat shows the old line again.
+    agent = _coder_agent(agent_factory)
+    agent._save_checkpoint("clone the repo", 1)
+    agent._call_action_model = lambda prompt: json.dumps(
+        _step("final_answer", {"message": "still blocked"}, "done")
+    )
+
+    agent.run("kimi-code", routed_role="coder")
+
+    users = [event for event in _events(agent) if event["type"] == "user"]
+    assert users == [{"type": "user", "text": "kimi-code"}]
+
+
 def test_resume_without_a_checkpoint_writes_nothing(agent_factory):
     agent = agent_factory()
 

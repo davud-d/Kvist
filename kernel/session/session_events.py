@@ -345,9 +345,13 @@ class SessionJournal:
                 self._pending_user["woken"] = True
 
     def describe_turn(self, text: str) -> None:
-        """Fill in the goal of a resumed turn, which is only known once loaded."""
+        """Fill in the goal of a resumed turn, which is only known once loaded.
+
+        A follow-up typed over an unfinished task already has its own text; the
+        checkpoint's goal is the task's first request and must not replace it.
+        """
         with self._lock:
-            if self._pending_user is not None:
+            if self._pending_user is not None and not self._pending_user["text"]:
                 self._pending_user["text"] = text
 
     def mark_stopped(self) -> None:
