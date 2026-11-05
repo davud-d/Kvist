@@ -220,6 +220,10 @@ jobs:
             # requirements-dev.txt is not used: ruff and pyinstaller have no BSD builds.
             .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt "pytest>=8.3,<10" defusedxml==0.7.1
             .venv/bin/python -m pytest -ra -m offline_smoke
+            # The remote core over genuine ssh: the base system's own sshd on localhost (a real key, a real host key,
+            # the real shim). This is what backs the claim that a BSD machine can serve as a Kvist server, so it is
+            # a step of its own and not part of the informational run below.
+            .venv/bin/python -m pytest -ra -p no:cacheprovider kernel/tests/test_ssh_real_sshd.py kernel/tests/test_ssh_install.py kernel/tests/test_ssh_proxy.py kernel/tests/test_ssh_daemon.py
             # Informational: the whole default suite and the doctor's view of the system, so the first runs show
             # what else breaks here. A failure of either does not fail the job (it is continue-on-error anyway).
             .venv/bin/python -m kernel --doctor || echo "::warning::doctor reported problems"
