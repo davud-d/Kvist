@@ -14,7 +14,7 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import ledger, limits, plans, tasks
+from . import exports, ledger, limits, plans, tasks
 from .db import session_scope, utcnow
 from .keys import kvist_environment
 from .machines import spawn, wake
@@ -167,6 +167,7 @@ async def _hello(app: FastAPI, machine_id: int, message: dict) -> None:
                 tasks.apply_exit(task, "machine_restarted")
                 app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
     await dispatch(app, machine_id, known)
+    await exports.send_pending(app, machine_id)
 
 
 def _heartbeat(app: FastAPI, machine_id: int, message: dict) -> ledger.BeatResult:
@@ -240,6 +241,8 @@ async def handle(app: FastAPI, machine_id: int, message: dict) -> None:
     elif kind == "task_exit":
         _exit(app, machine_id, message)
         await limits.admit_queued(app, machine_id)
+    elif kind == "export_done":
+        exports.on_export_done(app, machine_id, message)
     else:
         log.warning("machine %s sent an unknown message type %r", machine_id, kind)
 

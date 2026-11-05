@@ -3,6 +3,7 @@
 import { api, openStream } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
 import { apply, initialFeed } from "../events.js";
+import { exportButton } from "../exporter.js";
 import { hoursMinutes } from "../format.js";
 import { t } from "../i18n.js";
 import { diff, groupNode, markdown } from "../render.js";
@@ -165,7 +166,8 @@ export async function taskScreen(root, { params, navigate }) {
         ? h("ul.files", {}, files.map((file) => h("li", {}, h("details.fold", {},
             h("summary", {}, file.path, " ", h("span.count", {}, `+${file.lines_added} −${file.lines_removed}`)),
             file.patches.map(diff)))))
-        : h("p.dim", {}, t("task.noChanges"))));
+        : h("p.dim", {}, t("task.noChanges")),
+      exportButton(`/api/tasks/${id}/export`, t("task.download"))));
   };
 
   const draw = () => {

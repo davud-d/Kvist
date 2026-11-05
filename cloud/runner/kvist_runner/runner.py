@@ -16,6 +16,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
 from .config import RunnerConfig
+from .export import run_export
 from .task import Limits, TaskProcess
 
 log = logging.getLogger("kvist_runner")
@@ -34,7 +35,7 @@ class Runner:
         self._wakeup = asyncio.Event()
         self._connected = False
         self._stopping = False
-        self.exporter = None
+        self.exporter = run_export
 
     # -- outgoing -------------------------------------------------------------------------
 

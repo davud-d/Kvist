@@ -1,6 +1,7 @@
 // Dashboard: hours and their feed, the machine, recent tasks, the key (last four characters).
 import { api } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
+import { exportButton } from "../exporter.js";
 import { dateTime, hoursMinutes, percentLeft, shortDate } from "../format.js";
 import { locale, t } from "../i18n.js";
 import { emptyBox, errorBox, liveRegion, machinePill, taskPill } from "../ui.js";
@@ -70,7 +71,7 @@ function machineCard(machines) {
       ? h("div.stack", {},
           h("p.row", {}, machinePill(machine.display_status),
             h("span.small", {}, `${machine.vcpu} vCPU · ${machine.memory_gb} GB · ${machine.disk_gb} GB`)),
-          h("div", { "data-export": machine.id }))
+          exportButton(`/api/machines/${machine.id}/export`, t("dashboard.export")))
       : h("p.dim", {}, t("dashboard.noMachine")));
 }
 
