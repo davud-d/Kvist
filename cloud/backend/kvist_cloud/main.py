@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import auth, gateway, keys, machines, tasks
+from . import auth, billing, gateway, keys, machines, tasks
 from .config import Settings, load_settings
 from .db import make_engine, make_session_factory, upgrade
 from .errors import ApiError, api_error_handler, unhandled_error_handler, validation_error_handler
@@ -33,7 +33,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.loop = asyncio.get_running_loop()
-    loops = [asyncio.create_task(machines.sweep_forever(app))]
+    loops = [asyncio.create_task(machines.sweep_forever(app)), asyncio.create_task(billing.sweep_forever(app))]
     try:
         yield
     finally:
@@ -54,7 +54,13 @@ def create_app(
 ) -> FastAPI:
     settings = settings or load_settings()
     install_log_scrubber(
-        [settings.session_secret, settings.master_key, settings.github_client_secret, settings.paddle_webhook_secret]
+        [
+            settings.session_secret,
+            settings.master_key,
+            settings.github_client_secret,
+            settings.paddle_webhook_secret,
+            settings.paddle_api_key,
+        ]
     )
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     upgrade(settings.database_url)
@@ -95,4 +101,5 @@ def create_app(
     app.include_router(machines.router)
     app.include_router(gateway.router)
     app.include_router(tasks.router)
+    app.include_router(billing.router)
     return app

@@ -36,6 +36,7 @@ class Settings:
     auth_dev_login: bool = False
     billing_enabled: bool = False
     paddle_webhook_secret: str = field(default="", repr=False)
+    paddle_api_key: str = field(default="", repr=False)
     paddle_client_token: str = ""
     paddle_environment: str = "sandbox"
     paddle_price_start: str = ""
@@ -131,6 +132,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     host = urlparse(public_url).hostname or ""
     if auth_dev_login and host not in LOOPBACK_HOSTS:
         raise ConfigError("AUTH_DEV_LOGIN is only allowed when PUBLIC_URL is a loopback address")
+    billing_enabled = _flag(env, "BILLING_ENABLED")
+    if billing_enabled and not env.get("PADDLE_WEBHOOK_SECRET", ""):
+        raise ConfigError("BILLING_ENABLED needs PADDLE_WEBHOOK_SECRET")
     allow_local = _flag(env, "ALLOW_LOCAL_ENDPOINTS")
     if allow_local and host not in LOOPBACK_HOSTS:
         raise ConfigError("ALLOW_LOCAL_ENDPOINTS is only allowed when PUBLIC_URL is a loopback address")
@@ -146,8 +150,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         github_client_id=env.get("GITHUB_CLIENT_ID", ""),
         github_client_secret=env.get("GITHUB_CLIENT_SECRET", ""),
         auth_dev_login=auth_dev_login,
-        billing_enabled=_flag(env, "BILLING_ENABLED"),
+        billing_enabled=billing_enabled,
         paddle_webhook_secret=env.get("PADDLE_WEBHOOK_SECRET", ""),
+        paddle_api_key=env.get("PADDLE_API_KEY", ""),
         paddle_client_token=env.get("PADDLE_CLIENT_TOKEN", ""),
         paddle_environment=env.get("PADDLE_ENVIRONMENT", "sandbox"),
         paddle_price_start=env.get("PADDLE_PRICE_START", ""),
