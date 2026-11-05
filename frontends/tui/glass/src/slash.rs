@@ -23,7 +23,7 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 24] = [
+pub const COMMANDS: [Command; 25] = [
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
     Command { needs_argument: true, ..command("rename", "Set the active session's title", "Задать название сессии") },
@@ -37,6 +37,7 @@ pub const COMMANDS: [Command; 24] = [
     command("context", "Context size of the model and how much is used", "Размер контекста и сколько занято"),
     command("memory", "What Kvist remembers: inspect, why, forget, pause", "Что помнит Kvist: inspect, why, forget, pause"),
     command("doctor", "Check modules, frontends, provider, keys and settings", "Проверить модули, интерфейсы, провайдера, ключи и настройки"),
+    command("update", "Install the newest Kvist build (restart afterwards)", "Установить свежую сборку Kvist (потом перезапуск)"),
     command("permissions", "Command rules (allow, host, ask, deny) and auto mode (not safe)", "Правила для команд (allow, host, ask, deny) и автоматический режим (небезопасно)"),
     command("revert", "Undo the agent's changes", "Отменить изменения агента"),
     command("provider", "Switch or configure the provider", "Сменить или настроить провайдера"),

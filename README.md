@@ -188,6 +188,7 @@ Type `/` to see the list. The common ones:
 | `/changes`, `/diff`, `/revert` | What the agent changed, and undoing it |
 | `/context`, `/status` | Context usage, state |
 | `/permissions` | Rules for commands (`allow`, `host` = outside the sandbox, `ask`, `deny`) and auto mode, where a second model answers approval questions (**not safe**); see [configuration](docs/configuration.md) |
+| `/update` | Installs the newest build of an installed `kvist-core` (checked against the published SHA-256); restart Kvist afterwards. Kvist itself only tells you a new version exists and never downloads it unasked (`auto_update: false` or `KVIST_AUTO_UPDATE=0` silences the notice) |
 | `/doctor` (or `kvist --doctor`) | Checks modules, frontends, provider, API keys and settings; asks before sending the model a test request that must answer "pong" (`--yes` answers it) |
 | `/web-search-provider` | Tavily, Brave, Exa, Gemini (Google Search) or SearXNG for web search |
 | `/settings-api` | Request pacing, timeouts, retries, context window, fallbacks |

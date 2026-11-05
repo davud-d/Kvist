@@ -37,6 +37,7 @@ exist; do not invent subcommands. Some interfaces offer a few more of their own.
 | `/permissions auto on\|off` | Auto mode: a second model answers approval questions (not safe) |
 | `/memory` | `status`, `pause`, `resume`, `inspect <words>`, `why <id>`, `forget <id>`, `remember <text>`, `remember-global <text>`, `process`, `processing on|off` |
 | `/doctor` | Check modules, interfaces, provider, keys, settings; offers a test request |
+| `/update` | Install the newest build of an installed `kvist-core`, then restart; Kvist only announces a new version, it never installs one unasked |
 | `/bug <text>` | Save a local bug report (never sent anywhere) |
 | `/bye` (`/exit`, `/quit`) | Save the session and exit |
 

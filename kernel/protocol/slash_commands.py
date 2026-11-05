@@ -81,6 +81,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("website", "Build a website: Kvist interviews you, builds it and checks it"),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
     SlashCommand("doctor", "Check modules, frontends, provider, API keys and settings"),
+    SlashCommand("update", "Install the newest Kvist build (restart afterwards)"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
     SlashCommand(
         "del-provider",

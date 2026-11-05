@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Quiet self-update of an installed ``kvist-core`` from the rolling ``main`` release.
+"""Update of an installed ``kvist-core`` from the rolling ``main`` release.
+
+A background check only *announces* a new build ("type /update"); it never downloads or
+replaces anything. The person installs it with ``/update`` (``run_update``), when it suits them.
 
 The release ``latest-plugin-build`` is rebuilt only from ``main``, so following it *is*
 following ``main``. Only a binary placed by the release installer (frozen, named
@@ -63,7 +66,8 @@ class UpdateError(RuntimeError):
 
 
 def auto_update_enabled() -> bool:
-    """On by default; ``auto_update: false`` in config.json or ``KVIST_AUTO_UPDATE=0`` turns it off."""
+    """Whether the background check runs; on by default. ``auto_update: false`` in config.json or
+    ``KVIST_AUTO_UPDATE=0`` turns the announcement off (``/update`` keeps working)."""
     if os.environ.get(DISABLE_ENV, "").strip().lower() in {"0", "false", "no", "off"}:
         return False
     return load_user_config().get(CONFIG_KEY) is not False
@@ -142,11 +146,17 @@ def _put_in_place(new: Path, core: Path) -> None:
     os.replace(new, core)
 
 
+def update_available(core: Path, asset: str, digests: dict[str, str]) -> bool:
+    """True when the release carries a build of ``asset`` that differs from the installed ``core``."""
+    wanted = digests.get(asset)
+    return wanted is not None and sha256_file(core) != wanted
+
+
 def update_core(core: Path, asset: str, digests: dict[str, str]) -> bool:
     """Replace ``core`` with the release build when it differs. True when it was replaced."""
-    wanted = digests.get(asset)
-    if wanted is None or sha256_file(core) == wanted:
+    if not update_available(core, asset, digests):
         return False
+    wanted = digests[asset]
     staging = core.with_name(f".{core.stem}.update")
     try:
         _download(asset, staging)
@@ -184,11 +194,38 @@ def _remember_check() -> None:
         pass  # only costs one extra check at the next start
 
 
-def restart_notice() -> str:
+def _russian() -> bool:
     locale = (os.environ.get("LC_ALL") or os.environ.get("LANG") or "").lower()
-    if locale.startswith("ru"):
-        return "Kvist обновлён. Перезапустите его, чтобы попробовать новую версию."
-    return "Kvist has been updated. Restart it to try the new version."
+    return locale.startswith("ru")
+
+
+def available_notice() -> str:
+    if _russian():
+        return "Доступна новая версия Kvist. Введи /update, чтобы установить её."
+    return "A new version of Kvist is available. Type /update to install it."
+
+
+def run_update(russian: bool) -> tuple[bool, str]:
+    """The ``/update`` command: install the newest build now. Returns ``(ok, message)``."""
+    core = installed_core()
+    asset = release_asset_name()
+    if core is None or asset is None:
+        return False, (
+            "Это не установленная сборка kvist-core (или папка недоступна для записи): обновляй исходники через git."
+            if russian
+            else "This is not an installed kvist-core build (or its folder is not writable): update a source checkout with git."
+        )
+    try:
+        replaced = update_core(core, asset, fetch_release_digests())
+    except UpdateError as error:
+        return False, f"[update] {error}"
+    if replaced:
+        return True, (
+            "Kvist обновлён. Перезапусти его, чтобы получить новую версию."
+            if russian
+            else "Kvist has been updated. Restart it to run the new version."
+        )
+    return True, "Уже последняя версия." if russian else "Already up to date."
 
 
 def _loop(core: Path, asset: str) -> None:
@@ -197,14 +234,14 @@ def _loop(core: Path, asset: str) -> None:
         time.sleep(wait)
         wait = CHECK_INTERVAL_SECONDS
         try:
-            replaced = update_core(core, asset, fetch_release_digests())
-        except UpdateError as error:
+            found = update_available(core, asset, fetch_release_digests())
+        except (UpdateError, OSError) as error:
             _listeners[1](f"[update] {error}")
             continue
         finally:
             _remember_check()
-        if replaced:
-            _listeners[0](restart_notice())
+        if found:
+            _listeners[0](available_notice())
             return
 
 

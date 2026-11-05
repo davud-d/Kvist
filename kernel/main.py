@@ -4282,6 +4282,13 @@ def _stdio_doctor(ctx: CommandContext) -> CommandResult:
     return CommandResult(not doctor.has_failures(checks), doctor.render(checks, ru))
 
 
+def _stdio_update(ctx: CommandContext) -> CommandResult:
+    from kernel.config import self_update
+
+    ok, text = self_update.run_update(_speaks_russian(ctx.session.agent))
+    return CommandResult(ok, sanitize_display_text(text))
+
+
 def _stdio_permissions(ctx: CommandContext) -> CommandResult:
     from kernel.sandbox import permission_command
 
@@ -4729,6 +4736,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "revert": _stdio_revert,
     "bug": _stdio_bug,
     "doctor": _stdio_doctor,
+    "update": _stdio_update,
     "permissions": _stdio_permissions,
 }
 
@@ -5727,6 +5735,13 @@ def main() -> None:
                     title="/doctor",
                     border_style="red" if doctor.has_failures(checks) else "bright_cyan",
                 ))
+                continue
+
+            if user_goal.lower() == "/update":
+                from kernel.config import self_update
+
+                updated, update_text = self_update.run_update(_speaks_russian(agent))
+                console.print(_display_text(sanitize_display_text(update_text), "green" if updated else "red"))
                 continue
 
             if user_goal.lower() == "/changes":

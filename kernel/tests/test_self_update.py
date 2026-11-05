@@ -95,3 +95,62 @@ def test_fetch_keeps_only_sha256_digests(monkeypatch):
 
     monkeypatch.setattr(self_update.httpx, "get", lambda *a, **k: Response())
     assert self_update.fetch_release_digests() == {"a": "abc"}
+
+
+def test_update_available_compares_digests_without_touching_the_file(core):
+    assert self_update.update_available(core, "a", {"a": _digest(b"new")}) is True
+    assert self_update.update_available(core, "a", {"a": _digest(b"old")}) is False
+    assert self_update.update_available(core, "a", {}) is False
+    assert core.read_bytes() == b"old"
+
+
+def test_background_check_only_announces(core, monkeypatch):
+    """It must never download or replace; it says to type /update and stops."""
+    told = []
+    monkeypatch.setattr(self_update, "_listeners", (told.append, lambda message: None))
+    monkeypatch.setattr(self_update, "_last_check", lambda: 0.0)
+    monkeypatch.setattr(self_update, "_remember_check", lambda: None)
+    monkeypatch.setattr(self_update.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(self_update, "fetch_release_digests", lambda: {"a": _digest(b"new")})
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("the background check must not download")
+
+    monkeypatch.setattr(self_update, "_download", forbidden)
+
+    self_update._loop(core, "a")
+
+    assert told == [self_update.available_notice()]
+    assert "/update" in told[0]
+    assert core.read_bytes() == b"old"
+
+
+def test_run_update_installs_and_asks_for_a_restart(core, monkeypatch):
+    _serve(monkeypatch, b"new")
+    monkeypatch.setattr(self_update, "installed_core", lambda: core)
+    monkeypatch.setattr(self_update, "release_asset_name", lambda: "a")
+    monkeypatch.setattr(self_update, "fetch_release_digests", lambda: {"a": _digest(b"new")})
+
+    ok, text = self_update.run_update(False)
+
+    assert ok and "Restart" in text
+    assert core.read_bytes() == b"new"
+    assert self_update.run_update(True) == (True, "Уже последняя версия.")
+
+
+def test_run_update_reports_a_failed_download_and_keeps_the_binary(core, monkeypatch):
+    _serve(monkeypatch, b"tampered")
+    monkeypatch.setattr(self_update, "installed_core", lambda: core)
+    monkeypatch.setattr(self_update, "release_asset_name", lambda: "a")
+    monkeypatch.setattr(self_update, "fetch_release_digests", lambda: {"a": _digest(b"new")})
+
+    ok, text = self_update.run_update(False)
+
+    assert not ok and "SHA-256" in text
+    assert core.read_bytes() == b"old"
+
+
+def test_run_update_refuses_a_source_checkout(monkeypatch):
+    monkeypatch.setattr(self_update, "installed_core", lambda: None)
+    ok, text = self_update.run_update(False)
+    assert not ok and "git" in text

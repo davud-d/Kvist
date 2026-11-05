@@ -30,6 +30,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "context", route: "core", hint: "Context size of the model and how much is used" },
   { name: "memory", route: "core", hint: "What Kvist remembers: inspect, why <id>, forget <id>, remember <text>, pause" },
   { name: "doctor", route: "core", hint: "Check modules, frontends, provider, API keys and settings" },
+  { name: "update", route: "core", hint: "Install the newest Kvist build (restart afterwards)" },
   { name: "permissions", route: "core", hint: "Command rules (allow | host | ask | deny | remove | check) and auto mode (not safe)" },
   { name: "website", route: "goal", hint: "Build a website: Kvist interviews you, builds it and checks it" },
   { name: "revert", route: "core", hint: "Undo the agent's changes" },

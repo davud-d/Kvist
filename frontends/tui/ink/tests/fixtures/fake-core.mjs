@@ -36,7 +36,7 @@ if (process.env.FAKE_MANIFEST) {
     action_types: [],
     // What the real core lists: the commands it carries out say so (`via`), the launcher's are marked, a classic-only one has none.
     slash_commands: [
-      ...["memory", "permissions", "resume", "doctor", "provider", "web-search-provider", "change-api", "strime", "full-reset", "del-provider", "style", "context", "changes", "export", "verbose", "settings-api", "machines", "remote"]
+      ...["memory", "permissions", "resume", "doctor", "update", "provider", "web-search-provider", "change-api", "strime", "full-reset", "del-provider", "style", "context", "changes", "export", "verbose", "settings-api", "machines", "remote"]
         .map((name) => ({ name, description: `the core's ${name}`, via: "core" })),
       { name: "bug", description: "Save a local bug report (classic only)" },
     ],
