@@ -77,9 +77,23 @@ def apply_event(task: Task, event: dict) -> None:
         else:
             _finish(task, TaskStatus.DONE)
         return
+    if kind == "message" and event.get("source", "reply") == "reply":
+        # A chat reply ends its turn with no final event (UI_API.md, turn_end): it is the answer.
+        task.final_message = str(event.get("markdown", ""))
+        task.outcome = task.outcome or "replied"
+        return
+    if kind == "error" and task.outcome == "replied":
+        task.outcome = ""
+        return
     if kind == "turn_end" and task.status in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
-        # A turn that ended without a final answer ended on an error.
-        _finish(task, TaskStatus.FAILED, "agent_error")
+        if task.status_reason in PAUSE_REASONS:
+            # The runner stopped it on purpose (a wrong key, hours out, ...): it can continue later.
+            _finish(task, TaskStatus.PAUSED)
+        elif task.outcome:
+            _finish(task, TaskStatus.DONE)
+        else:
+            # A turn that ended with neither a final answer nor a reply ended on an error.
+            _finish(task, TaskStatus.FAILED, "agent_error")
 
 
 def _apply_task_state(task: Task, state: str) -> None:

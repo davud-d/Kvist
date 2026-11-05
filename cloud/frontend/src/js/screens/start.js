@@ -1,6 +1,7 @@
 // Funnel step 3: attach a card. Paddle.js overlay on top of this page when billing is on; a stub
 // with the same form and a "skip (dev)" button when it is off. The trial's terms are above both.
 import { api } from "../api.js";
+import { fromBoot } from "../boot.js";
 import { h, replace, skeleton } from "../dom.js";
 import { t } from "../i18n.js";
 import { watchMachine } from "../machine.js";
@@ -44,7 +45,10 @@ function stubForm(onSkip) {
 
 export async function startScreen(root, { me, navigate }) {
   replace(root, skeleton(4));
-  const [config, subscription] = await Promise.all([api("/api/billing/config"), api("/api/billing/subscription")]);
+  const [config, subscription] = await Promise.all([
+    fromBoot("billing", () => api("/api/billing/config")),
+    fromBoot("subscription", () => api("/api/billing/subscription")),
+  ]);
   if (subscription.status !== "none") {
     navigate("/onboarding", { replace: true });
     return null;

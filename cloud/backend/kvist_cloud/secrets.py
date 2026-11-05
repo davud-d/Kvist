@@ -112,8 +112,12 @@ def install_log_scrubber(static: Iterable[str] = ()) -> None:
             message = record.getMessage()
         except (TypeError, ValueError):
             message = str(record.msg)
-        record.msg = redact(message)
-        record.args = None
+        scrubbed = redact(message)
+        if scrubbed != message:
+            # Only a record that held a secret is rewritten: some formatters (uvicorn's access
+            # log) read the arguments themselves and need them as they were.
+            record.msg = scrubbed
+            record.args = ()
         if record.exc_info:
             record.exc_text = redact(formatter.formatException(record.exc_info))
             record.exc_info = None

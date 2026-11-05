@@ -39,6 +39,18 @@ def test_app_screens_need_a_session(client_factory, dist):
     assert "pricing.en" in client.get("/pricing").text
 
 
+def test_app_shell_carries_the_signed_in_person(client_factory, dist):
+    (dist / "app.en.html").write_text(
+        '<!doctype html><script id="boot" type="application/json">null</script>' + "x" * 600)
+    client = client_factory(FRONTEND_DIST=str(dist), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    page = client.get("/dashboard")
+    assert '"login": "dev"' in page.text and "null</script>" not in page.text
+    for part in ('"subscription": {"status": "none"', '"providers": [', '"has_tasks": false', '"enabled": false'):
+        assert part in page.text
+    assert page.headers["content-encoding"] == "gzip"
+
+
 def test_security_headers_and_caching(client_factory, dist):
     client = client_factory(FRONTEND_DIST=str(dist))
     page = client.get("/")

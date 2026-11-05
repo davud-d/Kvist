@@ -193,6 +193,25 @@ def test_event_for_someone_elses_task_is_ignored(client_factory, engine):
     assert read(engine, Task, foreign).status == TaskStatus.RUNNING
 
 
+def test_turn_end_settles_the_status():
+    from kvist_cloud.tasks import apply_event
+
+    replied = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
+    for event in ({"type": "message", "markdown": "It is a FastAPI app.", "source": "reply"}, {"type": "turn_end"}):
+        apply_event(replied, event)
+    assert (replied.status, replied.final_message) == (TaskStatus.DONE, "It is a FastAPI app.")
+
+    notice_only = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
+    for event in ({"type": "message", "markdown": "cleaned up", "source": "notice"}, {"type": "turn_end"}):
+        apply_event(notice_only, event)
+    assert (notice_only.status, notice_only.status_reason) == (TaskStatus.FAILED, "agent_error")
+
+    wrong_key = Task(status=TaskStatus.RUNNING, status_reason="invalid_key", outcome="")
+    for event in ({"type": "error", "message": "HTTP 401"}, {"type": "turn_end"}):
+        apply_event(wrong_key, event)
+    assert (wrong_key.status, wrong_key.status_reason) == (TaskStatus.PAUSED, "invalid_key")
+
+
 def _start_hanging_task(stack, goal: str = "hang") -> tuple[int, int]:
     dev_login(stack.http)
     machine_id = eventually(lambda: _connected_machine(stack))

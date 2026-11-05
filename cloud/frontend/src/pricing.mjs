@@ -39,7 +39,6 @@ export function renderPricing(t, catalog, styles) {
 <title>${esc(t.meta.title)}</title>
 <meta name="description" content="${esc(t.meta.description)}">
 <link rel="icon" href="data:,">
-<link rel="preload" href="/assets/fonts/kvist-mono-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 <style>${styles}</style>
 </head>
 <body>

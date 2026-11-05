@@ -2,6 +2,13 @@
 // (one model response: what it thought, what it said, the calls it made and their results).
 // Pure: no DOM, so node --test covers it.
 
+const TERMINAL_ACTIONS = new Set(["final_answer", "report_to_user", "refuse"]);
+
+/** A group with nothing to show (a response that only answered) is not drawn. */
+export function isEmpty(group) {
+  return !group.reasoning && !group.answer && !group.say && !group.plan && !group.actions.length && !group.notes.length;
+}
+
 export function initialFeed() {
   return { groups: [], open: null, input: null, final: null, live: "", seen: new Set() };
 }
@@ -80,6 +87,8 @@ export function apply(feed, event) {
       return touch(group);
     }
     case "step": {
+      // The answer itself is not an action (no action_result ever follows it); it shows as the result.
+      if (TERMINAL_ACTIONS.has(event.action_type)) return null;
       let group = feed.open;
       const batch = event.batch_id || "";
       const known = group && group.actions.some((item) => item.callId === event.call_id);

@@ -69,6 +69,17 @@ test("final and turn_end settle the feed", () => {
   assert.equal(feed.open, null);
 });
 
+test("the final answer is not shown as a running action", () => {
+  const feed = run([
+    { type: "step", step: 1, batch_id: "b1", call_id: "c1", action_type: "read_file" },
+    { type: "action_result", step: 1, call_id: "c1", ok: true },
+    { type: "step", step: 2, batch_id: "b2", call_id: "c2", action_type: "final_answer", action_description: "answers" },
+    { type: "final", message: "Done", outcome: "done" },
+  ]);
+  assert.equal(feed.groups.length, 1);
+  assert.ok(feed.groups.every((group) => group.actions.every((item) => item.type !== "final_answer")));
+});
+
 test("unknown events change nothing", () => {
   const feed = run([{ type: "something_new", x: 1 }, { type: "usage" }]);
   assert.equal(feed.groups.length, 0);

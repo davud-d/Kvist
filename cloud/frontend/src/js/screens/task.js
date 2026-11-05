@@ -2,7 +2,7 @@
 // below, a plain question when it waits for the person, the result at the end.
 import { api, openStream } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
-import { apply, initialFeed } from "../events.js";
+import { apply, initialFeed, isEmpty } from "../events.js";
 import { exportButton } from "../exporter.js";
 import { hoursMinutes } from "../format.js";
 import { t } from "../i18n.js";
@@ -185,6 +185,7 @@ export async function taskScreen(root, { params, navigate }) {
   const flush = () => {
     frame = 0;
     for (const group of dirty) {
+      if (isEmpty(group)) continue;
       const node = groupNode(group);
       const old = nodes.get(group);
       if (old) old.replaceWith(node);

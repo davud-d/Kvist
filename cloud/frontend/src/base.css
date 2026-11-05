@@ -1,10 +1,14 @@
-/* base.css — fonts, reset, type, page frame. No literal colour lives here. */
+/* base.css — fonts, reset, type, page frame. No literal colour lives here.
+
+   font-display: optional, not the landing's swap: on a slow phone the first screen is drawn in
+   the system monospace and stays that way instead of reflowing when the webfont lands (a late
+   swap moved the largest paint by seconds on slow 3G). The font is cached for the next page. */
 
 @font-face {
   font-family: "Kvist Mono";
   src: url("/assets/fonts/kvist-mono-latin-400.woff2") format("woff2");
   font-weight: 400;
-  font-display: swap;
+  font-display: optional;
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
     U+FEFF, U+FFFD, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2022, U+00B7,
@@ -14,7 +18,7 @@
   font-family: "Kvist Mono";
   src: url("/assets/fonts/kvist-mono-latin-700.woff2") format("woff2");
   font-weight: 700;
-  font-display: swap;
+  font-display: optional;
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
     U+FEFF, U+FFFD, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2022, U+00B7,
@@ -24,14 +28,14 @@
   font-family: "Kvist Mono";
   src: url("/assets/fonts/kvist-mono-cyrillic-400.woff2") format("woff2");
   font-weight: 400;
-  font-display: swap;
+  font-display: optional;
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 @font-face {
   font-family: "Kvist Mono";
   src: url("/assets/fonts/kvist-mono-cyrillic-700.woff2") format("woff2");
   font-weight: 700;
-  font-display: swap;
+  font-display: optional;
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 

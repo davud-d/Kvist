@@ -1,5 +1,6 @@
 // The app shell: header, router, footer. Each screen is a function (root, ctx) → cleanup.
 import { api } from "./api.js";
+import { readBoot } from "./boot.js";
 import { append, h, replace } from "./dom.js";
 import { detectLocale, locale, rememberLocale, setLocale, t } from "./i18n.js";
 import { errorBox } from "./ui.js";
@@ -93,7 +94,10 @@ async function boot() {
     navigate(link.pathname + link.search);
   });
   window.addEventListener("popstate", render);
-  await refreshMe();
+  // The server puts the signed-in person into the page; one round trip less on a slow phone.
+  const boot = readBoot();
+  if (boot && boot.me) state.me = boot.me;
+  else await refreshMe();
   if (state.me && state.me.locale && !/kc_lang=/.test(document.cookie)) setLocale(state.me.locale);
   await render();
 }

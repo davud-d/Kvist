@@ -37,13 +37,13 @@ function shell(styles, lang) {
 <meta name="description" content="${esc(t.meta.description)}">
 <meta name="robots" content="noindex">
 <link rel="icon" href="data:,">
-<link rel="preload" href="/assets/fonts/kvist-mono-latin-400.woff2" as="font" type="font/woff2" crossorigin>
 <style>${styles}</style>
 <script type="module" src="/assets/app.js"></script>
+<script id="boot" type="application/json">null</script>
 </head>
 <body>
 <a class="skip" href="#main">${esc(t.common.skip)}</a>
-<div id="app"><main class="wrap" id="main"><span class="skeleton line" style="width:60%"></span><span class="skeleton line" style="width:40%"></span></main></div>
+<div id="app"><header class="top"><div class="wrap top-row"><a class="mark" href="/"><span class="dot" aria-hidden="true"></span>${esc(t.common.brand)}<span class="sub">${esc(t.common.cloud)}</span></a></div></header><main class="wrap" id="main"><span class="skeleton line" style="width:60%"></span><span class="skeleton line" style="width:40%"></span></main></div>
 <noscript><p class="wrap">Kvist Cloud needs JavaScript for this page. / Для этой страницы нужен JavaScript.</p></noscript>
 </body>
 </html>

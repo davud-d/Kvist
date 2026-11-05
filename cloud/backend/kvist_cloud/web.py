@@ -2,15 +2,20 @@
 """The built frontend: the prerendered pricing page, the app shell for every screen, the assets."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from .auth import SESSION_COOKIE, request_locale, user_from_cookie
+from .auth import SESSION_COOKIE, me, request_locale, user_from_cookie
 from .db import session_scope
 from .funnel import record_pricing_view
+from .models import Task, User
 
 router = APIRouter()
 APP_PATHS = ("/start", "/onboarding", "/new", "/dashboard", "/settings", "/admin")
@@ -39,6 +44,8 @@ def install(app: FastAPI) -> None:
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
+    # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -90,10 +97,38 @@ def pricing(request: Request) -> Response:
     return response
 
 
+BOOT_SLOT = '<script id="boot" type="application/json">null</script>'
+
+
+def _boot(request: Request, db: Session, user: User) -> dict[str, object]:
+    """What the first screen needs, in the page itself: on slow 3G each saved round trip is 0.4 s."""
+    from .billing import billing_config, subscription_view
+    from .keys import key_summary, list_providers
+
+    return {
+        "me": me(request, user),
+        "subscription": subscription_view(db, user),
+        "billing": billing_config(request),
+        "key": key_summary(user),
+        "providers": list_providers(),
+        "has_tasks": db.scalar(select(Task.id).where(Task.user_id == user.id).limit(1)) is not None,
+    }
+
+
 def _app_page(request: Request) -> Response:
-    if not _signed_in(request):
+    with session_scope(request.app.state.session_factory) as db:
+        user = user_from_cookie(db, request.app.state.settings, request.cookies.get(SESSION_COOKIE))
+        profile = _boot(request, db, user) if user is not None else None
+    if profile is None:
         return RedirectResponse("/", status_code=302)
-    return _page(request, "app")
+    page = _page(request, "app")
+    if not isinstance(page, FileResponse):
+        return page
+    html = Path(page.path).read_text(encoding="utf-8")
+    # The signed-in person, in the page: the app starts without asking /api/me first.
+    boot = json.dumps(profile).replace("<", "\\u003c")
+    html = html.replace(BOOT_SLOT, f'<script id="boot" type="application/json">{boot}</script>', 1)
+    return HTMLResponse(html)
 
 
 for _path in APP_PATHS:

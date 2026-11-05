@@ -1,6 +1,7 @@
 // Funnel step 4, and the "new task" screen afterwards: model key, repository, task, Run.
 // The machine has been preparing since sign-in; there is no "please wait" screen.
 import { api } from "../api.js";
+import { fromBoot } from "../boot.js";
 import { h, replace, skeleton } from "../dom.js";
 import { t } from "../i18n.js";
 import { keyWidget } from "../keywidget.js";
@@ -13,7 +14,7 @@ const MACHINE_TEXT = {
   creating: "onboarding.machineCreating", error: "onboarding.machineError",
 };
 
-function repoSection(repos) {
+function repoSection(repos, loading) {
   let choice = repos.length ? repos[0].url : "";
   const paste = h("input.input", { type: "url", placeholder: t("onboarding.repoPastePlaceholder"), id: "repo-link",
     "aria-label": t("onboarding.repoPaste") });
@@ -31,25 +32,25 @@ function repoSection(repos) {
     list.querySelector('input[value="paste"]').checked = true;
   });
   const element = h("div.stack", {},
-    repos.length ? null : h("p.small", { text: t("onboarding.repoNoList") }),
+    loading ? h("p.small", { text: t("onboarding.repoLoading") })
+      : repos.length ? null : h("p.small", { text: t("onboarding.repoNoList") }),
     list, paste);
   return { element, value: () => (choice === "paste" ? paste.value.trim() : choice) };
 }
 
 export async function onboardingScreen(root, { navigate }) {
   replace(root, skeleton(6));
-  const [subscription, providers, saved, repoList, tasks] = await Promise.all([
-    api("/api/billing/subscription"),
-    api("/api/model-providers"),
-    api("/api/model-key"),
-    api("/api/github/repos").catch(() => ({ repos: [] })),
-    api("/api/tasks"),
+  const [subscription, providers, saved, hasTasks] = await Promise.all([
+    fromBoot("subscription", () => api("/api/billing/subscription")),
+    fromBoot("providers", () => api("/api/model-providers")),
+    fromBoot("key", () => api("/api/model-key")),
+    fromBoot("has_tasks", () => api("/api/tasks").then((tasks) => tasks.length > 0)),
   ]);
   if (subscription.status === "none") {
     navigate("/start", { replace: true });
     return null;
   }
-  const first = tasks.length === 0;
+  const first = !hasTasks;
   let keyValid = false;
   const run = h("button.btn.wide", { type: "button", text: t("onboarding.run") });
   const why = h("p.hint", { "aria-live": "polite" });
@@ -72,7 +73,18 @@ export async function onboardingScreen(root, { navigate }) {
     for (const button of presetButtons) button.setAttribute("aria-pressed", String(button.textContent === goal.value));
     update();
   });
-  const repo = repoSection(repoList.repos || []);
+  // GitHub can be slow; the screen does not wait for it. The list fills in when it comes.
+  let repo = repoSection([], true);
+  const repoSlot = h("div", {}, repo.element);
+  api("/api/github/repos")
+    .then((list) => {
+      repo = repoSection(list.repos || [], false);
+      replace(repoSlot, repo.element);
+    })
+    .catch(() => {
+      repo = repoSection([], false);
+      replace(repoSlot, repo.element);
+    });
   const machineLine = h("p.row.small", { "aria-live": "polite" });
 
   run.addEventListener("click", async () => {
@@ -97,7 +109,7 @@ export async function onboardingScreen(root, { navigate }) {
         machineLine),
       h("div", {}, h("h2.section-title", { text: t("onboarding.modelTitle") }),
         keyWidget({ providers, saved, onValid: (valid) => { keyValid = valid; update(); } })),
-      h("div", {}, h("h2.section-title", { text: t("onboarding.repoTitle") }), repo.element),
+      h("div", {}, h("h2.section-title", { text: t("onboarding.repoTitle") }), repoSlot),
       h("div.stack", {},
         h("h2.section-title", { text: t("onboarding.taskTitle") }),
         h("div.presets", { role: "group", "aria-label": t("onboarding.taskTitle") }, presetButtons),

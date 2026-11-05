@@ -205,7 +205,7 @@ def live_stack(env, database_url):
 
     stacks: list[LiveStack] = []
 
-    def start(kvist_command: list[str] | None = None, **overrides: str) -> LiveStack:
+    def start(kvist_command: list[str] | None = None, network: bool = False, **overrides: str) -> LiveStack:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = probe.getsockname()[1]
@@ -224,7 +224,8 @@ def live_stack(env, database_url):
             "HEARTBEAT_MAX_GAP_SECONDS": "1",
             **overrides,
         })
-        app = create_app(settings, http_transport=httpx.MockTransport(no_network))
+        # network=True only for the end-to-end test, whose model endpoint is a fake on this computer.
+        app = create_app(settings, http_transport=None if network else httpx.MockTransport(no_network))
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()

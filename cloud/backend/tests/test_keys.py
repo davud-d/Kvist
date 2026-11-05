@@ -28,6 +28,19 @@ def test_bad_master_key_is_a_clear_error():
         vaultmod.Vault("not-a-fernet-key")
 
 
+def test_log_records_without_secrets_keep_their_arguments(caplog):
+    import logging
+
+    vaultmod.install_log_scrubber()
+    logger = logging.getLogger("uvicorn.access.test")
+    with caplog.at_level(logging.INFO, logger="uvicorn.access.test"):
+        logger.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:1", "GET", "/", "1.1", 200)
+        logger.info("key %s", KEY)
+    clean, dirty = caplog.records[-2:]
+    assert clean.args == ("127.0.0.1:1", "GET", "/", "1.1", 200)
+    assert dirty.getMessage() == "key [redacted]"
+
+
 def test_redact_known_and_unregistered_shapes():
     assert vaultmod.redact(f"key={KEY}!") == "key=[redacted]!"
     assert vaultmod.redact("custom-secret-value here", ["custom-secret-value"]) == "[redacted] here"

@@ -156,7 +156,33 @@ Lighthouse results are recorded in the "Lighthouse" section below.
 
 ## Lighthouse
 
-*(filled in by stage 15)*
+Measured on 2026-11-05 with Lighthouse 12.8.2 (`frontend/tools/lighthouse.sh`) against
+`scripts/dev.sh` on this computer: mobile form factor, slow 3G (400 ms round trip, 400 kbit/s, CPU
+slowed 4×). The first screen a person sees is the pricing page; the other two are the funnel's
+screens behind sign-in.
+
+Chrome throttling the network for real (`METHOD=devtools`, the default):
+
+| Screen | Perf | A11y | Best pr. | FCP | LCP | TTI | CLS | Bytes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Pricing, en | 100 | 100 | 100 | 0.56 s | 0.60 s | **0.57 s** | 0 | 59 KB |
+| Pricing, ru | 100 | 100 | 100 | 0.64 s | 0.64 s | **0.64 s** | 0 | 72 KB |
+| Card step (`/start`, goes on to onboarding) | 90 | 100 | 100 | 0.54 s | 3.07 s | 2.23 s | 0.126 | 96 KB |
+| Onboarding, ru | 96 | 100 | 100 | 0.57 s | 2.81 s | 2.38 s | 0.030 | 95 KB |
+
+Lighthouse's own model (`METHOD=simulate`) on the same pages: pricing en 3.2 s, ru 4.0 s,
+onboarding 5.3 s TTI. The model counts the webfont as blocking the first paint whatever
+`font-display` says; with `optional` the browser paints in the system monospace at once, which is
+what the devtools run shows. Both are kept in `.lighthouse/` by the script.
+
+The first screen is within the brief: under 100 KB, interactive in 0.6 s. The screens behind
+sign-in are at 2.2–2.4 s: the HTML, one 22 KB bundle and one round trip to the API at 400 ms
+each. What would bring them under 1.5 s, not done in the MVP: inline the bundle into the shell
+(one round trip less; needs a CSP hash) and build one bundle per locale (−6 KB).
+
+What moved the numbers: gzip on every response (the pricing HTML went from 20 KB to 5.5 KB),
+`font-display: optional` instead of the landing's `swap` (no late reflow, no font in the first
+paint), no font preload, and the data the first screen needs put into the page by the server.
 
 ## Decisions
 
@@ -194,8 +220,24 @@ Where the brief left a choice open, the simple option was taken and written down
     instances would need PostgreSQL `LISTEN/NOTIFY` or similar; not needed for the MVP.
 14. **Paused tasks release the machine.** On pause the Kvist process ends (the key with it);
     resuming starts a new process with Kvist's `resume` command and the key sent again.
-15. **Emails are queued, not sent.** The trial reminder is written to the `outbox` log; wiring
+15. **Emails are queued, not sent.** The trial reminder is written to the `outbox` table; wiring
     an email provider is outside the MVP.
+16. **`font-display: optional`**, unlike the landing's `swap`. On slow 3G a late swap moved the
+    largest paint by seconds and reflowed the page; now the first visit may render in the system
+    monospace and the next one in Kvist Mono from the cache.
+17. **The app shell carries the first screen's data** (`<script id="boot" type="application/json">`):
+    the person, subscription, billing settings, key summary, providers. It saves one or two round
+    trips; a later screen inside the app asks the API as usual.
+18. **A chat reply ends a task as done.** Kvist ends a chat turn with `message` + `turn_end` and no
+    `final` (UI_API.md); a turn with neither a reply nor a final is a failure.
+19. **The local model is a fake OpenAI-compatible server** (`scripts/fake_model.py`) that drives the
+    real core through a short script, reached as the "Other" provider. Kvist's tool-calling probe
+    (`ping`) and role router are answered so the core runs as it would against a real model.
+20. **Lighthouse is reported with real throttling** (`devtools`) next to Lighthouse's model
+    (`simulate`), because the model ignores `font-display` (see "Lighthouse").
+21. **Hard-coded runner environment.** Kvist runs with `AGENT_WRITE_APPROVAL=0` and
+    `AGENT_SANDBOX_NET=allow` (decision 10) and its own `HOME` and `KVIST_CONFIG_DIR` inside the
+    machine folder, so the developer's own Kvist config is never used by a local machine.
 
 ## Core changes wanted
 
