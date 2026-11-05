@@ -155,6 +155,15 @@ def test_a_putty_key_is_made_without_a_passphrase_and_its_openssh_half_is_put_be
     assert not list(key.parent.glob("*.nopass"))
 
 
+def test_on_windows_no_key_is_made_because_puttygen_there_is_a_window(plink, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    with pytest.raises(RemoteError, match="make a .ppk key in it"):
+        access._make_key("work", lambda command, **options: pytest.fail("puttygen must not be started"))
+
+    assert not list(access.key_directory().glob("work*"))
+
+
 def test_a_failing_puttygen_is_reported_and_leaves_no_half_made_key(plink):
     with pytest.raises(RemoteError, match="puttygen failed: no entropy"):
         access._make_key("work", lambda command, **options: done(1, stderr="no entropy"))

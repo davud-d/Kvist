@@ -12,6 +12,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -152,6 +153,9 @@ def _key_file(name: str) -> Path:
 
 def _make_putty_key(path: Path, name: str, run: Run) -> None:
     """A key in PuTTY's own format, with no passphrase (the password only ever installs it), and its OpenSSH public half beside it."""
+    if sys.platform == "win32":
+        # PuTTY's puttygen.exe is a window, not a command: run here it would wait for a person for ever.
+        raise RemoteError("On Windows PuTTYgen cannot make a key without its window: make a .ppk key in it, put its public half on the machine, and choose a key file.")
     empty = path.with_name(path.name + ".nopass")
     empty.write_text("", encoding="utf-8")
     try:

@@ -153,6 +153,7 @@ def test_a_key_that_was_there_before_is_reused_and_never_deleted_on_failure():
     assert not run.ran("ssh-keygen")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="the helper is a shell script; on Windows a password goes through PuTTY")
 def test_the_helper_that_hands_ssh_its_password_only_echoes_the_environment():
     helper = access._askpass_helper()
 

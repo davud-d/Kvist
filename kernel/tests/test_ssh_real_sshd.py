@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def server(tmp_path, monkeypatch):
-    config_dir = Path(tempfile.mkdtemp(prefix="kv", dir="/tmp"))  # short: the daemon's socket lives under it
+    config_dir = Path(tempfile.mkdtemp(prefix="kv", dir="/tmp")).resolve()  # short: the daemon's socket lives under it
     monkeypatch.setenv("KVIST_CONFIG_DIR", str(config_dir))  # the test side finds the daemon where the "server" put it
     (tmp_path / "sshd").mkdir()
     try:

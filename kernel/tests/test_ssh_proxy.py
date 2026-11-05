@@ -90,7 +90,9 @@ def server_tools(tmp_path, monkeypatch):
         "  exit 255\n"
         "fi\n"
         'for last; do :; done\n'
-        'exec sh -c "$last"\n'
+        '# Replace this shell by the command, as ssh would hand it to the server: a shell that does not do it\n'
+        '# on its own (dash, ksh) would leave the real command behind when the proxy ends this process.\n'
+        'eval "exec $last"\n'
     )
     core = tools / "kvist-core"
     core.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{CORE_ENTRY}" "$@"\n')

@@ -192,7 +192,8 @@ Kvist uses whichever client it finds. On Windows it takes `plink` when PuTTY is 
 uses `ssh`. `KVIST_SSH` forces one: a program whose name starts with `plink` is run the PuTTY way, anything else the OpenSSH way.
 
 - Connections run `plink -batch`: no terminal, no questions, as with ssh. Keys are PuTTY's `.ppk`; with **a password** Kvist makes one
-  (with `puttygen`, no passphrase) and installs it, as above. The password reaches plink in a file (`-pwfile`, PuTTY 0.77+) that exists
+  (with `puttygen`, no passphrase) and installs it, as above. **Not on Windows:** there `puttygen.exe` is a window, not a command, so make a `.ppk` in
+  PuTTYgen yourself, put its public half in the machine's `authorized_keys`, and choose *a key file*. The password reaches plink in a file (`-pwfile`, PuTTY 0.77+) that exists
   for that one call and is deleted at once, never on the command line.
 - plink has no `known_hosts` and no `ssh-keyscan`. Kvist reads the fingerprint plink reports, you confirm it, and Kvist keeps it in
   `~/.kvist/ssh/putty_hosts.json` and passes it with `-hostkey` on every connection. PuTTY's registry is not touched, and a

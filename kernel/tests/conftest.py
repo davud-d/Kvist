@@ -209,7 +209,7 @@ def _short_config_dir_for_daemon_sockets(request, monkeypatch):
     if os.name != "posix" or not module.startswith("test_ssh_") or module in {"test_ssh_real_sshd", "test_ssh_install"}:
         yield
         return
-    folder = Path(tempfile.mkdtemp(prefix="kv", dir="/tmp"))
+    folder = Path(tempfile.mkdtemp(prefix="kv", dir="/tmp")).resolve()  # macOS: /tmp is a link, and storage compares real paths
     monkeypatch.setenv("KVIST_CONFIG_DIR", str(folder))
     yield
     shutil.rmtree(folder, ignore_errors=True)

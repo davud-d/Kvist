@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,7 @@ def putty_server(server, plink, tmp_path):  # noqa: F811
     return server, str(ppk)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="puttygen.exe is a window")
 @needs_putty
 def test_puttygen_makes_a_key_with_no_passphrase_and_the_public_half_for_authorized_keys(plink):
     key = access._make_key("work", access._run)
@@ -62,7 +64,8 @@ def test_the_host_key_plink_shows_is_the_one_the_server_has(putty_server):
 def test_plink_gets_in_with_the_key_the_server_knows_and_not_with_another_or_an_unconfirmed_host(putty_server, tmp_path):
     server, ppk = putty_server
     target = Target(server.address, server.port, "/", ppk)
-    assert access.check_login(target).problem == "host_key"
+    untrusted = access.check_login(target)
+    assert (untrusted.ok, untrusted.problem) == (False, "host_key"), f"plink without a confirmed host key: {untrusted}"
 
     access.trust_host_key(access.scan_host_key(access.Endpoint("127.0.0.1", server.port)))
     assert access.check_login(target).ok is True
