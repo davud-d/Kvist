@@ -152,6 +152,92 @@ def settle(client) -> None:
     client.portal.call(wait)
 
 
+FAKE_KVIST = Path(__file__).resolve().parents[2] / "runner" / "tests" / "fake_kvist.py"
+
+
+def eventually(check, timeout: float = 15.0, interval: float = 0.05):
+    """Poll until ``check()`` returns something truthy; returns it."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        value = check()
+        if value:
+            return value
+        if time.monotonic() > deadline:
+            raise AssertionError(f"condition not met in {timeout}s")
+        time.sleep(interval)
+
+
+class LiveStack:
+    """A real server on a real port, the local provider, real runners and the fake Kvist."""
+
+    def __init__(self, app, url: str, server, thread) -> None:
+        self.app = app
+        self.url = url
+        self._server = server
+        self._thread = thread
+        self.http = httpx.Client(base_url=url, headers={"X-Kvist-Client": "1"}, timeout=30.0)
+
+    def call(self, coroutine, timeout: float = 30.0):
+        import asyncio
+
+        return asyncio.run_coroutine_threadsafe(coroutine, self.app.state.loop).result(timeout)
+
+    def db(self):
+        return dbmod.make_session_factory(self.app.state.engine)()
+
+    def stop(self) -> None:
+        self.http.close()
+        self._server.should_exit = True
+        self._thread.join(30)
+
+
+@pytest.fixture
+def live_stack(env, database_url):
+    import socket
+    import sys
+    import threading
+
+    import uvicorn
+
+    from kvist_cloud.main import create_app
+
+    stacks: list[LiveStack] = []
+
+    def start(kvist_command: list[str] | None = None, **overrides: str) -> LiveStack:
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        url = f"http://127.0.0.1:{port}"
+        import json as _json
+
+        settings = load_settings({
+            **env,
+            "DATABASE_URL": database_url,
+            "PUBLIC_URL": url,
+            "AUTH_DEV_LOGIN": "true",
+            "ALLOW_LOCAL_ENDPOINTS": "true",
+            "RUNNER_COMMAND": _json.dumps([sys.executable, "-m", "kvist_runner"]),
+            "KVIST_COMMAND": _json.dumps(kvist_command or [sys.executable, str(FAKE_KVIST)]),
+            "HEARTBEAT_SECONDS": "0.2",
+            "HEARTBEAT_MAX_GAP_SECONDS": "1",
+            **overrides,
+        })
+        app = create_app(settings, http_transport=httpx.MockTransport(no_network))
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        eventually(lambda: server.started, timeout=20)
+        stack = LiveStack(app, url, server, thread)
+        stacks.append(stack)
+        return stack
+
+    yield start
+    for stack in stacks:
+        stack.stop()
+
+
 def dev_login(client) -> None:
     """Signs in through the dev path of the GitHub button."""
     response = client.get("/auth/github/login", follow_redirects=True)
