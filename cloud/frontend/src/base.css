@@ -1,0 +1,114 @@
+/* base.css — fonts, reset, type, page frame. No literal colour lives here. */
+
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-latin-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2022, U+00B7,
+    U+2026, U+2190-2199, U+2713, U+2717, U+25CF, U+25CB;
+}
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-latin-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2022, U+00B7,
+    U+2026, U+2190-2199, U+2713, U+2717, U+25CF, U+25CB;
+}
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-cyrillic-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-cyrillic-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--ink);
+  color: var(--tx);
+  font: 400 var(--t-16)/1.6 var(--f-mono);
+  font-variant-ligatures: none;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .25em; }
+a.inline { color: var(--acc); }
+
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 3px;
+  border-radius: var(--r-1);
+}
+
+::selection { background: var(--tx); color: var(--ink); }
+
+h1, h2, h3, p, ul, ol, dl, dd, figure, pre { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+button, input, textarea, select { font: inherit; color: inherit; }
+
+.wrap {
+  width: 100%;
+  max-width: var(--page);
+  margin-inline: auto;
+  padding-inline: var(--s-4);
+}
+@media (min-width: 620px) { .wrap { padding-inline: var(--s-5); } }
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 60;
+  background: var(--paper);
+  color: var(--ink);
+  padding: var(--s-2) var(--s-4);
+}
+.skip:focus { left: var(--s-4); top: var(--s-4); }
+
+.sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.kicker {
+  font-size: var(--t-13);
+  letter-spacing: var(--track-3);
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.h1 { font-size: var(--t-40); line-height: 1.08; font-weight: 700; letter-spacing: -.02em; }
+.h2 { font-size: var(--t-28); line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+.h3 { font-size: var(--t-16); font-weight: 700; letter-spacing: var(--track-1); text-transform: uppercase; }
+.lede { color: var(--dim); max-width: var(--measure); }
+.small { font-size: var(--t-14); color: var(--faint); }
+.dim { color: var(--dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

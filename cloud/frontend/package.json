@@ -1,0 +1,16 @@
+{
+  "name": "kvist-cloud-frontend",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "check": "node tools/contrast.mjs && node tools/i18n-check.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

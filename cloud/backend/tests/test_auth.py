@@ -118,6 +118,13 @@ def test_dev_login_needs_no_network(client_factory):
     assert client.get("/api/me").json()["login"] == "dev"
 
 
+def test_locale_is_saved(client_factory):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.patch("/api/me", json={"locale": "ru"}).json()["locale"] == "ru"
+    assert client.patch("/api/me", json={"locale": "de"}).status_code == 422
+
+
 def test_dev_login_is_refused_off_loopback(env):
     with pytest.raises(ConfigError):
         load_settings({**env, "AUTH_DEV_LOGIN": "true", "PUBLIC_URL": "https://cloud.example"})

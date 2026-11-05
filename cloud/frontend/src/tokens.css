@@ -1,0 +1,125 @@
+/* ==========================================================================
+   tokens.css — the only file in Kvist Cloud's frontend that names a colour.
+   --------------------------------------------------------------------------
+   Taken from the landing page (site/src/tokens.css) so the cloud reads as the
+   same product: the same ink, panel, line, text and accent values, the same
+   type scale, spacing and motion. Dark is the starting point, light is the
+   same roles inverted. tools/contrast.mjs checks every text pair at 4.5:1.
+
+   Two roles the landing does not need: --warn (the agent waits for you) and
+   --err (something failed). Both are the landing's own ANSI yellow and red,
+   so no new hue enters the palette.
+
+   Accent budget (as on the landing, accents mark state, never decoration):
+     --acc   focus ring, the agent is working (live dot), links in text
+     --ok    done, a key that works
+     --warn  waiting for you, the meter is stopped
+     --err   failed, an error next to a field
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  --ink:    #000000;
+  --panel:  #0d131b;
+  --panel-2:#121a24;
+  --line:   #232c38;
+  --line-2: #2f3a49;
+
+  --tx:     #e8edf2;
+  --dim:    #a7b0bb;
+  --faint:  #8b95a1;
+
+  --paper:  #ffffff;
+
+  --acc:    #4fc3f7;
+  --ok:     #3fc47a;
+  --warn:   #d9a441;
+  --err:    #ff8a8f;
+
+  --diff-add: rgba(63, 196, 122, .14);
+  --diff-del: rgba(224, 108, 117, .16);
+  --glass:    rgba(13, 19, 27, .82);
+  --scrim:    rgba(0, 0, 0, .66);
+  --skeleton: #161e29;
+
+  --r-1: 2px;
+  --r-2: 4px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  --measure: 37.2em;
+  --page: 960px;
+
+  --f-mono: "Kvist Mono", ui-monospace, "JetBrains Mono", "IBM Plex Mono",
+            "DejaVu Sans Mono", Consolas, monospace;
+  --t-13: 13px;
+  --t-14: 14px;
+  --t-15: 15px;
+  --t-16: 16px;
+  --t-18: 18px;
+  --t-21: 21px;
+  --t-28: clamp(22px, 5vw, 28px);
+  --t-40: clamp(28px, 7vw, 40px);
+  --track-1: .08em;
+  --track-2: .14em;
+  --track-3: .2em;
+
+  --dur-1: 120ms;
+  --dur-2: 260ms;
+  --dur-3: 520ms;
+  --ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --ink:    #ffffff;
+    --panel:  #f1f3f6;
+    --panel-2:#e8ecf1;
+    --line:   #c3ccd7;
+    --line-2: #a8b3c1;
+    --tx:     #10161d;
+    --dim:    #454f5b;
+    --faint:  #5b6672;
+    --paper:  #000000;
+    --acc:    #0a6c9e;
+    --ok:     #12734a;
+    --warn:   #7a5510;
+    --err:    #9b2f34;
+    --diff-add: rgba(18, 115, 74, .12);
+    --diff-del: rgba(176, 58, 63, .12);
+    --glass:    rgba(241, 243, 246, .86);
+    --scrim:    rgba(16, 22, 29, .45);
+    --skeleton: #e3e8ee;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --ink:    #ffffff;
+  --panel:  #f1f3f6;
+  --panel-2:#e8ecf1;
+  --line:   #c3ccd7;
+  --line-2: #a8b3c1;
+  --tx:     #10161d;
+  --dim:    #454f5b;
+  --faint:  #5b6672;
+  --paper:  #000000;
+  --acc:    #0a6c9e;
+  --ok:     #12734a;
+  --warn:   #7a5510;
+  --err:    #9b2f34;
+  --diff-add: rgba(18, 115, 74, .12);
+  --diff-del: rgba(176, 58, 63, .12);
+  --glass:    rgba(241, 243, 246, .86);
+  --scrim:    rgba(16, 22, 29, .45);
+  --skeleton: #e3e8ee;
+}

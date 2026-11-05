@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Awaitable, Callable
+from typing import Literal
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -217,6 +219,19 @@ def me(request: Request, user: User = Depends(current_user)) -> dict[str, object
         "locale": user.locale,
         "is_admin": user.github_login.lower() in request.app.state.settings.admin_logins,
     }
+
+
+class MeIn(BaseModel):
+    locale: Literal["en", "ru"]
+
+
+@router.patch("/api/me")
+def update_me(
+    payload: MeIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    user.locale = payload.locale
+    db.commit()
+    return me(request, user)
 
 
 @router.post("/auth/logout")
