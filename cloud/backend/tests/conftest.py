@@ -7,6 +7,7 @@ import shutil
 from datetime import timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 
@@ -62,6 +63,45 @@ def db(engine):
     yield session
     session.rollback()
     session.close()
+
+
+def no_network(request: httpx.Request) -> httpx.Response:
+    raise AssertionError(f"unexpected outbound request to {request.url.host}")
+
+
+@pytest.fixture
+def app_factory(env, database_url):
+    """Builds the app on this test's database; ``handler`` answers every outbound HTTP request."""
+    from kvist_cloud.main import create_app
+
+    def build(handler=no_network, **overrides: str):
+        settings = load_settings({**env, "DATABASE_URL": database_url, **overrides})
+        return create_app(settings, http_transport=httpx.MockTransport(handler))
+
+    return build
+
+
+@pytest.fixture
+def client_factory(app_factory):
+    from fastapi.testclient import TestClient
+
+    clients = []
+
+    def build(handler=no_network, **overrides: str) -> TestClient:
+        client = TestClient(app_factory(handler, **overrides), base_url="http://127.0.0.1:8740")
+        client.headers["X-Kvist-Client"] = "1"
+        clients.append(client)
+        return client
+
+    yield build
+    for client in clients:
+        client.close()
+
+
+def dev_login(client) -> None:
+    """Signs in through the dev path of the GitHub button."""
+    response = client.get("/auth/github/login", follow_redirects=True)
+    assert response.history, "the login did not redirect"
 
 
 def make_user(db, login: str = "octo", github_id: int = 1) -> User:

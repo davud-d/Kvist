@@ -10,6 +10,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from fastapi import Request
 from sqlalchemy import DateTime, Engine, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
@@ -87,6 +88,16 @@ def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
         session.rollback()
         raise
     finally:
+        session.close()
+
+
+def get_db(request: Request) -> Iterator[Session]:
+    """FastAPI dependency. Endpoints commit explicitly; anything left uncommitted is rolled back."""
+    session = request.app.state.session_factory()
+    try:
+        yield session
+    finally:
+        session.rollback()
         session.close()
 
 
