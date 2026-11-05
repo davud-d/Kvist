@@ -49,10 +49,19 @@ def test_the_client_is_what_kvist_ssh_names_else_plink_only_on_windows_when_it_i
 
 
 def test_plink_runs_without_a_terminal_or_questions_and_with_only_the_chosen_key(plink):
-    assert ssh_prefix(Target("me@box", None, "/w")) == ["plink", "-batch", "-ssh", "-T", "me@box"]
+    assert ssh_prefix(Target("me@box", None, "/w")) == ["plink", "-batch", "-ssh", "-T", "-hostkey", putty.UNCONFIRMED, "me@box"]
     assert ssh_prefix(Target("me@box", 2222, "/w", "C:/k.ppk")) == [
-        "plink", "-batch", "-ssh", "-T", "-P", "2222", "-i", "C:/k.ppk", "-noagent", "me@box",
+        "plink", "-batch", "-ssh", "-T", "-P", "2222", "-i", "C:/k.ppk", "-noagent", "-hostkey", putty.UNCONFIRMED, "me@box",
     ]
+
+
+def test_a_host_nobody_confirmed_is_not_reached_at_all(plink):
+    def run(command, **options):
+        pytest.fail("plink must not be started for a host nobody confirmed")
+
+    login = access.check_login(Target("me@box", None, "/w"), run)
+
+    assert (login.ok, login.problem) == (False, "host_key")
 
 
 def test_the_host_key_the_person_confirmed_is_handed_to_plink_every_time(plink):
@@ -123,6 +132,7 @@ def test_the_password_reaches_plink_in_a_file_that_is_gone_afterwards_and_never_
     assert seen["content"] == "s3cret" and not seen["pwfile"].exists()
     assert seen["input"] == "ssh-ed25519 AAAA kvist-work\n"
     assert seen["command"][:4] == ["plink", "-batch", "-ssh", "-T"] and seen["command"][-2] == "me@box"
+    assert "-hostkey" in seen["command"]
     assert "authorized_keys" in seen["command"][-1]
 
 
@@ -137,7 +147,8 @@ def test_a_refused_password_says_so_and_still_leaves_no_file(plink):
     assert not [entry for entry in key.parent.iterdir() if entry.name.startswith("pw-")]
 
 
-def test_a_putty_key_is_made_without_a_passphrase_and_its_openssh_half_is_put_beside_it(plink):
+def test_a_putty_key_is_made_without_a_passphrase_and_its_openssh_half_is_put_beside_it(plink, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")  # on Windows no key is made, see the test below
     calls = []
 
     def run(command, **options):
@@ -164,7 +175,8 @@ def test_on_windows_no_key_is_made_because_puttygen_there_is_a_window(plink, mon
     assert not list(access.key_directory().glob("work*"))
 
 
-def test_a_failing_puttygen_is_reported_and_leaves_no_half_made_key(plink):
+def test_a_failing_puttygen_is_reported_and_leaves_no_half_made_key(plink, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
     with pytest.raises(RemoteError, match="puttygen failed: no entropy"):
         access._make_key("work", lambda command, **options: done(1, stderr="no entropy"))
 

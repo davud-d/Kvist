@@ -63,6 +63,11 @@ def remember_host_key(host: str, port: int | None, fingerprint: str) -> None:
     update_json_object(_hosts_path(), change, boundary=_boundary(), empty_as_missing=True)
 
 
+# A fingerprint no server has. plink does not reliably refuse a host it has not been told to trust (on Linux it let a login
+# through with nothing confirmed), so a host the person has not confirmed gets this one and the connection fails.
+UNCONFIRMED = "SHA256:" + "A" * 43
+
+
 def plink_options(host: str, port: int | None, key: str | None) -> list[str]:
     """No terminal and no questions; the host key only if it is the one the person confirmed; only the chosen key."""
     # plink has no option for keep-alives or a connect timeout; the proxy's own pings notice a dead link.
@@ -71,9 +76,7 @@ def plink_options(host: str, port: int | None, key: str | None) -> list[str]:
         options += ["-P", str(port)]
     if key:
         options += ["-i", key, "-noagent"]
-    trusted = known_host_key(host, port)
-    if trusted:
-        options += ["-hostkey", trusted]
+    options += ["-hostkey", known_host_key(host, port) or UNCONFIRMED]
     return options
 
 

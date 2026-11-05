@@ -126,6 +126,8 @@ class Login:
 
 def check_login(target: Target, run: Run = _run) -> Login:
     """Can ssh get in right now without anything being typed?"""
+    if putty.uses_putty() and putty.known_host_key(target.host, target.port) is None:
+        return Login(False, "host_key", "the host key has not been confirmed")
     done = run([*ssh_prefix(target), "true"])
     if done.returncode == 0:
         return Login(True, "", "")
