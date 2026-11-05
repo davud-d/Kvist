@@ -69,14 +69,52 @@ def no_network(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"unexpected outbound request to {request.url.host}")
 
 
+class FakeProvider:
+    """Machines that exist only in memory; records what the server asked for."""
+
+    name = "fake"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.states: dict[str, str] = {}
+        self.tokens: dict[str, str] = {}
+
+    async def create(self, spec) -> str:
+        ref = f"m{spec.machine_id}"
+        self.calls.append(("create", ref))
+        self.states[ref] = "stopped"
+        self.tokens[ref] = spec.token
+        return ref
+
+    async def wake(self, ref: str) -> None:
+        self.calls.append(("wake", ref))
+        self.states[ref] = "running"
+
+    async def sleep(self, ref: str) -> None:
+        self.calls.append(("sleep", ref))
+        self.states[ref] = "stopped"
+
+    async def delete(self, ref: str) -> None:
+        self.calls.append(("delete", ref))
+        self.states.pop(ref, None)
+
+    async def status(self, ref: str) -> str:
+        return self.states.get(ref, "missing")
+
+
 @pytest.fixture
-def app_factory(env, database_url):
+def fake_provider() -> FakeProvider:
+    return FakeProvider()
+
+
+@pytest.fixture
+def app_factory(env, database_url, fake_provider):
     """Builds the app on this test's database; ``handler`` answers every outbound HTTP request."""
     from kvist_cloud.main import create_app
 
-    def build(handler=no_network, **overrides: str):
+    def build(handler=no_network, provider=None, **overrides: str):
         settings = load_settings({**env, "DATABASE_URL": database_url, **overrides})
-        return create_app(settings, http_transport=httpx.MockTransport(handler))
+        return create_app(settings, http_transport=httpx.MockTransport(handler), provider=provider or fake_provider)
 
     return build
 
@@ -87,15 +125,31 @@ def client_factory(app_factory):
 
     clients = []
 
-    def build(handler=no_network, **overrides: str) -> TestClient:
-        client = TestClient(app_factory(handler, **overrides), base_url="http://127.0.0.1:8740")
+    def build(handler=no_network, provider=None, **overrides: str) -> TestClient:
+        # Entered as a context manager: one event loop for the whole test, so background tasks live on.
+        client = TestClient(app_factory(handler, provider, **overrides), base_url="http://127.0.0.1:8740")
+        client.__enter__()
         client.headers["X-Kvist-Client"] = "1"
         clients.append(client)
         return client
 
     yield build
     for client in clients:
-        client.close()
+        client.__exit__(None, None, None)
+
+
+def settle(client) -> None:
+    """Wait until the app's background tasks are done."""
+    import asyncio
+
+    async def wait() -> None:
+        for _ in range(200):
+            pending = list(client.app.state.background)
+            if not pending:
+                return
+            await asyncio.wait(pending, timeout=0.05)
+
+    client.portal.call(wait)
 
 
 def dev_login(client) -> None:

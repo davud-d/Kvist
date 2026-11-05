@@ -2,17 +2,21 @@
 """The FastAPI app: settings, database, routers, error handlers and the built frontend."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+from collections.abc import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import auth, keys
+from . import auth, keys, machines
 from .config import Settings, load_settings
 from .db import make_engine, make_session_factory, upgrade
 from .errors import ApiError, api_error_handler, unhandled_error_handler, validation_error_handler
+from .providers import MachineProvider, make_provider
 from .secrets import Vault, install_log_scrubber
 
 log = logging.getLogger("kvist_cloud")
@@ -23,9 +27,26 @@ CLIENT_HEADER = "x-kvist-client"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    loops = [asyncio.create_task(machines.sweep_forever(app))]
+    try:
+        yield
+    finally:
+        for loop in loops:
+            loop.cancel()
+        for task in list(app.state.background):
+            task.cancel()
+        close = getattr(app.state.provider, "close", None)
+        if close is not None:
+            await close()
+        app.state.engine.dispose()
+
+
 def create_app(
     settings: Settings | None = None,
     http_transport: httpx.AsyncBaseTransport | None = None,
+    provider: MachineProvider | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     install_log_scrubber(
@@ -35,13 +56,15 @@ def create_app(
     upgrade(settings.database_url)
     engine = make_engine(settings.database_url)
 
-    app = FastAPI(title="Kvist Cloud", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="Kvist Cloud", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.http_transport = http_transport
     app.state.vault = Vault(settings.master_key)
-    app.state.on_signed_in = None
+    app.state.provider = provider or make_provider(settings)
+    app.state.background = set()
+    app.state.on_signed_in = machines.on_signed_in
 
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
@@ -61,4 +84,5 @@ def create_app(
 
     app.include_router(auth.router)
     app.include_router(keys.router)
+    app.include_router(machines.router)
     return app
