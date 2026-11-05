@@ -171,17 +171,20 @@ class FakeBarDaemon:
         self.thread.start()
 
     def _serve(self) -> None:
-        connection, _ = self._server.accept()
-        with connection, connection.makefile("r", encoding="utf-8") as reader:
-            self.received.append(json.loads(reader.readline()))
-            for summary in self._summaries:
-                connection.sendall((json.dumps(summary) + "\n").encode("utf-8"))
-            if self._summaries:
-                self._server.close()
-                return
-            for line in reader:
-                self.received.append(json.loads(line))
-        self._server.close()
+        # Whatever goes wrong here the listening socket is closed: a client that connected into its queue
+        # then gets a reset instead of waiting for ever for lines that will never come.
+        try:
+            connection, _ = self._server.accept()
+            with connection, connection.makefile("r", encoding="utf-8") as reader:
+                self.received.append(json.loads(reader.readline()))
+                for summary in self._summaries:
+                    connection.sendall((json.dumps(summary) + "\n").encode("utf-8"))
+                if self._summaries:
+                    return
+                for line in reader:
+                    self.received.append(json.loads(line))
+        finally:
+            self._server.close()
 
 
 def test_stream_prints_hidden_then_each_summary_and_hides_again_when_the_daemon_goes(tmp_path):

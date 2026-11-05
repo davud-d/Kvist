@@ -243,9 +243,10 @@ jobs:
             # Informational: the whole default suite and the doctor's view of the system, so the first runs show
             # what else breaks here. A failure of either does not fail the job (it is continue-on-error anyway).
             .venv/bin/python -m kernel --doctor || echo "::warning::doctor reported problems"
-            # pytest-timeout: one hung test (OpenBSD once sat for 30 minutes in a tray-bar test) must fail by name, not freeze the job.
+            # pytest-timeout: one hung test (OpenBSD sat for 30+ minutes in a tray-bar test) must not freeze the job. The thread method, because
+            # the default one needs SIGALRM to reach the main thread, which a thread-heavy process on OpenBSD may not give it.
             .venv/bin/python -m pip install --disable-pip-version-check pytest-timeout==2.4.0
-            .venv/bin/python -m pytest -ra -vv -p no:cacheprovider --timeout=180 -o faulthandler_timeout=60 || echo "::warning::the wider suite has failures on ${{ matrix.name }}"
+            .venv/bin/python -m pytest -ra -vv -p no:cacheprovider --timeout=180 --timeout-method=thread -o faulthandler_timeout=60 || echo "::warning::the wider suite has failures on ${{ matrix.name }}"
 
   package:
     name: Wheel and binary on ${{ matrix.os }}
