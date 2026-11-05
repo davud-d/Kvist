@@ -192,16 +192,18 @@ def _owned_task(db: Session, machine_id: int, task_id: int) -> Task | None:
     return task
 
 
-def _event(app: FastAPI, machine_id: int, message: dict) -> None:
+def _event(app: FastAPI, machine_id: int, message: dict) -> bool:
+    """Ingest one relayed event; True when it freed a parallel-task slot."""
     event = message.get("event")
     if not isinstance(event, dict):
-        return
+        return False
     with session_scope(app.state.session_factory) as db:
         task = _owned_task(db, machine_id, int(message.get("task_id") or 0))
         if task is None:
             log.warning("machine %s sent an event for a task it does not own", machine_id)
-            return
-        tasks.ingest_event(app, db, task, event)
+            return False
+        before = tasks.ingest_event(app, db, task, event)
+        return before in TaskStatus.ACTIVE and task.status not in TaskStatus.ACTIVE
 
 
 def _reason(app: FastAPI, machine_id: int, message: dict) -> None:
@@ -231,7 +233,8 @@ async def handle(app: FastAPI, machine_id: int, message: dict) -> None:
         if result.exhausted:
             await limits.on_hours_exhausted(app, machine_id)
     elif kind == "event":
-        _event(app, machine_id, message)
+        if _event(app, machine_id, message):
+            await limits.admit_queued(app, machine_id)
     elif kind == "task_reason":
         _reason(app, machine_id, message)
     elif kind == "task_exit":

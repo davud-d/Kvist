@@ -321,16 +321,24 @@ async def cancel_task(
     if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED) or (
         task.status == TaskStatus.STARTING and task.started_at is None
     ):
+        held_slot = task.status == TaskStatus.STARTING
         _finish(task, TaskStatus.CANCELLED, "cancelled")
         db.commit()
         request.app.state.hub.publish(task.id, {"type": "task", "task": task_view(db, task)})
+        if held_slot:
+            from .limits import admit_queued
+
+            await admit_queued(request.app, task.machine_id)
         return task_payload(db, task)
     task.status_reason = "cancelled"
     db.commit()
     if not await _control(request.app, task, "cancel"):
         # No runner to tell: the process is gone with it, so the task is over.
+        from .limits import admit_queued
+
         _finish(task, TaskStatus.CANCELLED)
         db.commit()
+        await admit_queued(request.app, task.machine_id)
     return task_payload(db, task)
 
 
