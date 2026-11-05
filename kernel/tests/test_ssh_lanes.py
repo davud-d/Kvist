@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -16,12 +18,12 @@ from kernel.ssh.proxy import Proxy
 from kernel.tests.ssh_support import FakeCoreDaemon
 from kernel.tests.test_ssh_daemon import is_type
 
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="the remote core is POSIX-only")
+
 
 @pytest.fixture
-def config_dir(tmp_path, monkeypatch):
-    folder = tmp_path / "config"
-    folder.mkdir()
-    monkeypatch.setenv("KVIST_CONFIG_DIR", str(folder))
+def config_dir():
+    folder = Path(os.environ["KVIST_CONFIG_DIR"])  # the short one conftest made: a socket path lives under it
     return folder
 
 

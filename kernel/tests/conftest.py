@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -195,6 +196,23 @@ def _isolate_home(request, monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _short_config_dir_for_daemon_sockets(request, monkeypatch):
+    """A Unix socket path is limited to about 100 bytes, and macOS puts pytest's tmp_path far past that.
+
+    The ssh tests that start a daemon on a socket under the config folder get a short folder instead. The real-sshd
+    modules are left alone: their server side is told its own config folder explicitly.
+    """
+    module = request.module.__name__.rsplit(".", 1)[-1]
+    if os.name != "posix" or not module.startswith("test_ssh_") or module in {"test_ssh_real_sshd", "test_ssh_install"}:
+        yield
+        return
+    folder = Path(tempfile.mkdtemp(prefix="kv", dir="/tmp"))
+    monkeypatch.setenv("KVIST_CONFIG_DIR", str(folder))
+    yield
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -12,15 +14,14 @@ from kernel.ssh import credentials, wire
 from kernel.tests.ssh_support import FakeCoreDaemon
 from kernel.tests.test_ssh_daemon import is_type
 from kernel.tests.test_ssh_proxy import server_tools, start_proxy  # noqa: F401  (fixture and helper)
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="the remote core is POSIX-only")
 
 LENT = {"llm_provider": "deepseek", "deepseek_api_key": "sk-lent-by-the-frontend", "llm_models": {"deepseek": {"fast": "f", "smart": "s"}}}
 
 
 @pytest.fixture
-def config_dir(tmp_path, monkeypatch):
-    folder = tmp_path / "config"
-    folder.mkdir()
-    monkeypatch.setenv("KVIST_CONFIG_DIR", str(folder))
+def config_dir(monkeypatch):
+    folder = Path(os.environ["KVIST_CONFIG_DIR"])  # the short one conftest made: a socket path lives under it
     monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)
     yield folder
     user_config._held_in_memory = None

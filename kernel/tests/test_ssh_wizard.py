@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -95,7 +96,7 @@ def test_a_key_file_that_cannot_be_used_is_asked_for_again(ssh_world):
 
     machine = wizard.add_or_edit_machine(ui, "en")
 
-    assert machine.key == "/home/me/.ssh/id"
+    assert machine.key == str(Path("/home/me/.ssh/id"))
     assert ui.errors == ["is not a file"]
 
 

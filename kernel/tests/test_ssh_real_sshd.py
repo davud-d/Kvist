@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import subprocess
+import tempfile
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -20,15 +23,15 @@ from kernel.tests.ssh_support import FakeCoreDaemon
 from kernel.tests.test_ssh_proxy import Frontend
 
 pytestmark = pytest.mark.skipif(
-    os.name != "posix" or sshd_program() is None or not all(__import__("shutil").which(tool) for tool in ("ssh", "ssh-keygen", "ssh-keyscan")),
+    os.name != "posix" or sshd_program() is None or not all(shutil.which(tool) for tool in ("ssh", "ssh-keygen", "ssh-keyscan")),
     reason="needs sshd and the ssh tools",
 )
 
 
 @pytest.fixture
 def server(tmp_path, monkeypatch):
-    config_dir = tmp_path / ".kvist"
-    config_dir.mkdir()
+    config_dir = Path(tempfile.mkdtemp(prefix="kv", dir="/tmp"))  # short: the daemon's socket lives under it
+    monkeypatch.setenv("KVIST_CONFIG_DIR", str(config_dir))  # the test side finds the daemon where the "server" put it
     (tmp_path / "sshd").mkdir()
     try:
         sshd = LocalSshd(tmp_path / "sshd", tmp_path, config_dir)
@@ -38,6 +41,7 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setenv("KVIST_SSH", str(wrapper))
     yield sshd
     sshd.stop()
+    shutil.rmtree(config_dir, ignore_errors=True)
 
 
 def target_for(server: LocalSshd, workspace: str = "/") -> Target:

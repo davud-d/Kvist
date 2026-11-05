@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from argparse import Namespace
 
 import pytest
@@ -42,7 +43,8 @@ def test_a_machine_is_saved_and_comes_back_as_it_was():
 
     assert machines.get_machine("work") == WORK
     assert [machine.name for machine in machines.list_machines()] == ["work"]
-    assert (machines.machines_path().stat().st_mode & 0o777) == 0o600
+    if os.name == "posix":  # NTFS has no such modes
+        assert (machines.machines_path().stat().st_mode & 0o777) == 0o600
 
 
 def test_only_the_known_fields_are_ever_written_and_never_a_password():

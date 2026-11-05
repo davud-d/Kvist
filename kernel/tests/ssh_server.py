@@ -53,7 +53,7 @@ class LocalSshd:
                     "UsePAM no",
                     "StrictModes no",
                     "PidFile none",
-                    "SetEnv " + " ".join(f"{name}={value}" for name, value in {"HOME": home, "KVIST_CONFIG_DIR": config_dir, **(extra_env or {})}.items()),
+                    "SetEnv " + " ".join(f'{name}="{value}"' for name, value in {"HOME": home, "PATH": self._server_path(), "KVIST_CONFIG_DIR": config_dir, **(extra_env or {})}.items()),
                 ]
             )
             + "\n",
@@ -66,6 +66,11 @@ class LocalSshd:
             stderr=subprocess.STDOUT,
         )
         self._wait_until_listening()
+
+    @staticmethod
+    def _server_path() -> str:
+        """The interpreter running the tests comes first: a bare sshd session has the system PATH, whose ``python3`` may be older than the core needs."""
+        return os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", os.defpath)])
 
     @staticmethod
     def install_core_shim(home: Path) -> None:

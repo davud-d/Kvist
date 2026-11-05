@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+
+import pytest
 
 from kernel.ssh.event_log import EventLog, fresh_replay, lines_from
+
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="the remote core is POSIX-only")
 
 
 def line(**fields) -> str:

@@ -2,6 +2,7 @@
 """Getting signed in the first time: the host key, a key file, and a password that is used once and forgotten."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -76,7 +77,8 @@ def test_trusting_a_key_adds_it_where_ssh_looks_and_keeps_the_file_private(tmp_p
 
     written = access.known_hosts()
     assert written.read_text().splitlines() == ["box ssh-ed25519 AAAA", "box ssh-rsa BBBB"]
-    assert (written.stat().st_mode & 0o777) == 0o600
+    if os.name == "posix":  # NTFS has no such modes
+        assert (written.stat().st_mode & 0o777) == 0o600
 
 
 def test_a_failed_login_says_which_kind_of_failure_it_was():
@@ -112,7 +114,8 @@ def test_a_password_makes_a_key_installs_it_and_is_seen_nowhere_but_the_environm
     assert "StrictHostKeyChecking=yes" in command
     on_disk = "".join(path.read_text(errors="replace") for path in access.key_directory().iterdir() if path.is_file())
     assert "s3cret-pass" not in on_disk
-    assert (access.key_directory().stat().st_mode & 0o777) == 0o700
+    if os.name == "posix":  # NTFS has no such modes
+        assert (access.key_directory().stat().st_mode & 0o777) == 0o700
 
 
 def test_a_wrong_password_leaves_no_key_behind():
@@ -153,7 +156,9 @@ def test_a_key_that_was_there_before_is_reused_and_never_deleted_on_failure():
 def test_the_helper_that_hands_ssh_its_password_only_echoes_the_environment():
     helper = access._askpass_helper()
 
-    assert (helper.stat().st_mode & 0o777) == 0o700
+    if os.name == "posix":  # NTFS has no such modes
+
+        assert (helper.stat().st_mode & 0o777) == 0o700
     answer = subprocess.run([str(helper)], env={"KVIST_SSH_PASSWORD": "pw with spaces"}, capture_output=True, text=True)
     assert answer.stdout == "pw with spaces\n"
 
@@ -168,4 +173,5 @@ def test_a_key_file_is_checked_before_it_is_used(tmp_path):
 
     assert access.usable_key_file(str(good)) is None
     assert "not a file" in access.usable_key_file(str(tmp_path / "missing"))
-    assert "chmod 600" in access.usable_key_file(str(open_key))
+    if os.name == "posix":
+        assert "chmod 600" in access.usable_key_file(str(open_key))

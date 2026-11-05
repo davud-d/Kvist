@@ -192,7 +192,7 @@ def usable_key_file(path: str) -> str | None:
         return f"{file} is not a file."
     if not os.access(file, os.R_OK):
         return f"{file} cannot be read."
-    if file.stat().st_mode & 0o077:
+    if os.name == "posix" and file.stat().st_mode & 0o077:  # on Windows the rights are ACLs, which ssh checks itself
         return f"{file} is open to other users; ssh refuses such a key (chmod 600)."
     return None
 

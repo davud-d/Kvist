@@ -13,6 +13,8 @@ from kernel.ssh.command import call_op
 from kernel.tests.test_ssh_real_sshd import pytestmark as _needs_sshd  # noqa: F401
 from kernel.tests.test_ssh_real_sshd import server, target_for, trust  # noqa: F401  (fixtures and helpers)
 
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="the remote core is POSIX-only")
+
 
 def test_the_core_and_what_it_imports_are_copied_and_no_tests():
     names = deploy.source_files()
@@ -176,7 +178,7 @@ def test_a_machine_of_another_kind_is_not_given_a_program_built_here(server, tmp
     trust(server)
 
     with pytest.raises(deploy.RemoteError, match="does not run there"):
-        deploy.install_binary(target_for(server), _program(tmp_path), local=("darwin", "arm64"))
+        deploy.install_binary(target_for(server), _program(tmp_path), local=("haiku", "riscv64"))  # no runner is one
 
 
 def test_an_installation_with_nothing_there_yet_creates_the_folder(server, tmp_path):
