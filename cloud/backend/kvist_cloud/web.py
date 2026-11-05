@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import SESSION_COOKIE, request_locale, user_from_cookie
 from .db import session_scope
+from .funnel import record_pricing_view
 
 router = APIRouter()
 APP_PATHS = ("/start", "/onboarding", "/new", "/dashboard", "/settings", "/admin")
@@ -82,7 +83,11 @@ def pricing(request: Request) -> Response:
         return _with_lang(request, response)
     if request.url.path == "/" and _signed_in(request):
         return RedirectResponse("/dashboard", status_code=302)
-    return _page(request, "pricing")
+    response = _page(request, "pricing")
+    if response.status_code == 200:
+        with session_scope(request.app.state.session_factory) as db:
+            record_pricing_view(db, request, response)
+    return response
 
 
 def _app_page(request: Request) -> Response:

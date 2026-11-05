@@ -1,4 +1,5 @@
 // Path → screen. The pricing page is not here: it is prerendered HTML served by the server.
+import { adminScreen } from "./screens/admin.js";
 import { dashboardScreen } from "./screens/dashboard.js";
 import { onboardingScreen } from "./screens/onboarding.js";
 import { settingsScreen } from "./screens/settings.js";
@@ -12,4 +13,5 @@ export const routes = [
   { pattern: /^\/dashboard\/?$/, screen: dashboardScreen, title: "nav.dashboard", nav: "/dashboard" },
   { pattern: /^\/tasks\/(\d+)\/?$/, screen: taskScreen, title: "task.goal", nav: null },
   { pattern: /^\/settings\/?$/, screen: settingsScreen, title: "nav.settings", nav: "/settings" },
+  { pattern: /^\/admin\/?$/, screen: adminScreen, title: "admin.title", nav: "/admin" },
 ];
