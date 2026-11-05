@@ -30,16 +30,20 @@ def done(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
-def test_the_client_is_what_kvist_ssh_names_else_plink_only_on_windows_when_it_is_installed(monkeypatch):
+def test_the_client_is_what_kvist_ssh_names_else_openssh_and_plink_only_on_windows_without_ssh(monkeypatch):
     monkeypatch.delenv("KVIST_SSH", raising=False)
-    monkeypatch.setattr(putty.shutil, "which", lambda name: "C:/PuTTY/plink.exe")
+    installed: set[str] = {"ssh", "plink"}
+    monkeypatch.setattr(putty.shutil, "which", lambda name: f"C:/{name}.exe" if name in installed else None)
 
     monkeypatch.setattr(sys, "platform", "linux")
     assert not putty.uses_putty()
     monkeypatch.setattr(sys, "platform", "win32")
+    assert not putty.uses_putty() and putty.ssh_program() == "ssh"  # Windows has OpenSSH; PuTTY being installed changes nothing
+
+    installed.discard("ssh")
     assert putty.uses_putty() and putty.ssh_program() == "plink"
 
-    monkeypatch.setattr(putty.shutil, "which", lambda name: None)
+    installed.discard("plink")
     assert not putty.uses_putty() and putty.ssh_program() == "ssh"
 
     monkeypatch.setenv("KVIST_SSH", r"C:\Program Files\PuTTY\plink.exe")

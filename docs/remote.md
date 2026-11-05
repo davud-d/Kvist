@@ -188,8 +188,10 @@ the end of a turn with nobody connected. The conversation itself is in the folde
 
 ## PuTTY on Windows
 
-Kvist uses whichever client it finds. On Windows it takes `plink` when PuTTY is installed and `ssh` otherwise; on every other system it
-uses `ssh`. `KVIST_SSH` forces one: a program whose name starts with `plink` is run the PuTTY way, anything else the OpenSSH way.
+Kvist uses `ssh` everywhere, on Windows too (Windows 10 and 11 come with OpenSSH, with the key tools Kvist needs). Signing in to a new machine *with a password* does not work on Windows yet, with either client:
+use *a key file* there.
+PuTTY is for when you choose it: set `KVIST_SSH` to `plink`, or to the full path of `plink.exe`; it is also used on a Windows computer that has `plink`
+and no `ssh`. `KVIST_SSH` forces any client: a program whose name starts with `plink` is run the PuTTY way, anything else the OpenSSH way.
 
 - Connections run `plink -batch`: no terminal, no questions, as with ssh. Keys are PuTTY's `.ppk`; with **a password** Kvist makes one
   (with `puttygen`, no passphrase) and installs it, as above. **Not on Windows:** there `puttygen.exe` is a window, not a command, so make a `.ppk` in

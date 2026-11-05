@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""PuTTY's ``plink`` as the ssh client, for a Windows computer that has PuTTY and no OpenSSH.
+"""PuTTY's ``plink`` as the ssh client, for whoever chooses it or has no OpenSSH.
 
-Kvist talks to a machine through whichever client is there: ``KVIST_SSH`` names one; without it, Windows prefers
-``plink`` when it is installed and every other system uses ``ssh``. The command lines differ (``-P`` not ``-p``,
+Kvist talks to a machine through ``ssh`` (Windows 10 and 11 come with it, with the key tools Kvist needs), unless ``KVIST_SSH`` names another client, or a Windows computer has ``plink`` and no ``ssh``. The command lines differ (``-P`` not ``-p``,
 ``-batch`` not ``BatchMode``, keys in ``.ppk``) and plink has neither ``ssh-keyscan`` nor a known_hosts file, so the
 host key the person confirmed is kept in a small file of Kvist's own and handed to plink with ``-hostkey`` each time.
 PuTTY's registry is never touched.
@@ -27,7 +26,9 @@ def ssh_program() -> str:
     explicit = os.environ.get("KVIST_SSH")
     if explicit:
         return explicit
-    return "plink" if sys.platform == "win32" and shutil.which("plink") else "ssh"
+    if sys.platform == "win32" and not shutil.which("ssh") and shutil.which("plink"):
+        return "plink"
+    return "ssh"
 
 
 def uses_putty() -> bool:
