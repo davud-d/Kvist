@@ -1,0 +1,209 @@
+# Kvist Cloud — architecture
+
+*(Русская версия: [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md))*
+
+Kvist Cloud is a subscription: every customer gets a cloud machine with Kvist on it. The
+customer pastes their own model key, writes a task, and the agent does it on the machine. The
+machine sleeps between tasks; the customer pays for the hours the agent actively works.
+
+This MVP runs end to end on one computer. The only piece that is not real yet is a hosting
+provider adapter (`providers/sprites.py`); `providers/local.py` stands in for it.
+
+## Picture
+
+```
+ browser ──HTTPS + cookie──▶ control server (FastAPI) ◀──WebSocket (outbound from machine)── runner
+   │  ▲                       │  users, machines, tasks,                                    │
+   │  └──WebSocket: task ─────┤  task_events, ledger_entries,                               │ spawns, per task
+   │     events               │  subscriptions, funnel_events                               ▼
+   │                          │                                               kvist --frontend stdio-multi
+   │                          ├── providers/<name>: create · wake · sleep · delete · status  (Mode B, NDJSON)
+   └─Paddle.js overlay        └── billing.py ◀── Paddle webhooks (BILLING_ENABLED=false by default)
+```
+
+* **Control server** (`backend/kvist_cloud`) — the only stateful part. SQLite by default,
+  PostgreSQL through `DATABASE_URL`. Serves the API, the two WebSockets and the built frontend.
+* **Runner** (`runner/kvist_runner`) — one process per machine. It dials the server (the
+  machine has no inbound ports), sends a heartbeat every 15 s, starts Kvist for each task and
+  relays Kvist's NDJSON events unchanged inside a `{"type":"event","task_id",...}` envelope.
+* **Kvist** — the unmodified core, launched as `--frontend stdio-multi` (UI_API.md, Mode B).
+  The cloud adds no protocol of its own on top of the event catalogue.
+* **Frontend** (`frontend/`) — static files, no framework. The pricing page is prerendered HTML
+  so it is usable before any script runs.
+
+## Data flows
+
+### Sign-up to first task (the funnel)
+
+1. `pricing_view` — the pricing page, trial preselected. The CTA is a plain link to
+   `/auth/github/login`.
+2. `github_login` — GitHub OAuth (`read:user` scope only). The callback upserts the user, sets
+   the session cookie and **starts creating the machine in the background** before redirecting.
+3. `checkout_open` → `card_added` — Paddle.js overlay over the page (or the dev stub while
+   `BILLING_ENABLED=false`). The trial subscription exists once the card is attached.
+4. `key_valid` → `first_task_started` → `first_task_done` — onboarding is one screen: provider
+   tile, key (checked with one cheap request through the server as soon as it is pasted),
+   repository, one of three ready-made tasks, "Run". The machine has been waking up meanwhile.
+
+### A task
+
+```
+browser POST /api/tasks ─▶ limits.admit() ─▶ queued | starting
+                                   │
+                   machine asleep? provider.wake() ─▶ runner connects ─▶ gateway sends start_task
+                                                                         {goal, repo, key, limits}
+runner: git clone → spawn kvist (key only in its env) → {"type":"goal"} on stdin
+kvist stdout NDJSON ─▶ runner scrubs the key ─▶ gateway ─▶ task_events (significant ones)
+                                                        └▶ live fan-out to browser sockets
+task status is derived from the events: task_state running/awaiting_input/paused, final, error
+turn_end ─▶ runner closes stdin (or keeps it for the plan's background window) ─▶ key gone
+```
+
+An answer to an `input_request` goes browser → server → runner → Kvist's stdin unchanged.
+Pause and cancel are Kvist's own `{"type":"pause"}` / `{"type":"cancel"}` messages.
+
+### Heartbeat
+
+Every 15 s, and immediately whenever the set changes, the runner sends
+`{"type":"heartbeat","running":[task ids]}`. The server bills the interval between two
+consecutive heartbeats (see below). No other signal ever creates a charge.
+
+### Archive export
+
+`POST /api/machines/{id}/export` (whole machine) or `POST /api/tasks/{id}/export` (one task's
+folder) creates an `exports` row, wakes the machine if needed and asks the runner over the
+socket. The runner packs the folder into a `.tar.gz` and uploads it with an HTTP `PUT` carrying
+the machine token. The browser polls the export and downloads it. Export goes through the
+runner, not the provider, so it works the same on any hosting.
+
+## Hours ledger rules
+
+`ledger_entries` is append-only. Every row has a signed `seconds` value and a `kind`:
+`grant` (+, plan hours for a period), `purchase` (+, a bought pack), `refund` (+, a correction
+with a `reason`), `usage` (−, agent time). The balance of a period is the sum of its rows.
+
+1. **What is billed.** Time while a task's status is `running`: the agent thinks, waits for the
+   model or runs a command. `waiting_for_user`, `paused`, `done`, `cancelled`, `failed` and
+   `queued` are free.
+2. **Only heartbeats count.** On heartbeat *k* (server clock, never the runner's) the server
+   bills `floor(t_k) − floor(t_{k−1})` seconds if heartbeat *k−1* named at least one task, the
+   gap is at most `HEARTBEAT_MAX_GAP_SECONDS` (default 45 s, three missed beats) and those tasks
+   are `running` on the server too. A longer gap bills nothing: the meter stopped at the last
+   heartbeat and restarts from the next one.
+3. **Parallel tasks count once.** One interval of one machine is one charge, whatever the number
+   of tasks in it: the union per machine, not the sum per task. The seconds are split between
+   the tasks only for display (`s // n` each, the remainder one second at a time in id order),
+   so the per-task feed adds up to exactly what was charged.
+4. **Per second, shown in minutes.** Rows store whole seconds; floors of absolute timestamps
+   telescope, so no fraction is lost or invented across heartbeats. The UI shows
+   `floor(seconds / 60)` minutes.
+5. **No UPDATE, no DELETE.** The ORM refuses both on `LedgerEntry` (mapper and bulk-statement
+   guards) and the migration installs database triggers that abort them. A correction is a new
+   `refund` row with a reason.
+6. **Hours run out mid-task.** The server stops billing at zero (it never charges past the
+   balance) and sends the runner `pause` with a 5-minute grace: Kvist pauses at its next safe
+   point, normally after the current command; if it has not paused after 5 minutes the runner
+   sends `cancel`, which keeps the checkpoint. The task becomes `paused` with reason
+   `hours_exhausted`. Nothing is deleted; buying hours lets the person resume it.
+7. **Model provider failure.** A wrong key (401/403) pauses the task at once. 429 and 5xx count
+   only if they last 5 minutes without a successful model call; then the task is paused with
+   reason `provider_unavailable`. Paused means the meter is stopped. Waiting for the model
+   during those 5 minutes is normal "running" time.
+
+## Limits (`limits.py`)
+
+* **Parallel tasks.** A task beyond the plan's limit is `queued` and starts when a slot frees.
+  `starting`, `running` and `waiting_for_user` occupy a slot; `paused` does not.
+* **Command time.** Sent to the runner with every task. The core caps a foreground command at
+  300 s today, below every plan's limit, so in practice the limit applies to background jobs:
+  a job older than the limit makes the runner stop the task (`cancel`, checkpoint kept, reason
+  `command_time_limit`).
+* **Background.** `background_minutes = 0` (trial) launches Kvist without `--wake`, so jobs die
+  with the turn. Otherwise the runner keeps Kvist alive after `turn_end` while jobs run, up to
+  the plan's window, then closes it. Background time is not billed; a wake-up turn is.
+* **Machine size.** On the local provider the runner wraps Kvist in
+  `systemd-run --user --scope -p MemoryMax=… -p CPUQuota=…` when systemd is available, so every
+  command the agent starts inherits the limits. Without systemd it logs a warning and runs
+  without them.
+
+## Secrets
+
+* Model keys are encrypted with Fernet (`KVIST_CLOUD_MASTER_KEY`, from the environment only).
+  The API returns only the last four characters.
+* The key is decrypted only to build a `start_task` message. The runner puts it into Kvist's
+  environment and nowhere else, scrubs it from every line Kvist prints before relaying it, and
+  drops it when the process ends. The server scrubs relayed events a second time.
+* Logs never receive request bodies. Unhandled errors return a plain message and a support code;
+  the traceback goes to the log with secrets scrubbed.
+* The local provider starts the runner with a clean environment, so the server's master key and
+  session secret never reach a machine.
+* `tests/test_secret_leaks.py` checks logs, API responses, events and exceptions for the key.
+
+## Honesty rules the UI keeps
+
+The trial's length and the price after it are on the pricing page next to the button, before
+any card. Cancelling is one button in Settings plus one confirmation. Two days before the trial
+ends the dashboard shows a banner and an email is queued: "In 2 days we will charge $15". No
+countdowns, no false urgency, no preselected paid options.
+
+## Performance
+
+The pricing page is prerendered per locale with its CSS inlined; its button is a link, so it is
+interactive as soon as the HTML is parsed. The app bundle is one ES module with both locales.
+Budgets are enforced by `frontend/build.mjs`: first screen ≤ 100 KB transferred.
+
+Lighthouse results are recorded in the "Lighthouse" section below.
+
+## Lighthouse
+
+*(filled in by stage 15)*
+
+## Decisions
+
+Where the brief left a choice open, the simple option was taken and written down here.
+
+1. **Branch.** The brief said "work in main"; the repository's CLAUDE.md forbids committing to
+   `main` directly. Work is committed on `experimental` and reaches `main` by a fast-forward
+   after review.
+2. **Landing source.** The brief names `web/`; the landing lives in `site/`. Its tokens and
+   fonts were copied into `frontend/` (nothing outside `cloud/` is changed).
+3. **No frontend framework.** Same stack as the landing (vanilla JS, esbuild). A framework's
+   runtime alone would eat most of the first-screen budget.
+4. **"Other" provider = any OpenAI-compatible endpoint** (base URL, key, model). Kvist runs it
+   through its `omniroute` provider, configured from the environment. The local dev model
+   gateway is reached the same way, so there is no dev-only provider.
+5. **One key per account.** Stored on the user row (`model_provider`, `model_key_enc`,
+   `model_key_last4`); there is no keys table.
+6. **One workspace folder per task** (`work/task-<id>` on the machine). Parallel tasks never
+   edit the same checkout; the task archive is that folder, the machine archive is all of them.
+7. **Public repositories only.** Login asks for `read:user` and nothing else; asking for `repo`
+   at the first screen scares people away. Private repositories need a separate grant later.
+8. **Hours do not roll over.** Plan hours and bought packs belong to the current billing period.
+   The trial is its own period of 7 days.
+9. **The 5-minute grace after hours run out is free.** Billing stops at zero rather than
+   running the balance negative.
+10. **Approvals.** Kvist runs with `--approval-mode ask` and `AGENT_WRITE_APPROVAL=0`: a
+    dangerous command still asks the person (status `waiting_for_user`, meter stopped), file
+    writes inside the task folder do not. Network inside the sandbox is allowed
+    (`AGENT_SANDBOX_NET=allow`): a cloud machine without network cannot install dependencies.
+11. **Provider errors are recognised from Kvist's error text** (401/403, 429, 5xx patterns).
+    A structured event would be better; see "Core changes wanted".
+12. **Dev sign-in.** With `AUTH_DEV_LOGIN=true` and no GitHub app configured, the GitHub button
+    signs in a local dev user. It refuses to start when `PUBLIC_URL` is not a loopback address.
+13. **Single server process.** Live event fan-out is an in-process pub/sub. Several server
+    instances would need PostgreSQL `LISTEN/NOTIFY` or similar; not needed for the MVP.
+14. **Paused tasks release the machine.** On pause the Kvist process ends (the key with it);
+    resuming starts a new process with Kvist's `resume` command and the key sent again.
+15. **Emails are queued, not sent.** The trial reminder is written to the `outbox` log; wiring
+    an email provider is outside the MVP.
+
+## Core changes wanted
+
+Not made (the brief forbids changes outside `cloud/`); listed here and in the final report.
+
+1. A structured `provider_error` event (`status_code`, `retrying`, `retry_in`) instead of text
+   matching on `error`/`status` messages.
+2. An inbound `{"type":"job_stop","job_id"}` so the runner can stop one background job past its
+   time limit instead of the whole task.
+3. A configurable ceiling for foreground command time (`MAX_SHELL_TIMEOUT_SECONDS` is a fixed
+   300 s) so the plans' 30 min / 2 h / 6 h command limits can mean what they say.

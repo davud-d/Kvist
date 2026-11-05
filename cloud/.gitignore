@@ -1,0 +1,10 @@
+.venv/
+.cloud-data/
+node_modules/
+frontend/dist/
+.lighthouse/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
