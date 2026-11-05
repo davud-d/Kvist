@@ -10,11 +10,17 @@ import logging
 
 from fastapi import FastAPI
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .db import session_scope
 from .models import Task, TaskStatus
 
 log = logging.getLogger("kvist_cloud.limits")
+
+
+def admit(db: Session, task: Task) -> None:
+    """A new or resumed task is ready to go to its machine."""
+    task.status = TaskStatus.STARTING
 
 
 async def on_hours_exhausted(app: FastAPI, machine_id: int) -> None:

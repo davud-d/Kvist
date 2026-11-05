@@ -2,13 +2,26 @@
 """Tasks: their status, derived from Kvist's own events, and the events kept for history."""
 from __future__ import annotations
 
-from fastapi import FastAPI
+import asyncio
+import contextlib
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import ledger
-from .db import utcnow
-from .models import Task, TaskEvent, TaskStatus
+from .auth import SESSION_COOKIE, current_user, user_from_cookie
+from .db import get_db, session_scope, utcnow
+from .errors import ApiError, not_found
+from .funnel import record_step
+from .models import Machine, MachineStatus, Task, TaskEvent, TaskStatus, User
 from .secrets import redact_obj
+
+router = APIRouter()
+GOAL_LIMIT = 20_000
+HISTORY_PAGE = 500
 
 # Kept in task_events for the history; everything else (snapshots, deltas) is live only,
 # the same split Kvist's own session journal makes.
@@ -140,4 +153,299 @@ def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
     app.state.hub.publish(task.id, {"type": "event", "seq": seq, "event": event})
     if task.status != before:
         app.state.hub.publish(task.id, {"type": "task", "task": task_view(db, task)})
+        if task.status == TaskStatus.DONE:
+            _first_done(db, task)
     return before
+
+
+def _first_done(db: Session, task: Task) -> None:
+    done_before = db.scalar(
+        select(func.count())
+        .select_from(Task)
+        .where(Task.user_id == task.user_id, Task.status == TaskStatus.DONE, Task.id != task.id)
+    )
+    if not done_before:
+        record_step(db, "first_task_done", user_id=task.user_id)
+
+
+# -- API ---------------------------------------------------------------------------------
+
+
+class TaskIn(BaseModel):
+    goal: str = Field(min_length=1, max_length=GOAL_LIMIT)
+    repo_url: str = Field(default="", max_length=500)
+
+
+class InputIn(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    value: str | None = Field(default=None, max_length=GOAL_LIMIT)
+    approved: bool | None = None
+
+
+def owned_task(db: Session, user: User, task_id: int) -> Task:
+    task = db.get(Task, task_id)
+    if task is None or task.user_id != user.id:
+        raise not_found("task")
+    return task
+
+
+def repo_problem(url: str, allow_local: bool) -> str:
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if parsed.scheme == "https" and parsed.hostname and "@" not in parsed.netloc:
+        return ""
+    if allow_local and parsed.scheme == "file":
+        return ""
+    return "bad_repo"
+
+
+def can_run(db: Session, user: User) -> None:
+    """Raise the reason a task cannot start now, in words the person can act on."""
+    if ledger.current_subscription(db, user.id) is None:
+        raise ApiError(402, "no_subscription", "Start the trial first. / Сначала начни пробный период.")
+    if ledger.balance_seconds(db, user.id) <= 0:
+        raise ApiError(402, "no_hours", "Your hours are used up. / Часы закончились.")
+    if not user.model_key_enc:
+        raise ApiError(400, "no_key", "Add your model key first. / Сначала добавь ключ модели.")
+
+
+def _machine_for_task(app: FastAPI, db: Session, user: User) -> Machine:
+    from .machines import live_machine, new_machine, provision, spawn
+
+    machine = live_machine(db, user.id)
+    if machine is not None and machine.status != MachineStatus.ERROR:
+        return machine
+    spec = new_machine(app, db, user)
+    db.commit()
+    spawn(app, provision(app, spec))
+    return db.get(Machine, spec.machine_id)
+
+
+def task_payload(db: Session, task: Task) -> dict[str, object]:
+    view = task_view(db, task)
+    view["balance_seconds"] = ledger.balance_seconds(db, task.user_id)
+    return view
+
+
+@router.post("/api/tasks", status_code=201)
+async def create_task(
+    payload: TaskIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    from .limits import admit
+
+    app = request.app
+    can_run(db, user)
+    repo_url = payload.repo_url.strip()
+    if repo_problem(repo_url, app.state.settings.allow_local_endpoints):
+        raise ApiError(400, "bad_repo", "That is not a repository link. / Это не ссылка на репозиторий.")
+    machine = _machine_for_task(app, db, user)
+    first = not db.scalar(select(func.count()).select_from(Task).where(Task.user_id == user.id))
+    task = Task(user_id=user.id, machine_id=machine.id, goal=payload.goal.strip(), repo_url=repo_url)
+    db.add(task)
+    db.flush()
+    admit(db, task)
+    if first:
+        record_step(db, "first_task_started", user_id=user.id)
+    db.commit()
+    await _dispatch(app, task.machine_id)
+    return task_payload(db, task)
+
+
+async def _dispatch(app: FastAPI, machine_id: int) -> None:
+    from .gateway import dispatch
+
+    await dispatch(app, machine_id)
+
+
+@router.get("/api/tasks")
+def list_tasks(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    rows = db.scalars(select(Task).where(Task.user_id == user.id).order_by(Task.id.desc()).limit(100))
+    return [task_view(db, task) for task in rows]
+
+
+@router.get("/api/tasks/{task_id}")
+def get_task(task_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
+    return task_payload(db, owned_task(db, user, task_id))
+
+
+@router.get("/api/tasks/{task_id}/events")
+def get_events(
+    task_id: int, after: int = 0, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    owned_task(db, user, task_id)
+    rows = list(
+        db.scalars(
+            select(TaskEvent)
+            .where(TaskEvent.task_id == task_id, TaskEvent.seq > after)
+            .order_by(TaskEvent.seq)
+            .limit(HISTORY_PAGE)
+        )
+    )
+    return {"events": [{"seq": row.seq, "event": row.payload} for row in rows], "more": len(rows) == HISTORY_PAGE}
+
+
+@router.get("/api/tasks/{task_id}/changes")
+def get_changes(task_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """Files the task changed, from the writes' own diffs, in the order they were first touched."""
+    owned_task(db, user, task_id)
+    files: dict[str, dict] = {}
+    rows = db.scalars(
+        select(TaskEvent)
+        .where(TaskEvent.task_id == task_id, TaskEvent.type == "action_result")
+        .order_by(TaskEvent.seq)
+    )
+    for row in rows:
+        event = row.payload
+        path = event.get("path")
+        if not path or not event.get("ok") or not event.get("patch"):
+            continue
+        entry = files.setdefault(path, {"path": path, "lines_added": 0, "lines_removed": 0, "patches": []})
+        entry["lines_added"] += int(event.get("lines_added") or 0)
+        entry["lines_removed"] += int(event.get("lines_removed") or 0)
+        entry["patches"].append(event["patch"])
+    return list(files.values())
+
+
+async def _control(app: FastAPI, task: Task, action: str) -> bool:
+    return await app.state.gateway.send(task.machine_id, {"type": "control", "task_id": task.id, "action": action})
+
+
+@router.post("/api/tasks/{task_id}/cancel")
+async def cancel_task(
+    task_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    task = owned_task(db, user, task_id)
+    if task.status in TaskStatus.FINISHED:
+        return task_payload(db, task)
+    if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED) or (
+        task.status == TaskStatus.STARTING and task.started_at is None
+    ):
+        _finish(task, TaskStatus.CANCELLED, "cancelled")
+        db.commit()
+        request.app.state.hub.publish(task.id, {"type": "task", "task": task_view(db, task)})
+        return task_payload(db, task)
+    task.status_reason = "cancelled"
+    db.commit()
+    if not await _control(request.app, task, "cancel"):
+        # No runner to tell: the process is gone with it, so the task is over.
+        _finish(task, TaskStatus.CANCELLED)
+        db.commit()
+    return task_payload(db, task)
+
+
+@router.post("/api/tasks/{task_id}/pause")
+async def pause_task(
+    task_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    task = owned_task(db, user, task_id)
+    if task.status not in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
+        raise ApiError(409, "not_running", "The task is not running. / Задача сейчас не выполняется.")
+    task.status_reason = "user"
+    db.commit()
+    await _control(request.app, task, "pause")
+    return task_payload(db, task)
+
+
+@router.post("/api/tasks/{task_id}/resume")
+async def resume_task(
+    task_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    from .limits import admit
+
+    task = owned_task(db, user, task_id)
+    if task.status != TaskStatus.PAUSED:
+        raise ApiError(409, "not_paused", "Only a paused task can continue. / Продолжить можно только задачу на паузе.")
+    can_run(db, user)
+    task.status_reason = ""
+    task.resume_requested = True
+    task.started_at = None
+    admit(db, task)
+    db.commit()
+    await _dispatch(request.app, task.machine_id)
+    return task_payload(db, task)
+
+
+@router.post("/api/tasks/{task_id}/input")
+async def answer_input(
+    task_id: int,
+    payload: InputIn,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    task = owned_task(db, user, task_id)
+    if task.status != TaskStatus.WAITING_FOR_USER:
+        raise ApiError(409, "not_waiting", "The agent is not waiting for an answer. / Агент сейчас ничего не ждёт.")
+    response: dict[str, object] = {"request_id": payload.request_id}
+    if payload.approved is not None:
+        response["approved"] = payload.approved
+    else:
+        response["value"] = payload.value
+    delivered = await request.app.state.gateway.send(
+        task.machine_id, {"type": "input_response", "task_id": task.id, "response": response}
+    )
+    if not delivered:
+        raise ApiError(503, "machine_offline", "The machine is not reachable. / Машина недоступна.")
+    return {"ok": True}
+
+
+def _same_origin(socket: WebSocket, public_url: str) -> bool:
+    origin = socket.headers.get("origin")
+    # Browsers always send Origin on a WebSocket; a missing one is a non-browser client with the cookie.
+    return origin is None or origin.rstrip("/") == public_url
+
+
+@router.websocket("/api/tasks/{task_id}/stream")
+async def stream(socket: WebSocket, task_id: int, after: int = 0) -> None:
+    """History after ``after``, then live events, until the browser goes away."""
+    app = socket.app
+    settings = app.state.settings
+    if not _same_origin(socket, settings.public_url):
+        await socket.close(code=4403)
+        return
+    with session_scope(app.state.session_factory) as db:
+        user = user_from_cookie(db, settings, socket.cookies.get(SESSION_COOKIE))
+        task = db.get(Task, task_id)
+        allowed = user is not None and task is not None and task.user_id == user.id
+    if not allowed:
+        await socket.close(code=4401)
+        return
+    await socket.accept()
+    # Subscribe before reading the history, so nothing falls between the two; the browser drops
+    # a live event whose seq it already has.
+    queue = app.state.hub.subscribe(task_id)
+    try:
+        with session_scope(app.state.session_factory) as db:
+            task = db.get(Task, task_id)
+            await socket.send_json({"type": "task", "task": task_payload(db, task)})
+            rows = db.scalars(
+                select(TaskEvent).where(TaskEvent.task_id == task_id, TaskEvent.seq > after).order_by(TaskEvent.seq)
+            )
+            for row in rows:
+                await socket.send_json({"type": "event", "seq": row.seq, "event": row.payload})
+        await socket.send_json({"type": "history_end"})
+        receiver = asyncio.create_task(_drain_browser(socket))
+        try:
+            while not receiver.done():
+                getter = asyncio.ensure_future(queue.get())
+                done, _ = await asyncio.wait({getter, receiver}, return_when=asyncio.FIRST_COMPLETED)
+                if getter not in done:
+                    getter.cancel()
+                    break
+                await socket.send_json(getter.result())
+        finally:
+            receiver.cancel()
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        app.state.hub.unsubscribe(task_id, queue)
+        with contextlib.suppress(RuntimeError):
+            await socket.close()
+
+
+async def _drain_browser(socket: WebSocket) -> None:
+    """The browser sends nothing we need; reading tells us when it leaves."""
+    with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+        while True:
+            await socket.receive_text()
