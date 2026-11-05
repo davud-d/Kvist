@@ -17,6 +17,20 @@ def test_build_runtime_prompt_includes_state_sections(agent_factory, monkeypatch
     assert "Read files: ui.py" in prompt
 
 
+def test_the_prompt_tells_the_model_whether_auto_mode_is_on(agent_factory):
+    # Without this the model trusts an old denial in the chat and tells the person
+    # auto mode is still on after they turned it off.
+    agent = agent_factory()
+
+    agent.set_auto_approval(False)
+    prompt = agent._build_runtime_prompt("go", 1)
+    assert "auto mode is OFF" in prompt
+    assert prompt.rstrip().splitlines()[-1].startswith("Runtime fact: auto mode")  # not in the cached opening
+
+    agent.set_auto_approval(True)
+    assert "auto mode is ON" in agent._build_runtime_prompt("go", 1)
+
+
 def test_context_formatting_compaction_and_summary(agent_factory):
     agent = agent_factory()
     agent._state.files_changed = ["app.py"]

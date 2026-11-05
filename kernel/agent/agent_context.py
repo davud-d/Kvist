@@ -276,6 +276,16 @@ def _indent_turn_text(text: str) -> str:
     return textwrap.indent(text, "    ", lambda _line: True)
 
 
+def auto_approval_fact(enabled: bool) -> str:
+    """One runtime line: an earlier denial in the chat says nothing about the mode now."""
+    if enabled:
+        return "Runtime fact: auto mode is ON (a second model answers approval questions)."
+    return (
+        "Runtime fact: auto mode is OFF (the person answers approval questions); "
+        "an earlier auto-mode denial in this chat no longer applies."
+    )
+
+
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     if self._state.task_updates:
         user_goal += "\n\nUser follow-ups for this active task (in order; later instructions take precedence):\n"
@@ -409,7 +419,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     )
     environment_header = "System environment:\n"
     prefix = f"{environment_header}- Identity: {identity}\n{cached_prefix[len(environment_header):]}"
-    return prefix + dynamic + cached_suffix
+    # Next to the clock, outside the cache: the person can flip auto mode between turns.
+    return prefix + dynamic + cached_suffix + f"{auto_approval_fact(self.auto_approval)}\n"
 
 
 def _extensions_block(self, language: str) -> str:

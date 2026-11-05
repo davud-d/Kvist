@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.text import Text
 
 from kernel.agent.agent_context import (
+    auto_approval_fact,
     build_runtime_prompt,
     build_summary,
     compact_for_prompt,
@@ -1489,7 +1490,10 @@ class LocalAgent:
         # Last before the person's words and never stored: the hour changes every turn, so
         # anywhere earlier it would cut the cached prefix; it lets a greeting at two in the
         # night differ from one at noon.
-        time_note = f"(Runtime fact: local time = {current_time_context()['current_time']})\n\n"
+        time_note = (
+            f"(Runtime fact: local time = {current_time_context()['current_time']})\n"
+            f"({auto_approval_fact(self.auto_approval)})\n\n"
+        )
         return (
             model_note + host_note + workspace_note + message_note + memory_note + self._chat_session_context()
             + time_note + _REPLY_END_NOTE + user_goal
