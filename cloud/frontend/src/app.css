@@ -12,7 +12,7 @@
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
-.top-row { display: flex; align-items: center; gap: var(--s-3); min-height: 52px; }
+.top-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-3); min-height: 52px; }
 .mark {
   display: inline-flex;
   align-items: baseline;
@@ -26,7 +26,21 @@
 }
 .mark .dot { width: 7px; height: 7px; background: var(--tx); }
 .mark .sub { color: var(--faint); font-weight: 400; }
-.nav { display: flex; gap: var(--s-3); margin-inline-start: auto; align-items: center; }
+.nav {
+  display: flex;
+  gap: var(--s-3);
+  margin-inline-start: auto;
+  align-items: center;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nav a { white-space: nowrap; }
+/* Phone: the mark keeps the first row, the links get a row of their own. */
+@media (max-width: 619px) {
+  .nav:has(a:not(.chip) + a) { order: 3; width: 100%; margin-inline-start: 0; padding-bottom: var(--s-1); }
+  .nav:has(a:not(.chip) + a) .chip { margin-inline-start: auto; }
+}
 .nav a {
   font-size: var(--t-14);
   letter-spacing: var(--track-1);
@@ -58,6 +72,7 @@
   border-radius: var(--r-1);
   padding: var(--s-2) var(--s-5);
   cursor: pointer;
+  text-align: center;
 }
 .btn.wide { width: 100%; }
 .btn.ghost { background: transparent; color: var(--tx); border-color: var(--line-2); }
@@ -141,8 +156,13 @@ main { padding-block: var(--s-5) var(--s-8); }
   color: var(--dim);
   min-height: 44px;
   display: flex;
+  gap: var(--s-2);
   align-items: center;
+  list-style: none;
 }
+.compare summary::-webkit-details-marker { display: none; }
+.compare summary::before { content: "▸"; color: var(--faint); }
+.compare[open] summary::before { content: "▾"; }
 .table-scroll { overflow-x: auto; }
 table.plans { border-collapse: collapse; width: 100%; font-size: var(--t-14); min-width: 520px; }
 table.plans th, table.plans td { text-align: left; padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line); }

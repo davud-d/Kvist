@@ -118,6 +118,38 @@ def test_dev_login_needs_no_network(client_factory):
     assert client.get("/api/me").json()["login"] == "dev"
 
 
+def test_public_repositories_are_listed(client_factory, engine):
+    seen: list[httpx.Request] = []
+
+    def github(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/user/repos":
+            seen.append(request)
+            return httpx.Response(200, json=[
+                {"full_name": "octocat/hello", "clone_url": "https://github.com/octocat/hello.git", "private": False},
+                {"full_name": "octocat/secret", "clone_url": "https://github.com/octocat/secret.git", "private": True},
+            ])
+        return fake_github([])(request)
+
+    client = client_factory(github, **GITHUB)
+    state = start_login(client)
+    client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
+    body = client.get("/api/github/repos").json()
+    assert body == {"repos": [{"name": "octocat/hello", "url": "https://github.com/octocat/hello.git",
+                               "description": ""}], "reason": ""}
+    assert seen[0].headers["authorization"] == "Bearer gho_test_token"
+    from sqlalchemy import text
+
+    with engine.connect() as connection:
+        stored = connection.execute(text("SELECT github_token_enc FROM users")).scalar_one()
+    assert stored and "gho_test_token" not in stored
+
+
+def test_dev_user_has_no_repositories_to_list(client_factory):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.get("/api/github/repos").json() == {"repos": [], "reason": "no_token"}
+
+
 def test_locale_is_saved(client_factory):
     client = client_factory(AUTH_DEV_LOGIN="true")
     dev_login(client)

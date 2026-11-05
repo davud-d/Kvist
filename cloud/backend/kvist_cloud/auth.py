@@ -199,6 +199,9 @@ async def github_callback(
         raise ApiError(400, "oauth_state", "The sign-in link expired, start again. / Ссылка входа устарела.")
     profile, github_token = await _github_profile(request, code)
     user = _upsert_user(db, profile, request_locale(request))
+    if github_token:
+        # Kept only to list the person's public repositories at onboarding.
+        user.github_token_enc = request.app.state.vault.encrypt(github_token)
     hook: Callable[[Request, Session, User, str], Awaitable[None]] | None = request.app.state.on_signed_in
     if hook is not None:
         await hook(request, db, user, github_token)
@@ -219,6 +222,34 @@ def me(request: Request, user: User = Depends(current_user)) -> dict[str, object
         "locale": user.locale,
         "is_admin": user.github_login.lower() in request.app.state.settings.admin_logins,
     }
+
+
+@router.get("/api/github/repos")
+async def github_repos(request: Request, user: User = Depends(current_user)) -> dict[str, object]:
+    """The person's public repositories, most recently pushed first."""
+    if not user.github_token_enc:
+        return {"repos": [], "reason": "no_token"}
+    token = request.app.state.vault.decrypt(user.github_token_enc)
+    async with http_client(request) as client:
+        try:
+            response = await client.get(
+                "https://api.github.com/user/repos",
+                params={"per_page": 30, "sort": "pushed", "visibility": "public"},
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            )
+        except httpx.HTTPError as error:
+            raise ApiError(502, "github_unreachable", "GitHub is not answering. / GitHub не отвечает.") from error
+    if response.status_code == 401:
+        return {"repos": [], "reason": "token_expired"}
+    if response.status_code != 200:
+        raise ApiError(502, "github_unreachable", "GitHub is not answering. / GitHub не отвечает.")
+    repos = [
+        {"name": str(item.get("full_name", "")), "url": str(item.get("clone_url", "")),
+         "description": str(item.get("description") or "")}
+        for item in response.json()
+        if isinstance(item, dict) and not item.get("private")
+    ]
+    return {"repos": repos, "reason": ""}
 
 
 class MeIn(BaseModel):

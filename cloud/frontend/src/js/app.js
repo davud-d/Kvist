@@ -21,8 +21,9 @@ export function navigate(path, { replace: swap = false } = {}) {
   render();
 }
 
-function header(active) {
-  const items = state.me
+function header(active, funnel) {
+  // Inside the funnel there is one way forward; the app's navigation would only be a way out.
+  const items = state.me && !funnel
     ? [["/dashboard", "nav.dashboard"], ["/new", "nav.newTask"], ["/settings", "nav.settings"],
        ...(state.me.is_admin ? [["/admin", "nav.admin"]] : [])]
     : [];
@@ -60,8 +61,8 @@ async function render() {
   const path = location.pathname;
   const found = match(path);
   const app = document.getElementById("app");
-  const main = h("main#main.wrap", { id: "main", tabindex: "-1" });
-  replace(app, header(found ? found.route.nav : null), main, footer());
+  const main = h("main.wrap", { id: "main", tabindex: "-1" });
+  replace(app, header(found ? found.route.nav : null, found ? found.route.funnel : false), main, footer());
   if (!found) {
     append(main, [errorBox({ code: "not_found" })]);
     return;

@@ -1,0 +1,60 @@
+{
+  "plans": [
+    {
+      "id": "trial",
+      "price_usd": 0,
+      "hours": 5,
+      "vcpu": 2,
+      "memory_gb": 4,
+      "disk_gb": 10,
+      "max_parallel_tasks": 1,
+      "command_minutes": 30,
+      "background_minutes": 0,
+      "trial_days": 7,
+      "converts_to": "start"
+    },
+    {
+      "id": "start",
+      "price_usd": 15,
+      "hours": 50,
+      "vcpu": 2,
+      "memory_gb": 4,
+      "disk_gb": 20,
+      "max_parallel_tasks": 1,
+      "command_minutes": 30,
+      "background_minutes": 30,
+      "trial_days": 0,
+      "converts_to": ""
+    },
+    {
+      "id": "pro",
+      "price_usd": 39,
+      "hours": 150,
+      "vcpu": 4,
+      "memory_gb": 8,
+      "disk_gb": 50,
+      "max_parallel_tasks": 3,
+      "command_minutes": 120,
+      "background_minutes": 120,
+      "trial_days": 0,
+      "converts_to": ""
+    },
+    {
+      "id": "max",
+      "price_usd": 99,
+      "hours": 450,
+      "vcpu": 4,
+      "memory_gb": 8,
+      "disk_gb": 150,
+      "max_parallel_tasks": 5,
+      "command_minutes": 360,
+      "background_minutes": 480,
+      "trial_days": 0,
+      "converts_to": ""
+    }
+  ],
+  "hour_pack": {
+    "hours": 10,
+    "price_usd": 5
+  }
+}
