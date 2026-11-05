@@ -6,12 +6,14 @@ import logging
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import auth
+from . import auth, keys
 from .config import Settings, load_settings
 from .db import make_engine, make_session_factory, upgrade
-from .errors import ApiError, api_error_handler, unhandled_error_handler
+from .errors import ApiError, api_error_handler, unhandled_error_handler, validation_error_handler
+from .secrets import Vault, install_log_scrubber
 
 log = logging.getLogger("kvist_cloud")
 
@@ -26,6 +28,9 @@ def create_app(
     http_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
+    install_log_scrubber(
+        [settings.session_secret, settings.master_key, settings.github_client_secret, settings.paddle_webhook_secret]
+    )
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     upgrade(settings.database_url)
     engine = make_engine(settings.database_url)
@@ -35,9 +40,11 @@ def create_app(
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.http_transport = http_transport
+    app.state.vault = Vault(settings.master_key)
     app.state.on_signed_in = None
 
     app.add_exception_handler(ApiError, api_error_handler)
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(Exception, unhandled_error_handler)
 
     @app.middleware("http")
@@ -53,4 +60,5 @@ def create_app(
         return await call_next(request)
 
     app.include_router(auth.router)
+    app.include_router(keys.router)
     return app

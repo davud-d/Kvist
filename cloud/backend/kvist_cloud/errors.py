@@ -6,6 +6,7 @@ import logging
 import secrets
 
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 log = logging.getLogger("kvist_cloud")
@@ -42,6 +43,15 @@ async def unhandled_error_handler(request: Request, error: Exception) -> JSONRes
             }
         },
         status_code=500,
+    )
+
+
+async def validation_error_handler(_request: Request, error: RequestValidationError) -> JSONResponse:
+    """Field names only: FastAPI's default answer echoes the input, which may be a key."""
+    fields = [".".join(str(part) for part in item.get("loc", ())[1:]) for item in error.errors()]
+    return JSONResponse(
+        {"error": {"code": "bad_request", "message": "Check the form. / Проверь форму.", "fields": fields}},
+        status_code=422,
     )
 
 
