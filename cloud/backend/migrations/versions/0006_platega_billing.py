@@ -36,6 +36,7 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(20), nullable=False),
         sa.Column("amount", sa.String(20), nullable=False),
         sa.Column("currency", sa.String(8), nullable=False),
+        sa.Column("payment_method", sa.Integer(), nullable=False),
         sa.Column("token", sa.String(64), nullable=False, unique=True),
         sa.Column("transaction_id", sa.String(36), unique=True),
         sa.Column("pay_url", sa.String(500), nullable=False),

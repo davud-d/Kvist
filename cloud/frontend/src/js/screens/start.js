@@ -1,6 +1,7 @@
 // Funnel step 3: start the trial (free) or pay for a plan on Platega's page; a stub with a "skip (dev)" button
 // when billing is off. The trial's terms are above both.
 import { chargeLabel, startCheckout, syncPayments } from "../billing.js";
+import { choosePayment } from "../paydialog.js";
 import { api } from "../api.js";
 import { fromBoot } from "../boot.js";
 import { h, replace, skeleton } from "../dom.js";
@@ -78,7 +79,8 @@ export async function startScreen(root, { me, navigate }) {
       status.textContent = t("start.opening");
       replace(problem);
       try {
-        // A paid plan leaves for Platega's page and comes back here; the free trial starts at once.
+        // A paid plan: pick how to pay, then Platega's page, which returns here. The free trial starts at once.
+        if (plan !== "trial") { choosePayment(config, plan); status.textContent = ""; return; }
         if (await startCheckout(plan) === "started") done();
       } catch (error) {
         // Next to the choices, not instead of them: a refused trial still leaves the paid plans.

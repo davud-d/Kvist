@@ -265,6 +265,8 @@ class BillingCheckout(Base):
     # What we asked Platega to charge; a confirmation must match it exactly.
     amount: Mapped[str] = mapped_column(String(20))
     currency: Mapped[str] = mapped_column(String(8))
+    # Platega's payment method id the person picked from the server's list.
+    payment_method: Mapped[int] = mapped_column(Integer, default=0)
     # Sent to Platega as the payload and checked on the way back.
     token: Mapped[str] = mapped_column(String(64), unique=True)
     transaction_id: Mapped[str | None] = mapped_column(String(36), unique=True, nullable=True)

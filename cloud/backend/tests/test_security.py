@@ -122,7 +122,7 @@ FIELDS = [
     *[("POST", "/api/projects", {"name": "safe"}, k) for k in ("name", "repo_url")],
     *[("POST", "/api/disputes", {"message": "please review"}, k) for k in ("task_id", "message")],
     *[("POST", "/api/admin/disputes/1/refund", {"minutes": 1, "note": "refund"}, k) for k in ("minutes", "note")],
-    ("POST", "/api/billing/checkout", {"plan": "trial"}, "plan"),
+    *[("POST", "/api/billing/checkout", {"plan": "trial"}, k) for k in ("plan", "method")],
 ]
 
 
@@ -394,7 +394,8 @@ def test_payments_cannot_be_hammered_at_platega(client_factory, engine):
 def test_a_checkout_abandoned_mid_creation_does_not_block_forever(client_factory, engine):
     client, platega = paid_client(client_factory)
     with session_scope(client.app.state.session_factory) as db:
-        db.add(BillingCheckout(user_id=1, kind="start", amount="1500.00", currency="RUB", token="t" * 48))
+        db.add(BillingCheckout(user_id=1, kind="start", amount="1500.00", currency="RUB", payment_method=2,
+                               token="t" * 48))
     assert client.post("/api/billing/checkout", json={"plan": "start"}).status_code == 409
     with session_scope(client.app.state.session_factory) as db:
         db.scalar(select(BillingCheckout)).created_at = utcnow() - billing.CHECKOUT_CREATE_TIMEOUT

@@ -23,7 +23,7 @@ LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 ENV_FILE_NAME = ".env"
 # Platega's PaymentMethodInt: 2 SBP QR, 3 ERIP, 11 card acquiring, 12 international, 13 crypto, 14 Sberpay.
 PLATEGA_METHODS = frozenset({2, 3, 11, 12, 13, 14})
-PLATEGA_DEFAULT_METHOD = 11
+PLATEGA_DEFAULT_METHODS = (2, 11, 12, 13)
 PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours")
 
 
@@ -46,7 +46,8 @@ class Settings:
     platega_secret: str = field(default="", repr=False)
     platega_base_url: str = "https://app.platega.io"
     platega_currency: str = "RUB"
-    platega_payment_method: int = PLATEGA_DEFAULT_METHOD
+    # The ways a person may pay, in the order the picker shows them; the browser can only choose among these.
+    platega_payment_methods: tuple[int, ...] = PLATEGA_DEFAULT_METHODS
     # What each purchase costs in ``platega_currency``; the server alone decides amounts.
     platega_prices: Mapping[str, Decimal] = field(default_factory=dict)
     machine_provider: str = "local"
@@ -143,16 +144,18 @@ def _environment() -> dict[str, str]:
     return {**read_env_file(path), **os.environ}
 
 
-def _platega(env: Mapping[str, str], enabled: bool) -> tuple[str, str, str, str, int, dict[str, Decimal]]:
+def _platega(env: Mapping[str, str], enabled: bool) -> tuple[str, str, str, str, tuple[int, ...], dict[str, Decimal]]:
     merchant, secret = env.get("PLATEGA_MERCHANT_ID", "").strip(), env.get("PLATEGA_SECRET", "").strip()
     base_url = (env.get("PLATEGA_BASE_URL", "") or "https://app.platega.io").rstrip("/")
     currency = (env.get("PLATEGA_CURRENCY", "") or "RUB").strip().upper()
+    raw_methods = env.get("PLATEGA_PAYMENT_METHODS", "").strip()
     try:
-        method = int(env.get("PLATEGA_PAYMENT_METHOD", "") or PLATEGA_DEFAULT_METHOD)
+        methods = tuple(dict.fromkeys(int(item) for item in raw_methods.split(",") if item.strip()))
     except ValueError as error:
-        raise ConfigError("PLATEGA_PAYMENT_METHOD must be a number") from error
-    if method not in PLATEGA_METHODS:
-        raise ConfigError(f"PLATEGA_PAYMENT_METHOD must be one of {sorted(PLATEGA_METHODS)}")
+        raise ConfigError("PLATEGA_PAYMENT_METHODS must be comma-separated numbers") from error
+    methods = methods or PLATEGA_DEFAULT_METHODS
+    if not set(methods) <= PLATEGA_METHODS:
+        raise ConfigError(f"PLATEGA_PAYMENT_METHODS must be among {sorted(PLATEGA_METHODS)}")
     if not base_url.startswith("https://"):
         raise ConfigError("PLATEGA_BASE_URL must be https")
     prices: dict[str, Decimal] = {}
@@ -175,7 +178,7 @@ def _platega(env: Mapping[str, str], enabled: bool) -> tuple[str, str, str, str,
         missing = [f"PLATEGA_PRICE_{key.upper()}" for key in PLATEGA_PRICE_KEYS if key not in prices]
         if missing:
             raise ConfigError("BILLING_ENABLED needs " + ", ".join(missing))
-    return merchant, secret, base_url, currency, method, prices
+    return merchant, secret, base_url, currency, methods, prices
 
 
 def default_kvist_command() -> tuple[str, ...]:
@@ -204,7 +207,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if auth_dev_login and host not in LOOPBACK_HOSTS:
         raise ConfigError("AUTH_DEV_LOGIN is only allowed when PUBLIC_URL is a loopback address")
     billing_enabled = _flag(env, "BILLING_ENABLED")
-    merchant, secret, platega_url, currency, method, prices = _platega(env, billing_enabled)
+    merchant, secret, platega_url, currency, methods, prices = _platega(env, billing_enabled)
     allow_local = _flag(env, "ALLOW_LOCAL_ENDPOINTS")
     if allow_local and host not in LOOPBACK_HOSTS:
         raise ConfigError("ALLOW_LOCAL_ENDPOINTS is only allowed when PUBLIC_URL is a loopback address")
@@ -225,7 +228,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         platega_secret=secret,
         platega_base_url=platega_url,
         platega_currency=currency,
-        platega_payment_method=method,
+        platega_payment_methods=methods,
         platega_prices=prices,
         machine_provider=env.get("MACHINE_PROVIDER", "local"),
         runner_command=_argv(env, "RUNNER_COMMAND", default_runner_command()),

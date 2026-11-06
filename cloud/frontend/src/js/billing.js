@@ -2,8 +2,8 @@
 // Whatever happens on that page proves nothing: access appears when the server has asked Platega.
 import { api } from "./api.js";
 
-export async function startCheckout(plan) {
-  const result = await api("/api/billing/checkout", { method: "POST", body: { plan } });
+export async function startCheckout(plan, method) {
+  const result = await api("/api/billing/checkout", { method: "POST", body: method ? { plan, method } : { plan } });
   if (!result.redirect) return result.started || "started";
   if (new URL(result.redirect).protocol !== "https:") {
     throw Object.assign(new Error("redirect"), { code: "billing_unavailable" });

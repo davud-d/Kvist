@@ -53,7 +53,8 @@ def test_billing_needs_credentials_and_every_price(env):
 
 @pytest.mark.parametrize("name,value", [("PLATEGA_PRICE_START", "0"), ("PLATEGA_PRICE_START", "-5"),
                                          ("PLATEGA_PRICE_START", "12.345"), ("PLATEGA_PRICE_START", "nan"),
-                                         ("PLATEGA_PAYMENT_METHOD", "7"), ("PLATEGA_BASE_URL", "http://x")])
+                                         ("PLATEGA_PAYMENT_METHODS", "7"), ("PLATEGA_PAYMENT_METHODS", "2,x"),
+                                         ("PLATEGA_BASE_URL", "http://x")])
 def test_nonsense_billing_settings_are_refused(env, name, value):
     with pytest.raises(ConfigError):
         load_settings({**env, **PLATEGA, name: value})
@@ -119,11 +120,32 @@ def test_checkout_asks_platega_for_the_servers_own_amount(client_factory, engine
     transaction_id = open_checkout(client, "pro")
     body = platega.transactions[transaction_id]["request"]
     assert body["paymentDetails"] == {"amount": 3900.0, "currency": "RUB"}
-    assert body["return"] == "http://127.0.0.1:8740/start" and body["paymentMethod"] == 11
+    assert body["return"] == "http://127.0.0.1:8740/start" and body["paymentMethod"] == 2
     assert body["payload"] == checkout_row(engine).token and len(body["payload"]) == 48
     row = checkout_row(engine)
     assert (row.user_id, row.kind, row.amount, row.status) == (1, "pro", "3900.00", CheckoutStatus.PENDING)
     assert row.transaction_id == transaction_id
+
+
+def test_the_person_picks_among_the_servers_methods_only(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    assert client.get("/api/billing/config").json()["charge"]["methods"] == [2, 11, 12, 13]
+    for method in (3, 14, 0, -1, 999):
+        assert client.post("/api/billing/checkout", json={"plan": "start", "method": method}).status_code == 422
+    assert client.post("/api/billing/checkout", json={"plan": "start", "method": "11"}).status_code == 422
+    assert client.post("/api/billing/checkout", json={"plan": "start", "method": True}).status_code == 422
+    assert not platega.requests
+    cards = client.post("/api/billing/checkout", json={"plan": "start", "method": 11}).json()["redirect"]
+    crypto = client.post("/api/billing/checkout", json={"plan": "start", "method": 13}).json()["redirect"]
+    assert cards != crypto
+    assert [t["request"]["paymentMethod"] for t in platega.transactions.values()] == [11, 13]
+    assert checkout_row(engine).payment_method == 13
+
+
+def test_methods_come_from_the_settings(client_factory):
+    client, _ = paid_client(client_factory, PLATEGA_PAYMENT_METHODS="3,2")
+    assert client.get("/api/billing/config").json()["charge"]["methods"] == [3, 2]
+    assert client.post("/api/billing/checkout", json={"plan": "start", "method": 11}).status_code == 422
 
 
 def test_the_same_open_payment_link_is_handed_out_again(client_factory):
@@ -336,7 +358,7 @@ def test_billing_off_means_no_checkout(client_factory):
 def test_config_shows_the_charged_prices_but_no_credentials(client_factory):
     client, _ = paid_client(client_factory)
     config = client.get("/api/billing/config")
-    assert config.json()["charge"] == {"currency": "RUB", "prices": PRICES}
+    assert config.json()["charge"] == {"currency": "RUB", "methods": [2, 11, 12, 13], "prices": PRICES}
     assert SECRET not in config.text and MERCHANT not in config.text
 
 

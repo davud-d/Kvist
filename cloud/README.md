@@ -90,7 +90,7 @@ Variables are read from the process environment and, below it, from `cloud/.env`
 | `PLATEGA_SECRET` | the API key (`X-Secret`); server-side only |
 | `PLATEGA_PRICE_START` / `_PRO` / `_MAX` / `_HOURS` | what each purchase costs, e.g. `1500.00` |
 | `PLATEGA_CURRENCY` | optional, default `RUB` |
-| `PLATEGA_PAYMENT_METHOD` | optional, default `11` (cards); also `2` SBP, `3` ERIP, `12` international, `13` crypto, `14` Sberpay |
+| `PLATEGA_PAYMENT_METHODS` | optional, comma-separated, in the order the picker shows them; default `2,11,12,13` (SBP, cards, international, crypto); also `3` ERIP, `14` Sberpay |
 | `PLATEGA_BASE_URL` | optional, default `https://app.platega.io` |
 
 The callback URL (cabinet: Settings → Callback URLs) is `<PUBLIC_URL>/billing/platega/callback`; it must

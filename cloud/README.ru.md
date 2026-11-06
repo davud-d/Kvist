@@ -91,7 +91,7 @@ scripts/dev.sh         локальный запуск одной командо
 | `PLATEGA_SECRET` | API-ключ (`X-Secret`), только на сервере |
 | `PLATEGA_PRICE_START` / `_PRO` / `_MAX` / `_HOURS` | цена каждой покупки, например `1500.00` |
 | `PLATEGA_CURRENCY` | необязательно, по умолчанию `RUB` |
-| `PLATEGA_PAYMENT_METHOD` | необязательно, по умолчанию `11` (карты); ещё `2` СБП, `3` ЕРИП, `12` международная, `13` крипта, `14` Sberpay |
+| `PLATEGA_PAYMENT_METHODS` | необязательно, через запятую, в порядке показа; по умолчанию `2,11,12,13` (СБП, карты, международная, крипта); ещё `3` ЕРИП, `14` Sberpay |
 | `PLATEGA_BASE_URL` | необязательно, по умолчанию `https://app.platega.io` |
 
 Callback URL (кабинет: Настройки → Callback URLs) — `<PUBLIC_URL>/billing/platega/callback`; нужен

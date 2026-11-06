@@ -299,5 +299,45 @@
     "refundMinutes": "Minutes to refund",
     "refund": "Refund",
     "reject": "Close without refund"
+  },
+  "pay": {
+    "title": "Pay",
+    "method": "Payment method",
+    "total": "Total",
+    "item": "You get",
+    "hours": "Agent hours",
+    "h": "h",
+    "valid": "Valid for",
+    "thirtyDays": "30 days",
+    "thisPeriod": "this period",
+    "pack": "Hour pack",
+    "go": "Go to payment",
+    "note": "You pay on Platega's page. Access appears as soon as the payment is confirmed.",
+    "methods": {
+      "2": {
+        "name": "SBP",
+        "sub": "SBP · QR"
+      },
+      "3": {
+        "name": "ERIP",
+        "sub": "Belarus"
+      },
+      "11": {
+        "name": "Cards",
+        "sub": "MIR · Visa · MC"
+      },
+      "12": {
+        "name": "International",
+        "sub": "Foreign cards"
+      },
+      "13": {
+        "name": "Crypto",
+        "sub": "USDT · BTC · ETH"
+      },
+      "14": {
+        "name": "SberPay",
+        "sub": "Sberbank"
+      }
+    }
   }
 }

@@ -1,5 +1,6 @@
 // Dashboard: hours and their feed, the machine, recent tasks, the key (last four characters).
-import { chargeLabel, startCheckout, syncPayments } from "../billing.js";
+import { chargeLabel, syncPayments } from "../billing.js";
+import { choosePayment } from "../paydialog.js";
 import { api } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
 import { exportButton } from "../exporter.js";
@@ -44,7 +45,8 @@ function hoursCard(view, config, refresh, announce) {
     try {
       if (config.enabled) {
         // Billing on: the one-off hour pack is paid on Platega's page, and this page is where it returns to.
-        await startCheckout("hours");
+        choosePayment(config, "hours");
+        buy.disabled = false;
       } else {
         await api("/api/billing/dev/buy-hours", { method: "POST" });
         announce.textContent = t("dashboard.bought", { h: config.hour_pack.hours });

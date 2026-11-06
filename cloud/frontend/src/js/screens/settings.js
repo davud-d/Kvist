@@ -1,6 +1,6 @@
 // Settings: the plan with a visible one-click cancel, the model key, language, account, machine.
 import { api } from "../api.js";
-import { startCheckout } from "../billing.js";
+import { choosePayment } from "../paydialog.js";
 import { h, modal, replace, skeleton } from "../dom.js";
 import { shortDate } from "../format.js";
 import { locale, rememberLocale, setLocale, t } from "../i18n.js";
@@ -40,11 +40,9 @@ export async function settingsScreen(root, { me, navigate }) {
     // Plans do not renew by themselves: near the end the person pays again, and the new month follows this one.
     const renew = h("button.btn", { type: "button", text: t("settings.renew") });
     renew.addEventListener("click", async () => {
-      renew.disabled = true;
       try {
-        await startCheckout(current.plan);
+        choosePayment(await api("/api/billing/config"), current.plan);
       } catch (error) {
-        renew.disabled = false;
         planBox.append(errorBox(error));
       }
     });

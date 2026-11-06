@@ -321,6 +321,43 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
   padding: var(--s-5);
 }
 .modal > * + * { margin-top: var(--s-4); }
+.modal:has(.pay) { max-width: 46em; }
+
+/* -- payment picker --------------------------------------------------------- */
+
+.pay { display: grid; gap: var(--s-5); }
+@media (min-width: 720px) { .pay { grid-template-columns: 3fr 2fr; } }
+.pay-methods { display: grid; grid-template-columns: repeat(auto-fill, minmax(8em, 1fr)); gap: var(--s-2); }
+.pay-tile {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-1);
+  padding: var(--s-3) var(--s-2);
+  font: inherit;
+  color: var(--tx);
+  text-align: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+.pay-tile small { font-size: var(--t-13); color: var(--faint); }
+.pay-tile[aria-checked="true"] { border-color: var(--tx); }
+.pay-tile[aria-checked="true"] .pay-mark { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+@media (hover: hover) and (pointer: fine) { .pay-tile:hover { border-color: var(--line-2); } .pay-tile[aria-checked="true"]:hover { border-color: var(--tx); } }
+.pay-mark {
+  min-width: 3.4em;
+  padding: var(--s-1) var(--s-2);
+  font-weight: 700;
+  letter-spacing: var(--track-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+}
+.pay-total { padding: var(--s-4); background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-2); }
+.pay-total > * + * { margin-top: var(--s-3); }
+.pay-sum { font-size: var(--t-28); font-weight: 700; margin-bottom: 0; }
+.pay-rows > div { display: flex; justify-content: space-between; gap: var(--s-3); padding-block: var(--s-2); border-top: 1px solid var(--line); color: var(--dim); }
+.pay-rows > div span:last-child { color: var(--tx); }
 
 /* -- task view ------------------------------------------------------------- */
 

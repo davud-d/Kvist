@@ -25,6 +25,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Request
+from pydantic import StrictInt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -70,6 +71,8 @@ PERIOD = timedelta(days=30)
 
 class CheckoutIn(InputModel):
     plan: Literal["trial", "start", "pro", "max", "hours"] = "trial"
+    # One of the server's own methods (/api/billing/config); left out, the first one is used.
+    method: StrictInt | None = None
 
 
 def _unavailable() -> ApiError:
@@ -395,7 +398,7 @@ def billing_config(request: Request) -> dict[str, object]:
         "enabled": settings.billing_enabled,
         "dev": settings.dev_billing,
         # What is really charged; the plan table's dollars are only the catalogue.
-        "charge": {"currency": settings.platega_currency,
+        "charge": {"currency": settings.platega_currency, "methods": list(settings.platega_payment_methods),
                    "prices": {key: str(price) for key, price in settings.platega_prices.items()}}
         if settings.billing_enabled
         else None,
@@ -441,7 +444,7 @@ def _transaction_body(settings: Settings, user: User, checkout: BillingCheckout)
     page = "/dashboard" if checkout.kind == "hours" else "/start"
     label = "10 hour pack" if checkout.kind == "hours" else f"{checkout.kind.capitalize()} plan, 30 days"
     return {
-        "paymentMethod": settings.platega_payment_method,
+        "paymentMethod": checkout.payment_method,
         "paymentDetails": {"amount": float(Decimal(checkout.amount)), "currency": checkout.currency},
         "description": f"Kvist Cloud: {label}",
         "return": settings.public_url + page,
@@ -453,11 +456,11 @@ def _transaction_body(settings: Settings, user: User, checkout: BillingCheckout)
     }
 
 
-def _new_checkout_allowed(db: Session, user: User, plan: str) -> str | None:
+def _new_checkout_allowed(db: Session, user: User, plan: str, method: int) -> str | None:
     """A payment link still good to use, else None; raises when a new one may not be made yet."""
     now = utcnow()
     pending = list(db.scalars(select(BillingCheckout).where(
-        BillingCheckout.user_id == user.id, BillingCheckout.kind == plan,
+        BillingCheckout.user_id == user.id, BillingCheckout.kind == plan, BillingCheckout.payment_method == method,
         BillingCheckout.status == CheckoutStatus.PENDING).order_by(BillingCheckout.id.desc())))
     for row in pending:
         if row.transaction_id and row.pay_url and now - row.created_at < CHECKOUT_REUSE_WINDOW:
@@ -495,14 +498,17 @@ async def checkout(payload: CheckoutIn, request: Request, user: User = Depends(c
         db.commit()
         return {"started": "trial"}
     _check_purchase_allowed(db, user, payload.plan)
-    link = _new_checkout_allowed(db, user, payload.plan)
+    method = payload.method if payload.method is not None else settings.platega_payment_methods[0]
+    if method not in settings.platega_payment_methods:
+        raise ApiError(422, "bad_method", "This payment method is not offered. / Такого способа оплаты нет.")
+    link = _new_checkout_allowed(db, user, payload.plan, method)
     if link is not None:
         return {"redirect": link}
     amount = settings.platega_prices.get(payload.plan)
     if amount is None:
         raise ApiError(503, "billing_unavailable", "Price is not configured. / Цена не настроена.")
     row = BillingCheckout(user_id=user.id, kind=payload.plan, amount=str(amount), currency=settings.platega_currency,
-                          token=secrets.token_hex(24))
+                          payment_method=method, token=secrets.token_hex(24))
     db.add(row)
     db.commit()
     try:
