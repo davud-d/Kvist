@@ -69,7 +69,51 @@ function hoursCard(view, config, refresh, announce) {
     h("p", {}, buy));
 }
 
-function machineCard(machines) {
+// The Remote plan: the machine is the person's own, so the page shows how to connect it, not hours.
+function connectDialog(config) {
+  const text = JSON.stringify(config, null, 2);
+  modal((close) => {
+    const copy = h("button.btn.ghost", { type: "button", text: t("dashboard.copy") });
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.textContent = t("dashboard.copied");
+      } catch (error) {
+        if (!(error instanceof DOMException)) throw error;
+      }
+    });
+    return h("div.stack", {},
+      h("h2.h3", {}, t("dashboard.connectTitle")),
+      h("p.dim", {}, t("dashboard.connectBody")),
+      h("pre.code", {}, text),
+      h("p.hint", {}, t("dashboard.connectOnce")),
+      h("div.row", {}, copy, h("button.btn", { type: "button", autofocus: true, onclick: close, text: t("common.close") })));
+  });
+}
+
+function remoteCard(view, machines, reload) {
+  const connect = h("button.btn", { type: "button",
+    text: machines.length ? t("dashboard.reconnect") : t("dashboard.connect") });
+  const holder = h("p", {}, connect);
+  connect.addEventListener("click", async () => {
+    connect.disabled = true;
+    try {
+      const answer = await api("/api/machines/remote/connect", { method: "POST" });
+      connectDialog(answer.runner_config);
+      reload();
+    } catch (error) {
+      holder.after(errorBox(error));
+    }
+    connect.disabled = false;
+  });
+  return h("section.card", { "aria-labelledby": "remote-title" },
+    h("div.spread", {}, h("h2.h3", { id: "remote-title" }, t("dashboard.remoteTitle")),
+      h("span.small", {}, t("dashboard.periodEnds", { date: shortDate(view.period_end, locale()) }))),
+    h("p", {}, t("dashboard.remoteText")),
+    holder);
+}
+
+function machineCard(machines, own) {
   const machine = machines[0];
   return h("section.card", { "aria-labelledby": "machine-title" },
     h("h2.h3", { id: "machine-title" }, t("dashboard.machinesTitle")),
@@ -78,7 +122,7 @@ function machineCard(machines) {
           h("p.row", {}, machinePill(machine.display_status),
             h("span.small", {}, `${machine.vcpu} vCPU · ${machine.memory_gb} GB · ${machine.disk_gb} GB`)),
           exportButton(`/api/machines/${machine.id}/export`, t("dashboard.export")))
-      : h("p.dim", {}, t("dashboard.noMachine")));
+      : h("p.dim", {}, own ? t("dashboard.noRemoteMachine") : t("dashboard.noMachine")));
 }
 
 function tasksCard(tasks) {
@@ -136,8 +180,8 @@ export async function dashboardScreen(root) {
             h("p", {}, t("dashboard.trialBanner", { price: view.price_after_trial_usd })),
             h("p", {}, h("a.inline", { href: "/settings", "data-link": "" }, t("dashboard.toSettings"))))
         : null,
-      hoursCard(view, config, reload, announce),
-      machineCard(machines),
+      view.own_machine ? remoteCard(view, machines, reload) : hoursCard(view, config, reload, announce),
+      machineCard(machines, view.own_machine),
       tasksCard(tasks),
       feedCard(ledgerView.feed, reload),
       h("section.card", {}, h("h2.h3", {}, t("dashboard.keyTitle")),

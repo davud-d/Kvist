@@ -66,11 +66,10 @@ SWEEP_MAX_COUNT = 50
 RENEW_WINDOW = timedelta(days=3)
 REMINDER_BEFORE = timedelta(days=2)
 SWEEP_SECONDS = 300.0
-PERIOD = timedelta(days=30)
 
 
 class CheckoutIn(InputModel):
-    plan: Literal["trial", "start", "pro", "max", "hours"] = "trial"
+    plan: Literal["trial", "start", "pro", "max", "remote", "hours"] = "trial"
     # One of the server's own methods (/api/billing/config); left out, the first one is used.
     method: StrictInt | None = None
 
@@ -143,7 +142,8 @@ def _start_period(db: Session, subscription: Subscription, start: datetime, end:
     subscription.current_period_end = end
     db.flush()
     plan = plans.get_plan(subscription.plan)
-    ledger.grant_period(db, subscription, plan.seconds, f"{plan.id} plan hours")
+    if plan.metered:
+        ledger.grant_period(db, subscription, plan.seconds, f"{plan.id} plan hours")
 
 
 def create_trial(db: Session, user: User, now: datetime | None = None) -> Subscription:
@@ -198,10 +198,11 @@ def _grant_plan(db: Session, checkout: BillingCheckout, now: datetime) -> bool:
         # Paying replaces the trial; its unused hours do not carry over.
         current.status = SubscriptionStatus.CANCELLED
         current.current_period_end = now
+    end = start + timedelta(days=plans.get_plan(checkout.kind).period_days)
     subscription = Subscription(user_id=checkout.user_id, plan=checkout.kind, status=SubscriptionStatus.ACTIVE,
-                                current_period_start=start, current_period_end=start + PERIOD)
+                                current_period_start=start, current_period_end=end)
     db.add(subscription)
-    _start_period(db, subscription, start, start + PERIOD)
+    _start_period(db, subscription, start, end)
     checkout.subscription_row_id = subscription.id
     record_step(db, "card_added", user_id=checkout.user_id)
     return True
@@ -322,6 +323,8 @@ def subscription_view(db: Session, user: User, now: datetime | None = None) -> d
         "cancel_at_period_end": subscription.cancel_at_period_end,
         "trial_reminder": reminder,
         "can_renew": plan_start(db, user.id, now) is not None and plan.id != plans.TRIAL.id,
+        "own_machine": plan.own_machine,
+        "unmetered": not plan.metered,
     }
 
 
@@ -371,7 +374,7 @@ def roll_dev_subscriptions(db: Session, now: datetime | None = None) -> None:
             subscription.status = SubscriptionStatus.ACTIVE
             subscription.plan = plans.TRIAL.converts_to
         start = subscription.current_period_end
-        _start_period(db, subscription, start, start + PERIOD)
+        _start_period(db, subscription, start, start + timedelta(days=plans.get_plan(subscription.plan).period_days))
 
 
 async def sweep_forever(app: FastAPI) -> None:
@@ -404,6 +407,7 @@ def billing_config(request: Request) -> dict[str, object]:
         else None,
         "plans": plans.public_catalog(),
         "hour_pack": {"hours": plans.HOUR_PACK_HOURS, "price_usd": plans.HOUR_PACK_PRICE_USD},
+        "remote": plans.remote_offer(),
     }
 
 
@@ -434,15 +438,20 @@ async def sync_my_payments(request: Request, user: User = Depends(current_user),
 def _check_purchase_allowed(db: Session, user: User, plan: str) -> None:
     now = utcnow()
     if plan == "hours":
-        if ledger.current_subscription(db, user.id) is None:
+        current = ledger.current_subscription(db, user.id)
+        if current is None:
             raise ApiError(402, "no_subscription", "An active plan is required. / Нужен активный тариф.")
+        if not plans.get_plan(current.plan).metered:
+            raise ApiError(409, "hours_not_counted",
+                           "Your plan has no hours to add. / В твоём тарифе часы не считаются.")
     elif plan_start(db, user.id, now) is None:
         raise ApiError(409, "already_subscribed", "A subscription already exists. / Подписка уже есть.")
 
 
 def _transaction_body(settings: Settings, user: User, checkout: BillingCheckout) -> dict[str, object]:
     page = "/dashboard" if checkout.kind == "hours" else "/start"
-    label = "10 hour pack" if checkout.kind == "hours" else f"{checkout.kind.capitalize()} plan, 30 days"
+    label = ("10 hour pack" if checkout.kind == "hours"
+             else f"{checkout.kind.capitalize()} plan, {plans.get_plan(checkout.kind).period_days} days")
     return {
         "paymentMethod": checkout.payment_method,
         "paymentDetails": {"amount": float(Decimal(checkout.amount)), "currency": checkout.currency},

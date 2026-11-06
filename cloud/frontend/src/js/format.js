@@ -15,9 +15,15 @@ export function hoursMinutes(seconds, tr) {
   return tr("units.hm", { h, m });
 }
 
+// A month-long plan ends "6 November"; a year-long one needs the year, or it reads as the coming one.
+const FAR = 60 * 24 * 3600 * 1000;
+
 export function shortDate(iso, lang) {
   if (!iso) return "";
-  return new Date(iso).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-GB", { day: "numeric", month: "long" });
+  const date = new Date(iso);
+  const far = date.getTime() - Date.now() > FAR;
+  return date.toLocaleDateString(lang === "ru" ? "ru-RU" : "en-GB",
+    far ? { day: "numeric", month: "long", year: "numeric" } : { day: "numeric", month: "long" });
 }
 
 export function dateTime(iso, lang) {

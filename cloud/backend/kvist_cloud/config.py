@@ -24,7 +24,7 @@ ENV_FILE_NAME = ".env"
 # Platega's PaymentMethodInt: 2 SBP QR, 3 ERIP, 11 card acquiring, 12 international, 13 crypto, 14 Sberpay.
 PLATEGA_METHODS = frozenset({2, 3, 11, 12, 13, 14})
 PLATEGA_DEFAULT_METHODS = (2, 11, 12, 13)
-PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours")
+PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours", "remote")
 
 
 class ConfigError(RuntimeError):

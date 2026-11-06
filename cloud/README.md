@@ -88,7 +88,7 @@ Variables are read from the process environment and, below it, from `cloud/.env`
 | `BILLING_ENABLED` | `true` turns payments on; then everything below except the optional ones is required |
 | `PLATEGA_MERCHANT_ID` | the merchant UUID (`X-MerchantId`, Platega cabinet: Settings) |
 | `PLATEGA_SECRET` | the API key (`X-Secret`); server-side only |
-| `PLATEGA_PRICE_START` / `_PRO` / `_MAX` / `_HOURS` | what each purchase costs, e.g. `1500.00` |
+| `PLATEGA_PRICE_START` / `_PRO` / `_MAX` / `_HOURS` / `_REMOTE` | what each purchase costs, e.g. `1500.00`; `_REMOTE` is the price of a whole year |
 | `PLATEGA_CURRENCY` | optional, default `RUB` |
 | `PLATEGA_PAYMENT_METHODS` | optional, comma-separated, in the order the picker shows them; default `2,11,12,13` (SBP, cards, international, crypto); also `3` ERIP, `14` Sberpay |
 | `PLATEGA_BASE_URL` | optional, default `https://app.platega.io` |
@@ -117,6 +117,25 @@ Things that follow from Platega's model, not choices:
 - `PARTIALLY_REFUNDED` and `DISPUTED` callbacks cannot be verified through the status endpoint, so they
   change nothing; handle them by hand in the Platega cabinet and in the ledger.
 - Prices are charged in `PLATEGA_CURRENCY`; the dollar figures in the plan table are only the catalogue.
+
+### Remote: the customer's own machine
+
+A fourth plan for people who already have a computer: **$48 a year, paid once, no monthly charges**
+(`PLATEGA_PRICE_REMOTE`, in your currency). The agent works there, not on a machine of ours, so no hours are
+counted and no hour packs are sold. The cloud is the go-between: the customer's machine opens the
+connection to us, and everything else (tasks, queue, the web workspace, history) works as for any plan.
+
+How it connects: after paying, the dashboard's *Connect my machine* button makes the machine's row and
+shows `runner.json` (`machine_id`, `gateway_url`, a token) **once**; the token is stored only as a hash.
+The customer saves it on the computer with Kvist and runs `kvist-runner --config runner.json`, which dials
+`/gateway/ws` like the runner on our machines. We never receive an ssh key or a password and never connect
+out to an address a customer typed, which would turn the server into a scanner. Pressing the button again
+issues a new token and drops the old connection, so a leaked config is cured by pressing it again. A
+machine that is switched off shows as *offline* and is not given up on; tasks wait for it. The runner puts
+no CPU or memory cap on the owner's own computer.
+
+Not done yet: a way to install `kvist-runner` on someone else's computer (there is no published package),
+and cleaning up a trial's machine of ours when the person moves to Remote (it is left alone and hidden).
 
 Migration `0006` drops Paddle's tables (it only ever ran in sandbox) and the Paddle columns of
 `subscriptions`; it cannot be reversed. Before enabling live billing, make a real test payment on your

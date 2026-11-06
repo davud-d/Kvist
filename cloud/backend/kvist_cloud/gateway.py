@@ -73,7 +73,7 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
         return None
     settings = app.state.settings
     subscription = ledger.current_subscription(db, user.id)
-    if subscription is None or ledger.balance_seconds(db, user.id) <= 0:
+    if subscription is None or not ledger.has_hours(db, user.id):
         return None
     plan = plans.get_plan(subscription.plan)
     project = db.get(Project, task.project_id) if task.project_id else None
@@ -126,7 +126,7 @@ async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None)
         for task in waiting:
             if task.started_at is not None and (known is None or task.id in known):
                 continue
-            if ledger.current_subscription(db, task.user_id) is None or ledger.balance_seconds(db, task.user_id) <= 0:
+            if not ledger.has_hours(db, task.user_id):
                 # Hours can run out between admission and start; Continue picks it up after a purchase.
                 tasks.apply_exit(task, "hours_exhausted")
                 app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})

@@ -180,6 +180,12 @@ def test_systemd_wrapper(monkeypatch):
     assert guard.with_machine_limits(["kvist"], 2, 4) == ["kvist"]
 
 
+def test_no_cap_on_the_owners_own_machine(monkeypatch):
+    # The Remote plan sends 0 and 0: even where systemd is there, nothing is limited.
+    monkeypatch.setattr(guard, "_systemd", True)
+    assert guard.with_machine_limits(["kvist", "--x"], vcpu=0, memory_gb=0) == ["kvist", "--x"]
+
+
 @pytest.mark.parametrize(
     ("event", "trouble"),
     [

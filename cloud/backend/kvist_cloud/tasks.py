@@ -271,10 +271,14 @@ def can_run(db: Session, user: User) -> None:
     """Raise the reason a task cannot start now, in words the person can act on."""
     if ledger.current_subscription(db, user.id) is None:
         raise ApiError(402, "no_subscription", "Start the trial first. / Сначала начни пробный период.")
-    if ledger.balance_seconds(db, user.id) <= 0:
+    if not ledger.has_hours(db, user.id):
         raise ApiError(402, "no_hours", "Your hours are used up. / Часы закончились.")
     if not user.model_key_enc:
         raise ApiError(400, "no_key", "Add your model key first. / Сначала добавь ключ модели.")
+    from .machines import live_machine, machine_plan
+
+    if machine_plan(db, user.id).own_machine and live_machine(db, user.id) is None:
+        raise ApiError(409, "no_machine", "Connect your machine first. / Сначала подключи свою машину.")
 
 
 def _machine_for_task(app: FastAPI, db: Session, user: User) -> Machine:

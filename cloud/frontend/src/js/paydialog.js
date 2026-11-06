@@ -32,6 +32,9 @@ function summary(config, plan) {
   if (plan === "hours") {
     return { name: t("pay.pack"), hours: config.hour_pack.hours, price: charge.prices.hours, period: t("pay.thisPeriod") };
   }
+  if (plan === "remote") {
+    return { name: t("pricing.planNames.remote"), hours: null, price: charge.prices.remote, period: t("pay.oneYear") };
+  }
   const found = config.plans.find((item) => item.id === plan);
   return { name: t(`pricing.planNames.${plan}`), hours: found.hours, price: charge.prices[plan], period: t("pay.thirtyDays") };
 }
@@ -77,7 +80,9 @@ export function choosePayment(config, plan) {
           h("p.pay-sum", { text: money(bought.price, currency) }),
           h("div.pay-rows", {},
             h("div", {}, h("span", { text: t("pay.item") }), h("span", { text: bought.name })),
-            h("div", {}, h("span", { text: t("pay.hours") }), h("span", { text: `${bought.hours} ${t("pay.h")}` })),
+            bought.hours === null
+              ? h("div", {}, h("span", { text: t("pay.machine") }), h("span", { text: t("pay.yours") }))
+              : h("div", {}, h("span", { text: t("pay.hours") }), h("span", { text: `${bought.hours} ${t("pay.h")}` })),
             h("div", {}, h("span", { text: t("pay.valid") }), h("span", { text: bought.period }))),
           go,
           h("p.hint", { text: t("pay.note") }))),

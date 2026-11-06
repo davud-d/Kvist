@@ -34,6 +34,7 @@
     "failed": "Failed"
   },
   "machineStatus": {
+    "offline": "Offline: start the connector",
     "creating": "Being created",
     "asleep": "Asleep",
     "waking": "Waking up",
@@ -63,6 +64,11 @@
     "no_key": "There is no model key. Add one in Settings."
   },
   "errors": {
+    "no_machine": "Connect your machine first: Dashboard, Connect my machine.",
+    "own_machine": "This plan runs on your own machine: connect it on the dashboard.",
+    "not_remote": "This plan runs on our machines.",
+    "hours_not_counted": "Your plan has no hours to add.",
+    "bad_method": "That payment method is not offered.",
     "already_subscribed": "You already have a subscription.",
     "checkout_pending": "Checkout is being created. Try again shortly.",
     "trial_ineligible": "The trial is available once, for GitHub accounts older than one month. You can choose a paid plan.",
@@ -122,7 +128,7 @@
     "perMonth": "${p}/mo",
     "trialPerWeek": "Free · 7 days",
     "none": "none",
-    "planNames": { "trial": "Trial", "start": "Start", "pro": "Pro", "max": "Max" },
+    "planNames": { "trial": "Trial", "start": "Start", "pro": "Pro", "max": "Max", "remote": "Remote" },
     "howTitle": "How hours are counted",
     "how": [
       "The meter runs only while the agent works: thinks, waits for the model, runs a command.",
@@ -133,6 +139,9 @@
     "signedIn": "Open your dashboard"
   },
   "start": {
+    "remoteTitle": "Remote: your own machine",
+    "remoteNote": "The agent works on a computer you already have: you run our small connector there, and it dials us. No machine of ours and no hours to count. One payment, one year, no monthly charges.",
+    "year": "year",
     "month": "month",
     "kicker": "Step 3 of 4",
     "title": "Start your trial",
@@ -233,6 +242,16 @@
     "noRepo": "empty folder"
   },
   "dashboard": {
+    "remoteTitle": "Your machine",
+    "remoteText": "Remote plan: the agent works on your own computer. Hours are not counted.",
+    "connect": "Connect my machine",
+    "reconnect": "Show connection settings again",
+    "connectTitle": "Connect your machine",
+    "connectBody": "Save this as runner.json on the computer where Kvist is installed, then run: kvist-runner --config runner.json. It stays connected by itself and the machine shows as ready.",
+    "connectOnce": "The key is shown only now. Pressing the button again makes a new key and disconnects the old one.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "noRemoteMachine": "Your machine is not connected yet.",
     "title": "Dashboard",
     "trialBanner": "Your trial ends in 2 days. To keep going, pick a plan in Settings: nothing is charged automatically.",
     "toSettings": "Open Settings",
@@ -301,6 +320,9 @@
     "reject": "Close without refund"
   },
   "pay": {
+    "oneYear": "1 year",
+    "machine": "Machine",
+    "yours": "Your own",
     "title": "Pay",
     "method": "Payment method",
     "total": "Total",

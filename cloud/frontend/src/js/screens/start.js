@@ -94,6 +94,11 @@ export async function startScreen(root, { me, navigate }) {
         onclick: () => open(plan),
         text: `${plan.toUpperCase()} · ${chargeLabel(config, plan, config.plans.find((p) => p.id === plan).price_usd)}/`
           + t("start.month") }))),
+      config.remote && config.charge.prices.remote
+        ? h("div.card", {}, h("p.h3", { text: t("start.remoteTitle") }), h("p.small", { text: t("start.remoteNote") }),
+            h("button.btn.ghost", { type: "button", onclick: () => open("remote"),
+              text: `REMOTE · ${chargeLabel(config, "remote", config.remote.price_usd)}/` + t("start.year") }))
+        : null,
       problem));
   } else {
     replace(action, errorBox({ code: "billing_unavailable" }));

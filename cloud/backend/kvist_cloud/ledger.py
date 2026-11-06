@@ -15,6 +15,7 @@ from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from . import plans
 from .auth import current_user
 from .db import get_db, utcnow
 from .errors import not_found
@@ -76,6 +77,16 @@ def balance_seconds(db: Session, user_id: int, period_start: datetime | None = N
         )
     )
     return int(total or 0)
+
+
+def has_hours(db: Session, user_id: int) -> bool:
+    """May the agent work now? A plan on the customer's own machine is not counted in hours."""
+    subscription = current_subscription(db, user_id)
+    if subscription is None:
+        return False
+    if not plans.get_plan(subscription.plan).metered:
+        return True
+    return balance_seconds(db, user_id, subscription.current_period_start) > 0
 
 
 def purchased_seconds(db: Session, user_id: int, period_start: datetime) -> int:
@@ -201,7 +212,10 @@ def record_heartbeat(
     previous = machine.last_beat_second
     billable = list(machine.last_beat_running or [])
     subscription = current_subscription(db, machine.user_id)
-    if previous is not None and billable and 0 < second - previous <= max_gap_seconds:
+    unmetered = subscription is not None and not plans.get_plan(subscription.plan).metered
+    if unmetered:
+        result = BeatResult()  # their own machine: nothing is billed and nothing runs out
+    elif previous is not None and billable and 0 < second - previous <= max_gap_seconds:
         result = _bill(db, machine, subscription, billable, previous, second)
     elif subscription is not None:
         result.balance_seconds = balance_seconds(db, machine.user_id, subscription.current_period_start)

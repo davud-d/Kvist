@@ -19,7 +19,7 @@ from .db import make_engine, make_session_factory, upgrade
 from .errors import ApiError, api_error_handler, unhandled_error_handler, validation_error_handler
 from .events import EventHub
 from .gateway import Gateway
-from .providers import MachineProvider, make_provider
+from .providers import MachineProvider, RemoteProvider, make_provider
 from .screens import ScreenStore
 from .secrets import Vault, install_log_scrubber
 
@@ -74,6 +74,7 @@ def create_app(
     app.state.http_transport = http_transport
     app.state.vault = Vault(settings.master_key)
     app.state.provider = provider or make_provider(settings)
+    app.state.remote_provider = RemoteProvider()
     app.state.background = set()
     app.state.on_signed_in = machines.on_signed_in
     app.state.gateway = Gateway()

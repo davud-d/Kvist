@@ -472,3 +472,15 @@ pre.diff .hunk { color: var(--faint); display: block; }
   color: var(--faint);
 }
 .foot .row a { color: var(--dim); }
+
+/* -- connection settings (the Remote plan) ---------------------------------- */
+
+pre.code {
+  padding: var(--s-3);
+  overflow-x: auto;
+  font-size: var(--t-14);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  user-select: all;
+}

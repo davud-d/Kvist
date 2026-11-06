@@ -71,6 +71,8 @@ def systemd_available() -> bool:
 
 def with_machine_limits(argv: list[str], vcpu: int, memory_gb: int) -> list[str]:
     """Kvist and every command it starts share one scope with the plan's CPU and memory."""
+    if vcpu <= 0 or memory_gb <= 0:
+        return argv  # the Remote plan: the owner's own machine, the owner's own limits
     if not systemd_available():
         log.warning("systemd-run is not available: Kvist runs without CPU and memory limits")
         return argv

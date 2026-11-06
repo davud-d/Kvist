@@ -7,9 +7,10 @@ from urllib.parse import urlparse
 from ..config import LOOPBACK_HOSTS, Settings
 from .base import MachineProvider, MachineSpec, ProviderError, ProviderState
 from .local import LocalProvider
+from .remote import RemoteProvider
 from .sprites import SpritesProvider
 
-__all__ = ["MachineProvider", "MachineSpec", "ProviderError", "ProviderState", "make_provider"]
+__all__ = ["MachineProvider", "MachineSpec", "ProviderError", "ProviderState", "RemoteProvider", "make_provider"]
 
 
 def make_provider(settings: Settings) -> MachineProvider:

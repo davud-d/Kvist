@@ -12,6 +12,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, FastAPI, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.status import WS_1008_POLICY_VIOLATION
 
 from . import ledger, plans
 from .auth import current_user
@@ -19,13 +20,14 @@ from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
 from .models import Export, Machine, MachineStatus, Task, TaskStatus, User
-from .providers import MachineSpec, ProviderError
+from .providers import MachineProvider, MachineSpec, ProviderError
 
 log = logging.getLogger("kvist_cloud.machines")
 router = APIRouter()
 SWEEP_SECONDS = 30.0
 # A machine that was asked to wake and never dialled in.
 WAKE_TIMEOUT = timedelta(minutes=3)
+REMOTE_PROVIDER = "remote"
 
 
 def hash_token(token: str) -> str:
@@ -44,12 +46,23 @@ def machine_plan(db: Session, user_id: int) -> plans.Plan:
     return plans.get_plan(subscription.plan) if subscription is not None else plans.TRIAL
 
 
+def provider_of(app: FastAPI, name: str) -> MachineProvider:
+    """A customer's own machine has its own provider; every other machine lives with the hosting one."""
+    return app.state.remote_provider if name == REMOTE_PROVIDER else app.state.provider
+
+
+def machines_of(db: Session, user_id: int):
+    """The person's machines for the plan they have now: ours, or their own when the plan is Remote.
+
+    A machine left over from an earlier plan is not shown and not used; it is not touched either.
+    """
+    own = machine_plan(db, user_id).own_machine
+    kind = Machine.provider == REMOTE_PROVIDER if own else Machine.provider != REMOTE_PROVIDER
+    return select(Machine).where(Machine.user_id == user_id, Machine.status != MachineStatus.DELETED, kind)
+
+
 def live_machine(db: Session, user_id: int) -> Machine | None:
-    return db.scalars(
-        select(Machine)
-        .where(Machine.user_id == user_id, Machine.status != MachineStatus.DELETED)
-        .order_by(Machine.id)
-    ).first()
+    return db.scalars(machines_of(db, user_id).order_by(Machine.id)).first()
 
 
 def owned_machine(db: Session, user: User, machine_id: int) -> Machine:
@@ -68,6 +81,8 @@ def display_status(db: Session, machine: Machine) -> str:
         return "waiting_for_you"
     if statuses:
         return "working"
+    if machine.provider == REMOTE_PROVIDER and not machine.connected:
+        return "offline"
     if machine.status == MachineStatus.AWAKE and machine.connected:
         return "ready"
     return machine.status
@@ -139,13 +154,13 @@ async def wake(app: FastAPI, machine_id: int) -> None:
             machine.status = MachineStatus.AWAKE
             machine.last_active_at = utcnow()
             return
-        if not app.state.settings.dev_billing and ledger.balance_seconds(db, machine.user_id) <= 0:
+        if not app.state.settings.dev_billing and not ledger.has_hours(db, machine.user_id):
             return
-        ref = machine.provider_ref
+        ref, provider = machine.provider_ref, provider_of(app, machine.provider)
         machine.status = MachineStatus.WAKING
         machine.last_active_at = utcnow()
     try:
-        await app.state.provider.wake(ref)
+        await provider.wake(ref)
     except (ProviderError, NotImplementedError, OSError) as error:
         log.error("machine %s could not wake: %s", machine_id, error)
         _set_status(app, machine_id, MachineStatus.ERROR, "wake_failed")
@@ -156,10 +171,10 @@ async def put_to_sleep(app: FastAPI, machine_id: int) -> None:
         machine = db.get(Machine, machine_id)
         if machine is None or machine.status in (MachineStatus.DELETED, MachineStatus.CREATING):
             return
-        ref = machine.provider_ref
+        ref, provider = machine.provider_ref, provider_of(app, machine.provider)
         machine.status = MachineStatus.SLEEPING
     try:
-        await app.state.provider.sleep(ref)
+        await provider.sleep(ref)
     except (ProviderError, NotImplementedError, OSError) as error:
         log.error("machine %s could not sleep: %s", machine_id, error)
         _set_status(app, machine_id, MachineStatus.ERROR, "sleep_failed")
@@ -172,10 +187,10 @@ async def destroy(app: FastAPI, machine_id: int) -> None:
         machine = db.get(Machine, machine_id)
         if machine is None:
             return
-        ref = machine.provider_ref
+        ref, provider = machine.provider_ref, provider_of(app, machine.provider)
     try:
         if ref:
-            await app.state.provider.delete(ref)
+            await provider.delete(ref)
     except (ProviderError, NotImplementedError, OSError) as error:
         log.error("machine %s could not be deleted: %s", machine_id, error)
         _set_status(app, machine_id, MachineStatus.ERROR, "delete_failed")
@@ -204,7 +219,9 @@ async def sweep_once(app: FastAPI) -> None:
             if _has_work(db, machine):
                 machine.last_active_at = now
                 continue
-            never_came_up = machine.status == MachineStatus.WAKING and not machine.connected
+            # A customer's own machine comes up when its owner starts the runner, which can be much later.
+            never_came_up = (machine.status == MachineStatus.WAKING and not machine.connected
+                             and machine.provider != REMOTE_PROVIDER)
             if never_came_up and now - machine.last_active_at > WAKE_TIMEOUT:
                 machine.status = MachineStatus.ERROR
                 machine.status_detail = "wake_timeout"
@@ -228,8 +245,10 @@ async def on_signed_in(request: Request, db: Session, user: User, _github_token:
     """Sign-in hook: the machine starts being created while the person enters their card."""
     app = request.app
     record_step(db, "github_login", user_id=user.id, visitor_id=request.cookies.get("kc_visitor", ""))
-    if not app.state.settings.dev_billing and ledger.balance_seconds(db, user.id) <= 0:
+    if not app.state.settings.dev_billing and not ledger.has_hours(db, user.id):
         return
+    if machine_plan(db, user.id).own_machine:
+        return  # their machine arrives by itself, through "connect"
     lock_account(db, user.id)
     machine = live_machine(db, user.id)
     if machine is None:
@@ -244,9 +263,7 @@ async def on_signed_in(request: Request, db: Session, user: User, _github_token:
 
 @router.get("/api/machines")
 def list_machines(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, object]]:
-    machines = db.scalars(
-        select(Machine).where(Machine.user_id == user.id, Machine.status != MachineStatus.DELETED).order_by(Machine.id)
-    )
+    machines = db.scalars(machines_of(db, user.id).order_by(Machine.id))
     return [machine_view(db, machine) for machine in machines]
 
 
@@ -254,6 +271,9 @@ def list_machines(user: User = Depends(current_user), db: Session = Depends(get_
 async def create_machine(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     lock_account(db, user.id)
     _require_hours(request.app, db, user.id)
+    if machine_plan(db, user.id).own_machine:
+        raise ApiError(409, "own_machine", "This plan runs on your own machine: connect it instead. "
+                       "/ Тариф работает на твоей машине: подключи её.")
     existing = live_machine(db, user.id)
     if existing is not None:
         return machine_view(db, existing)
@@ -261,6 +281,33 @@ async def create_machine(request: Request, user: User = Depends(current_user), d
     db.commit()
     spawn(request.app, provision(request.app, spec))
     return machine_view(db, db.get(Machine, spec.machine_id))
+
+
+@router.post("/api/machines/remote/connect")
+async def connect_remote_machine(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Make (or re-key) the row for the person's own machine and hand over what its runner needs, once.
+
+    The token is shown only here and kept only as a hash. Asking again issues a new one and drops the old
+    connection, so a leaked config is cured by pressing the button again.
+    """
+    lock_account(db, user.id)
+    if not machine_plan(db, user.id).own_machine:
+        raise ApiError(409, "not_remote", "This plan runs on our machines. / Этот тариф работает на наших машинах.")
+    token = secrets.token_urlsafe(32)
+    machine = live_machine(db, user.id)
+    if machine is None:
+        machine = Machine(user_id=user.id, provider=REMOTE_PROVIDER, provider_ref=f"remote-{user.id}",
+                          token_hash=hash_token(token), vcpu=0, memory_gb=0, disk_gb=0, status=MachineStatus.ASLEEP)
+        db.add(machine)
+    else:
+        machine.token_hash = hash_token(token)
+    db.commit()
+    old = request.app.state.gateway.sockets.get(machine.id)
+    if old is not None:
+        await old.close(code=WS_1008_POLICY_VIOLATION)
+    return {"machine": machine_view(db, machine),
+            "runner_config": {"machine_id": machine.id, "gateway_url": request.app.state.settings.gateway_url,
+                              "token": token}}
 
 
 @router.post("/api/machines/{machine_id}/wake", status_code=202)
@@ -296,5 +343,5 @@ async def delete_machine(
 
 
 def _require_hours(app: FastAPI, db: Session, user_id: int) -> None:
-    if not app.state.settings.dev_billing and ledger.balance_seconds(db, user_id) <= 0:
+    if not app.state.settings.dev_billing and not ledger.has_hours(db, user_id):
         raise ApiError(402, "no_hours", "A paid plan with hours is required. / Нужен тариф с доступными часами.")

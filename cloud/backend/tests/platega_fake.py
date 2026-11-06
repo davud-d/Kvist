@@ -15,10 +15,11 @@ from kvist_cloud.models import User
 
 MERCHANT = "1a021d91-9b26-4762-b303-5d4aac74e921"
 SECRET = "platega_test_secret_value_0123456789"
-PRICES = {"start": "1500.00", "pro": "3900.00", "max": "9900.00", "hours": "500.00"}
+PRICES = {"start": "1500.00", "pro": "3900.00", "max": "9900.00", "hours": "500.00", "remote": "4000.00"}
 PLATEGA = {"BILLING_ENABLED": "true", "PLATEGA_MERCHANT_ID": MERCHANT, "PLATEGA_SECRET": SECRET,
            "PLATEGA_PRICE_START": PRICES["start"], "PLATEGA_PRICE_PRO": PRICES["pro"],
-           "PLATEGA_PRICE_MAX": PRICES["max"], "PLATEGA_PRICE_HOURS": PRICES["hours"], "AUTH_DEV_LOGIN": "true"}
+           "PLATEGA_PRICE_MAX": PRICES["max"], "PLATEGA_PRICE_HOURS": PRICES["hours"],
+           "PLATEGA_PRICE_REMOTE": PRICES["remote"], "AUTH_DEV_LOGIN": "true"}
 
 
 class PlategaFake:

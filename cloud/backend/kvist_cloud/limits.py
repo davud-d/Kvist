@@ -34,7 +34,7 @@ def active_count(db: Session, user_id: int, exclude: int | None = None) -> int:
 def admit(db: Session, task: Task) -> None:
     """Start now if the plan has a free slot, otherwise wait in the queue."""
     lock_account(db, task.user_id)
-    if ledger.balance_seconds(db, task.user_id) <= 0:
+    if not ledger.has_hours(db, task.user_id):
         task.status = TaskStatus.PAUSED
         task.status_reason = "hours_exhausted"
         return
@@ -56,7 +56,7 @@ def promote(db: Session, user_id: int) -> list[int]:
             select(Task).where(Task.user_id == user_id, Task.status == TaskStatus.QUEUED).order_by(Task.id).limit(free)
         )
     )
-    if queued and ledger.balance_seconds(db, user_id) <= 0:
+    if queued and not ledger.has_hours(db, user_id):
         # Nothing to run them on: they wait, paused, for the person to add hours.
         for task in queued:
             task.status = TaskStatus.PAUSED
