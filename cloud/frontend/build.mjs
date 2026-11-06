@@ -12,13 +12,10 @@ import { checkLocales } from "./tools/i18n-check.mjs";
 const SRC = new URL("./src/", import.meta.url);
 const DIST = new URL("./dist/", import.meta.url);
 const BUDGET_BYTES = 100 * 1024;
-// One pixel face covers both scripts (headings only), so it is counted for every locale.
-const PIXEL_FONT = "kvist-pixel.woff2";
 const FONTS = {
-  latin: ["kvist-mono-latin-400.woff2", "kvist-mono-latin-700.woff2", PIXEL_FONT],
+  latin: ["kvist-mono-latin-400.woff2", "kvist-mono-latin-700.woff2"],
   cyrillic: ["kvist-mono-cyrillic-400.woff2", "kvist-mono-cyrillic-700.woff2"],
 };
-const PRELOAD = `<link rel="preload" href="/assets/fonts/${PIXEL_FONT}" as="font" type="font/woff2" crossorigin>`;
 
 const read = (name) => readFileSync(new URL(name, SRC), "utf8");
 const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -40,7 +37,6 @@ function shell(styles, lang) {
 <meta name="description" content="${esc(t.meta.description)}">
 <meta name="robots" content="noindex">
 <link rel="icon" href="data:,">
-${PRELOAD}
 <style>${styles}</style>
 <script type="module" src="/assets/app.js"></script>
 <script id="boot" type="application/json">null</script>
@@ -69,7 +65,7 @@ async function buildOnce() {
 
   rmSync(DIST, { recursive: true, force: true });
   mkdirSync(new URL("assets/fonts/", DIST), { recursive: true });
-  for (const name of [...FONTS.latin, ...FONTS.cyrillic, "OFL.txt", "OFL-PressStart2P.txt"]) {
+  for (const name of [...FONTS.latin, ...FONTS.cyrillic, "OFL.txt"]) {
     cpSync(new URL(`fonts/${name}`, SRC), new URL(`assets/fonts/${name}`, DIST));
   }
   const styles = await css();
@@ -94,7 +90,7 @@ async function buildOnce() {
     const { renderPricing } = await import(`${pricing.href}?t=${Date.now()}`);
     const plans = JSON.parse(read("plans.json"));
     for (const lang of ["en", "ru"]) {
-      const html = renderPricing(JSON.parse(read(`i18n/${lang}.json`)), plans, styles, PRELOAD);
+      const html = renderPricing(JSON.parse(read(`i18n/${lang}.json`)), plans, styles);
       writeFileSync(new URL(`pricing.${lang}.html`, DIST), html);
       report.push([`pricing (${lang})`, gz(html) + fontBytes(lang === "ru" ? ["latin", "cyrillic"] : ["latin"])]);
     }

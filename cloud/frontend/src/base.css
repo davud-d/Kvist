@@ -39,23 +39,9 @@
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
-/* Press Start 2P (OFL), cut down to Latin + Cyrillic + a few shapes: 3.5 KB. Headings and
-   controls only, never running text. It is preloaded and font-display: block, because a pixel
-   face swapped in late would move every box: it is the product's look, not a fallback-able
-   nicety, and at this size waiting for it costs nothing. */
-@font-face {
-  font-family: "Kvist Pixel";
-  src: url("/assets/fonts/kvist-pixel.woff2") format("woff2");
-  font-weight: 400;
-  font-display: block;
-}
-
 *, *::before, *::after { box-sizing: border-box; }
 
-html {
-  -webkit-text-size-adjust: 100%;
-  scrollbar-color: var(--line-2) var(--ink);
-}
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
@@ -65,30 +51,16 @@ body {
   font: 400 var(--t-16)/1.6 var(--f-mono);
   font-variant-ligatures: none;
   overflow-x: hidden;
-  caret-color: var(--acc);
-}
-
-/* The page is graph paper: one 2px dot every 16px, drawn as a mask so the dot colour is a token. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: var(--grid);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='2' height='2'/%3E%3C/svg%3E") 0 0 / 16px 16px;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='2' height='2'/%3E%3C/svg%3E") 0 0 / 16px 16px;
 }
 
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: .25em; }
 a.inline { color: var(--acc); }
 
 :focus-visible {
-  outline: 2px dashed var(--acc);
-  outline-offset: calc(var(--px) + 2px);
+  outline: 2px solid var(--acc);
+  outline-offset: 3px;
+  border-radius: var(--r-1);
 }
-
-::placeholder { color: var(--faint); opacity: 1; }
 
 ::selection { background: var(--tx); color: var(--ink); }
 
@@ -125,14 +97,14 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 
 .kicker {
-  font: 400 var(--p-1)/1.6 var(--f-pixel);
+  font-size: var(--t-13);
+  letter-spacing: var(--track-3);
   text-transform: uppercase;
   color: var(--faint);
 }
-.kicker::before { content: "> " / ""; }
-.h1 { font: 400 var(--p-5)/1.4 var(--f-pixel); text-transform: uppercase; }
-.h2 { font: 400 var(--p-4)/1.5 var(--f-pixel); text-transform: uppercase; }
-.h3 { font: 400 var(--p-2)/1.6 var(--f-pixel); text-transform: uppercase; }
+.h1 { font-size: var(--t-40); line-height: 1.08; font-weight: 700; letter-spacing: -.02em; }
+.h2 { font-size: var(--t-28); line-height: 1.2; font-weight: 700; letter-spacing: -.01em; }
+.h3 { font-size: var(--t-16); font-weight: 700; letter-spacing: var(--track-1); text-transform: uppercase; }
 .lede { color: var(--dim); max-width: var(--measure); }
 .small { font-size: var(--t-14); color: var(--faint); }
 .dim { color: var(--dim); }

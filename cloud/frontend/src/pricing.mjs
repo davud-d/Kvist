@@ -28,7 +28,7 @@ ${rows}
 </tbody></table></div>`;
 }
 
-export function renderPricing(t, catalog, styles, preload = "") {
+export function renderPricing(t, catalog, styles) {
   const p = t.pricing;
   const other = t.lang === "ru" ? "en" : "ru";
   return `<!doctype html>
@@ -39,7 +39,6 @@ export function renderPricing(t, catalog, styles, preload = "") {
 <title>${esc(t.meta.title)}</title>
 <meta name="description" content="${esc(t.meta.description)}">
 <link rel="icon" href="data:,">
-${preload}
 <style>${styles}</style>
 </head>
 <body>
