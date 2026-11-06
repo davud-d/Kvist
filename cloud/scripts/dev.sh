@@ -2,6 +2,8 @@
 # Kvist Cloud on this computer, one command: the server, the local machine provider, the real
 # Kvist core, and a fake model so nothing is spent. Dev sign-in, billing off.
 #
+#   PAYMENTS=1 ./cloud/scripts/dev.sh    billing on: Platega settings are read from cloud/.env
+#
 #   ./cloud/scripts/dev.sh               the real Kvist core against the fake model
 #   ./cloud/scripts/dev.sh --fake-kvist  a scripted stand-in for Kvist (no core needed)
 #
@@ -59,7 +61,8 @@ export KVIST_CLOUD_DATA_DIR="$DATA"
 export PUBLIC_URL="http://127.0.0.1:$PORT"
 export AUTH_DEV_LOGIN=true
 export ALLOW_LOCAL_ENDPOINTS=true
-export BILLING_ENABLED=false
+# PAYMENTS=1 leaves BILLING_ENABLED to cloud/.env; the stub is off then, so payments go to Platega.
+[[ "${PAYMENTS:-}" == 1 ]] || export BILLING_ENABLED=false
 export ADMIN_GITHUB_LOGINS="${ADMIN_GITHUB_LOGINS:-dev}"
 
 "$PY" "$CLOUD/scripts/fake_model.py" --port "$MODEL_PORT" &
@@ -68,7 +71,7 @@ trap 'kill "$MODEL_PID" 2>/dev/null || true' EXIT
 
 say "Kvist Cloud: http://127.0.0.1:$PORT"
 echo "  Sign in: the GitHub button signs you in as the local user 'dev'."
-echo "  Card: press 'Skip (dev)'."
+if [[ "${PAYMENTS:-}" == 1 ]]; then echo "  Payments: ON, real Platega from cloud/.env."; else echo "  Card: press 'Skip (dev)'."; fi
 echo "  Model: pick 'Other', base URL http://127.0.0.1:$MODEL_PORT/v1, model fake-model, any key of 8+ characters."
 echo "  Admin page: http://127.0.0.1:$PORT/admin"
 cd "$CLOUD/backend"
