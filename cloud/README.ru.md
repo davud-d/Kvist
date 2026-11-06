@@ -51,7 +51,7 @@ backend/kvist_cloud/   сервер управления (FastAPI, SQLAlchemy 2,
   keys.py              ключи моделей, проверка  machines.py машины, фоновое создание, сон
   gateway.py           WebSocket раннеров       tasks.py    API задач, статус из событий Kvist
   events.py            живая рассылка           ledger.py   журнал часов, лента, споры
-  limits.py            очередь, конец часов     billing.py  вебхуки Paddle (по умолчанию выкл.)
+  limits.py            очередь, конец часов     billing.py  callback-и Platega (по умолчанию выкл.)
   funnel.py            шаги воронки, конверсия  exports.py  экспорт архива
   web.py               собранный фронтенд, CSP, gzip        providers/  base, local, sprites
 backend/migrations/    Alembic; здесь же триггеры журнала против UPDATE/DELETE
@@ -72,30 +72,62 @@ scripts/dev.sh         локальный запуск одной командо
 | `PUBLIC_URL` | собственный адрес сервера (`https://…` включает secure-cookie) |
 
 Необязательные: `DATABASE_URL` (по умолчанию SQLite в `KVIST_CLOUD_DATA_DIR`), `GITHUB_CLIENT_ID` /
-`GITHUB_CLIENT_SECRET`, `BILLING_ENABLED` вместе с `PADDLE_WEBHOOK_SECRET`, `PADDLE_API_KEY`,
-`PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `PADDLE_PRICE_TRIAL|START|PRO|MAX|HOURS`;
+`GITHUB_CLIENT_SECRET`, `BILLING_ENABLED` вместе с переменными `PLATEGA_*` ниже;
 `MACHINE_PROVIDER` (`local`), `KVIST_COMMAND`, `RUNNER_COMMAND`, `HEARTBEAT_SECONDS` (15),
 `HEARTBEAT_MAX_GAP_SECONDS` (45), `MACHINE_IDLE_SLEEP_SECONDS` (900), `PROVIDER_OUTAGE_SECONDS`
 (300), `HOURS_GRACE_SECONDS` (300), `ADMIN_GITHUB_LOGINS` и только для разработки
 `AUTH_DEV_LOGIN`, `ALLOW_LOCAL_ENDPOINTS` (обе запрещены, если `PUBLIC_URL` не loopback).
 
-Для Paddle нужна отдельная цена `PADDLE_PRICE_TRIAL`: Start за $15 в месяц с 7-дневным
-**платным пробным периодом за $1** и обязательной платёжной картой
-(`trial_period.unit_price.amount="100"`, валюта `USD`). Обычные Start/Pro/Max — без trial.
-Все цены — USD, с включённым налогом (`tax_mode=internal`), без региональных переопределений,
-количество 1, суммы из `plans.py`. Перед созданием checkout backend проверяет настройки цены.
-Для выдачи доступа требуется списание точной суммы; скидки и кредиты не подходят.
-Браузер получает только серверный `transactionId`; `custom_data`, событие успешной оплаты
-в браузере и поля профиля не меняют тариф или баланс.
+### Оплата (Platega)
 
-Адрес вебхука: `<PUBLIC_URL>/billing/paddle/webhook`. Нужны события `transaction.completed`,
-`subscription.*`, `adjustment.created`, `adjustment.updated`. API-ключу нужны права создания
-транзакций, чтения цен и подписок, отмены подписок, чтения и создания adjustments.
-Trial открывается после фактического списания $1 и **одобренного полного возврата**.
-Авторизации карты недостаточно. Одобрение возврата и зачисление банком могут занимать время;
-отклонённый возврат требует вмешательства оператора. Обычные возвраты и chargeback отзывают
-купленные часы и доступ к возвращённому периоду подписки. Отмена chargeback не восстанавливает
-доступ автоматически: нужна сверка оператором.
+Переменные берутся из окружения процесса и, ниже приоритетом, из файла `cloud/.env` (или из файла,
+который назван в `KVIST_CLOUD_ENV_FILE`). Скопируй `cloud/env.example` в `cloud/.env`, заполни и не
+коммить: `.env` лежит в `.gitignore`. Настоящая переменная окружения сильнее файла.
+
+| Переменная | Что это |
+| --- | --- |
+| `BILLING_ENABLED` | `true` включает оплату; тогда нужно всё ниже, кроме необязательного |
+| `PLATEGA_MERCHANT_ID` | UUID мерчанта (`X-MerchantId`, кабинет Platega: Настройки) |
+| `PLATEGA_SECRET` | API-ключ (`X-Secret`), только на сервере |
+| `PLATEGA_PRICE_START` / `_PRO` / `_MAX` / `_HOURS` | цена каждой покупки, например `1500.00` |
+| `PLATEGA_CURRENCY` | необязательно, по умолчанию `RUB` |
+| `PLATEGA_PAYMENT_METHOD` | необязательно, по умолчанию `11` (карты); ещё `2` СБП, `3` ЕРИП, `12` международная, `13` крипта, `14` Sberpay |
+| `PLATEGA_BASE_URL` | необязательно, по умолчанию `https://app.platega.io` |
+
+Callback URL (кабинет: Настройки → Callback URLs) — `<PUBLIC_URL>/billing/platega/callback`; нужен
+публичный HTTPS.
+
+**Чему верит backend.** Platega ничего не подписывает: в callback только два статических заголовка.
+Поэтому сервер считает его звонком в дверь. Он сверяет заголовки (за постоянное время), берёт из тела
+*только* id транзакции и сам спрашивает Platega (`GET /transaction/{id}` с нашими ключами) статус,
+сумму и валюту. Тариф или часы выдаются, только если эта запись относится к строке `billing_checkouts`,
+которую наш сервер создал для вошедшего пользователя, статус `CONFIRMED`, а сумма, валюта и payload
+точно совпадают со строкой. Суммы берутся из настроек сервера; браузер присылает лишь название тарифа
+и не определяет ни цену, ни адрес возврата, ни пользователя. Обработка идемпотентна (checkout
+оплачивается один раз при любом порядке дублей), платёж, который нельзя применить или который не
+совпал, помечается `mismatch` / `needs_review` и пишется в лог вместо начисления, а `CANCELED` /
+`CHARGEBACKED` (перепроверенные у Platega) забирают часы или завершают тариф. Если callback не пришёл,
+платёж так же находит вызов страницы «проверить оплату» (`POST /api/billing/sync`) и фоновый проход раз
+в пять минут.
+
+Что следует из модели Platega, а не из наших решений:
+
+- Платежи разовые. Тариф действует 30 дней и **сам не продлевается**: человек платит снова (кнопка
+  «Продлить» появляется за 3 дня до конца, новый месяц начинается, когда кончается этот).
+- Пробный период бесплатный и без карты (проверки карты в Platega нет). Один на аккаунт, для
+  GitHub-аккаунтов старше месяца. Оплата заменяет идущий пробный период.
+- Callback-и `PARTIALLY_REFUNDED` и `DISPUTED` нельзя проверить через эндпоинт статуса, поэтому они
+  ничего не меняют; разбирай их вручную в кабинете Platega и в ledger.
+- Списывается `PLATEGA_CURRENCY`; доллары в таблице тарифов — только каталог.
+
+Миграция `0006` удаляет таблицы Paddle (он работал только в sandbox) и колонки Paddle в
+`subscriptions`; обратить её нельзя. Перед live-оплатой сделай настоящий тестовый платёж на своём
+мерчанте: тесты в репозитории используют заглушку по опубликованному API Platega и не проверят
+настройки кабинета, callback URL и то, что Platega возвращает `payload` в ответе статуса (проверка
+терпит его отсутствие, но отвергает другое значение).
+
+Документация провайдера: [Platega API](https://docs.platega.io/),
+[GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
 
 Возраст берётся из `created_at`, полученного от GitHub после OAuth: аккаунт должен быть строго
 старше календарного месяца. Trial доступен один раз; неизвестный возраст запрещает его до
@@ -110,17 +142,6 @@ Scope `repo` широкий. Токен зашифрован в базе; при
 ограниченный github.com, не попадает в URL remote или окружение агента. Принимаются только
 GitHub HTTPS URL; локальные file URL разрешены лишь в dev-режиме. Авторизованные fetch/push
 из агента эта интеграция клонирования не предоставляет; экспорт архива сохранён.
-
-Миграция `0005` сохраняет факт использования старых trial и приостанавливает старые Paddle-подписки.
-Подписки, созданные
-через доверие к клиентскому `custom_data`, перед продлением требуют сверки оператором с Paddle
-и привязки к серверным checkout/payment-записям. Нельзя восстанавливать владельца из `custom_data`.
-Перед live-оплатой нужно пройти списание, возврат и продление в Paddle sandbox: локальные тесты
-используют заглушки и не проверяют настройки вашего merchant-аккаунта.
-
-Контракты провайдеров: [платный trial](https://developer.paddle.com/build/trials/create-trial/),
-[возвраты](https://developer.paddle.com/build/transactions/create-transaction-adjustments/),
-[GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
 
 ## Проверки
 

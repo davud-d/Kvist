@@ -50,7 +50,7 @@ backend/kvist_cloud/   the control server (FastAPI, SQLAlchemy 2, Alembic)
   keys.py              model keys, key check machines.py machines, background creation, idle sleep
   gateway.py           runners' WebSocket    tasks.py    tasks API, status from Kvist's events
   events.py            live fan-out          ledger.py   append-only hours ledger, feed, disputes
-  limits.py            queue, hours running out          billing.py  Paddle webhooks (off by default)
+  limits.py            queue, hours running out          billing.py  Platega callbacks (off by default)
   funnel.py            funnel steps, conversion          exports.py  archive export
   web.py               the built frontend, CSP, gzip     providers/  base, local, sprites (stub)
 backend/migrations/    Alembic; the ledger's no-UPDATE/no-DELETE triggers live here
@@ -71,28 +71,61 @@ Environment variables only. The required ones:
 | `PUBLIC_URL` | the server's own address (`https://…` turns on secure cookies) |
 
 Optional: `DATABASE_URL` (default SQLite in `KVIST_CLOUD_DATA_DIR`), `GITHUB_CLIENT_ID` /
-`GITHUB_CLIENT_SECRET`, `BILLING_ENABLED` with `PADDLE_WEBHOOK_SECRET`, `PADDLE_API_KEY`,
-`PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `PADDLE_PRICE_TRIAL|START|PRO|MAX|HOURS`;
+`GITHUB_CLIENT_SECRET`, `BILLING_ENABLED` with the `PLATEGA_*` variables below;
 `MACHINE_PROVIDER` (`local`), `KVIST_COMMAND`, `RUNNER_COMMAND`, `HEARTBEAT_SECONDS` (15),
 `HEARTBEAT_MAX_GAP_SECONDS` (45), `MACHINE_IDLE_SLEEP_SECONDS` (900), `PROVIDER_OUTAGE_SECONDS`
 (300), `HOURS_GRACE_SECONDS` (300), `ADMIN_GITHUB_LOGINS`, and the dev-only `AUTH_DEV_LOGIN`,
 `ALLOW_LOCAL_ENDPOINTS` (both refused unless `PUBLIC_URL` is loopback).
 
-Paddle requires a separate `PADDLE_PRICE_TRIAL`: a monthly $15 Start price with a 7-day,
-card-required **paid trial of $1** (`trial_period.unit_price.amount="100"`, currency `USD`).
-The ordinary Start/Pro/Max prices must have no trial. All prices use USD, tax-inclusive
-`tax_mode=internal`, no regional overrides, quantity 1, and the amounts in `plans.py`.
-The server checks the price configuration before creating a transaction. Discounts/credits do not
-qualify for provisioning: the exact charge must be captured. The browser opens only the server's
-`transactionId`; `custom_data`, browser success callbacks and profile fields cannot grant access.
+### Payments (Platega)
 
-The webhook URL is `<PUBLIC_URL>/billing/paddle/webhook`. Subscribe to `transaction.completed`,
-`subscription.*`, `adjustment.created` and `adjustment.updated`. The API key needs transaction-create,
-price-read, subscription-read/cancel, and adjustment-read/create permissions. Trial access waits for
-a captured $1 payment and an **approved full refund**, not just a card authorization. Refund approval
-and bank settlement can take time; rejected refunds need operator attention. Ordinary refunds and
-chargebacks reverse purchased hours and suspend refunded subscription periods. A reversed chargeback
-needs operator reconciliation; it does not automatically restore access.
+Variables are read from the process environment and, below it, from `cloud/.env` (or the file named by
+`KVIST_CLOUD_ENV_FILE`). Copy `cloud/env.example` to `cloud/.env`, fill it in and keep it out of git:
+`.env` is in `.gitignore`. A real environment variable wins over the file.
+
+| Variable | Meaning |
+| --- | --- |
+| `BILLING_ENABLED` | `true` turns payments on; then everything below except the optional ones is required |
+| `PLATEGA_MERCHANT_ID` | the merchant UUID (`X-MerchantId`, Platega cabinet: Settings) |
+| `PLATEGA_SECRET` | the API key (`X-Secret`); server-side only |
+| `PLATEGA_PRICE_START` / `_PRO` / `_MAX` / `_HOURS` | what each purchase costs, e.g. `1500.00` |
+| `PLATEGA_CURRENCY` | optional, default `RUB` |
+| `PLATEGA_PAYMENT_METHOD` | optional, default `11` (cards); also `2` SBP, `3` ERIP, `12` international, `13` crypto, `14` Sberpay |
+| `PLATEGA_BASE_URL` | optional, default `https://app.platega.io` |
+
+The callback URL (cabinet: Settings → Callback URLs) is `<PUBLIC_URL>/billing/platega/callback`; it must
+be public HTTPS.
+
+**What the backend trusts.** Platega signs nothing: a callback carries only the two static headers. So the
+server treats it as a doorbell. It checks the headers (constant-time), reads *only* the transaction id from
+the body, and asks Platega itself (`GET /transaction/{id}` with our credentials) for the status, amount and
+currency. A plan or hours are granted only if that record belongs to a `billing_checkouts` row our server
+created for a signed-in user, `status` is `CONFIRMED`, and amount, currency and payload match the row
+exactly. The amounts come from the server's own settings; the browser sends only a plan name and is never
+trusted for a price, a return address or a user. Processing is idempotent (a checkout is paid once, in any
+order of duplicates), a payment that cannot be applied or does not match is held as `mismatch` /
+`needs_review` with a log line instead of crediting, and `CANCELED` / `CHARGEBACKED` (re-checked at Platega)
+take back hours or end the plan. If a callback never arrives, the page's "check my payment" call
+(`POST /api/billing/sync`) and a five-minute background pass look the payment up the same way.
+
+Things that follow from Platega's model, not choices:
+
+- Payments are one-off. A plan lasts 30 days and does **not** renew by itself; the person pays again
+  (the Renew button appears in the last 3 days, and the next month starts when this one ends).
+- The trial is free and needs no card (Platega has no card verification). It is limited to one per
+  account, to GitHub accounts older than a month. Paying replaces a running trial.
+- `PARTIALLY_REFUNDED` and `DISPUTED` callbacks cannot be verified through the status endpoint, so they
+  change nothing; handle them by hand in the Platega cabinet and in the ledger.
+- Prices are charged in `PLATEGA_CURRENCY`; the dollar figures in the plan table are only the catalogue.
+
+Migration `0006` drops Paddle's tables (it only ever ran in sandbox) and the Paddle columns of
+`subscriptions`; it cannot be reversed. Before enabling live billing, make a real test payment on your
+merchant account: repository tests use a fake built from Platega's published API and cannot verify your
+cabinet settings, the callback URL, or that Platega echoes `payload` in the status response (the check
+tolerates its absence but rejects a different value).
+
+Provider docs: [Platega API](https://docs.platega.io/),
+[GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
 
 Trial eligibility uses GitHub's authenticated `created_at`, strictly older than one calendar month,
 and a durable lifetime trial-use marker. Unknown ages fail closed until GitHub is reconnected.
@@ -106,17 +139,6 @@ is encrypted at rest, used in a GitHub-scoped Git header for cloning, and never 
 URL or the agent environment. Repository inputs accept GitHub HTTPS URLs only (local file URLs are
 a development-only exception). Authenticated fetch/push from the agent is not provided by this clone
 integration; existing archive export remains available.
-
-Migration `0005` preserves prior trial usage and suspends legacy Paddle subscriptions.
-Existing Paddle subscriptions from the older,
-client-metadata-based flow need operator reconciliation against Paddle and server-owned checkout/payment
-records before future notifications can renew them. Do not backfill ownership from `custom_data`.
-Before enabling live billing, exercise the complete charge/refund/renewal flow in Paddle sandbox;
-repository tests use mocks and do not verify your merchant account configuration.
-
-Provider contracts: [paid trials](https://developer.paddle.com/build/trials/create-trial/),
-[refund approvals](https://developer.paddle.com/build/transactions/create-transaction-adjustments/),
-[GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
 
 ## Checks
 

@@ -18,7 +18,7 @@ provider adapter (`providers/sprites.py`); `providers/local.py` stands in for it
    │     events               │  subscriptions, funnel_events                               ▼
    │                          │                                               kvist --frontend stdio-multi
    │                          ├── providers/<name>: create · wake · sleep · delete · status  (Mode B, NDJSON)
-   └─Paddle.js overlay        └── billing.py ◀── Paddle webhooks (BILLING_ENABLED=false by default)
+   └─Platega payment page      └── billing.py ◀── Platega callbacks (BILLING_ENABLED=false by default)
 ```
 
 * **Control server** (`backend/kvist_cloud`) — the only stateful part. SQLite by default,
@@ -39,8 +39,9 @@ provider adapter (`providers/sprites.py`); `providers/local.py` stands in for it
    `/auth/github/login`.
 2. `github_login` — GitHub OAuth (`read:user` scope only). The callback upserts the user, sets
    the session cookie and **starts creating the machine in the background** before redirecting.
-3. `checkout_open` → `card_added` — Paddle.js overlay over the page (or the dev stub while
-   `BILLING_ENABLED=false`). The trial subscription exists once the card is attached.
+3. `checkout_open` → `card_added` — the free trial starts at once; a paid plan sends the
+   person to Platega's payment page (or the dev stub while `BILLING_ENABLED=false`). A plan exists
+   once the server has asked Platega and found the payment confirmed.
 4. `key_valid` → `first_task_started` → `first_task_done` — onboarding is one screen: provider
    tile, key (checked with one cheap request through the server as soon as it is pasted),
    repository, one of three ready-made tasks, "Run". The machine has been waking up meanwhile.

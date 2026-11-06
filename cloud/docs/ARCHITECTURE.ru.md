@@ -18,7 +18,7 @@ MVP целиком работает на одном компьютере. Нен
    │     задачи               │  subscriptions, funnel_events                                 ▼
    │                          │                                                 kvist --frontend stdio-multi
    │                          ├── providers/<name>: create · wake · sleep · delete · status    (режим B, NDJSON)
-   └─оверлей Paddle.js        └── billing.py ◀── вебхуки Paddle (по умолчанию BILLING_ENABLED=false)
+   └─страница оплаты Platega   └── billing.py ◀── callback-и Platega (по умолчанию BILLING_ENABLED=false)
 ```
 
 * **Сервер управления** (`backend/kvist_cloud`) — единственная часть с состоянием. SQLite по
@@ -40,8 +40,9 @@ MVP целиком работает на одном компьютере. Нен
 2. `github_login` — GitHub OAuth (только scope `read:user`). Callback создаёт или обновляет
    пользователя, ставит cookie сессии и **запускает создание машины в фоне**, а уже потом
    делает редирект.
-3. `checkout_open` → `card_added` — оверлей Paddle.js поверх страницы (или dev-заглушка, пока
-   `BILLING_ENABLED=false`). Пробная подписка появляется, когда карта привязана.
+3. `checkout_open` → `card_added` — пробный период стартует сразу; платный тариф отправляет
+   на страницу оплаты Platega (или dev-заглушка, пока `BILLING_ENABLED=false`). Тариф появляется,
+   когда сервер сам спросил Platega и увидел подтверждённый платёж.
 4. `key_valid` → `first_task_started` → `first_task_done` — онбординг на одном экране: плитка
    провайдера, ключ (проверяется одним дешёвым запросом через сервер сразу после вставки),
    репозиторий, одна из трёх готовых задач, «Запустить». Машина всё это время просыпается.

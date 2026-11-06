@@ -1,5 +1,5 @@
 // Dashboard: hours and their feed, the machine, recent tasks, the key (last four characters).
-import { openCheckout } from "../billing.js";
+import { chargeLabel, startCheckout, syncPayments } from "../billing.js";
 import { api } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
 import { exportButton } from "../exporter.js";
@@ -37,14 +37,14 @@ function disputeDialog(row, onSent) {
 function hoursCard(view, config, refresh, announce) {
   const total = view.plan_seconds;
   const buy = h("button.btn.ghost", { type: "button",
-    text: t("dashboard.buyHours", { h: config.hour_pack.hours, p: config.hour_pack.price_usd }) });
+    text: t("dashboard.buyHoursCharge", { h: config.hour_pack.hours,
+      p: chargeLabel(config, "hours", config.hour_pack.price_usd) }) });
   buy.addEventListener("click", async () => {
     buy.disabled = true;
     try {
       if (config.enabled) {
-        // Billing on: the same Paddle overlay, for the one-off hour pack.
-        await openCheckout(config, "hours", refresh);
-        buy.disabled = false;
+        // Billing on: the one-off hour pack is paid on Platega's page, and this page is where it returns to.
+        await startCheckout("hours");
       } else {
         await api("/api/billing/dev/buy-hours", { method: "POST" });
         announce.textContent = t("dashboard.bought", { h: config.hour_pack.hours });
@@ -147,6 +147,8 @@ export async function dashboardScreen(root) {
   };
   const reload = () => load().catch((error) => replace(root, errorBox(error, reload)));
   replace(root, skeleton(3), h("span.skeleton.block"), skeleton(4));
+  // Back from paying: the server asks Platega, so a payment shows up even if its callback is late.
+  await syncPayments().catch(() => {});
   await load();
   const timer = setInterval(() => load().catch(() => {}), 15000);
   return () => clearInterval(timer);

@@ -8,16 +8,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlparse
 
 CLOUD_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = CLOUD_ROOT.parent
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+ENV_FILE_NAME = ".env"
+# Platega's PaymentMethodInt: 2 SBP QR, 3 ERIP, 11 card acquiring, 12 international, 13 crypto, 14 Sberpay.
+PLATEGA_METHODS = frozenset({2, 3, 11, 12, 13, 14})
+PLATEGA_DEFAULT_METHOD = 11
+PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours")
 
 
 class ConfigError(RuntimeError):
@@ -35,15 +42,13 @@ class Settings:
     github_client_secret: str = field(default="", repr=False)
     auth_dev_login: bool = False
     billing_enabled: bool = False
-    paddle_webhook_secret: str = field(default="", repr=False)
-    paddle_api_key: str = field(default="", repr=False)
-    paddle_client_token: str = ""
-    paddle_environment: str = "sandbox"
-    paddle_price_start: str = ""
-    paddle_price_trial: str = ""
-    paddle_price_pro: str = ""
-    paddle_price_max: str = ""
-    paddle_price_hours: str = ""
+    platega_merchant_id: str = field(default="", repr=False)
+    platega_secret: str = field(default="", repr=False)
+    platega_base_url: str = "https://app.platega.io"
+    platega_currency: str = "RUB"
+    platega_payment_method: int = PLATEGA_DEFAULT_METHOD
+    # What each purchase costs in ``platega_currency``; the server alone decides amounts.
+    platega_prices: Mapping[str, Decimal] = field(default_factory=dict)
     machine_provider: str = "local"
     runner_command: tuple[str, ...] = ()
     kvist_command: tuple[str, ...] = ()
@@ -113,6 +118,66 @@ def _argv(env: Mapping[str, str], name: str, default: tuple[str, ...]) -> tuple[
     return tuple(shlex.split(raw))
 
 
+def read_env_file(path: Path) -> dict[str, str]:
+    """KEY=value lines of a .env file; a missing file is not an error, a malformed line is."""
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.removeprefix("export ").partition("=")
+        name, value = name.strip(), value.strip()
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ConfigError(f"{path.name} line {number} is not NAME=value")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values[name] = value
+    return values
+
+
+def _environment() -> dict[str, str]:
+    """The process environment over the .env file: a real variable always wins."""
+    path = Path(os.environ.get("KVIST_CLOUD_ENV_FILE", "") or CLOUD_ROOT / ENV_FILE_NAME)
+    return {**read_env_file(path), **os.environ}
+
+
+def _platega(env: Mapping[str, str], enabled: bool) -> tuple[str, str, str, str, int, dict[str, Decimal]]:
+    merchant, secret = env.get("PLATEGA_MERCHANT_ID", "").strip(), env.get("PLATEGA_SECRET", "").strip()
+    base_url = (env.get("PLATEGA_BASE_URL", "") or "https://app.platega.io").rstrip("/")
+    currency = (env.get("PLATEGA_CURRENCY", "") or "RUB").strip().upper()
+    try:
+        method = int(env.get("PLATEGA_PAYMENT_METHOD", "") or PLATEGA_DEFAULT_METHOD)
+    except ValueError as error:
+        raise ConfigError("PLATEGA_PAYMENT_METHOD must be a number") from error
+    if method not in PLATEGA_METHODS:
+        raise ConfigError(f"PLATEGA_PAYMENT_METHOD must be one of {sorted(PLATEGA_METHODS)}")
+    if not base_url.startswith("https://"):
+        raise ConfigError("PLATEGA_BASE_URL must be https")
+    prices: dict[str, Decimal] = {}
+    for key in PLATEGA_PRICE_KEYS:
+        raw = env.get(f"PLATEGA_PRICE_{key.upper()}", "").strip()
+        if not raw:
+            continue
+        try:
+            amount = Decimal(raw)
+        except InvalidOperation as error:
+            raise ConfigError(f"PLATEGA_PRICE_{key.upper()} must be a number, got {raw!r}") from error
+        if not amount.is_finite() or amount <= 0 or amount != amount.quantize(Decimal("0.01")):
+            raise ConfigError(f"PLATEGA_PRICE_{key.upper()} must be positive with at most 2 decimals")
+        prices[key] = amount.quantize(Decimal("0.01"))
+    if enabled:
+        if not re.fullmatch(r"[0-9a-fA-F-]{36}", merchant):
+            raise ConfigError("BILLING_ENABLED needs PLATEGA_MERCHANT_ID (a UUID)")
+        if not secret:
+            raise ConfigError("BILLING_ENABLED needs PLATEGA_SECRET")
+        missing = [f"PLATEGA_PRICE_{key.upper()}" for key in PLATEGA_PRICE_KEYS if key not in prices]
+        if missing:
+            raise ConfigError("BILLING_ENABLED needs " + ", ".join(missing))
+    return merchant, secret, base_url, currency, method, prices
+
+
 def default_kvist_command() -> tuple[str, ...]:
     """The repository's own core, run from its virtual environment when there is one."""
     repo_python = REPO_ROOT / ".venv" / "bin" / "python"
@@ -125,7 +190,7 @@ def default_runner_command() -> tuple[str, ...]:
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
-    env = os.environ if env is None else env
+    env = _environment() if env is None else env
     data_dir = Path(env.get("KVIST_CLOUD_DATA_DIR", "") or CLOUD_ROOT / ".cloud-data").resolve()
     public_url = (env.get("PUBLIC_URL", "") or "http://127.0.0.1:8740").rstrip("/")
     session_secret = env.get("KVIST_CLOUD_SESSION_SECRET", "")
@@ -139,10 +204,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if auth_dev_login and host not in LOOPBACK_HOSTS:
         raise ConfigError("AUTH_DEV_LOGIN is only allowed when PUBLIC_URL is a loopback address")
     billing_enabled = _flag(env, "BILLING_ENABLED")
-    if billing_enabled and not env.get("PADDLE_WEBHOOK_SECRET", ""):
-        raise ConfigError("BILLING_ENABLED needs PADDLE_WEBHOOK_SECRET")
-    if env.get("PADDLE_ENVIRONMENT", "sandbox") not in {"sandbox", "production"}:
-        raise ConfigError("PADDLE_ENVIRONMENT must be sandbox or production")
+    merchant, secret, platega_url, currency, method, prices = _platega(env, billing_enabled)
     allow_local = _flag(env, "ALLOW_LOCAL_ENDPOINTS")
     if allow_local and host not in LOOPBACK_HOSTS:
         raise ConfigError("ALLOW_LOCAL_ENDPOINTS is only allowed when PUBLIC_URL is a loopback address")
@@ -159,15 +221,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         github_client_secret=env.get("GITHUB_CLIENT_SECRET", ""),
         auth_dev_login=auth_dev_login,
         billing_enabled=billing_enabled,
-        paddle_webhook_secret=env.get("PADDLE_WEBHOOK_SECRET", ""),
-        paddle_api_key=env.get("PADDLE_API_KEY", ""),
-        paddle_client_token=env.get("PADDLE_CLIENT_TOKEN", ""),
-        paddle_environment=env.get("PADDLE_ENVIRONMENT", "sandbox"),
-        paddle_price_start=env.get("PADDLE_PRICE_START", ""),
-        paddle_price_trial=env.get("PADDLE_PRICE_TRIAL", ""),
-        paddle_price_pro=env.get("PADDLE_PRICE_PRO", ""),
-        paddle_price_max=env.get("PADDLE_PRICE_MAX", ""),
-        paddle_price_hours=env.get("PADDLE_PRICE_HOURS", ""),
+        platega_merchant_id=merchant,
+        platega_secret=secret,
+        platega_base_url=platega_url,
+        platega_currency=currency,
+        platega_payment_method=method,
+        platega_prices=prices,
         machine_provider=env.get("MACHINE_PROVIDER", "local"),
         runner_command=_argv(env, "RUNNER_COMMAND", default_runner_command()),
         kvist_command=_argv(env, "KVIST_COMMAND", default_kvist_command()),

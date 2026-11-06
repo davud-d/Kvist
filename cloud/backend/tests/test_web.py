@@ -71,7 +71,7 @@ def test_the_pixel_window_is_served_and_may_show_pictures_it_fetched(client_fact
     # The agent's screen is drawn from a blob the page fetched itself; nothing else widens what pages may load.
     policy = page.headers["content-security-policy"]
     assert "img-src 'self' data: blob: https://avatars.githubusercontent.com" in policy
-    assert "script-src 'self' https://cdn.paddle.com" in policy
+    assert "script-src 'self';" in policy and "paddle" not in policy
 
 
 def test_the_old_new_task_page_leads_to_the_workspace(client_factory, dist):

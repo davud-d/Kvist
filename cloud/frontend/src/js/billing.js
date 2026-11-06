@@ -1,33 +1,23 @@
-// Checkout identities come from the authenticated backend. Browser events only trigger a refresh.
+// The server creates every purchase and names the page to pay on; the browser only goes there.
+// Whatever happens on that page proves nothing: access appears when the server has asked Platega.
 import { api } from "./api.js";
 
-let loading;
-let initialized = false;
-let completed = () => {};
-
-function loadPaddle() {
-  if (window.Paddle) return Promise.resolve(window.Paddle);
-  if (!loading) loading = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
-    script.onload = () => resolve(window.Paddle);
-    script.onerror = () => { loading = null; reject(Object.assign(new Error("paddle"), { code: "billing_unavailable" })); };
-    document.head.append(script);
-  });
-  return loading;
+export async function startCheckout(plan) {
+  const result = await api("/api/billing/checkout", { method: "POST", body: { plan } });
+  if (!result.redirect) return result.started || "started";
+  if (new URL(result.redirect).protocol !== "https:") {
+    throw Object.assign(new Error("redirect"), { code: "billing_unavailable" });
+  }
+  location.assign(result.redirect);
+  return "redirect";
 }
 
-export async function openCheckout(config, plan, onComplete) {
-  const checkout = await api("/api/billing/checkout", { method: "POST", body: { plan } });
-  const Paddle = await loadPaddle();
-  completed = onComplete;
-  if (!initialized) {
-    if (config.paddle.environment === "sandbox") Paddle.Environment.set("sandbox");
-    Paddle.Initialize({ token: config.paddle.client_token, eventCallback: (event) => {
-      if (event.name === "checkout.completed") completed();
-    } });
-    initialized = true;
-  }
-  Paddle.Checkout.open({ transactionId: checkout.transaction_id,
-    settings: { displayMode: "overlay", locale: document.documentElement.lang, allowDiscountRemoval: false, showAddDiscounts: false } });
+// "Check my payments": the server asks Platega about this person's open payments and answers with the plan.
+export function syncPayments() {
+  return api("/api/billing/sync", { method: "POST" });
+}
+
+export function chargeLabel(config, key, usd) {
+  const charge = config.charge;
+  return charge ? `${charge.prices[key]} ${charge.currency}` : `$${usd}`;
 }

@@ -26,13 +26,12 @@ def csp(public_url: str) -> str:
     return "; ".join(
         [
             "default-src 'self'",
-            "script-src 'self' https://cdn.paddle.com",
-            "style-src 'self' 'unsafe-inline' https://cdn.paddle.com",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
             # blob: is the pixel window showing the agent's screen, one picture at a time, from a fetch it made itself.
             "img-src 'self' data: blob: https://avatars.githubusercontent.com",
             "font-src 'self'",
-            f"connect-src 'self' {socket} https://*.paddle.com",
-            "frame-src https://*.paddle.com",
+            f"connect-src 'self' {socket}",
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "form-action 'self' https://github.com",

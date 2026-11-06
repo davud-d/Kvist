@@ -2,15 +2,14 @@
 """Adversarial requests: billing ownership, replay, trial eligibility, admission and input boundaries."""
 from __future__ import annotations
 
-import copy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import dev_login, make_machine, make_subscription, make_task, make_user
-from paddle_fake import open_checkout, paid_client
+from platega_fake import MERCHANT, SECRET, callback, open_checkout, paid_client, pay_and_notify
 from sqlalchemy import event, func, select
-from test_billing import balance, webhook
+from test_billing import balance, checkout_row
 from test_tasks_api import signed_in
 
 from kvist_cloud import billing, limits
@@ -37,114 +36,20 @@ def test_month_boundary_and_leap_year():
     assert billing.trial_eligible(user, now)
 
 
-@pytest.mark.parametrize("profile", [None, "2026-11-06T00:00:00Z", "not-a-date"])
-def test_unknown_young_or_invalid_github_age_cannot_checkout(client_factory, profile):
-    client, paddle = paid_client(client_factory)
+@pytest.mark.parametrize("age", [None, timedelta(0), timedelta(days=20)])
+def test_unknown_or_young_github_age_cannot_start_a_trial(client_factory, age):
+    client, platega = paid_client(client_factory)
     with session_scope(client.app.state.session_factory) as db:
         user = db.get(User, 1)
-        user.github_created_at = billing._parse_time(profile)
+        user.github_created_at = utcnow() - age if age is not None else None
     response = client.post("/api/billing/checkout", json={"plan": "trial"})
     assert response.status_code == 403
-    assert not paddle.requests
-
-
-def test_unbound_checkout_metadata_cannot_mint_anything(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    payment = paddle.payment("txn_unowned", "max")
-    payment["custom_data"] = {"user_id": 1, "kind": "hours", "plan": "max", "hours": 999999}
-    webhook(client, "evt_forged_metadata", "transaction.completed", payment)
-    webhook(client, "evt_subscription", "subscription.created", paddle.subscriptions["sub_01"] | {
-        "transaction_id": "txn_unowned", "custom_data": {"user_id": 1}})
-    assert balance(engine) == 0
-    assert not paddle.requests
-
-
-@pytest.mark.parametrize("change", [
-    {"status": "paid"}, {"currency_code": "EUR"}, {"payments": []},
-    {"payments": [{"status": "authorized", "amount": "100"}]},
-    {"details": {"totals": {"total": "0", "credit": "100"}}},
-    {"items": [{"price": {"id": "pri_max"}, "quantity": 1}]},
-    {"items": [{"price": {"id": "pri_trial"}, "quantity": 150}]},
-])
-def test_trial_requires_correct_price_quantity_and_captured_dollar(client_factory, engine, change):
-    client, paddle = paid_client(client_factory)
-    data = paddle.payment(open_checkout(client)) | change
-    assert webhook(client, "evt_bad_payment", "transaction.completed", data).status_code == 200
-    assert balance(engine) == 0
-    assert not paddle.adjustments
-
-
-def test_trial_waits_for_approved_refund_then_cannot_repeat(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    paddle.refund_status = "pending_approval"
-    payment = paddle.payment(open_checkout(client))
-    webhook(client, "evt_paid", "transaction.completed", payment)
-    assert balance(engine) == 0
-    # The browser claiming success, or a subscription event, is insufficient.
-    webhook(client, "evt_early", "subscription.created", paddle.subscriptions["sub_01"])
-    assert balance(engine) == 0
-    paddle.adjustments[0]["status"] = "approved"
-    webhook(client, "evt_refund", "adjustment.updated", paddle.adjustments[0])
-    assert balance(engine) == 5 * 3600
-    assert len(paddle.adjustments) == 1
-    with session_scope(client.app.state.session_factory) as db:
-        row = db.scalar(select(Subscription))
-        row.status = "cancelled"
-    assert client.post("/api/billing/checkout", json={"plan": "trial"}).status_code == 403
-
-
-def test_payment_and_refund_replays_with_distinct_event_ids_are_idempotent(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    payment = paddle.payment(open_checkout(client))
-    for i in range(4):
-        assert webhook(client, f"evt_paid_{i}", "transaction.completed", payment).status_code == 200
-    assert balance(engine) == 5 * 3600
-    assert len(paddle.adjustments) == 1
-    pack = paddle.payment(open_checkout(client, "hours"), "hours")
-    for i in range(4):
-        assert webhook(client, f"evt_pack_{i}", "transaction.completed", pack).status_code == 200
-    assert balance(engine) == 15 * 3600
-
-
-def test_checkout_cannot_be_reassigned_by_custom_data(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    with session_scope(client.app.state.session_factory) as db:
-        other = make_user(db, "other", 2)
-        other_id = other.id
-    payment = paddle.payment(open_checkout(client, "pro"), "pro")
-    payment["custom_data"] = {"user_id": other_id, "plan": "max", "kind": "hours"}
-    webhook(client, "evt_paid", "transaction.completed", payment)
-    assert balance(engine) == 150 * 3600
-    with session_scope(client.app.state.session_factory) as db:
-        assert db.scalar(select(Subscription.user_id)) == 1
-
-
-def test_stale_webhook_cannot_reactivate_cancelled_subscription(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    payment = paddle.payment(open_checkout(client, "start"), "start")
-    webhook(client, "evt_paid", "transaction.completed", payment)
-    stale = copy.deepcopy(paddle.subscriptions["sub_01"])
-    paddle.subscriptions["sub_01"].update(
-        status="canceled", updated_at=utcnow().isoformat(), current_billing_period=None)
-    webhook(client, "evt_cancel", "subscription.canceled", paddle.subscriptions["sub_01"])
-    webhook(client, "evt_old", "subscription.activated", stale)
-    assert balance(engine) == 0
-
-
-def test_unpaid_upgrade_cannot_raise_plan_or_hours(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    webhook(client, "evt_paid", "transaction.completed", paddle.payment(open_checkout(client, "start"), "start"))
-    snapshot = paddle.subscriptions["sub_01"]
-    snapshot["items"][0]["price"]["id"] = "pri_max"
-    snapshot["updated_at"] = utcnow().isoformat()
-    webhook(client, "evt_upgrade", "subscription.updated", snapshot)
-    view = client.get("/api/billing/subscription").json()
-    assert view["plan"] == "start" and view["balance_seconds"] == 50 * 3600
+    assert not platega.requests
 
 
 @pytest.mark.parametrize("extra", ["plan", "status", "is_admin", "balance_seconds", "trial_used_at",
                                     "github_created_at",
-                                    "paddle_customer_id", "max_parallel_tasks"])
+                                    "payment_status", "max_parallel_tasks"])
 def test_profile_cannot_change_server_owned_fields(client_factory, extra):
     client = client_factory(AUTH_DEV_LOGIN="true")
     dev_login(client)
@@ -294,15 +199,6 @@ def test_150_parallel_http_creations_have_only_one_active_task(client_factory, e
         assert db.scalar(select(func.count()).select_from(Machine)) == 1
 
 
-@pytest.mark.parametrize("override", [{"tax_mode": "external"}, {"trial_period": None},
-                                      {"unit_price": {"amount": "100", "currency_code": "USD"}}])
-def test_incorrect_price_configuration_fails_before_checkout(client_factory, override):
-    client, paddle = paid_client(client_factory)
-    paddle.price_override = override
-    assert client.post("/api/billing/checkout", json={"plan": "trial"}).status_code == 503
-    assert not paddle.transactions
-
-
 def test_private_repo_token_only_reaches_runner_clone(client_factory, engine):
     from kvist_cloud.gateway import start_message
 
@@ -346,62 +242,6 @@ def test_local_provider_cannot_be_exposed_as_public_hosting(settings):
         make_provider(replace(settings, public_url="https://cloud.example"))
 
 
-@pytest.mark.parametrize("before_payment", [False, True])
-def test_refunded_hour_pack_is_reversed_once_even_out_of_order(client_factory, engine, before_payment):
-    client, paddle = paid_client(client_factory)
-    webhook(client, "evt_start", "transaction.completed", paddle.payment(open_checkout(client, "start"), "start"))
-    txn = open_checkout(client, "hours")
-    payment = paddle.payment(txn, "hours")
-    adjustment = {"id": "adj_hours", "transaction_id": txn, "status": "approved", "currency_code": "USD",
-                  "action": "refund", "type": "full", "totals": {"total": "500"}}
-    if before_payment:
-        webhook(client, "evt_refund_early", "adjustment.updated", adjustment)
-    webhook(client, "evt_pack", "transaction.completed", payment)
-    for i in range(3):
-        assert webhook(client, f"evt_refund_{i}", "adjustment.updated", adjustment).status_code == 200
-    assert balance(engine) == 50 * 3600
-    webhook(client, "evt_paid_again", "transaction.completed", payment)
-    assert balance(engine) == 50 * 3600
-
-
-@pytest.mark.parametrize("before_payment", [False, True])
-def test_chargeback_does_not_leave_paid_plan_active(client_factory, engine, before_payment):
-    client, paddle = paid_client(client_factory)
-    txn = open_checkout(client, "max")
-    payment = paddle.payment(txn, "max")
-    adjustment = {"id": "adj_dispute", "transaction_id": txn, "status": "approved",
-                  "action": "chargeback", "type": "full"}
-    if before_payment:
-        webhook(client, "evt_chargeback_early", "adjustment.created", adjustment)
-    webhook(client, "evt_paid", "transaction.completed", payment)
-    webhook(client, "evt_chargeback", "adjustment.created", adjustment)
-    webhook(client, "evt_stale_active", "subscription.activated", paddle.subscriptions["sub_01"])
-    assert balance(engine) == 0
-
-
-def test_partial_refund_removes_only_refunded_pack_hours(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    webhook(client, "evt_start", "transaction.completed", paddle.payment(open_checkout(client, "start"), "start"))
-    txn = open_checkout(client, "hours")
-    webhook(client, "evt_pack", "transaction.completed", paddle.payment(txn, "hours"))
-    adjustment = {"id": "adj_partial", "transaction_id": txn, "status": "approved", "currency_code": "USD",
-                  "action": "refund", "type": "partial", "totals": {"total": "250"}}
-    webhook(client, "evt_refund", "adjustment.updated", adjustment)
-    assert balance(engine) == 55 * 3600
-
-
-def test_checkout_abandoned_mid_creation_does_not_block_forever(client_factory, engine):
-    client, paddle = paid_client(client_factory)
-    with session_scope(client.app.state.session_factory) as db:
-        db.add(BillingCheckout(user_id=1, kind="trial", price_id="pri_trial"))
-    assert client.post("/api/billing/checkout", json={"plan": "trial"}).status_code == 409
-    with session_scope(client.app.state.session_factory) as db:
-        db.scalar(select(BillingCheckout)).created_at = utcnow() - billing.CHECKOUT_CREATE_TIMEOUT
-    assert open_checkout(client).startswith("txn_")
-    with session_scope(client.app.state.session_factory) as db:
-        assert db.scalar(select(func.count()).select_from(BillingCheckout)) == 1
-
-
 def test_hours_gone_before_start_pause_the_task_not_blame_the_key(client_factory, engine):
     from kvist_cloud.gateway import dispatch
 
@@ -430,3 +270,156 @@ def test_machine_never_created_is_replaced_and_keeps_its_tasks(client_factory, e
         assert len(live) == 1 and live[0].id != broken.id
         assert db.get(Task, waiting).machine_id == live[0].id
         assert db.get(Task, response.json()["id"]).machine_id == live[0].id
+
+
+# -- billing: the backend believes Platega, never the browser or the callback body ------------------
+
+
+def test_a_callback_for_a_transaction_we_never_made_credits_nothing_and_asks_nothing(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    forged = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+    assert callback(client, forged, status="CONFIRMED", amount=1, payload="max").status_code == 200
+    assert not platega.requests and balance(engine) == 0
+
+
+def test_the_callback_body_cannot_confirm_a_payment_platega_has_not_received(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    transaction_id = open_checkout(client, "max")
+    # Even with the right headers, "CONFIRMED" in the body is only a doorbell; Platega still says PENDING.
+    assert callback(client, transaction_id, status="CONFIRMED", amount=9900, currency="RUB").status_code == 200
+    assert len(platega.gets()) == 1 and balance(engine) == 0
+    assert checkout_row(engine).status == "pending"
+
+
+@pytest.mark.parametrize("tamper", [
+    {"paymentDetails": {"amount": 1.0, "currency": "RUB"}},
+    {"paymentDetails": {"amount": 1500.0, "currency": "USD"}},
+    {"paymentDetails": {"amount": "garbage", "currency": "RUB"}},
+    {"paymentDetails": "1500 RUB"},
+    {"paymentDetails": None},
+    {"payload": "another-checkouts-token"},
+    {"id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"},
+])
+def test_a_confirmation_that_is_not_the_purchase_we_created_credits_nothing(client_factory, engine, tamper):
+    client, platega = paid_client(client_factory)
+    transaction_id = open_checkout(client, "start")
+    platega.pay(transaction_id)
+    platega.tamper = tamper
+    callback(client, transaction_id)
+    assert balance(engine) == 0 and checkout_row(engine).status == "mismatch"
+    platega.tamper = {}
+    callback(client, transaction_id)
+    assert balance(engine) == 0
+
+
+def test_a_cheaper_payment_cannot_buy_a_dearer_plan(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    cheap = open_checkout(client, "start")
+    dear = open_checkout(client, "max")
+    # The attacker pays for Start but points the notification at the Max checkout's id.
+    platega.pay(cheap)
+    callback(client, dear)
+    assert balance(engine) == 0 and not subscriptions_exist(engine)
+
+
+def subscriptions_exist(engine) -> bool:
+    with session_scope(make_session_factory(engine)) as db:
+        return db.scalar(select(Subscription)) is not None
+
+
+def second_user(client_factory, platega):
+    from fastapi import Response
+    from platega_fake import PLATEGA
+
+    from kvist_cloud.auth import set_session
+
+    other = client_factory(platega, **PLATEGA)
+    with session_scope(other.app.state.session_factory) as db:
+        user = make_user(db, "intruder", 2)
+        response = Response()
+        set_session(response, other.app.state.settings, user)
+        other.cookies.set("kc_session", response.headers["set-cookie"].split(";", 1)[0].split("=", 1)[1])
+    return other
+
+
+def test_a_payment_credits_the_account_that_created_the_checkout(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    transaction_id = open_checkout(client, "start")
+    other = second_user(client_factory, platega)
+    platega.pay(transaction_id)
+    # Anyone can ring the bell (it is authenticated by the merchant's headers, not by a user) ...
+    assert callback(other, transaction_id).status_code == 200
+    # ... and the plan still lands on the owner, nowhere else.
+    with session_scope(client.app.state.session_factory) as db:
+        assert [s.user_id for s in db.scalars(select(Subscription))] == [1]
+
+
+def test_one_user_cannot_read_or_sync_anothers_checkout(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    transaction_id = open_checkout(client, "start")
+    other = second_user(client_factory, platega)
+    platega.pay(transaction_id)
+    assert other.post("/api/billing/sync").json()["status"] == "none"
+    assert balance(engine) == 0 and not platega.gets()
+
+
+def test_checkout_requires_a_signed_in_user(client_factory):
+    client, platega = paid_client(client_factory)
+    client.cookies.clear()
+    assert client.post("/api/billing/checkout", json={"plan": "start"}).status_code in {401, 403}
+    assert client.post("/api/billing/sync").status_code in {401, 403}
+
+
+def test_credentials_never_leave_in_an_error_or_a_log(client_factory, caplog):
+    import httpx
+
+    client, _ = paid_client(client_factory)
+    client.app.state.http_transport = httpx.MockTransport(
+        lambda request: httpx.Response(500, text=f"echo {SECRET} {MERCHANT}"))
+    response = client.post("/api/billing/checkout", json={"plan": "start"})
+    assert response.status_code == 502
+    assert SECRET not in response.text and SECRET not in caplog.text and MERCHANT not in response.text
+
+
+def test_payments_cannot_be_hammered_at_platega(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    with session_scope(client.app.state.session_factory) as db:
+        for number in range(billing.MAX_NEW_CHECKOUTS_PER_HOUR):
+            db.add(BillingCheckout(user_id=1, kind="pro", amount="3900.00", currency="RUB",
+                                   token=f"{number}" * 48, status="revoked"))
+    assert client.post("/api/billing/checkout", json={"plan": "start"}).status_code == 429
+    assert not platega.requests
+
+
+def test_a_checkout_abandoned_mid_creation_does_not_block_forever(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    with session_scope(client.app.state.session_factory) as db:
+        db.add(BillingCheckout(user_id=1, kind="start", amount="1500.00", currency="RUB", token="t" * 48))
+    assert client.post("/api/billing/checkout", json={"plan": "start"}).status_code == 409
+    with session_scope(client.app.state.session_factory) as db:
+        db.scalar(select(BillingCheckout)).created_at = utcnow() - billing.CHECKOUT_CREATE_TIMEOUT
+    assert open_checkout(client, "start")
+    with session_scope(client.app.state.session_factory) as db:
+        assert db.scalar(select(func.count()).select_from(BillingCheckout)) == 1
+
+
+def test_a_payment_that_no_longer_fits_is_held_for_an_operator_not_stacked(client_factory, engine):
+    client, platega = paid_client(client_factory)
+    first = open_checkout(client, "pro")
+    second_link = first  # same link; a second payer path is opened by hand below
+    pay_and_notify(client, platega, "start")
+    # A pack link opened while there was no plan, paid after the plan was charged back.
+    with session_scope(client.app.state.session_factory) as db:
+        db.add(BillingCheckout(user_id=1, kind="hours", amount="500.00", currency="RUB", token="h" * 48,
+                               transaction_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+    assert second_link
+    platega.transactions["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] = {
+        "request": {"paymentDetails": {"amount": 500.0, "currency": "RUB"}, "payload": "h" * 48, "return": "x"},
+        "status": "CONFIRMED"}
+    with session_scope(client.app.state.session_factory) as db:
+        db.scalars(select(Subscription)).first().status = "cancelled"
+    callback(client, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    with session_scope(client.app.state.session_factory) as db:
+        statuses = {row.kind: row.status for row in db.scalars(select(BillingCheckout))}
+    assert statuses["hours"] == "needs_review"
+    assert balance(engine) == 0

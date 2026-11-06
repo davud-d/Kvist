@@ -8,3 +8,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# Secrets: never commit real keys (the template is env.example)
+.env
+.env.*
+*.env

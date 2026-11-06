@@ -43,9 +43,13 @@ def _serializer(settings: Settings, salt: str) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_secret, salt=salt)
 
 
+def app_http_client(app) -> httpx.AsyncClient:
+    """Outbound HTTP; tests swap the transport, so no test reaches GitHub, a model provider or Platega."""
+    return httpx.AsyncClient(transport=app.state.http_transport, timeout=10.0)
+
+
 def http_client(request: Request) -> httpx.AsyncClient:
-    """Outbound HTTP; tests swap the transport, so no test reaches GitHub or a model provider."""
-    return httpx.AsyncClient(transport=request.app.state.http_transport, timeout=10.0)
+    return app_http_client(request.app)
 
 
 def safe_next(raw: str | None, default: str = "/start") -> str:

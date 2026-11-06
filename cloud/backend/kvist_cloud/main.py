@@ -59,8 +59,8 @@ def create_app(
             settings.session_secret,
             settings.master_key,
             settings.github_client_secret,
-            settings.paddle_webhook_secret,
-            settings.paddle_api_key,
+            settings.platega_merchant_id,
+            settings.platega_secret,
         ]
     )
     settings.data_dir.mkdir(parents=True, exist_ok=True)

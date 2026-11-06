@@ -99,9 +99,6 @@ class Subscription(Base):
     current_period_end: Mapped[datetime] = mapped_column(UTCDateTime)
     trial_ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
-    paddle_subscription_id: Mapped[str] = mapped_column(String(100), default="", index=True)
-    provider_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
-    paddle_customer_id: Mapped[str] = mapped_column(String(100), default="")
     trial_reminder_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
@@ -246,47 +243,39 @@ class FunnelEvent(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
-class PaddleEvent(Base):
-    """Webhook ids already processed; Paddle retries, a retry must change nothing."""
-
-    __tablename__ = "paddle_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[str] = mapped_column(String(100), unique=True)
-    event_type: Mapped[str] = mapped_column(String(100))
-    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+class CheckoutStatus:
+    PENDING = "pending"
+    PAID = "paid"
+    REVOKED = "revoked"
+    # Platega confirmed a payment that is not what we asked for, or money arrived that cannot be applied.
+    # Nothing is credited; an operator looks at the log line with the checkout id.
+    MISMATCH = "mismatch"
+    NEEDS_REVIEW = "needs_review"
 
 
 class BillingCheckout(Base):
-    """Only transactions created by our server can provision a new purchase."""
+    """A purchase created by our server. Only a row like this can ever be turned into hours or a plan."""
 
     __tablename__ = "billing_checkouts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # A paid plan id, or "hours".
     kind: Mapped[str] = mapped_column(String(20))
-    price_id: Mapped[str] = mapped_column(String(100))
-    transaction_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
-    subscription_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
-    completed: Mapped[bool] = mapped_column(Boolean, default=False)
-    purchase_entry_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    refund_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    refunded: Mapped[bool] = mapped_column(Boolean, default=False)
+    # What we asked Platega to charge; a confirmation must match it exactly.
+    amount: Mapped[str] = mapped_column(String(20))
+    currency: Mapped[str] = mapped_column(String(8))
+    # Sent to Platega as the payload and checked on the way back.
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    transaction_id: Mapped[str | None] = mapped_column(String(36), unique=True, nullable=True)
+    pay_url: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(20), default=CheckoutStatus.PENDING)
+    # What a confirmed payment created, so a chargeback can take it back.
+    subscription_row_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ledger_entry_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    paid_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
-
-class BillingPayment(Base):
-    """Payment proof for a subscription period; transaction IDs, not notification IDs, deduplicate it."""
-
-    __tablename__ = "billing_payments"
-
-    transaction_id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    subscription_id: Mapped[str] = mapped_column(String(100), index=True)
-    price_id: Mapped[str] = mapped_column(String(100))
-    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
-    period_start: Mapped[datetime] = mapped_column(UTCDateTime)
-    period_end: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
 class Outbox(Base):

@@ -1,6 +1,6 @@
-// Funnel step 3: attach a card. Paddle.js overlay on top of this page when billing is on; a stub
-// with the same form and a "skip (dev)" button when it is off. The trial's terms are above both.
-import { openCheckout } from "../billing.js";
+// Funnel step 3: start the trial (free) or pay for a plan on Platega's page; a stub with a "skip (dev)" button
+// when billing is off. The trial's terms are above both.
+import { chargeLabel, startCheckout, syncPayments } from "../billing.js";
 import { api } from "../api.js";
 import { fromBoot } from "../boot.js";
 import { h, replace, skeleton } from "../dom.js";
@@ -10,7 +10,7 @@ import { errorBox, liveRegion, machinePill } from "../ui.js";
 
 async function waitForSubscription(tries = 60) {
   for (let i = 0; i < tries; i += 1) {
-    const view = await api("/api/billing/subscription");
+    const view = await syncPayments();
     if (view.status !== "none") return view;
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
@@ -68,7 +68,7 @@ export async function startScreen(root, { me, navigate }) {
     }));
   } else if (config.enabled) {
     const eligible = await api("/api/billing/eligibility");
-    if (eligible.trial_pending) {
+    if (eligible.payment_pending) {
       replace(action, h("p.hint.wait", { text: t("start.confirming") }));
       waitForSubscription().then(done).catch(() => {});
       return null;
@@ -78,13 +78,8 @@ export async function startScreen(root, { me, navigate }) {
       status.textContent = t("start.opening");
       replace(problem);
       try {
-        await openCheckout(config, plan, async () => {
-          replace(action, h("p.hint.wait", { text: t("start.confirming") }));
-          try {
-            await waitForSubscription();
-            done();
-          } catch (error) { fail(error); }
-        });
+        // A paid plan leaves for Platega's page and comes back here; the free trial starts at once.
+        if (await startCheckout(plan) === "started") done();
       } catch (error) {
         // Next to the choices, not instead of them: a refused trial still leaves the paid plans.
         replace(problem, errorBox(error));
@@ -95,7 +90,8 @@ export async function startScreen(root, { me, navigate }) {
         : h("p.hint", { text: t("errors.trial_ineligible") }),
       h("div.row", {}, ...["start", "pro", "max"].map((plan) => h("button.btn.ghost", { type: "button",
         onclick: () => open(plan),
-        text: `${plan.toUpperCase()} · $${config.plans.find((p) => p.id === plan).price_usd}/` + t("start.month") }))),
+        text: `${plan.toUpperCase()} · ${chargeLabel(config, plan, config.plans.find((p) => p.id === plan).price_usd)}/`
+          + t("start.month") }))),
       problem));
   } else {
     replace(action, errorBox({ code: "billing_unavailable" }));
