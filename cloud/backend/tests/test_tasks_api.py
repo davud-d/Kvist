@@ -106,7 +106,7 @@ def test_task_life_through_the_runner(client_factory, engine, fake_provider):
     assert (task["final_message"], task["outcome"]) == ("Wrote app.py", "done")
     events = client.get(f"/api/tasks/{task_id}/events").json()["events"]
     # The live snapshot (stream_chunk) is not kept; the significant events are.
-    assert [item["event"]["type"] for item in events] == ["hello", "action_result", "final"]
+    assert [item["event"]["type"] for item in events] == ["user", "hello", "action_result", "final"]
     assert client.get(f"/api/tasks/{task_id}/events?after=2").json()["events"][0]["seq"] == 3
     changes = client.get(f"/api/tasks/{task_id}/changes").json()
     assert changes == [{"path": "app.py", "lines_added": 1, "lines_removed": 0, "patches": [WRITE["patch"]]}]
@@ -125,8 +125,10 @@ def test_browser_stream_sends_history_then_live_events(client_factory, engine, f
             first = browser.receive_json()
             assert first["type"] == "task" and first["task"]["status"] == "running"
             assert "balance_seconds" in first["task"]
+            # What the person wrote is the first thing in the history, then what the agent did.
+            assert browser.receive_json() == {"type": "event", "seq": 1, "event": {"type": "user", "text": "go"}}
             history = browser.receive_json()
-            assert history == {"type": "event", "seq": 1, "event": {"type": "hello", "protocol_version": 1}}
+            assert history == {"type": "event", "seq": 2, "event": {"type": "hello", "protocol_version": 1}}
             assert browser.receive_json() == {"type": "history_end"}
             relay(ws, task_id, {"type": "action_output", "step": 1, "output": "building...", "call_id": "c"})
             live = browser.receive_json()
@@ -215,3 +217,72 @@ def test_pause_and_resume(client_factory, engine, fake_provider):
         assert resumed["status"] == TaskStatus.STARTING
         again = ws.receive_json()
         assert (again["type"], again["task_id"], again["resume"]) == ("start_task", task_id, True)
+
+
+def test_a_task_is_a_conversation_it_takes_more_messages(client_factory, engine, fake_provider):
+    """After the first answer the person writes again: the same task starts a new run that switches back into
+    the conversation (by the core's own session name) and takes the new message."""
+    client = signed_in(client_factory, engine)
+    with runner(client, fake_provider) as ws:
+        ws.send_json({"type": "hello", "tasks": []})
+        task_id = client.post("/api/tasks", json={"goal": "write app.py", "repo_url": ""}).json()["id"]
+        ws.receive_json()
+        relay(ws, task_id, {"type": "hello", "protocol_version": 1, "session": "chat-1"})
+        relay(ws, task_id, {"type": "final", "message": "Wrote app.py", "user_messages": [], "outcome": "done"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.DONE)
+
+        answer = client.post(f"/api/tasks/{task_id}/messages", json={"text": "  now add a test  "})
+        assert answer.status_code == 200 and answer.json()["status"] == TaskStatus.STARTING
+        start = ws.receive_json()
+        assert (start["type"], start["task_id"], start["goal"]) == ("start_task", task_id, "now add a test")
+        # The conversation is the session the first run opened, not the fresh one each run begins with.
+        assert start["session"] == "chat-1" and start["resume"] is False
+        with session_scope(make_session_factory(engine)) as db:
+            assert db.get(Task, task_id).pending_text == "now add a test"
+
+        # The old run's exit arriving late must not end the new run.
+        ws.send_json({"type": "task_exit", "task_id": task_id, "exit_code": 0, "reason": "finished"})
+        relay(ws, task_id, {"type": "hello", "protocol_version": 1, "session": "chat-2"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.RUNNING)
+        with session_scope(make_session_factory(engine)) as db:
+            assert db.get(Task, task_id).pending_text == ""
+        relay(ws, task_id, {"type": "final", "message": "Added the test", "user_messages": [], "outcome": "done"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.DONE)
+
+        # A third message switches into the same conversation again, whatever session the second run began in.
+        client.post(f"/api/tasks/{task_id}/messages", json={"text": "and a README"})
+        assert ws.receive_json()["session"] == "chat-1"
+        relay(ws, task_id, {"type": "session", "session": "chat-1", "has_checkpoint": True})
+        relay(ws, task_id, {"type": "hello", "protocol_version": 1, "session": "chat-3"})
+        relay(ws, task_id, {"type": "final", "message": "Done", "user_messages": [], "outcome": "done"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.DONE)
+
+    events = client.get(f"/api/tasks/{task_id}/events").json()["events"]
+    assert [item["event"]["text"] for item in events if item["event"]["type"] == "user"] == [
+        "write app.py", "now add a test", "and a README"]
+
+
+def test_a_message_during_a_turn_goes_to_the_running_agent(client_factory, engine, fake_provider):
+    client = signed_in(client_factory, engine)
+    with runner(client, fake_provider) as ws:
+        ws.send_json({"type": "hello", "tasks": []})
+        task_id = client.post("/api/tasks", json={"goal": "go"}).json()["id"]
+        ws.receive_json()
+        assert client.post(f"/api/tasks/{task_id}/messages", json={"text": "too early"}).status_code == 409
+        relay(ws, task_id, {"type": "hello", "protocol_version": 1})
+        eventually(lambda: status(engine, task_id) == TaskStatus.RUNNING)
+        assert client.post(f"/api/tasks/{task_id}/messages", json={"text": "also this"}).status_code == 200
+        assert ws.receive_json() == {"type": "message", "task_id": task_id, "text": "also this"}
+        # The run ended a moment before the message reached it: the message starts the next run instead.
+        relay(ws, task_id, {"type": "final", "message": "ok", "user_messages": [], "outcome": "done"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.DONE)
+        ws.send_json({"type": "message_undelivered", "task_id": task_id, "text": "also this"})
+        assert ws.receive_json()["goal"] == "also this"
+
+
+def test_messages_are_for_the_owner_and_need_hours_and_words(client_factory, engine, fake_provider):
+    client = signed_in(client_factory, engine)
+    task_id = client.post("/api/tasks", json={"goal": "go"}).json()["id"]
+    assert client.post(f"/api/tasks/{task_id + 50}/messages", json={"text": "hi"}).status_code == 404
+    assert client.post(f"/api/tasks/{task_id}/messages", json={"text": ""}).status_code == 422
+    assert client.post(f"/api/tasks/{task_id}/messages", json={"text": "   "}).status_code == 400

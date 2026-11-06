@@ -4,7 +4,7 @@
 import * as bridge from "./bridge.js";
 import { account, cannotRun } from "./cloud.js";
 import { t } from "./i18n.js";
-import { addNote, clearFeed, createAgent, replayHistory, addUser, beginTurn } from "./reducer.js";
+import { addNote, beginTurn, clearFeed, createAgent, replayHistory } from "./reducer.js";
 import { addAgent, announce, dispatch, removeAgent, setActive, setPref, store } from "./store.js";
 import { toast } from "./views/toast.js";
 
@@ -139,40 +139,31 @@ function explain(problem) {
   else location.assign(problem === "no_subscription" ? "/start" : "/dashboard");
 }
 
-/** A goal starts the task. The same words go nowhere else: a task has one goal. True when it was sent. */
+/**
+ * The first message starts the task; every later one goes into the same conversation (the cloud starts the agent
+ * again if it had stopped, or queues the message if it is busy). The person's words reach the feed from the
+ * task's own history, the way they do after a reload. True when the message was sent.
+ */
 export async function sendGoal(agent, text) {
   const line = text.trim();
-  // One goal per task: once it is sent (or while it is being sent) the words go nowhere.
-  if (!line || agent.cloud || agent.session || agent.state === "running" || agent.state === "gone") return false;
+  if (!line || agent.state === "gone") return false;
   const problem = cannotRun(account);
   if (problem) {
     explain(problem);
     return false;
   }
-  addUser(agent, line, []);
-  beginTurn(agent);
-  announce({ kind: "agent", id: agent.id });
   try {
     await bridge.sendToAgent(agent.id, { type: "goal", text: line });
   } catch (error) {
-    undoGoal(agent);
     toast(error.localized ?? String(error), "error");
     if (error.code === "no_key") openKeyDialog();
     else if (error.code === "no_hours") location.assign("/dashboard");
     else if (error.code === "no_subscription") location.assign("/start");
     return false;
   }
-  return true;
-}
-
-// The server refused the goal: the draft goes back to how it was, with the words still in the box.
-function undoGoal(agent) {
-  const last = agent.items.at(-1);
-  if (last?.kind === "user") agent.items.pop();
-  agent.state = "idle";
-  agent.turn = { startedAt: 0, waitingSince: 0, outputAtStart: 0 };
-  agent.rev++;
+  if (agent.state !== "running") beginTurn(agent);
   announce({ kind: "agent", id: agent.id });
+  return true;
 }
 
 /** The only commands the cloud has: another task, and continuing a paused one. */

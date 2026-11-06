@@ -30,7 +30,7 @@ PERSISTED = frozenset(
         "hello", "route", "plan", "step", "action_result", "job_started", "job_finished", "job_notice",
         "message", "final", "error", "input_request", "input_closed", "stream_start", "stream_commit",
         "reasoning_start", "reasoning_commit", "usage", "session_title", "artifact", "helper", "skill",
-        "turn_end", "wake", "command_result", "session", "notice", "sandbox_notice", "task_state",
+        "turn_end", "wake", "command_result", "session", "notice", "sandbox_notice", "task_state", "user",
     }
 )
 # Reasons the runner gives for stopping a task that can be continued later.
@@ -151,6 +151,38 @@ def task_view(db: Session, task: Task) -> dict[str, object]:
     }
 
 
+def record_user(app: FastAPI, db: Session, task: Task, text: str) -> None:
+    """What the person wrote, kept in the task's history like any event: the core's own journal never reaches us."""
+    event = redact_obj({"type": "user", "text": text})
+    seq = task.next_seq
+    task.next_seq += 1
+    db.add(TaskEvent(task_id=task.id, seq=seq, type="user", payload=event))
+    db.flush()
+    app.state.hub.publish(task.id, {"type": "event", "seq": seq, "event": event})
+
+
+def core_session(db: Session, task: Task) -> str:
+    """The name Kvist gave this conversation, so a later run of Kvist can switch back into it.
+
+    Every run starts a session of its own (hello); the conversation stays in the one the first run opened,
+    and a `session` event (the switch back) names it again.
+    """
+    rows = db.scalars(
+        select(TaskEvent)
+        .where(TaskEvent.task_id == task.id, TaskEvent.type.in_(("session", "hello")))
+        .order_by(TaskEvent.seq)
+    )
+    first_hello = ""
+    switched = ""
+    for row in rows:
+        name = str(row.payload.get("session") or "")
+        if row.type == "session" and name:
+            switched = name
+        elif row.type == "hello" and name and not first_hello:
+            first_hello = name
+    return switched or first_hello
+
+
 def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
     """Store (if it is kept), update the status, fan out. Returns the status before the event."""
     before = task.status
@@ -163,6 +195,9 @@ def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
         if view is not None:
             app.state.hub.publish(task.id, {"type": "event", "seq": None, "event": view})
         return task.status
+    if kind == "hello" or (kind == "task_state" and event.get("state") == "running"):
+        # Kvist on the machine is up and working, so it has the message that started this turn.
+        task.pending_text = ""
     seq = None
     if kind in PERSISTED:
         seq = task.next_seq
@@ -196,6 +231,10 @@ def _first_done(db: Session, task: Task) -> None:
 class TaskIn(BaseModel):
     goal: str = Field(min_length=1, max_length=GOAL_LIMIT)
     repo_url: str = Field(default="", max_length=500)
+
+
+class MessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=GOAL_LIMIT)
 
 
 class InputIn(BaseModel):
@@ -267,6 +306,7 @@ async def create_task(
     db.add(task)
     db.flush()
     admit(db, task)
+    record_user(app, db, task, task.goal)
     if first:
         record_step(db, "first_task_started", user_id=user.id)
     db.commit()
@@ -393,6 +433,56 @@ async def resume_task(
     admit(db, task)
     db.commit()
     await _dispatch(request.app, task.machine_id)
+    return task_payload(db, task)
+
+
+def restart_with(db: Session, task: Task, text: str) -> None:
+    """The session goes on in a new run of Kvist: it switches back into the conversation and takes `text`."""
+    from .limits import admit
+
+    task.pending_text = text
+    task.resume_requested = False
+    task.status_reason = ""
+    task.outcome = ""
+    task.final_message = ""
+    task.finished_at = None
+    task.started_at = None
+    admit(db, task)
+
+
+@router.post("/api/tasks/{task_id}/messages")
+async def post_message(
+    task_id: int,
+    payload: MessageIn,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Another message in the conversation. A task is a session: it takes as many as the hours allow."""
+    app = request.app
+    task = owned_task(db, user, task_id)
+    text = payload.text.strip()
+    if not text:
+        raise ApiError(400, "empty", "Write something first. / Сначала напиши что-нибудь.")
+    can_run(db, user)
+    if task.status in (TaskStatus.QUEUED, TaskStatus.STARTING):
+        raise ApiError(
+            409,
+            "not_ready",
+            "The agent is still starting. Write again in a moment. / Агент ещё запускается: напиши через мгновение.",
+        )
+    if task.status in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
+        # Kvist queues a goal that arrives during a turn and takes it when the turn ends.
+        delivered = await app.state.gateway.send(task.machine_id, {"type": "message", "task_id": task.id, "text": text})
+        if not delivered:
+            raise ApiError(503, "machine_offline", "The machine is not reachable. / Машина недоступна.")
+        record_user(app, db, task, text)
+        db.commit()
+        return task_payload(db, task)
+    restart_with(db, task, text)
+    record_user(app, db, task, text)
+    db.commit()
+    await _dispatch(app, task.machine_id)
     return task_payload(db, task)
 
 

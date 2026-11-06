@@ -77,7 +77,10 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
     return {
         "type": "start_task",
         "task_id": task.id,
-        "goal": task.goal,
+        # The first goal starts the task; what was written later goes into the same conversation.
+        "goal": task.pending_text or task.goal,
+        "session": tasks.core_session(db, task) if task.pending_text else "",
+        "follow_up": bool(task.pending_text),
         "repo_url": task.repo_url,
         "resume": task.resume_requested,
         "env": kvist_environment(user, key),
@@ -220,6 +223,18 @@ def _screen_frame(app: FastAPI, machine_id: int, message: dict) -> None:
         log.info("machine %s: a screen picture was refused", machine_id)
 
 
+async def _undelivered(app: FastAPI, machine_id: int, message: dict) -> None:
+    """The run that should have taken a message had just ended: the message starts the next run."""
+    with session_scope(app.state.session_factory) as db:
+        task = _owned_task(db, machine_id, int(message.get("task_id") or 0))
+        text = str(message.get("text") or "")
+        if task is None or not text:
+            return
+        tasks.restart_with(db, task, text)
+        app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
+    await dispatch(app, machine_id)
+
+
 def _reason(app: FastAPI, machine_id: int, message: dict) -> None:
     with session_scope(app.state.session_factory) as db:
         task = _owned_task(db, machine_id, int(message.get("task_id") or 0))
@@ -231,6 +246,9 @@ def _exit(app: FastAPI, machine_id: int, message: dict) -> None:
     with session_scope(app.state.session_factory) as db:
         task = _owned_task(db, machine_id, int(message.get("task_id") or 0))
         if task is None:
+            return
+        if task.pending_text and task.status in (TaskStatus.QUEUED, TaskStatus.STARTING):
+            # The previous run of this session ending: the next one is already waiting for the machine.
             return
         before = task.status
         tasks.apply_exit(task, str(message.get("reason", "crashed"))[:60])
@@ -253,6 +271,8 @@ async def handle(app: FastAPI, machine_id: int, message: dict) -> None:
             await limits.admit_queued(app, machine_id)
     elif kind == "screen_frame":
         _screen_frame(app, machine_id, message)
+    elif kind == "message_undelivered":
+        await _undelivered(app, machine_id, message)
     elif kind == "task_reason":
         _reason(app, machine_id, message)
     elif kind == "task_exit":

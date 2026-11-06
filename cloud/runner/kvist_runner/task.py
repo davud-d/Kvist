@@ -69,6 +69,7 @@ class TaskProcess:
         emit: Callable[[dict], None],
         on_change: Callable[[], None],
         send_frame: Callable[[dict], bool] = lambda _message: False,
+        session: str = "",
     ) -> None:
         self.task_id = task_id
         self.goal = goal
@@ -91,6 +92,14 @@ class TaskProcess:
         self.background_deadline: float | None = None
         self._stdin_closed = False
         self.screens = ScreenRelay(task_id, send_frame)
+        # A task is a conversation: a run after the first starts by switching back into the session the
+        # first run opened (`session`), and only then takes its message (`_after_switch`).
+        self.session = session
+        self._after_switch: str | None = None
+        # Goals written to Kvist whose turn has not ended yet. A message that comes in while a turn is
+        # finishing is one of them: the stdin stays open until its turn has been taken too.
+        self._goals_waiting = 0
+        self._woken = False
 
     # -- state the heartbeat reports ------------------------------------------------------
 
@@ -152,8 +161,15 @@ class TaskProcess:
         finally:
             env.clear()
             self._model_env = None
-        first = {"type": "command", "name": "resume"} if self.resume else {"type": "goal", "text": self.goal}
+        if self.resume:
+            first = {"type": "command", "name": "resume"}
+        elif self.session:
+            first = {"type": "command", "name": "session", "args": ["switch", self.session]}
+            self._after_switch = self.goal
+        else:
+            first = {"type": "goal", "text": self.goal}
         await self._write(first)
+        self._goals_waiting = 1
         self.turn_open = True
         watchdog = asyncio.create_task(self._watch())
         try:
@@ -221,11 +237,14 @@ class TaskProcess:
             elif state in STOPPED_STATES:
                 self._set_running(False)
         elif kind == "wake":
+            self._woken = True
             self.turn_open = True
             self.background_deadline = None
             self._set_running(True)
         elif kind == "turn_end":
             await self._turn_ended()
+        elif kind == "command_result" and event.get("name") == "session" and self._after_switch is not None:
+            await self._take_message(event)
         elif kind == "command_result" and event.get("name") == "resume" and not event.get("ok"):
             self.stop_reason = self.stop_reason or "resume_failed"
             await self._turn_ended()
@@ -249,7 +268,46 @@ class TaskProcess:
         elif trouble == "transient" and self.trouble_since is None:
             self.trouble_since = now
 
+    async def _take_message(self, switched: dict) -> None:
+        """Back in the conversation (or, if that failed, in a fresh one, said so): now the message."""
+        text, self._after_switch = self._after_switch or "", None
+        if not switched.get("ok"):
+            log.warning("task %s: could not switch back into the session", self.task_id)
+            self._emit({"type": "event", "task_id": self.task_id, "event": {
+                "type": "message", "source": "notice",
+                "markdown": "Could not reopen the earlier conversation, so this message starts a new one. / "
+                            "Не удалось открыть прежний разговор: это сообщение начнёт новый."}})
+        await self._write({"type": "goal", "text": text})
+
+    @property
+    def accepts_goals(self) -> bool:
+        """Kvist is up and listening: a message can be written to it now."""
+        process = self.process
+        if process is None or process.stdin is None or self._stdin_closed:
+            return False
+        return process.returncode is None
+
+    async def follow_up(self, text: str) -> bool:
+        """Another message for the agent that is already running; False when it is already on its way out."""
+        if not self.accepts_goals:
+            return False
+        self.turn_open = True
+        self.background_deadline = None
+        self._goals_waiting += 1
+        self._set_running(True)
+        await self._write({"type": "goal", "text": text})
+        return True
+
     async def _turn_ended(self) -> None:
+        if self._woken:
+            # A wake-up turn nobody typed; it answers no goal.
+            self._woken = False
+        elif self._goals_waiting > 0:
+            self._goals_waiting -= 1
+        if self._goals_waiting > 0 and not self.stop_reason:
+            # Another message is already queued behind this turn: its turn comes next, so Kvist stays up.
+            self.turn_open = True
+            return
         self.turn_open = False
         self.commands.clear()
         self.pause_deadline = None

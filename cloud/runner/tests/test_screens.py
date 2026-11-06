@@ -153,3 +153,14 @@ async def test_a_line_from_kvist_reaches_the_server_without_the_address(tmp_path
     assert TOKEN not in json.dumps(recorder.messages)
     assert recorder.events("screen")[0]["frame_url"] == ""
     assert task.screens._frame_urls["browser"].endswith(TOKEN)  # kept here, on this machine, to fetch frames
+
+
+async def test_a_cancel_for_a_task_this_runner_does_not_have_is_answered(tmp_path):
+    from test_task import config
+
+    from kvist_runner.runner import Runner
+
+    runner = Runner(config(tmp_path))
+    await runner.handle({"type": "control", "task_id": 9, "action": "cancel"})
+    await runner.handle({"type": "control", "task_id": 9, "action": "pause"})
+    assert list(runner._outbox) == [{"type": "task_exit", "task_id": 9, "exit_code": None, "reason": "cancelled"}]

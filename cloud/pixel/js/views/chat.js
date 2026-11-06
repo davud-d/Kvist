@@ -4,7 +4,7 @@
 import { activate, pause, runCommand, sendGoal, stopAll, wake } from "../actions.js";
 import { sessionOp } from "../bridge.js";
 import { summary } from "../reducer.js";
-import { duration, repoLabel, taskBanner } from "../cloud.js";
+import { canResume, duration, repoLabel } from "../cloud.js";
 import { fill, frameThrottle, h, icon, keyedList } from "../dom.js";
 import { t } from "../i18n.js";
 import { coolDown, formatSeconds, shimmerColor, spinnerWord, tokenCount } from "../spinner.js";
@@ -75,6 +75,7 @@ export function mountChat(root) {
     meter.hidden = !limit;
     const running = agent.state === "running";
     fill(controls, 
+      canResume(agent.cloud) ? h("button", { class: "btn primary", type: "button", title: t("resume"), onclick: () => runCommand(agent, "resume") }, icon("play", 14)) : null,
       running ? h("button", { class: "btn", type: "button", title: `${t("pause")} (Esc)`, onclick: () => pause(agent) }, icon("pause", 14)) : null,
       running ? h("button", { class: "btn danger", type: "button", title: t("stop all"), onclick: () => stopAll(agent) }, icon("stop", 14)) : null,
       h("button", { class: "btn", type: "button", title: t("zoom out"), onclick: () => setMode("overview") }, icon("grid", 14)),
@@ -87,7 +88,8 @@ export function mountChat(root) {
     banner.hidden = words === null;
     if (words !== null) banner.textContent = words;
     const running = agent.state === "running";
-    input.placeholder = t("write your task");
+    // A session takes as many messages as you like; while the agent works they queue behind its turn.
+    input.placeholder = running ? t("message running") : agent.session ? t("write a message") : t("write your task");
     input.disabled = agent.state === "gone";
     status.classList.toggle("on", running);
     paintStatus();
@@ -99,13 +101,12 @@ export function mountChat(root) {
   // drives, a session that was closed.
   function bannerWords(agent) {
     if (agent.remote) return agent.remote.text;
-    return taskBanner(agent.cloud, t)?.text ?? null;
+    return null;
   }
 
   // What Enter on the banner does; the link that is down offers nothing.
-  function bannerAction(agent) {
-    const action = agent.remote ? null : taskBanner(agent.cloud, t)?.action;
-    return action ? () => runCommand(agent, action) : () => {};
+  function bannerAction() {
+    return () => {};
   }
 
   function paintDialog(agent) {

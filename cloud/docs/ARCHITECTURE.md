@@ -62,6 +62,32 @@ turn_end ─▶ runner closes stdin (or keeps it for the plan's background windo
 An answer to an `input_request` goes browser → server → runner → Kvist's stdin unchanged.
 Pause and cancel are Kvist's own `{"type":"pause"}` / `{"type":"cancel"}` messages.
 
+### A conversation (more messages in the same task)
+
+A task is a session: after the first answer the person keeps writing to it.
+
+```
+browser POST /api/tasks/{id}/messages {text}
+   status running / waiting_for_user ─▶ {"type":"message"} to the runner ─▶ Kvist queues it behind its turn
+   status done / paused / cancelled / failed ─▶ pending_text = text, admit() ─▶ start_task {goal: text, session, follow_up}
+                                                                   │
+        runner: the same process if it is still up (finishing its turn, or kept by background work);
+                otherwise a new Kvist: `command session switch <session>` ─▶ then the goal
+```
+
+* The text is also stored as a `user` event in `task_events`, so a reloaded page shows the whole conversation
+  (the core's own journal never reaches the server). Tasks from before this have no first `user` event; the page
+  puts the goal in front of the history.
+* `session` is the name Kvist gave the conversation (the latest `session` event, else the first `hello`).
+  `Task.pending_text` holds a message until the machine's Kvist says it has it (`hello` or `task_state: running`),
+  so a machine that is asleep, or a plan with no free slot, loses nothing.
+* The runner keeps Kvist up past `turn_end` only while a message is queued behind that turn (`_goals_waiting`);
+  otherwise it still closes stdin at the end of the turn, so the model key is in no process while the agent is idle.
+* A late `task_exit` of the previous run does not end the new one (`pending_text` set while `starting`/`queued`),
+  and a message that reaches a run that has just ended comes back as `message_undelivered` and starts the next run.
+* Every message needs hours, a key and a subscription, like a first goal (`can_run`); one that arrives while the task
+  is `queued`/`starting` is refused with `not_ready` (409).
+
 ### Heartbeat
 
 Every 15 s, and immediately whenever the set changes, the runner sends

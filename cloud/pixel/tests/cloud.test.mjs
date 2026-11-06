@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cannotRun, duration, firstLine, listItem, repoLabel, repositories, share, taskBanner, tasksOf } from "../js/cloud.js";
+import { canResume, cannotRun, duration, firstLine, listItem, repoLabel, repositories, share, tasksOf } from "../js/cloud.js";
 
 const say = (key) => key;
 
@@ -43,17 +43,13 @@ test("tasks group by repository and list as sessions named by their id", () => {
   assert.equal(firstLine("  one\ntwo"), "one");
 });
 
-test("once a task has its goal the composer gives way to one line, and Enter does the one thing that makes sense", () => {
-  assert.equal(taskBanner(null, say), null);
-  assert.deepEqual(taskBanner({ status: "queued" }, say), { text: "queued banner", action: null });
-  for (const status of ["starting", "running"]) assert.deepEqual(taskBanner({ status }, say), { text: "working banner", action: null });
-  assert.deepEqual(taskBanner({ status: "waiting_for_user" }, say), { text: "waiting banner", action: null });
-  assert.deepEqual(taskBanner({ status: "paused", reason: "hours_exhausted" }, say), { text: "paused banner (pause: hours_exhausted)", action: "resume" });
-  assert.deepEqual(taskBanner({ status: "paused", reason: "" }, say), { text: "paused banner", action: "resume" });
-  for (const status of ["done", "cancelled", "failed"]) assert.deepEqual(taskBanner({ status }, say), { text: "finished banner", action: "new" });
+test("only a paused task is continued by a button; every other task is continued by writing to it", () => {
+  assert.equal(canResume(null), false);
+  assert.equal(canResume({ status: "paused" }), true);
+  for (const status of ["queued", "starting", "running", "waiting_for_user", "done", "cancelled", "failed"]) assert.equal(canResume({ status }), false);
 });
 
-test("a goal is held back, with the reason, until the account can run it", () => {
+test("a message is held back, with the reason, until the account can run it", () => {
   const ready = { sub: { status: "trialing", balance_seconds: 60 }, key: { set: true } };
   assert.equal(cannotRun(ready), null);
   assert.equal(cannotRun({ ...ready, sub: { status: "none" } }), "no_subscription");

@@ -12,6 +12,7 @@ The goal text picks the script:
   auth-error   the model refuses the key
   rate-limit   the model keeps answering 429 until paused
   bg N         starts a background job that runs N seconds after the answer
+  say          answers with how many earlier messages of this conversation it remembers (sessions are files)
   screen N     opens a virtual desktop (a loopback viewer behind a secret token, like Kvist's own) for N seconds
 Never calls a model, never touches the network.
 """
@@ -233,18 +234,44 @@ def run_turn(goal: str, workspace: Path) -> None:
         emit({"type": "job_finished", "job_id": "job_1", "status": "exited", "exit_code": 0, "output": ""})
 
 
+def session_file(workspace: Path, name: str) -> Path:
+    folder = workspace / ".fake-sessions"
+    folder.mkdir(exist_ok=True)
+    return folder / f"{name}.txt"
+
+
 def main() -> int:
     args = sys.argv[1:]
     workspace = Path(args[args.index("--workspace") + 1]) if "--workspace" in args else Path.cwd()
     threading.Thread(target=read_stdin, daemon=True).start()
+    # Like Kvist: every launch begins a session of its own; `session switch NAME` goes back into an older one.
+    session = f"fake-{os.getpid()}"
     emit({"type": "hello", "protocol_version": 1, "provider": os.environ.get("AGENT_LLM_PROVIDER", ""),
-          "session": "fake", "has_checkpoint": False})
+          "session": session, "has_checkpoint": False})
     while True:
         message = next_message()
         if message is None or message.get("type") == "eof":
             return 0
         if message.get("type") == "goal":
-            run_turn(str(message.get("text", "")), workspace)
+            text = str(message.get("text", ""))
+            remembered = session_file(workspace, session)
+            earlier = remembered.read_text(encoding="utf-8").splitlines() if remembered.exists() else []
+            remembered.write_text("\n".join([*earlier, text]) + "\n", encoding="utf-8")
+            if text.split()[:1] == ["say"]:
+                emit({"type": "task_state", "state": "running", "reason": ""})
+                remembered_words = "; ".join(earlier)
+                emit({"type": "message", "markdown": f"I remember {len(earlier)} earlier messages: {remembered_words}",
+                      "source": "reply"})
+                emit({"type": "task_state", "state": "completed", "reason": ""})
+                emit({"type": "turn_end"})
+                continue
+            run_turn(text, workspace)
+        elif message.get("type") == "command" and message.get("name") == "session":
+            wanted = (message.get("args") or ["", ""])[1]
+            if session_file(workspace, wanted).exists():
+                session = wanted
+                emit({"type": "session", "session": session, "has_checkpoint": True})
+            emit({"type": "command_result", "name": "session", "ok": session == wanted, "message": "", "effects": {}})
         elif message.get("type") == "command" and message.get("name") == "resume":
             run_turn("quick", workspace)
 

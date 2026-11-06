@@ -137,6 +137,9 @@ class Task(Base):
     outcome: Mapped[str] = mapped_column(String(20), default="")
     final_message: Mapped[str] = mapped_column(Text, default="")
     resume_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A task is a session: what the person wrote after the first goal waits here until the machine has it
+    # (it may be asleep, or the plan may have no free slot yet). Cleared when the machine's Kvist says hello.
+    pending_text: Mapped[str] = mapped_column(Text, default="", server_default="")
     next_seq: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

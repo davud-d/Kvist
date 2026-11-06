@@ -67,12 +67,16 @@ function connect(agent, taskId) {
 // The core names its own session inside; on this page a task is its id, so that is what stays the session.
 const SESSION_EVENTS = new Set(["hello", "session"]);
 
+/** What a run of Kvist says about finding its way back into the conversation is plumbing, not news. */
+const isPlumbing = (event, entry) => (event.type === "hello" && entry.announced) || (event.type === "command_result" && event.name === "session");
+
 function handle(agent, taskId, entry, data) {
   if (data.type === "event") {
     if (data.seq) {
       if (data.seq <= entry.lastSeq) return;
       entry.lastSeq = data.seq;
     }
+    if (isPlumbing(data.event, entry)) return;
     emit(agent, SESSION_EVENTS.has(data.event.type) ? { ...data.event, session: String(taskId) } : data.event);
   } else if (data.type === "task") {
     onTask(agent, entry, data.task);
@@ -92,7 +96,7 @@ function onTask(agent, entry, task) {
     entry.announced = true;
     emit(agent, hello(agent));
   }
-  emit(agent, { type: "cloud_task", task: { id: task.id, goal: task.goal, repo_url: task.repo_url, status: task.status, reason: task.reason, used_seconds: task.used_seconds } });
+  emit(agent, taskEvent(task));
   if (!WORKING.has(task.status)) refreshHours();
 }
 
@@ -121,6 +125,17 @@ export function closeAgent(id) {
 
 // -- what the person can do -----------------------------------------------------------------
 
+function taskEvent(task) {
+  return { type: "cloud_task", task: { id: task.id, goal: task.goal, repo_url: task.repo_url, status: task.status, reason: task.reason, used_seconds: task.used_seconds } };
+}
+
+/** Another message in the conversation: the cloud starts the agent again if it had stopped, or queues it if it is busy. */
+async function sendMessage(id, taskId, text) {
+  const task = await api(`/api/tasks/${taskId}/messages`, { method: "POST", body: { text } });
+  emit(id, taskEvent(task));
+  refreshHours();
+}
+
 async function startTask(id, text) {
   const entry = agents.get(id);
   const task = await api("/api/tasks", { method: "POST", body: { goal: text, repo_url: entry.workspace } });
@@ -143,7 +158,7 @@ function answerRequest(taskId, message) {
 export async function sendToAgent(id, message) {
   const entry = agents.get(id);
   if (!entry) return;
-  if (message.type === "goal") return startTask(id, message.text);
+  if (message.type === "goal") return entry.taskId ? sendMessage(id, entry.taskId, message.text) : startTask(id, message.text);
   if (!entry.taskId) return undefined;
   if (message.request_id) return answerRequest(entry.taskId, message);
   if (message.type === "pause") return api(`/api/tasks/${entry.taskId}/pause`, { method: "POST" });
@@ -158,7 +173,7 @@ const HISTORY_PAGES = 40;
 
 async function history(taskId) {
   const task = await api(`/api/tasks/${taskId}`);
-  const events = [{ event: { type: "user", text: task.goal } }];
+  const events = [];
   let after = 0;
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const reply = await api(`/api/tasks/${taskId}/events?after=${after}`);
@@ -169,6 +184,8 @@ async function history(taskId) {
     if (!reply.more) break;
   }
   seen.set(taskId, after);
+  // Tasks from before the conversation was kept in the history have no first message in it.
+  if (events[0]?.event.type !== "user") events.unshift({ event: { type: "user", text: task.goal } });
   return { ok: true, has_more: false, events };
 }
 

@@ -51,24 +51,10 @@ export const tasksOf = (tasks, workspace) => tasks.filter((task) => (task.repo_u
 
 export const repositories = (tasks) => [...new Set(tasks.map((task) => task.repo_url ?? ""))];
 
-/**
- * What stands where the composer was once a task has its goal. A task has one goal; its answer is the
- * agent's. `action` is what Enter does: start another task, or continue a paused one.
- */
-export function taskBanner(cloud, say) {
-  if (!cloud) return null;
-  const { status, reason } = cloud;
-  if (status === "queued") return { text: say("queued banner"), action: null };
-  if (WORKING.has(status)) return { text: say("working banner"), action: null };
-  if (status === "waiting_for_user") return { text: say("waiting banner"), action: null };
-  if (status === "paused") {
-    const why = reason ? ` (${say(`pause: ${reason}`)})` : "";
-    return { text: `${say("paused banner")}${why}`, action: "resume" };
-  }
-  return { text: say("finished banner"), action: "new" };
-}
+/** A paused task is continued by a button; any message continues it too, with the message. */
+export const canResume = (cloud) => cloud?.status === "paused";
 
-/** The reason a goal cannot be sent yet, from what the account looks like; null when it can. */
+/** The reason a message cannot be sent yet, from what the account looks like; null when it can. */
 export function cannotRun(account) {
   if (!account.sub || account.sub.status === "none") return "no_subscription";
   if (account.sub.balance_seconds <= 0) return "no_hours";

@@ -170,3 +170,61 @@ def test_the_agents_screen_reaches_only_its_owner_through_a_real_runner(live_sta
     with stack.db() as db:
         stored = "\n".join(json.dumps(row.payload) for row in db.scalars(sql_select(TaskEvent)))
     assert "fake-screen-token" not in "".join(seen) + stored
+
+
+def test_the_conversation_goes_on_through_a_real_runner(live_stack, fake_model, dist):
+    """A task is a session: the second message reaches a new run of Kvist that remembers the first."""
+    stack = live_stack(network=True, FRONTEND_DIST=str(dist), ADMIN_GITHUB_LOGINS="dev")
+    task_id = walk_the_funnel(stack, fake_model, "say hello there")
+    stream_until_done(stack, task_id)
+
+    sent = stack.http.post(f"/api/tasks/{task_id}/messages", json={"text": "say and once more"})
+    assert sent.status_code == 200, sent.text
+
+    def second_answer():
+        events = stack.http.get(f"/api/tasks/{task_id}/events").json()["events"]
+        done = stack.http.get(f"/api/tasks/{task_id}").json()["status"] == "done"
+        replies = [row["event"]["markdown"] for row in events
+                   if row["event"]["type"] == "message" and row["event"].get("source") == "reply"]
+        return replies if done and len(replies) == 2 else None
+
+    replies = eventually(second_answer, timeout=40)
+    assert replies[0].startswith("I remember 0 earlier messages")
+    assert replies[1] == "I remember 1 earlier messages: say hello there"
+    users = [row["event"]["text"] for row in stack.http.get(f"/api/tasks/{task_id}/events").json()["events"]
+             if row["event"]["type"] == "user"]
+    assert users == ["say hello there", "say and once more"]
+
+
+@pytest.mark.real_core
+@pytest.mark.skipif(not (REPO_ROOT / ".venv" / "bin" / "python").exists(), reason="the Kvist core's venv is missing")
+def test_the_real_core_takes_the_next_message_in_the_same_conversation(live_stack, fake_model, dist):
+    """Both ways a message can arrive: the first run still finishing (the same process takes it), and the first run
+    gone (a new process switches back into the session, then takes it)."""
+    import time
+
+    stack = live_stack(
+        kvist_command=[str(REPO_ROOT / ".venv" / "bin" / "python"), "-m", "kernel"],
+        network=True, FRONTEND_DIST=str(dist), ADMIN_GITHUB_LOGINS="dev",
+    )
+    task_id = walk_the_funnel(stack, fake_model, "Write the cloud notes")
+    stream_until_done(stack, task_id, timeout=120)
+
+    def rows_with(finals: int):
+        def check():
+            rows = stack.http.get(f"/api/tasks/{task_id}/events").json()["events"]
+            done = stack.http.get(f"/api/tasks/{task_id}").json()["status"] == "done"
+            return rows if done and len([r for r in rows if r["event"]["type"] == "final"]) == finals else None
+        return eventually(check, timeout=120)
+
+    # Straight after the answer: the first process is still finishing its turn.
+    assert stack.http.post(f"/api/tasks/{task_id}/messages", json={"text": "once more"}).status_code == 200
+    rows_with(2)
+    # Later: that process has gone, so a new one has to find its way back into the conversation.
+    time.sleep(8)
+    assert stack.http.post(f"/api/tasks/{task_id}/messages", json={"text": "and again"}).status_code == 200
+    rows = rows_with(3)
+    results = [row["event"] for row in rows if row["event"]["type"] == "command_result"]
+    assert results and results[-1]["name"] == "session" and results[-1]["ok"] is True, results
+    users = [row["event"]["text"] for row in rows if row["event"]["type"] == "user"]
+    assert users == ["Write the cloud notes", "once more", "and again"]

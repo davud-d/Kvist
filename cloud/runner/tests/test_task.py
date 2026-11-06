@@ -209,3 +209,28 @@ async def test_clone_rules(tmp_path):
     with pytest.raises(WorkspaceError) as failure:
         await prepare(tmp_path / "work", 3, f"file://{tmp_path}/missing", allow_local=True)
     assert failure.value.reason == "clone_failed"
+
+
+async def test_the_next_message_goes_into_the_same_conversation(tmp_path):
+    """A second run of Kvist switches back into the first run's session before it takes the message."""
+    first = Recorder()
+    await run(make(tmp_path, "say first words", first))
+    name = next(e["session"] for e in first.events("hello"))
+
+    second = Recorder()
+    follow_up = make(tmp_path, "say and again", second)
+    follow_up.session = name
+    await run(follow_up)
+    reply = [e for e in second.events("message") if e.get("source") == "reply"]
+    assert reply and "I remember 1 earlier messages: say first words" in reply[0]["markdown"]
+    assert [e["session"] for e in second.events("session")] == [name]
+
+
+async def test_a_conversation_that_cannot_be_reopened_says_so_and_goes_on(tmp_path):
+    recorder = Recorder()
+    task = make(tmp_path, "say hello again", recorder)
+    task.session = "no-such-session"
+    await run(task)
+    notices = [e["markdown"] for e in recorder.events("message") if e.get("source") == "notice"]
+    assert notices and "earlier conversation" in notices[0]
+    assert recorder.events("final") or any("remember 0" in e.get("markdown", "") for e in recorder.events("message"))

@@ -27,8 +27,11 @@ unchanged because the cloud relays Kvist's events as they are (`cloud/docs/ARCHI
 * **Hours** shows what is left of the plan, what this task used and the ledger. Buying hours opens the plan page.
 * **Server** shows the machine (asleep / ready / working, vCPU, RAM, disk), wakes or sleeps it and exports an
   archive of its files.
-* A task has **one goal**: once it is sent, the composer gives way to a line, and Enter starts another task (or
-  continues a paused one). Pause and stop are in the task header; the agent's questions are the usual dialogs.
+* A task is a **session**: you keep writing to it. The first message starts the agent on your server; the next ones
+  go into the same conversation, which the agent remembers (the cloud starts Kvist again and switches back into
+  it if it had stopped; a message sent while the agent works queues behind its turn). The conversation is stored,
+  so it is all there after a reload. Pause and stop are in the task header, a paused task has a continue button,
+  the agent's questions are the usual dialogs.
 * No attachments: a cloud task takes words only.
 
 ## The agent's screen is private
