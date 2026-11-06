@@ -343,16 +343,24 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
 }
 .pay-tile small { font-size: var(--t-13); color: var(--faint); }
 .pay-tile[aria-checked="true"] { border-color: var(--tx); }
-.pay-tile[aria-checked="true"] .pay-mark { background: var(--paper); color: var(--ink); border-color: var(--paper); }
 @media (hover: hover) and (pointer: fine) { .pay-tile:hover { border-color: var(--line-2); } .pay-tile[aria-checked="true"]:hover { border-color: var(--tx); } }
-.pay-mark {
-  min-width: 3.4em;
-  padding: var(--s-1) var(--s-2);
-  font-weight: 700;
-  letter-spacing: var(--track-1);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-1);
+/* The plate is white in both themes: brand logos are drawn for a light ground. */
+.pay-plate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  box-sizing: border-box;
+  width: 100%;
+  height: 3.1em;
+  padding: var(--s-1) var(--s-3);
+  background: #fff;
+  border-radius: var(--r-2);
 }
+.pay-plate svg { height: 100%; width: auto; min-width: 0; max-width: 100%; }
+.pay-plate b { color: #0b0f14; letter-spacing: var(--track-1); }
+.pay-warning { font-size: var(--t-14); }
+.pay-warning[hidden] { display: none; }
 .pay-total { padding: var(--s-4); background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-2); }
 .pay-total > * + * { margin-top: var(--s-3); }
 .pay-sum { font-size: var(--t-28); font-weight: 700; margin-bottom: 0; }

@@ -2,11 +2,19 @@
 // It only chooses; the server decides the amount and the methods it accepts (see billing.py).
 import { startCheckout } from "./billing.js";
 import { h, modal, replace } from "./dom.js";
+import { METHOD_ICONS, icon } from "./icons.js";
 import { locale, t } from "./i18n.js";
 import { errorBox } from "./ui.js";
 
-// Platega's method ids. Each tile carries a short mark in the site's own type, not a brand logo.
-const MARKS = { 2: "СБП", 3: "ЕРИП", 11: "••••", 12: "◎", 13: "₿", 14: "СБ" };
+// Platega's method ids without a logo set (see icons.js) get a short mark in the site's own type.
+const MARKS = { 3: "ЕРИП", 14: "СБ" };
+// Methods that run through Russian banks: they tend to fail from a foreign address or behind a VPN.
+const RUSSIAN_METHODS = new Set([2, 3, 11, 14]);
+
+function plate(id) {
+  const logos = METHOD_ICONS[id];
+  return h("span.pay-plate", {}, ...(logos ? logos.map(icon) : [h("b", { text: MARKS[id] || "?" })]));
+}
 
 // "3 900 ₽" in the page's language; a currency the browser does not know stays as "3900.00 XYZ".
 function money(amount, currency) {
@@ -34,13 +42,16 @@ export function choosePayment(config, plan) {
   modal((close) => {
     let chosen = methods[0];
     const problem = h("div", { "aria-live": "polite" });
+    const warning = h("p.banner.err.pay-warning", { role: "note", text: t("pay.ruIp") });
+    const showWarning = () => { warning.hidden = !RUSSIAN_METHODS.has(chosen); };
     const go = h("button.btn.wide", { type: "button", text: t("pay.go") });
     const tiles = methods.map((id) => h("button.pay-tile", { type: "button", role: "radio", "data-method": id,
       "aria-checked": String(id === chosen), onclick: () => {
         chosen = id;
         for (const tile of tiles) tile.setAttribute("aria-checked", String(Number(tile.dataset.method) === id));
+        showWarning();
       } },
-      h("span.pay-mark", { text: MARKS[id] || "?" }),
+      plate(id),
       h("span.pay-name", { text: t(`pay.methods.${id}.name`) }),
       h("small", { text: t(`pay.methods.${id}.sub`) })));
     go.addEventListener("click", async () => {
@@ -53,12 +64,14 @@ export function choosePayment(config, plan) {
         replace(problem, errorBox(error));
       }
     });
+    showWarning();
     return h("div.stack", {},
       h("h2.h3", {}, t("pay.title")),
       h("div.pay", {},
         h("div.stack", {},
           h("p.kicker", { text: t("pay.method") }),
-          h("div.pay-methods", { role: "radiogroup", "aria-label": t("pay.method") }, ...tiles)),
+          h("div.pay-methods", { role: "radiogroup", "aria-label": t("pay.method") }, ...tiles),
+          warning),
         h("div.pay-total", {},
           h("p.kicker", { text: t("pay.total") }),
           h("p.pay-sum", { text: money(bought.price, currency) }),

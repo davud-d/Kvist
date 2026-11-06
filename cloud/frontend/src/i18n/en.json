@@ -311,6 +311,7 @@
     "thirtyDays": "30 days",
     "thisPeriod": "this period",
     "pack": "Hour pack",
+    "ruIp": "To pay from Russia, use a Russian IP address (or turn your VPN off): payments through Russian banks often fail otherwise.",
     "go": "Go to payment",
     "note": "You pay on Platega's page. Access appears as soon as the payment is confirmed.",
     "methods": {
