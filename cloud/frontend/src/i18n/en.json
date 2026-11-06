@@ -64,6 +64,7 @@
     "no_key": "There is no model key. Add one in Settings."
   },
   "errors": {
+    "reset_failed": "The machine could not be reset right now. Try again in a minute.",
     "no_machine": "Connect your machine first: Dashboard, Connect my machine.",
     "own_machine": "This plan runs on your own machine: connect it on the dashboard.",
     "not_remote": "This plan runs on our machines.",
@@ -301,11 +302,7 @@
     "langTitle": "Language",
     "accountTitle": "Account",
     "signedInAs": "Signed in with GitHub as {login}",
-    "machineTitle": "Machine",
-    "deleteMachine": "Delete the machine",
-    "deleteTitle": "Delete the machine and its files?",
-    "deleteBody": "Everything on its disk goes away. Export an archive first if you need the files.",
-    "deleteYes": "Delete it"
+    "machineTitle": "Machine"
   },
   "admin": {
     "title": "Admin",
@@ -318,6 +315,15 @@
     "refundMinutes": "Minutes to refund",
     "refund": "Refund",
     "reject": "Close without refund"
+  },
+  "machine": {
+    "reset": "Reset the machine",
+    "resetTitle": "Reset the machine?",
+    "resetBody": "We make a new, clean machine in place of this one. Everything on the old disk is lost: export an archive first if you need the files. Tasks that are not finished move to the new machine.",
+    "resetYes": "Reset",
+    "resetNote": "If the machine broke, hung or stopped answering, a reset replaces it with a new one. Your plan, hours and tasks stay.",
+    "ownNote": "This is your own computer. To fix the connection, press “Show connection settings again” on the dashboard.",
+    "deadNote": "The machine is not answering and waiting will not bring it back. Reset it: we make a new one, and unfinished tasks move to it."
   },
   "pay": {
     "oneYear": "1 year",

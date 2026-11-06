@@ -1,5 +1,6 @@
 // Dashboard: hours and their feed, the machine, recent tasks, the key (last four characters).
 import { chargeLabel, syncPayments } from "../billing.js";
+import { resetMachineDialog } from "../machinereset.js";
 import { choosePayment } from "../paydialog.js";
 import { api } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
@@ -113,7 +114,7 @@ function remoteCard(view, machines, reload) {
     holder);
 }
 
-function machineCard(machines, own) {
+function machineCard(machines, own, reload) {
   const machine = machines[0];
   return h("section.card", { "aria-labelledby": "machine-title" },
     h("h2.h3", { id: "machine-title" }, t("dashboard.machinesTitle")),
@@ -121,6 +122,12 @@ function machineCard(machines, own) {
       ? h("div.stack", {},
           h("p.row", {}, machinePill(machine.display_status),
             h("span.small", {}, `${machine.vcpu} vCPU · ${machine.memory_gb} GB · ${machine.disk_gb} GB`)),
+          // A machine in trouble is not mended by waiting: say so, and offer a new one.
+          machine.display_status === "error" && !own
+            ? h("div.banner.err", { role: "alert" }, h("p", {}, t("machine.deadNote")),
+                h("p", {}, h("button.btn", { type: "button", text: t("machine.reset"),
+                  onclick: () => resetMachineDialog(machine, reload) })))
+            : null,
           exportButton(`/api/machines/${machine.id}/export`, t("dashboard.export")))
       : h("p.dim", {}, own ? t("dashboard.noRemoteMachine") : t("dashboard.noMachine")));
 }
@@ -181,7 +188,7 @@ export async function dashboardScreen(root) {
             h("p", {}, h("a.inline", { href: "/settings", "data-link": "" }, t("dashboard.toSettings"))))
         : null,
       view.own_machine ? remoteCard(view, machines, reload) : hoursCard(view, config, reload, announce),
-      machineCard(machines, view.own_machine),
+      machineCard(machines, view.own_machine, reload),
       tasksCard(tasks),
       feedCard(ledgerView.feed, reload),
       h("section.card", {}, h("h2.h3", {}, t("dashboard.keyTitle")),

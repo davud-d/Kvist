@@ -5,6 +5,7 @@ import { h, modal, replace, skeleton } from "../dom.js";
 import { shortDate } from "../format.js";
 import { locale, rememberLocale, setLocale, t } from "../i18n.js";
 import { keyWidget } from "../keywidget.js";
+import { resetMachineDialog } from "../machinereset.js";
 import { errorBox } from "../ui.js";
 
 const PRICES = { start: 15, pro: 39, max: 99 };
@@ -73,23 +74,14 @@ export async function settingsScreen(root, { me, navigate }) {
     })));
 
   const machine = machines[0];
-  const machineBox = machine
-    ? h("p", {}, h("button.btn.danger", { type: "button", text: t("settings.deleteMachine"), onclick: () => modal((close) =>
-        h("div.stack", {},
-          h("h2.h3", {}, t("settings.deleteTitle")),
-          h("p.dim", {}, t("settings.deleteBody")),
-          h("div.row", {},
-            h("button.btn.danger", { type: "button", text: t("settings.deleteYes"), onclick: async () => {
-              close();
-              try {
-                await api(`/api/machines/${machine.id}`, { method: "DELETE" });
-                navigate("/dashboard");
-              } catch (error) {
-                machineBox.append(errorBox(error));
-              }
-            } }),
-            h("button.btn.ghost", { type: "button", autofocus: true, onclick: close, text: t("common.cancel") })))) }))
-    : h("p.dim", {}, t("dashboard.noMachine"));
+  const machineBox = view.own_machine
+    ? h("p.dim", {}, t("machine.ownNote"))
+    : machine
+      ? h("div.stack", {},
+          h("p.dim", {}, t("machine.resetNote")),
+          h("p", {}, h("button.btn.danger", { type: "button", text: t("machine.reset"),
+            onclick: () => resetMachineDialog(machine, () => navigate("/dashboard")) })))
+      : h("p.dim", {}, t("dashboard.noMachine"));
 
   replace(root, h("div.stack-lg", {},
     h("h1.h2", {}, t("settings.title")),

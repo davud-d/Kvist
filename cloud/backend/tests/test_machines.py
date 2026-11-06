@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from kvist_cloud import machines
 from kvist_cloud.db import make_session_factory, session_scope, utcnow
-from kvist_cloud.models import Machine, MachineStatus, TaskStatus, User
+from kvist_cloud.models import Machine, MachineStatus, Task, TaskStatus, User
 from kvist_cloud.providers import MachineSpec, ProviderError, ProviderState
 from kvist_cloud.providers.local import LocalProvider
 
@@ -94,7 +94,7 @@ def test_second_sign_in_reuses_the_machine(client_factory, fake_provider):
     assert [call for call in fake_provider.calls if call[0] == "create"] == [("create", "m1")]
 
 
-def test_busy_machine_cannot_sleep_or_be_deleted(client_factory, engine):
+def test_busy_machine_cannot_sleep_or_be_reset(client_factory, engine):
     client = client_factory(AUTH_DEV_LOGIN="true")
     dev_login(client)
     settle(client)
@@ -102,7 +102,76 @@ def test_busy_machine_cannot_sleep_or_be_deleted(client_factory, engine):
         machine = db.scalars(select(Machine)).one()
         make_task(db, db.get(User, machine.user_id), machine)
     assert client.post("/api/machines/1/sleep").status_code == 409
-    assert client.delete("/api/machines/1").status_code == 409
+    assert client.post("/api/machines/1/reset").status_code == 409
+
+
+def live(engine) -> list[Machine]:
+    with session_scope(make_session_factory(engine)) as db:
+        rows = list(db.scalars(select(Machine).where(Machine.status != MachineStatus.DELETED).order_by(Machine.id)))
+        db.expunge_all()
+        return rows
+
+
+def test_reset_gives_a_clean_machine_and_keeps_unfinished_tasks(client_factory, engine, fake_provider):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    settle(client)
+    (old,) = live(engine)
+    with session_scope(make_session_factory(engine)) as db:
+        task_id = make_task(db, db.get(User, old.user_id), db.get(Machine, old.id), status=TaskStatus.PAUSED).id
+    answer = client.post(f"/api/machines/{old.id}/reset")
+    assert answer.status_code == 200 and answer.json()["id"] != old.id
+    settle(client)
+    (new,) = live(engine)
+    assert new.id == answer.json()["id"] and new.provider_ref != old.provider_ref
+    assert ("delete", old.provider_ref) in fake_provider.calls
+    with session_scope(make_session_factory(engine)) as db:
+        assert db.get(Machine, old.id).status == MachineStatus.DELETED
+        assert db.get(Task, task_id).machine_id == new.id
+
+
+def test_a_dead_machine_can_still_be_reset(client_factory, engine, fake_provider):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    settle(client)
+    (old,) = live(engine)
+    fake_provider.states.pop(old.provider_ref, None)  # it is gone at the provider
+
+    async def broken(ref):
+        raise ProviderError("not found")
+
+    fake_provider.delete = broken
+    assert client.post(f"/api/machines/{old.id}/reset").status_code == 200
+    settle(client)
+    assert [row.id for row in live(engine)] != [old.id]
+
+
+def test_a_machine_that_cannot_be_removed_is_kept_and_the_person_is_told(client_factory, engine, fake_provider):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    settle(client)
+    (old,) = live(engine)
+
+    async def broken(ref):
+        raise ProviderError("provider is down")
+
+    fake_provider.delete = broken
+    answer = client.post(f"/api/machines/{old.id}/reset")
+    assert answer.status_code == 502 and answer.json()["error"]["code"] == "reset_failed"
+    assert [row.id for row in live(engine)] == [old.id]
+
+
+def test_your_own_machine_is_reconnected_not_reset(client_factory):
+    from conftest import make_subscription
+
+
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    with session_scope(client.app.state.session_factory) as db:
+        make_subscription(db, db.get(User, 1), "remote")
+    machine_id = client.post("/api/machines/remote/connect").json()["machine"]["id"]
+    answer = client.post(f"/api/machines/{machine_id}/reset")
+    assert answer.status_code == 409 and answer.json()["error"]["code"] == "own_machine"
 
 
 def test_idle_machine_goes_to_sleep(client_factory, engine, fake_provider):

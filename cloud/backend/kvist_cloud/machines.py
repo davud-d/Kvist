@@ -10,7 +10,7 @@ from collections.abc import Coroutine
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, FastAPI, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 from starlette.status import WS_1008_POLICY_VIOLATION
 
@@ -20,7 +20,7 @@ from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
 from .models import Export, Machine, MachineStatus, Task, TaskStatus, User
-from .providers import MachineProvider, MachineSpec, ProviderError
+from .providers import MachineProvider, MachineSpec, ProviderError, ProviderState
 
 log = logging.getLogger("kvist_cloud.machines")
 router = APIRouter()
@@ -182,20 +182,40 @@ async def put_to_sleep(app: FastAPI, machine_id: int) -> None:
     _set_status(app, machine_id, MachineStatus.ASLEEP)
 
 
-async def destroy(app: FastAPI, machine_id: int) -> None:
+async def _gone_at_provider(provider: MachineProvider, ref: str) -> bool:
+    try:
+        return await provider.status(ref) == ProviderState.MISSING
+    except (ProviderError, NotImplementedError, OSError):
+        return False
+
+
+async def reset(app: FastAPI, machine_id: int) -> int:
+    """A clean machine in place of this one, which may be dead. Returns the new machine's id.
+
+    The old one is removed first so two never exist at once. If the provider cannot remove it but it is
+    already gone there, that is fine: a dead machine must be replaceable, or the person is stuck with it.
+    Tasks that were not finished move to the new machine; their projects' folders are sent when it says hello.
+    """
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
-        if machine is None:
-            return
         ref, provider = machine.provider_ref, provider_of(app, machine.provider)
     try:
         if ref:
             await provider.delete(ref)
     except (ProviderError, NotImplementedError, OSError) as error:
-        log.error("machine %s could not be deleted: %s", machine_id, error)
-        _set_status(app, machine_id, MachineStatus.ERROR, "delete_failed")
-        return
-    _set_status(app, machine_id, MachineStatus.DELETED)
+        if not await _gone_at_provider(provider, ref):
+            log.error("machine %s could not be removed for a reset: %s", machine_id, error)
+            raise ApiError(502, "reset_failed", "The machine could not be reset right now, try again in a minute. "
+                           "/ Не получилось сбросить машину, попробуй через минуту.") from error
+    with session_scope(app.state.session_factory) as db:
+        old = db.get(Machine, machine_id)
+        old.status = MachineStatus.DELETED
+        lock_account(db, old.user_id)
+        spec = new_machine(app, db, db.get(User, old.user_id))
+        db.execute(update(Task).where(Task.machine_id == machine_id, Task.status.not_in(TaskStatus.FINISHED))
+                   .values(machine_id=spec.machine_id))
+    spawn(app, provision(app, spec))
+    return spec.machine_id
 
 
 def _has_work(db: Session, machine: Machine) -> bool:
@@ -331,15 +351,23 @@ async def sleep_machine(
     return {"ok": True}
 
 
-@router.delete("/api/machines/{machine_id}", status_code=202)
-async def delete_machine(
+@router.post("/api/machines/{machine_id}/reset")
+async def reset_machine(
     machine_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
+    """Start over with a clean machine: for one that broke, hung or is simply gone. Files on its disk are lost."""
+    lock_account(db, user.id)
     machine = owned_machine(db, user, machine_id)
+    if machine.provider == REMOTE_PROVIDER:
+        raise ApiError(409, "own_machine", "This is your own machine: connect it again instead. "
+                       "/ Это твоя машина: подключи её заново.")
     if _has_work(db, machine):
         raise ApiError(409, "machine_busy", "A task is running on it. / На ней идёт задача.")
-    spawn(request.app, destroy(request.app, machine_id))
-    return {"ok": True}
+    _require_hours(request.app, db, user.id)
+    db.commit()
+    new_id = await reset(request.app, machine_id)
+    db.expire_all()
+    return machine_view(db, db.get(Machine, new_id))
 
 
 def _require_hours(app: FastAPI, db: Session, user_id: int) -> None:
