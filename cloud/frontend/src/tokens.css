@@ -42,9 +42,14 @@
   --glass:    rgba(13, 19, 27, .82);
   --scrim:    rgba(0, 0, 0, .66);
   --skeleton: #161e29;
+  --grid:     rgba(232, 237, 242, .07);
+  --bevel-lo: rgba(0, 0, 0, .30);
 
-  --r-1: 2px;
-  --r-2: 4px;
+  /* Pixel UI: nothing is round. One "pixel" is 4px; borders are stepped (corners notched) and
+     built from box-shadows, so a component only chooses --edge (its border colour). */
+  --r-1: 0;
+  --r-2: 0;
+  --px: 4px;
 
   --s-1: 4px;
   --s-2: 8px;
@@ -58,8 +63,15 @@
   --measure: 37.2em;
   --page: 960px;
 
+  --f-pixel: "Kvist Pixel", "Kvist Mono", ui-monospace, monospace;
   --f-mono: "Kvist Mono", ui-monospace, "JetBrains Mono", "IBM Plex Mono",
             "DejaVu Sans Mono", Consolas, monospace;
+  /* The pixel face is drawn on an 8px grid: 8 / 16 / 24 are crisp, the sizes between stay legible. */
+  --p-1: 10px;
+  --p-2: 12px;
+  --p-3: 16px;
+  --p-4: clamp(16px, 4.6vw, 24px);
+  --p-5: clamp(18px, 6vw, 32px);
   --t-13: 13px;
   --t-14: 14px;
   --t-15: 15px;
@@ -99,6 +111,8 @@
     --glass:    rgba(241, 243, 246, .86);
     --scrim:    rgba(16, 22, 29, .45);
     --skeleton: #e3e8ee;
+    --grid:     rgba(16, 22, 29, .08);
+    --bevel-lo: rgba(255, 255, 255, .22);
   }
 }
 
@@ -122,4 +136,6 @@
   --glass:    rgba(241, 243, 246, .86);
   --scrim:    rgba(16, 22, 29, .45);
   --skeleton: #e3e8ee;
+  --grid:     rgba(16, 22, 29, .08);
+  --bevel-lo: rgba(255, 255, 255, .22);
 }
