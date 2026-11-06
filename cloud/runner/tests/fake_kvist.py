@@ -266,6 +266,14 @@ def main() -> int:
                 emit({"type": "turn_end"})
                 continue
             run_turn(text, workspace)
+        elif message.get("type") == "command" and message.get("name") == "new":
+            wanted = (message.get("args") or [""])[0]
+            made = bool(wanted) and not session_file(workspace, wanted).exists()
+            if made:
+                session = wanted
+                session_file(workspace, session).write_text("", encoding="utf-8")
+                emit({"type": "session", "session": session, "has_checkpoint": False})
+            emit({"type": "command_result", "name": "new", "ok": made, "message": "", "effects": {}})
         elif message.get("type") == "command" and message.get("name") == "session":
             wanted = (message.get("args") or ["", ""])[1]
             if session_file(workspace, wanted).exists():

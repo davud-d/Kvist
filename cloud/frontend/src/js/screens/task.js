@@ -111,7 +111,7 @@ export async function taskScreen(root, { params, navigate }) {
     if (status === "paused") buttons.push(h("button.btn", { type: "button", onclick: act("resume"), text: t("task.resume") }));
     if (!FINISHED.has(status)) buttons.push(h("button.btn.ghost", { type: "button", onclick: confirmStop, text: t("task.stop") }));
     if (FINISHED.has(status)) {
-      buttons.push(h("a.btn", { href: "/new", "data-link": "", text: t("task.newTask") }));
+      buttons.push(h("a.btn", { href: "/pixel/", text: t("task.newTask") }));
     }
     replace(controls, buttons);
   };

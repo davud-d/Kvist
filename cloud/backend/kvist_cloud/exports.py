@@ -21,7 +21,7 @@ from .auth import current_user
 from .db import get_db, session_scope
 from .errors import ApiError, not_found
 from .machines import live_machine, owned_machine, spawn, wake
-from .models import Export, Machine, Task, User
+from .models import Export, Machine, Project, Task, User
 
 log = logging.getLogger("kvist_cloud.exports")
 router = APIRouter()
@@ -49,7 +49,14 @@ def export_view(export: Export) -> dict[str, object]:
     }
 
 
-def _request_message(app: FastAPI, export: Export) -> dict[str, object]:
+def _task_folder(db: Session, task_id: int | None) -> str:
+    """The folder of the task's project; empty for a task with a folder of its own."""
+    task = db.get(Task, task_id) if task_id else None
+    project = db.get(Project, task.project_id) if task is not None and task.project_id else None
+    return project.folder if project is not None else ""
+
+
+def _request_message(app: FastAPI, db: Session, export: Export) -> dict[str, object]:
     """A fresh one-time token each time the request is (re)sent; only its hash is kept."""
     token = secrets.token_urlsafe(32)
     export.upload_token_hash = _hash(token)
@@ -57,6 +64,7 @@ def _request_message(app: FastAPI, export: Export) -> dict[str, object]:
         "type": "export",
         "export_id": export.id,
         "task_id": export.task_id,
+        "folder": _task_folder(db, export.task_id),
         "upload_url": f"{app.state.settings.public_url}/gateway/exports/{export.id}",
         "upload_token": token,
     }
@@ -66,7 +74,7 @@ async def send_pending(app: FastAPI, machine_id: int) -> None:
     """Ask the runner for every export still waiting; called when it connects."""
     with session_scope(app.state.session_factory) as db:
         pending = db.scalars(select(Export).where(Export.machine_id == machine_id, Export.status == "pending"))
-        messages = [_request_message(app, export) for export in pending]
+        messages = [_request_message(app, db, export) for export in pending]
     for message in messages:
         await app.state.gateway.send(machine_id, message)
 
@@ -87,7 +95,7 @@ async def _start(app: FastAPI, db: Session, user: User, machine: Machine, task_i
     export = Export(user_id=user.id, machine_id=machine.id, task_id=task_id, status="pending")
     db.add(export)
     db.flush()
-    message = _request_message(app, export)
+    message = _request_message(app, db, export)
     db.commit()
     if app.state.gateway.connected(machine.id):
         await app.state.gateway.send(machine.id, message)

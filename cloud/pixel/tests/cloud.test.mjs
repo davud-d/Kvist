@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canResume, cannotRun, duration, firstLine, listItem, repoLabel, repositories, share, tasksOf } from "../js/cloud.js";
+import { canResume, cannotRun, duration, firstLine, folderOf, listItem, nameProblem, projectName, repoLabel, share, suggestedName, tasksOf, workspaceOf } from "../js/cloud.js";
 
 const say = (key) => key;
 
@@ -30,17 +30,38 @@ test("a repository is shown as owner/repo, the empty folder as nothing", () => {
   assert.equal(repoLabel(""), "");
 });
 
-test("tasks group by repository and list as sessions named by their id", () => {
+test("tasks group by project and list as sessions named by their id", () => {
   const tasks = [
-    { id: 3, goal: "fix it\nmore words", repo_url: "https://github.com/o/r", status: "running", created_at: "2026-11-06T10:00:00" },
-    { id: 2, goal: "write notes", repo_url: "", status: "done", finished_at: "2026-11-05T10:00:00" },
-    { id: 1, goal: "older", repo_url: "https://github.com/o/r", status: "failed" },
+    { id: 3, goal: "fix it\nmore words", project_id: 7, status: "running", created_at: "2026-11-06T10:00:00" },
+    { id: 2, goal: "write notes", project_id: null, status: "done", finished_at: "2026-11-05T10:00:00" },
+    { id: 1, goal: "older", project_id: 7, status: "failed" },
   ];
-  assert.deepEqual(repositories(tasks), ["https://github.com/o/r", ""]);
-  assert.deepEqual(tasksOf(tasks, "https://github.com/o/r").map((task) => task.id), [3, 1]);
+  assert.deepEqual(tasksOf(tasks, "7").map((task) => task.id), [3, 1]);
+  assert.deepEqual(tasksOf(tasks, "").map((task) => task.id), [2]);
+  assert.equal(workspaceOf(tasks[0]), "7");
+  assert.equal(workspaceOf(tasks[1]), "");
   assert.deepEqual(listItem(tasks[0]), { name: "3", title: "fix it", updated_at: "2026-11-06T10:00:00", closed: false });
   assert.equal(listItem(tasks[1]).closed, true);
   assert.equal(firstLine("  one\ntwo"), "one");
+});
+
+test("a project is shown by its name; the older tasks have a shared label", () => {
+  const projects = [{ id: 7, name: "My app" }];
+  assert.equal(projectName("7", projects, "none"), "My app");
+  assert.equal(projectName("", projects, "none"), "none");
+});
+
+test("project names follow the server's rules, and repeats are caught however they are spelled", () => {
+  const projects = [{ id: 1, name: "My app" }];
+  for (const name of ["Новый", "site", "a.b_c-d", "x".repeat(60), "日本語"]) assert.equal(nameProblem(name, projects), "", name);
+  for (const name of ["My app", "my app", "MY APP", "my-app", " My  app "]) assert.equal(nameProblem(name, projects), "name_taken", name);
+  for (const name of ["", "   ", "../x", "a/b", "a\\b", ".hidden", "-x", "x.", "x".repeat(61), "task-7", "Task-12"]) assert.equal(nameProblem(name, projects), "bad_project_name", JSON.stringify(name));
+  assert.equal(folderOf("  My   app "), "My-app");
+});
+
+test("a repository suggests its name for the project", () => {
+  assert.equal(suggestedName("anthropics/claude-code"), "claude-code");
+  assert.equal(suggestedName("repo.git"), "repo");
 });
 
 test("only a paused task is continued by a button; every other task is continued by writing to it", () => {

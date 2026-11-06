@@ -230,7 +230,57 @@ async def test_a_conversation_that_cannot_be_reopened_says_so_and_goes_on(tmp_pa
     recorder = Recorder()
     task = make(tmp_path, "say hello again", recorder)
     task.session = "no-such-session"
+    task._session_mode = "switch"
     await run(task)
     notices = [e["markdown"] for e in recorder.events("message") if e.get("source") == "notice"]
     assert notices and "earlier conversation" in notices[0]
     assert recorder.events("final") or any("remember 0" in e.get("markdown", "") for e in recorder.events("message"))
+
+
+async def test_tasks_of_a_project_share_its_folder_and_keep_their_own_sessions(tmp_path):
+    first, second = Recorder(), Recorder()
+    one = make(tmp_path, "say first", first)
+    one.folder, one.session = "my-app", "task-5"
+    await run(one)
+    # Another task of the same project: the same folder, a conversation of its own.
+    other = make(tmp_path, "say other", second)
+    other.task_id = 6
+    other.folder, other.session = "my-app", "task-6"
+    await run(other)
+    assert (tmp_path / "work" / "my-app" / ".fake-sessions").is_dir() and not (tmp_path / "work" / "task-5").exists()
+    reply = [e["markdown"] for e in second.events("message") if e.get("source") == "reply"][0]
+    assert reply == "I remember 0 earlier messages: "
+    assert [e["session"] for e in second.events("session")] == ["task-6"]
+
+
+async def test_a_session_name_already_taken_is_switched_into(tmp_path):
+    first = Recorder()
+    one = make(tmp_path, "say first", first)
+    one.folder, one.session = "my-app", "task-5"
+    await run(one)
+    # The same task started "new" again (its first run died after opening the session): it goes back in.
+    again = Recorder()
+    retry = make(tmp_path, "say again", again)
+    retry.folder, retry.session = "my-app", "task-5"
+    await run(retry)
+    reply = [e["markdown"] for e in again.events("message") if e.get("source") == "reply"][0]
+    assert reply.startswith("I remember 1 earlier messages: say first")
+    assert not [e for e in again.events("message") if e.get("source") == "notice"]
+
+
+async def test_a_folder_name_cannot_leave_the_work_folder(tmp_path):
+    recorder = Recorder()
+    task = make(tmp_path, "quick", recorder)
+    task.folder = "../outside"
+    await run(task)
+    assert recorder.exit()["reason"] == "bad_folder"
+    assert not (tmp_path / "outside").exists()
+
+
+def test_project_folders_are_plain_names():
+    from kvist_runner.workspace import WorkspaceError, project_dir
+
+    assert project_dir(tmp := __import__("pathlib").Path("/w"), "my-app") == tmp / "my-app"
+    for bad in ("", ".", "..", "a/b", "../x", "a\\b", "a\0b"):
+        with pytest.raises(WorkspaceError):
+            project_dir(tmp, bad)

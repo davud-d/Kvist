@@ -10,10 +10,15 @@ import { toast } from "./views/toast.js";
 
 const ready = new Map();
 let openKeyDialog = () => {};
+let openProjectDialog = () => {};
 
-/** The settings dialogs live in views; this is how an action asks for one without importing the view. */
+/** The dialogs live in views; this is how an action asks for one without importing the view. */
 export function onNeedKey(open) {
   openKeyDialog = open;
+}
+
+export function onNeedProject(open) {
+  openProjectDialog = open;
 }
 
 function newId() {
@@ -35,10 +40,6 @@ function fail(agent, error) {
   announce({ kind: "agent", id: agent.id });
 }
 
-function rememberProject(workspace) {
-  if (!store.prefs.projects.includes(workspace)) setPref("projects", [...store.prefs.projects, workspace]);
-}
-
 /** The tasks a repository holds, as the cloud lists them; the rail shows them under it. */
 export async function refreshSessions(workspace) {
   try {
@@ -57,9 +58,8 @@ export function toggleProject(workspace) {
   if (!open) refreshSessions(workspace);
 }
 
-/** A repository joins the rail, opens, and gets a draft task to write in. */
+/** A project (by id) opens on the rail and gets a draft task to write in. */
 export function addProject(workspace) {
-  rememberProject(workspace);
   if (!store.prefs.expanded.includes(workspace)) setPref("expanded", [...store.prefs.expanded, workspace]);
   return newAgent(workspace);
 }
@@ -72,9 +72,8 @@ export async function openSession(workspace, name, title) {
   return activate(agent.id);
 }
 
-/** A draft in `workspace` (a repository link, or "" for an empty folder): nothing exists on the server yet. */
+/** A draft in a project: nothing exists on the server until its first message is sent. */
 export function newAgent(workspace) {
-  rememberProject(workspace);
   const agent = createAgent(newId(), workspace);
   addAgent(agent);
   setActive(agent.id);
@@ -99,7 +98,6 @@ export async function wake(agent) {
 }
 
 export function restoreTab({ workspace, session, title }) {
-  rememberProject(workspace);
   const agent = createAgent(newId(), workspace, session);
   agent.state = "asleep";
   agent.title = title ?? "";
@@ -135,7 +133,8 @@ export async function closeTab(id) {
 // What the account lacks, said in the person's words, with the way to fix it.
 function explain(problem) {
   toast(t(problem), "error");
-  if (problem === "no_key") openKeyDialog();
+  if (problem === "no_project") openProjectDialog();
+  else if (problem === "no_key") openKeyDialog();
   else location.assign(problem === "no_subscription" ? "/start" : "/dashboard");
 }
 
@@ -147,7 +146,8 @@ function explain(problem) {
 export async function sendGoal(agent, text) {
   const line = text.trim();
   if (!line || agent.state === "gone") return false;
-  const problem = cannotRun(account);
+  // A task lives in a project (a folder on the server); a draft with none cannot start.
+  const problem = !agent.session && !agent.workspace ? "no_project" : cannotRun(account);
   if (problem) {
     explain(problem);
     return false;
@@ -168,7 +168,7 @@ export async function sendGoal(agent, text) {
 
 /** The only commands the cloud has: another task, and continuing a paused one. */
 export async function runCommand(agent, name) {
-  if (name === "new") return newAgent(agent.workspace);
+  if (name === "new") return newAgent(agent.workspace || String(account.projects[0]?.id ?? ""));
   if (name === "resume" && agent.cloud?.status === "paused") {
     return bridge.sendToAgent(agent.id, { type: "command", name: "resume" }).catch((error) => toast(error.localized ?? String(error), "error"));
   }

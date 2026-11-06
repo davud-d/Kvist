@@ -1,8 +1,8 @@
 // Kvist Cloud, pixel edition: wires the modules together, loads the account and opens the first task.
 
-import { activate, newAgent, onNeedKey, openSession, refreshSessions, startListening } from "./actions.js";
+import { activate, newAgent, onNeedKey, onNeedProject, openSession, refreshSessions, startListening } from "./actions.js";
 import { openExternal } from "./bridge.js";
-import { account, keepFresh, loadAccount, repositories } from "./cloud.js";
+import { account, keepFresh, loadAccount, workspaceOf } from "./cloud.js";
 import { $ } from "./dom.js";
 import { detectLanguage, setLanguage } from "./i18n.js";
 import { setMathRenderer } from "./markdown.js";
@@ -12,6 +12,7 @@ import { mountChat } from "./views/chat.js";
 import { mountDock } from "./views/dock.js";
 import { mountInspector } from "./views/inspector.js";
 import { mountOverview } from "./views/overview.js";
+import { openProjectDialog } from "./views/project-dialog.js";
 import { openKeyDialog } from "./views/settings-dialogs.js";
 import { mountTitlebar } from "./views/titlebar.js";
 
@@ -29,7 +30,7 @@ function wireGlobalKeys() {
       const next = store.order[(at + (event.shiftKey ? -1 : 1) + store.order.length) % store.order.length];
       if (next) activate(next);
     } else if (event.altKey && event.key === "n") {
-      newAgent(active()?.workspace ?? "");
+      newAgent(active()?.workspace || String(account.projects[0]?.id ?? ""));
     } else return;
     event.preventDefault();
   });
@@ -41,14 +42,16 @@ function wireGlobalKeys() {
   });
 }
 
-// The rail lists what the server has: every repository that has a task, and the empty folder, which is
-// always there. A link like /pixel/#/tasks/12 opens that task; otherwise the page opens a draft to write in.
+// The rail lists the person's projects. A link like /pixel/#/tasks/12 opens that task; otherwise the page opens a
+// draft in the project used last. With no project at all the first thing to do is add one, so that is asked.
 async function openFirst() {
-  const known = new Set(["", ...store.prefs.projects, ...repositories(account.tasks)]);
-  setPref("projects", [...known]);
   const wanted = location.hash.match(/^#\/tasks\/(\d+)$/)?.[1];
   const task = account.tasks.find((item) => String(item.id) === wanted);
-  const workspace = task?.repo_url ?? "";
+  const workspace = task ? workspaceOf(task) : String(workspaceOf(account.tasks[0] ?? {}) || account.projects[0]?.id || "");
+  if (!workspace && !task) {
+    openProjectDialog();
+    return;
+  }
   if (!store.prefs.expanded.includes(workspace)) setPref("expanded", [...store.prefs.expanded, workspace]);
   if (task) {
     refreshSessions(workspace);
@@ -73,6 +76,7 @@ async function boot() {
   wireGlobalKeys();
   startListening();
   onNeedKey(openKeyDialog);
+  onNeedProject(openProjectDialog);
   subscribe((change) => {
     if (change.kind !== "prefs") return;
     applyPrefs(store.prefs);

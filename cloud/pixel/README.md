@@ -4,7 +4,7 @@
 
 The pixel-game window of [Kvist Pixel (Tauri)](../../frontends/gui/tauri/README.md), copied here and changed
 only where the cloud has different data. It is plain files, no bundler: `cloud/frontend/build.mjs` copies it to
-`dist/pixel/` and the server serves it at **`/pixel/`** (the old pages stay as they are; the header has a "Pixel"
+`dist/pixel/` and the server serves it at **`/pixel/`** (the old pages stay as they are; the header has a "Workspace"
 link). Open a task directly with `/pixel/#/tasks/<id>`.
 
 ## What is the same
@@ -16,8 +16,8 @@ unchanged because the cloud relays Kvist's events as they are (`cloud/docs/ARCHI
 
 | Desktop app | Here |
 | --- | --- |
-| Project folders in the rail | **Repositories** (and the empty folder); "add repository" takes an https link |
-| A session per folder | **A task**; the rail lists them, newest first, grouped by repository |
+| Project folders in the rail | **Projects**: "Add project" makes a folder on your server, either a clone of one of your GitHub repositories or just a name (names never repeat) |
+| A session per folder | **A task** (a session) in a project; the rail lists them, newest first |
 | Window controls, resize edges | Gone (it is a web page); a language switch instead |
 | Core's models, role, effort, style | The person's **model key** (provider + key, checked on save) |
 | Settings: sessions, revert, export… | **Account**: key, plan and billing, sign out; and how the page looks |

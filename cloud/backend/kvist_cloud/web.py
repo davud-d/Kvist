@@ -18,7 +18,7 @@ from .funnel import record_pricing_view
 from .models import Task, User
 
 router = APIRouter()
-APP_PATHS = ("/start", "/onboarding", "/new", "/dashboard", "/settings", "/admin")
+APP_PATHS = ("/start", "/onboarding", "/dashboard", "/settings", "/admin")
 
 
 def csp(public_url: str) -> str:
@@ -133,6 +133,12 @@ def _app_page(request: Request) -> Response:
     boot = json.dumps(profile).replace("<", "\\u003c")
     html = html.replace(BOOT_SLOT, f'<script id="boot" type="application/json">{boot}</script>', 1)
     return HTMLResponse(html)
+
+
+@router.get("/new", include_in_schema=False)
+def new_task() -> Response:
+    """Tasks are written in the workspace now; an old bookmark or link lands there."""
+    return RedirectResponse("/pixel/", status_code=307)
 
 
 for _path in APP_PATHS:

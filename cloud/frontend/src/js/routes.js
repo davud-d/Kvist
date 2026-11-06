@@ -8,8 +8,7 @@ import { taskScreen } from "./screens/task.js";
 
 export const routes = [
   { pattern: /^\/start\/?$/, screen: startScreen, title: "start.title", nav: null, funnel: true },
-  { pattern: /^\/onboarding\/?$/, screen: onboardingScreen, title: "onboarding.title", nav: "/new", funnel: true },
-  { pattern: /^\/new\/?$/, screen: onboardingScreen, title: "onboarding.newTitle", nav: "/new" },
+  { pattern: /^\/onboarding\/?$/, screen: onboardingScreen, title: "onboarding.title", nav: null, funnel: true },
   { pattern: /^\/dashboard\/?$/, screen: dashboardScreen, title: "nav.dashboard", nav: "/dashboard" },
   { pattern: /^\/tasks\/(\d+)\/?$/, screen: taskScreen, title: "task.goal", nav: null },
   { pattern: /^\/settings\/?$/, screen: settingsScreen, title: "nav.settings", nav: "/settings" },

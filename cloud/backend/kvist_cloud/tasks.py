@@ -137,6 +137,7 @@ def task_view(db: Session, task: Task) -> dict[str, object]:
     return {
         "id": task.id,
         "machine_id": task.machine_id,
+        "project_id": task.project_id,
         "goal": task.goal,
         "repo_url": task.repo_url,
         "status": task.status,
@@ -230,6 +231,9 @@ def _first_done(db: Session, task: Task) -> None:
 
 class TaskIn(BaseModel):
     goal: str = Field(min_length=1, max_length=GOAL_LIMIT)
+    # A task belongs to a project (a folder on the machine). Without one it gets a folder of its own, as it
+    # did before projects: the older screens still start tasks that way.
+    project_id: int | None = None
     repo_url: str = Field(default="", max_length=500)
 
 
@@ -297,12 +301,25 @@ async def create_task(
 
     app = request.app
     can_run(db, user)
-    repo_url = payload.repo_url.strip()
+    project = None
+    if payload.project_id is not None:
+        from .projects import owned_project
+
+        project = owned_project(db, user, payload.project_id)
+        repo_url = project.repo_url
+    else:
+        repo_url = payload.repo_url.strip()
     if repo_problem(repo_url, app.state.settings.allow_local_endpoints):
         raise ApiError(400, "bad_repo", "That is not a repository link. / Это не ссылка на репозиторий.")
     machine = _machine_for_task(app, db, user)
     first = not db.scalar(select(func.count()).select_from(Task).where(Task.user_id == user.id))
-    task = Task(user_id=user.id, machine_id=machine.id, goal=payload.goal.strip(), repo_url=repo_url)
+    task = Task(
+        user_id=user.id,
+        machine_id=machine.id,
+        goal=payload.goal.strip(),
+        repo_url=repo_url,
+        project_id=project.id if project is not None else None,
+    )
     db.add(task)
     db.flush()
     admit(db, task)

@@ -138,7 +138,9 @@ async function sendMessage(id, taskId, text) {
 
 async function startTask(id, text) {
   const entry = agents.get(id);
-  const task = await api("/api/tasks", { method: "POST", body: { goal: text, repo_url: entry.workspace } });
+  // `workspace` is the project's id; "" is a task outside any project (only the older tasks are).
+  const body = { goal: text, project_id: entry.workspace ? Number(entry.workspace) : null };
+  const task = await api("/api/tasks", { method: "POST", body });
   entry.taskId = task.id;
   seen.set(task.id, 0);
   account.tasks.unshift(task);

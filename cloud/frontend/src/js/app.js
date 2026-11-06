@@ -25,7 +25,7 @@ export function navigate(path, { replace: swap = false } = {}) {
 function header(active, funnel) {
   // Inside the funnel there is one way forward; the app's navigation would only be a way out.
   const items = state.me && !funnel
-    ? [["/dashboard", "nav.dashboard"], ["/new", "nav.newTask"], ["/pixel/", "nav.pixel"], ["/settings", "nav.settings"],
+    ? [["/dashboard", "nav.dashboard"], ["/pixel/", "nav.pixel"], ["/settings", "nav.settings"],
        ...(state.me.is_admin ? [["/admin", "nav.admin"]] : [])]
     : [];
   return h("header.top", {},

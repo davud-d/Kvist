@@ -81,13 +81,13 @@ function machineCard(machines) {
 function tasksCard(tasks) {
   return h("section.card", { "aria-labelledby": "tasks-title" },
     h("div.spread", {}, h("h2.h3", { id: "tasks-title" }, t("dashboard.tasksTitle")),
-      h("a.chip", { href: "/new", "data-link": "" }, t("nav.newTask"))),
+      h("a.chip", { href: "/pixel/" }, t("nav.newTask"))),
     tasks.length
       ? h("ul.list", {}, tasks.slice(0, 20).map((task) => h("li", {},
           h("div.spread", {}, h("a.title", { href: `/tasks/${task.id}`, "data-link": "" }, task.goal.split("\n")[0]),
             taskPill(task.status)),
           h("p.meta", {}, `${dateTime(task.created_at, locale())} · ${hoursMinutes(task.used_seconds, t)}`))))
-      : emptyBox(t("dashboard.noTasks"), h("a.btn", { href: "/new", "data-link": "" }, t("dashboard.firstTask"))));
+      : emptyBox(t("dashboard.noTasks"), h("a.btn", { href: "/pixel/" }, t("dashboard.firstTask"))));
 }
 
 // Under a minute the shown value is 0, and "−0" would read as a glitch.

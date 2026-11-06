@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 
-from .workspace import task_dir, write_archive
+from .workspace import WorkspaceError, folder_for, write_archive
 
 log = logging.getLogger("kvist_runner.export")
 UPLOAD_TIMEOUT_SECONDS = 3600.0
@@ -29,7 +29,11 @@ async def run_export(runner, message: dict) -> None:
     export_id = int(message["export_id"])
     task_id = message.get("task_id")
     work = runner.config.work_dir
-    source = task_dir(work, int(task_id)) if task_id else work
+    try:
+        source = folder_for(work, int(task_id), str(message.get("folder") or "")) if task_id else work
+    except WorkspaceError:
+        _failed(runner, export_id, "bad_folder")
+        return
     archive = runner.config.root / "exports" / f"{export_id}.tar.gz"
     if not source.is_dir():
         _failed(runner, export_id, "nothing_to_export")

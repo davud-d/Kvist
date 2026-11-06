@@ -2,7 +2,7 @@
 // from that tile's place; leaving the chat zooms it out into the grid.
 
 import { activate, newAgent } from "../actions.js";
-import { repoLabel } from "../cloud.js";
+import { account, projectName } from "../cloud.js";
 import { fill, frameThrottle, h, icon } from "../dom.js";
 import { t } from "../i18n.js";
 import { animate, enter, finished, zoomIn, zoomOut } from "../motion.js";
@@ -22,7 +22,7 @@ function tile(agent, index) {
     "div",
     { class: `tile px${agent.id === store.activeId ? " on" : ""}`, role: "button", tabindex: "0", data: { id: agent.id } },
     h("div", { class: "tile-head" }, h("span", { class: `state-dot ${state}` }), h("span", { class: "tile-title" }, agent.title || t("new task")), h("span", { class: "tile-key" }, index < 9 ? String(index + 1) : "")),
-    h("div", { class: "tile-sub" }, `${t(state)} · ${repoLabel(agent.workspace) || t("empty folder")}`),
+    h("div", { class: "tile-sub" }, `${t(state)} · ${projectName(agent.workspace, account.projects, t("no project"))}`),
     picture,
     h("div", { class: "tile-text" }, lastWords(agent)),
     h("div", { class: "tile-foot" }, [...agent.helpers.values()].some((x) => x.state === "running") ? h("span", { class: "badge" }, icon("bot", 10), t("helpers")) : null, agent.changed.size ? h("span", { class: "badge" }, icon("file", 10), agent.changed.size) : null),
@@ -46,7 +46,7 @@ export function mountOverview(root, pane) {
   root.append(grid);
   // Another task in the same repository as the one in front.
   plus.addEventListener("click", () => {
-    newAgent(active()?.workspace ?? "");
+    newAgent(active()?.workspace || String(account.projects[0]?.id ?? ""));
     setMode("chat");
   });
 

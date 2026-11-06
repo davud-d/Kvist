@@ -2,13 +2,14 @@
 // bottom left, the gear that opens the settings. Picking a task shows it (its stream opens when it is used);
 // a running one carries a dot, and its cross only hides it from the page.
 
-import { addProject, closeTab, newAgent, openSession, refreshSessions, toggleProject } from "../actions.js";
+import { closeTab, newAgent, openSession, refreshSessions, toggleProject } from "../actions.js";
+import { account, onAccount, projectName, workspaceOf } from "../cloud.js";
 import { fill, frameThrottle, h, icon, keyedList } from "../dom.js";
 import { t } from "../i18n.js";
 import { enter } from "../motion.js";
 import { buildTree } from "../projects.js";
 import { store, subscribe } from "../store.js";
-import { openModal } from "./modal.js";
+import { openProjectDialog } from "./project-dialog.js";
 import { toggleSettings } from "./settings.js";
 
 function sessionRow(project, session) {
@@ -35,13 +36,14 @@ function paintProject(el, project) {
     el.querySelector(".proj-head"),
     chev,
     icon("folder", 16),
-    h("span", { class: "proj-name", title: project.workspace || t("empty folder") }, project.name || t("empty folder")),
+    h("span", { class: "proj-name", title: project.name }, project.name),
     project.running ? h("span", { class: "state-dot running" }) : null,
     project.sessions.length ? h("span", { class: "proj-count" }, String(project.sessions.length)) : null,
   );
   const create = h("button", { class: "sess new", type: "button" }, icon("plus", 12), h("span", { class: "sess-title" }, t("new task")));
   create.addEventListener("click", () => newAgent(project.workspace));
-  fill(el.querySelector(".proj-body > div"), project.sessions.map((session) => sessionRow(project, session)), create);
+  // The older tasks have no project to start a new one in.
+  fill(el.querySelector(".proj-body > div"), project.sessions.map((session) => sessionRow(project, session)), project.workspace ? create : null);
 }
 
 function makeProject(project) {
@@ -52,35 +54,20 @@ function makeProject(project) {
   return el;
 }
 
-// The cloud clones a public repository by its https link; there is no folder to pick.
-function askRepository() {
-  const input = h("input", { class: "field", type: "url", placeholder: "https://github.com/owner/repo", spellcheck: "false", autocomplete: "off" });
-  const hint = h("p", { class: "dim" }, t("repository link"));
-  const go = () => {
-    const link = input.value.trim();
-    if (!/^https:\/\/[^\s/@]+\/\S+$/.test(link)) {
-      hint.textContent = t("repository link");
-      hint.classList.add("bad");
-      return;
-    }
-    modal.close();
-    addProject(link);
-  };
-  input.addEventListener("keydown", (event) => event.key === "Enter" && go());
-  const modal = openModal({
-    title: t("add repository"),
-    content: [hint, input, h("div", { class: "dialog-buttons" }, h("button", { class: "btn primary", type: "button", onclick: go }, t("ok")), h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("cancel")))],
-  });
+// The rail lists the person's projects, and the older tasks' group only while there are such tasks.
+function workspaces() {
+  const own = account.projects.map((project) => String(project.id));
+  return account.tasks.some((task) => workspaceOf(task) === "") ? [...own, ""] : own;
 }
 
 export function mountDock(root) {
   const list = h("div", { class: "tree" });
-  const add = h("button", { class: "btn wide", type: "button" }, icon("plus", 14), h("span", {}, t("add repository")));
+  const add = h("button", { class: "btn wide", type: "button" }, icon("plus", 14), h("span", {}, t("add project")));
   const gear = h("button", { class: "btn wide", type: "button", title: t("settings"), "aria-haspopup": "dialog" }, icon("gear", 16), h("span", {}, t("settings")));
   root.classList.add("px");
-  root.append(h("div", { class: "section-label" }, t("repositories")), list, h("div", { class: "dock-foot" }, add, gear));
+  root.append(h("div", { class: "section-label" }, t("projects")), list, h("div", { class: "dock-foot" }, add, gear));
 
-  add.addEventListener("click", askRepository);
+  add.addEventListener("click", openProjectDialog);
   gear.addEventListener("click", () => toggleSettings(gear));
 
   const draw = keyedList(list, {
@@ -93,7 +80,8 @@ export function mountDock(root) {
   });
   const redraw = frameThrottle(() => {
     const tree = buildTree({
-      projects: store.prefs.projects,
+      projects: workspaces(),
+      nameOf: (workspace) => projectName(workspace, account.projects, t("no project")),
       agents: store.order.map((id) => store.agents.get(id)),
       listings: store.listings,
       expanded: store.prefs.expanded,
@@ -103,5 +91,6 @@ export function mountDock(root) {
     for (const project of tree) if (project.open && !store.listings.has(project.workspace)) refreshSessions(project.workspace);
   });
   subscribe(redraw);
+  onAccount(redraw);
   redraw();
 }

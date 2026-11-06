@@ -11,8 +11,7 @@ export const DEFAULT_PREFS = {
   scale: 1,
   inspector: true,
   inspectorTab: "hours",
-  projects: [], // repositories on the rail ("" is the empty folder)
-  expanded: [], // repositories opened on the rail
+  expanded: [], // projects opened on the rail (by id; "" is the older tasks)
 };
 
 export const store = {

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Task folders: one per task, optionally a clone of a repository; and their archives."""
+"""Work folders: a project's, or one per task for older tasks; optionally a clone of a repository; and archives."""
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +22,17 @@ def task_dir(work_root: Path, task_id: int) -> Path:
     return work_root / f"task-{task_id}"
 
 
+def project_dir(work_root: Path, folder: str) -> Path:
+    """A project's folder under the work root; a name that could leave it is refused, whoever sent it."""
+    if not folder or folder in (".", "..") or "/" in folder or "\\" in folder or "\0" in folder:
+        raise WorkspaceError("bad_folder")
+    return work_root / folder
+
+
+def folder_for(work_root: Path, task_id: int, folder: str = "") -> Path:
+    return project_dir(work_root, folder) if folder else task_dir(work_root, task_id)
+
+
 def allowed_repo(url: str, allow_local: bool) -> bool:
     parsed = urlparse(url)
     if parsed.scheme == "https" and parsed.hostname:
@@ -29,8 +40,9 @@ def allowed_repo(url: str, allow_local: bool) -> bool:
     return allow_local and parsed.scheme == "file"
 
 
-async def prepare(work_root: Path, task_id: int, repo_url: str, allow_local: bool) -> Path:
-    folder = task_dir(work_root, task_id)
+async def prepare(work_root: Path, task_id: int, repo_url: str, allow_local: bool, project: str = "") -> Path:
+    """The task's folder: the project's when it has one, else its own. Made (or cloned) the first time only."""
+    folder = folder_for(work_root, task_id, project)
     if folder.exists():
         return folder
     work_root.mkdir(parents=True, exist_ok=True)

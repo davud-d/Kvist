@@ -4,7 +4,7 @@
 import { activate, pause, runCommand, sendGoal, stopAll, wake } from "../actions.js";
 import { sessionOp } from "../bridge.js";
 import { summary } from "../reducer.js";
-import { canResume, duration, repoLabel } from "../cloud.js";
+import { account, canResume, duration, projectName } from "../cloud.js";
 import { fill, frameThrottle, h, icon, keyedList } from "../dom.js";
 import { t } from "../i18n.js";
 import { coolDown, formatSeconds, shimmerColor, spinnerWord, tokenCount } from "../spinner.js";
@@ -58,12 +58,12 @@ export function mountChat(root) {
 
   function paintHeader(agent) {
     const stateLabel = summary(agent);
-    const repo = repoLabel(agent.workspace) || t("empty folder");
+    const project = projectName(agent.workspace, account.projects, t("no project"));
     fill(title, h("span", { class: `state-dot ${stateLabel}` }), h("span", { class: "title-text" }, agent.title || t("new task")), h("span", { class: "title-sub" }, agent.session ? `#${agent.session}` : ""));
     const role = agent.routedRole || agent.role;
     fill(chips, 
       h("span", { class: "chip" }, t(stateLabel)),
-      h("span", { class: "chip repo", title: agent.workspace || t("empty folder") }, repo),
+      h("span", { class: "chip repo", title: project }, project),
       role ? h("span", { class: "chip role" }, role) : null,
       agent.models?.fast ? h("span", { class: "chip model", title: `${agent.provider}: ${agent.models.fast} / ${agent.models.smart}` }, agent.models.smart || agent.models.fast) : null,
       agent.cloud ? h("span", { class: "chip hours", title: t("this task") }, duration(agent.cloud.used_seconds)) : null,

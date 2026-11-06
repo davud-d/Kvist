@@ -19,6 +19,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidSta
 from .config import RunnerConfig
 from .export import run_export
 from .task import Limits, TaskProcess
+from .workspace import WorkspaceError, prepare
 
 log = logging.getLogger("kvist_runner")
 VERSION = "0.1.0"
@@ -154,6 +155,8 @@ class Runner:
             await task.answer(message.get("response") or {})
         elif kind == "control" and task is not None:
             await task.control(str(message.get("action", "")))
+        elif kind == "prepare_project":
+            self._spawn(self._prepare_project(message))
         elif kind == "message":
             await self._message(int(message.get("task_id") or 0), str(message.get("text") or ""))
         elif kind == "screen_watch" and task is not None:
@@ -169,6 +172,17 @@ class Runner:
             log.info("message for a task this runner does not have: %s", kind)
         else:
             log.warning("unknown message from the server: %r", kind)
+
+    async def _prepare_project(self, message: dict) -> None:
+        """A project was added: make its folder (or clone its repository) now, so it is there before any task."""
+        try:
+            await prepare(
+                self.config.work_dir, 0, str(message.get("repo_url") or ""), bool(message.get("allow_local")),
+                str(message.get("folder") or ""),
+            )
+        except WorkspaceError as error:
+            # The first task tries again and tells the person; nothing waits on this.
+            log.warning("project folder not ready: %s %s", error.reason, error.detail)
 
     async def _message(self, task_id: int, text: str) -> None:
         task = self.tasks.get(task_id)
@@ -191,6 +205,8 @@ class Runner:
             env={str(k): str(v) for k, v in (message.get("env") or {}).items()},
             limits=Limits.from_message(message["limits"]),
             session=str(message.get("session") or ""),
+            folder=str(message.get("folder") or ""),
+            follow_up=bool(message.get("follow_up")),
             config=self.config,
             emit=self.emit,
             on_change=self.heartbeat_now,

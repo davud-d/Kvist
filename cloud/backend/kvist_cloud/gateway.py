@@ -14,11 +14,11 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import exports, ledger, limits, plans, screens, tasks
+from . import exports, ledger, limits, plans, projects, screens, tasks
 from .db import session_scope, utcnow
 from .keys import kvist_environment
 from .machines import spawn, wake
-from .models import Machine, MachineStatus, Task, TaskStatus, User
+from .models import Machine, MachineStatus, Project, Task, TaskStatus, User
 from .secrets import SecretError
 
 log = logging.getLogger("kvist_cloud.gateway")
@@ -74,12 +74,20 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
     settings = app.state.settings
     subscription = ledger.current_subscription(db, user.id)
     plan = plans.get_plan(subscription.plan) if subscription is not None else plans.TRIAL
+    project = db.get(Project, task.project_id) if task.project_id else None
+    if project is not None:
+        # A project's tasks share its folder, so each keeps its conversation in a session of its own, named
+        # for the task: a first run opens it, a later one switches back into it.
+        session = f"task-{task.id}"
+    else:
+        session = tasks.core_session(db, task) if task.pending_text else ""
     return {
         "type": "start_task",
         "task_id": task.id,
         # The first goal starts the task; what was written later goes into the same conversation.
         "goal": task.pending_text or task.goal,
-        "session": tasks.core_session(db, task) if task.pending_text else "",
+        "folder": project.folder if project is not None else "",
+        "session": session,
         "follow_up": bool(task.pending_text),
         "repo_url": task.repo_url,
         "resume": task.resume_requested,
@@ -171,6 +179,24 @@ async def _hello(app: FastAPI, machine_id: int, message: dict) -> None:
                 app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
     await dispatch(app, machine_id, known)
     await exports.send_pending(app, machine_id)
+    await _send_projects(app, machine_id)
+
+
+async def _send_projects(app: FastAPI, machine_id: int) -> None:
+    """Every project of the machine's owner gets its folder: ones added while it slept, or lost since.
+
+    A folder that is already there is left alone, so this is cheap and says the same thing every time.
+    """
+    with session_scope(app.state.session_factory) as db:
+        machine = db.get(Machine, machine_id)
+        if machine is None:
+            return
+        messages = [
+            projects.prepare_message(app, project)
+            for project in db.scalars(select(Project).where(Project.user_id == machine.user_id))
+        ]
+    for message in messages:
+        await app.state.gateway.send(machine_id, message)
 
 
 def _heartbeat(app: FastAPI, machine_id: int, message: dict) -> ledger.BeatResult:

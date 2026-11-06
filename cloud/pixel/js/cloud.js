@@ -29,7 +29,7 @@ export function share(balance, total) {
 
 export const firstLine = (text) => String(text ?? "").trim().split("\n")[0].slice(0, 120);
 
-/** "owner/repo" out of a repository link; empty for the empty folder. */
+/** "owner/repo" out of a repository link. */
 export function repoLabel(url) {
   if (!url) return "";
   const parts = String(url).replace(/\.git$/, "").split("/").filter(Boolean);
@@ -46,10 +46,36 @@ export function listItem(task) {
   };
 }
 
-/** The tasks that belong to one repository ("" is the empty folder), newest first. */
-export const tasksOf = (tasks, workspace) => tasks.filter((task) => (task.repo_url ?? "") === workspace);
+// A "workspace" on this page is a project's id as text; "" holds the tasks from before projects existed.
+export const workspaceOf = (task) => String(task.project_id ?? "");
 
-export const repositories = (tasks) => [...new Set(tasks.map((task) => task.repo_url ?? ""))];
+/** The tasks of one project, newest first. */
+export const tasksOf = (tasks, workspace) => tasks.filter((task) => workspaceOf(task) === workspace);
+
+/** What a project is called: its name, or the old tasks' shared label. */
+export function projectName(workspace, projects, fallback) {
+  return projects.find((project) => String(project.id) === workspace)?.name ?? fallback;
+}
+
+// -- project names: the same rules the server applies, so the dialog can say no before asking ----------------
+
+const NAME = /^[\p{L}\p{N}_][\p{L}\p{N}_ .\-]*$/u;
+const RESERVED = /^task-\d+$/i;
+export const NAME_LIMIT = 60;
+
+/** The folder a name becomes on the server: spaces turn into hyphens. */
+export const folderOf = (name) => String(name).trim().replace(/\s+/g, "-");
+
+/** Why this cannot be a project name ("" when it can). Case and spacing do not make a new project. */
+export function nameProblem(name, projects) {
+  const folder = folderOf(name);
+  if (!folder || folder.length > NAME_LIMIT || !NAME.test(String(name).trim()) || /[. ]$/.test(String(name).trim()) || RESERVED.test(folder)) return "bad_project_name";
+  if (projects.some((project) => folderOf(project.name).toLowerCase() === folder.toLowerCase())) return "name_taken";
+  return "";
+}
+
+/** "owner/repo" or "repo" from a clone link, to suggest as a project name. */
+export const suggestedName = (repoName) => String(repoName).split("/").at(-1).replace(/\.git$/, "");
 
 /** A paused task is continued by a button; any message continues it too, with the message. */
 export const canResume = (cloud) => cloud?.status === "paused";
@@ -66,7 +92,7 @@ export const displayState = (machine) => machine?.display_status ?? "none";
 
 // -- the account ----------------------------------------------------------------------------
 
-export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], ready: false };
+export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], projects: [], ready: false };
 
 const listeners = new Set();
 export const onAccount = (fn) => (listeners.add(fn), () => listeners.delete(fn));
@@ -144,6 +170,20 @@ export async function refreshTasks() {
   return account.tasks;
 }
 
+export async function refreshProjects() {
+  const projects = await quietly("/api/projects");
+  if (projects) account.projects = projects;
+  changed();
+  return account.projects;
+}
+
+/** A new project: a folder of that name on the server, empty or a clone of `repoUrl`. */
+export async function createProject(name, repoUrl = "") {
+  const project = await api("/api/projects", { method: "POST", body: { name, repo_url: repoUrl } });
+  await refreshProjects();
+  return project;
+}
+
 export async function refreshKey() {
   const key = await quietly("/api/model-key");
   if (key) account.key = key;
@@ -154,7 +194,7 @@ export async function loadAccount() {
   account.me = await api("/api/me");
   const providers = await quietly("/api/model-providers");
   if (providers) account.providers = providers;
-  await Promise.all([refreshMachine(), refreshHours(), refreshTasks(), refreshKey()]);
+  await Promise.all([refreshMachine(), refreshHours(), refreshTasks(), refreshKey(), refreshProjects()]);
   account.ready = true;
   changed();
 }

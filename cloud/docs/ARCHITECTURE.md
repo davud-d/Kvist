@@ -102,6 +102,27 @@ socket. The runner packs the folder into a `.tar.gz` and uploads it with an HTTP
 the machine token. The browser polls the export and downloads it. Export goes through the
 runner, not the provider, so it works the same on any hosting.
 
+### Projects
+
+A project is a named folder on the person's machine: **empty** (just a name) or a **clone of one of their public
+GitHub repositories** (`GET /api/github/repos`). Tasks (sessions) belong to a project and work in its folder, so
+what one leaves the next finds; older tasks (no `project_id`) keep a folder of their own (`task-N`).
+
+* **Names never repeat.** The name is the folder (spaces become hyphens) and is compared without regard to case,
+  so "My app", "my app" and "my-app" are one project: `409 name_taken`, enforced by the database
+  (`UNIQUE(user_id, folder_key)`) and checked first for the message. Allowed: letters, digits, spaces, dots,
+  hyphens, underscores, 60 characters at most; no `/`, no leading dot or hyphen, and not `task-<digits>` (those are
+  the older tasks' folders). Two people may use the same name: their machines are separate.
+* **The folder is made on the machine** (`prepare_project`: created, or cloned) as soon as the project is added if the
+  machine is awake, and for every project each time its runner connects, so one added while the machine slept
+  appears when it wakes. A folder that exists is left alone. The runner refuses a folder name that is not a plain
+  name (`project_dir`), whoever sent it.
+* **One session per task inside the shared folder.** Kvist keeps its sessions per folder, so a task would otherwise
+  continue the project's last conversation. A task's session is named `task-<id>`: its first run opens it
+  (`command new`), later runs switch back into it (`command session switch`); a first run that finds the name taken
+  (it died after opening it) switches in too.
+* Exports of a task pack its project's folder (`folder` in the `export` message).
+
 ### The agent's screen (private)
 
 The browser and desktop skills draw on a virtual screen that Kvist serves on a loopback address of

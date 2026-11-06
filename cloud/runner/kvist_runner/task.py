@@ -70,6 +70,8 @@ class TaskProcess:
         on_change: Callable[[], None],
         send_frame: Callable[[dict], bool] = lambda _message: False,
         session: str = "",
+        folder: str = "",
+        follow_up: bool = False,
     ) -> None:
         self.task_id = task_id
         self.goal = goal
@@ -95,6 +97,10 @@ class TaskProcess:
         # A task is a conversation: a run after the first starts by switching back into the session the
         # first run opened (`session`), and only then takes its message (`_after_switch`).
         self.session = session
+        self.folder = folder
+        # A project's tasks share one folder, so a run opens its session by name (`new`) the first time and
+        # switches back into it afterwards; a run that found the name already taken switches too.
+        self._session_mode = "switch" if follow_up else "new"
         self._after_switch: str | None = None
         # Goals written to Kvist whose turn has not ended yet. A message that comes in while a turn is
         # finishing is one of them: the stdin stays open until its turn has been taken too.
@@ -125,7 +131,9 @@ class TaskProcess:
 
     async def _run(self) -> None:
         try:
-            workdir = await prepare(self.config.work_dir, self.task_id, self.repo_url, self.limits.allow_local_repos)
+            workdir = await prepare(
+                self.config.work_dir, self.task_id, self.repo_url, self.limits.allow_local_repos, self.folder
+            )
         except WorkspaceError as error:
             log.warning("task %s: workspace not ready: %s %s", self.task_id, error.reason, error.detail)
             self._exit(None, error.reason)
@@ -164,7 +172,7 @@ class TaskProcess:
         if self.resume:
             first = {"type": "command", "name": "resume"}
         elif self.session:
-            first = {"type": "command", "name": "session", "args": ["switch", self.session]}
+            first = self._session_command()
             self._after_switch = self.goal
         else:
             first = {"type": "goal", "text": self.goal}
@@ -243,7 +251,7 @@ class TaskProcess:
             self._set_running(True)
         elif kind == "turn_end":
             await self._turn_ended()
-        elif kind == "command_result" and event.get("name") == "session" and self._after_switch is not None:
+        elif kind == "command_result" and event.get("name") in ("session", "new") and self._after_switch is not None:
             await self._take_message(event)
         elif kind == "command_result" and event.get("name") == "resume" and not event.get("ok"):
             self.stop_reason = self.stop_reason or "resume_failed"
@@ -270,6 +278,11 @@ class TaskProcess:
 
     async def _take_message(self, switched: dict) -> None:
         """Back in the conversation (or, if that failed, in a fresh one, said so): now the message."""
+        if not switched.get("ok") and self._session_mode == "new":
+            # The name is taken (an earlier run of this task opened it): go back into it instead.
+            self._session_mode = "switch"
+            await self._write(self._session_command())
+            return
         text, self._after_switch = self._after_switch or "", None
         if not switched.get("ok"):
             log.warning("task %s: could not switch back into the session", self.task_id)
@@ -278,6 +291,11 @@ class TaskProcess:
                 "markdown": "Could not reopen the earlier conversation, so this message starts a new one. / "
                             "Не удалось открыть прежний разговор: это сообщение начнёт новый."}})
         await self._write({"type": "goal", "text": text})
+
+    def _session_command(self) -> dict:
+        if self._session_mode == "new":
+            return {"type": "command", "name": "new", "args": [self.session]}
+        return {"type": "command", "name": "session", "args": ["switch", self.session]}
 
     @property
     def accepts_goals(self) -> bool:

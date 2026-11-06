@@ -45,3 +45,6 @@
   #app #inspector { opacity: 0; pointer-events: none; }
   .brand-sub, .server-chip span:last-child { display: none; }
 }
+
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.repo-list { max-height: 220px; overflow-y: auto; }

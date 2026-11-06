@@ -228,3 +228,32 @@ def test_the_real_core_takes_the_next_message_in_the_same_conversation(live_stac
     assert results and results[-1]["name"] == "session" and results[-1]["ok"] is True, results
     users = [row["event"]["text"] for row in rows if row["event"]["type"] == "user"]
     assert users == ["Write the cloud notes", "once more", "and again"]
+
+
+@pytest.mark.real_core
+@pytest.mark.skipif(not (REPO_ROOT / ".venv" / "bin" / "python").exists(), reason="the Kvist core's venv is missing")
+def test_the_real_core_keeps_a_session_per_task_in_a_shared_project_folder(live_stack, fake_model, dist):
+    stack = live_stack(
+        kvist_command=[str(REPO_ROOT / ".venv" / "bin" / "python"), "-m", "kernel"],
+        network=True, FRONTEND_DIST=str(dist), ADMIN_GITHUB_LOGINS="dev",
+    )
+    first = walk_the_funnel(stack, fake_model, "Write the cloud notes")  # an older task: a folder of its own
+    stream_until_done(stack, first, timeout=120)
+    project = stack.http.post("/api/projects", json={"name": "Notes site"}).json()
+    folder = Path(stack.app.state.settings.data_dir) / "machines" / "m1" / "work" / "Notes-site"
+    eventually(folder.is_dir, timeout=20)  # made at once: the machine is awake
+
+    ids = []
+    for goal in ("Write the cloud notes", "Write the cloud notes again"):
+        created = stack.http.post("/api/tasks", json={"goal": goal, "project_id": project["id"]})
+        assert created.status_code == 201, created.text
+        ids.append(created.json()["id"])
+        stream_until_done(stack, ids[-1], timeout=120)
+
+    assert "Written by the fake model." in (folder / "CLOUD_NOTES.md").read_text()
+    for task_id in ids:
+        rows = stack.http.get(f"/api/tasks/{task_id}/events").json()["events"]
+        sessions = [row["event"]["session"] for row in rows if row["event"]["type"] == "session"]
+        results = [row["event"] for row in rows if row["event"]["type"] == "command_result"]
+        assert sessions == [f"task-{task_id}"], sessions
+        assert results and results[0]["name"] == "new" and results[0]["ok"] is True, results

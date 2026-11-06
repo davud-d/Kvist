@@ -123,12 +123,32 @@ class Machine(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class Project(Base):
+    """A named folder on the person's machine. Tasks (sessions) work in it, so what one leaves the next finds."""
+
+    __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("user_id", "folder_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # What the person typed, and the folder it becomes on the machine (spaces become hyphens).
+    name: Mapped[str] = mapped_column(String(60))
+    folder: Mapped[str] = mapped_column(String(60))
+    # The folder compared without regard to case: "Notes" and "notes" are the same folder, so the same project.
+    folder_key: Mapped[str] = mapped_column(String(60))
+    # Set when the project is a clone of one of the person's repositories.
+    repo_url: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     machine_id: Mapped[int] = mapped_column(ForeignKey("machines.id"), index=True)
+    # None for the tasks from before projects existed: each had a folder of its own.
+    project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     goal: Mapped[str] = mapped_column(Text)
     repo_url: Mapped[str] = mapped_column(String(500), default="")
     status: Mapped[str] = mapped_column(String(20), default=TaskStatus.QUEUED, index=True)
