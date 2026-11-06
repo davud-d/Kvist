@@ -178,7 +178,7 @@ class Runner:
         try:
             await prepare(
                 self.config.work_dir, 0, str(message.get("repo_url") or ""), bool(message.get("allow_local")),
-                str(message.get("folder") or ""),
+                str(message.get("folder") or ""), str(message.pop("github_token", "") or ""),
             )
         except WorkspaceError as error:
             # The first task tries again and tells the person; nothing waits on this.
@@ -201,6 +201,7 @@ class Runner:
             task_id=task_id,
             goal=str(message.get("goal", "")),
             repo_url=str(message.get("repo_url", "")),
+            github_token=str(message.pop("github_token", "") or ""),
             resume=bool(message.get("resume")),
             env={str(k): str(v) for k, v in (message.get("env") or {}).items()},
             limits=Limits.from_message(message["limits"]),

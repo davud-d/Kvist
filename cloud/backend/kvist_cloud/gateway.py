@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import exports, ledger, limits, plans, projects, screens, tasks
-from .db import session_scope, utcnow
+from .db import lock_account, session_scope, utcnow
 from .keys import kvist_environment
 from .machines import spawn, wake
 from .models import Machine, MachineStatus, Project, Task, TaskStatus, User
@@ -73,7 +73,9 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
         return None
     settings = app.state.settings
     subscription = ledger.current_subscription(db, user.id)
-    plan = plans.get_plan(subscription.plan) if subscription is not None else plans.TRIAL
+    if subscription is None or ledger.balance_seconds(db, user.id) <= 0:
+        return None
+    plan = plans.get_plan(subscription.plan)
     project = db.get(Project, task.project_id) if task.project_id else None
     if project is not None:
         # A project's tasks share its folder, so each keeps its conversation in a session of its own, named
@@ -90,6 +92,7 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
         "session": session,
         "follow_up": bool(task.pending_text),
         "repo_url": task.repo_url,
+        "github_token": app.state.vault.decrypt(user.github_token_enc) if user.github_token_enc else "",
         "resume": task.resume_requested,
         "env": kvist_environment(user, key),
         "limits": {
@@ -110,6 +113,10 @@ async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None)
         spawn(app, wake(app, machine_id))
         return
     with session_scope(app.state.session_factory) as db:
+        machine = db.get(Machine, machine_id)
+        if machine is None:
+            return
+        lock_account(db, machine.user_id)
         waiting = list(
             db.scalars(
                 select(Task).where(Task.machine_id == machine_id, Task.status == TaskStatus.STARTING).order_by(Task.id)
@@ -118,6 +125,11 @@ async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None)
         messages = []
         for task in waiting:
             if task.started_at is not None and (known is None or task.id in known):
+                continue
+            if ledger.current_subscription(db, task.user_id) is None or ledger.balance_seconds(db, task.user_id) <= 0:
+                # Hours can run out between admission and start; Continue picks it up after a purchase.
+                tasks.apply_exit(task, "hours_exhausted")
+                app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
                 continue
             message = start_message(app, db, task)
             if message is None:
@@ -192,7 +204,7 @@ async def _send_projects(app: FastAPI, machine_id: int) -> None:
         if machine is None:
             return
         messages = [
-            projects.prepare_message(app, project)
+            projects.prepare_message(app, project, db.get(User, machine.user_id))
             for project in db.scalars(select(Project).where(Project.user_id == machine.user_id))
         ]
     for message in messages:
@@ -205,6 +217,8 @@ def _heartbeat(app: FastAPI, machine_id: int, message: dict) -> ledger.BeatResul
     settings = app.state.settings
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
+        lock_account(db, machine.user_id)
+        db.refresh(machine)
         result = ledger.record_heartbeat(db, machine, running, app.state.clock(), settings.heartbeat_max_gap_seconds)
         if running or background:
             machine.last_active_at = utcnow()
@@ -216,7 +230,11 @@ def _heartbeat(app: FastAPI, machine_id: int, message: dict) -> ledger.BeatResul
 
 
 def _owned_task(db: Session, machine_id: int, task_id: int) -> Task | None:
-    task = db.get(Task, task_id)
+    machine = db.get(Machine, machine_id)
+    if machine is None:
+        return None
+    lock_account(db, machine.user_id)
+    task = db.get(Task, task_id, populate_existing=True)
     if task is None or task.machine_id != machine_id:
         return None
     return task

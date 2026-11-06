@@ -1,4 +1,5 @@
 // Dashboard: hours and their feed, the machine, recent tasks, the key (last four characters).
+import { openCheckout } from "../billing.js";
 import { api } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
 import { exportButton } from "../exporter.js";
@@ -42,8 +43,8 @@ function hoursCard(view, config, refresh, announce) {
     try {
       if (config.enabled) {
         // Billing on: the same Paddle overlay, for the one-off hour pack.
-        window.Paddle.Checkout.open({ items: [{ priceId: config.paddle.prices.hours, quantity: 1 }],
-          customData: { kind: "hours", user_id: String(view.user_id || "") } });
+        await openCheckout(config, "hours", refresh);
+        buy.disabled = false;
       } else {
         await api("/api/billing/dev/buy-hours", { method: "POST" });
         announce.textContent = t("dashboard.bought", { h: config.hour_pack.hours });

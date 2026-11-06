@@ -40,6 +40,7 @@ class Settings:
     paddle_client_token: str = ""
     paddle_environment: str = "sandbox"
     paddle_price_start: str = ""
+    paddle_price_trial: str = ""
     paddle_price_pro: str = ""
     paddle_price_max: str = ""
     paddle_price_hours: str = ""
@@ -59,6 +60,11 @@ class Settings:
     @property
     def secure_cookies(self) -> bool:
         return self.public_url.startswith("https://")
+
+    @property
+    def dev_billing(self) -> bool:
+        return (not self.billing_enabled and self.auth_dev_login
+                and urlparse(self.public_url).hostname in LOOPBACK_HOSTS)
 
     @property
     def gateway_url(self) -> str:
@@ -135,6 +141,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     billing_enabled = _flag(env, "BILLING_ENABLED")
     if billing_enabled and not env.get("PADDLE_WEBHOOK_SECRET", ""):
         raise ConfigError("BILLING_ENABLED needs PADDLE_WEBHOOK_SECRET")
+    if env.get("PADDLE_ENVIRONMENT", "sandbox") not in {"sandbox", "production"}:
+        raise ConfigError("PADDLE_ENVIRONMENT must be sandbox or production")
     allow_local = _flag(env, "ALLOW_LOCAL_ENDPOINTS")
     if allow_local and host not in LOOPBACK_HOSTS:
         raise ConfigError("ALLOW_LOCAL_ENDPOINTS is only allowed when PUBLIC_URL is a loopback address")
@@ -156,6 +164,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         paddle_client_token=env.get("PADDLE_CLIENT_TOKEN", ""),
         paddle_environment=env.get("PADDLE_ENVIRONMENT", "sandbox"),
         paddle_price_start=env.get("PADDLE_PRICE_START", ""),
+        paddle_price_trial=env.get("PADDLE_PRICE_TRIAL", ""),
         paddle_price_pro=env.get("PADDLE_PRICE_PRO", ""),
         paddle_price_max=env.get("PADDLE_PRICE_MAX", ""),
         paddle_price_hours=env.get("PADDLE_PRICE_HOURS", ""),

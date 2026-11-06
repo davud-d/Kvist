@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.orm import Session
 
 from .auth import current_user, http_client
@@ -22,7 +22,9 @@ from .db import get_db
 from .errors import ApiError
 from .funnel import record_step
 from .models import User
+from .outbound import PublicEndpointTransport
 from .secrets import Vault, last4, remember
+from .validation import InputModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +57,7 @@ class KeyCheck:
     code: str = ""
 
 
-class KeyIn(BaseModel):
+class KeyIn(InputModel):
     provider: str
     key: str = Field(min_length=8, max_length=500)
     base_url: str = Field(default="", max_length=500)
@@ -64,8 +66,14 @@ class KeyIn(BaseModel):
 
 def endpoint_problem(base_url: str, allow_local: bool) -> str:
     """Empty when the endpoint may be called; otherwise why not."""
-    parsed = urlparse(base_url)
-    host = parsed.hostname or ""
+    try:
+        parsed = urlparse(base_url)
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        return "bad_endpoint"
+    if parsed.username or parsed.password or parsed.fragment or port == 0:
+        return "bad_endpoint"
     if not host:
         return "bad_endpoint"
     if allow_local:
@@ -196,7 +204,11 @@ async def save_key(
             return {"ok": False, "code": problem or "model_missing"}
     else:
         base_url, model = "", ""
-    async with http_client(request) as client:
+    client = http_client(request)
+    if payload.provider == "other" and not settings.allow_local_endpoints and request.app.state.http_transport is None:
+        await client.aclose()
+        client = httpx.AsyncClient(transport=PublicEndpointTransport(), trust_env=False, timeout=10.0)
+    async with client:
         result = await check_key(client, payload.provider, key, base_url, model)
     if not result.ok:
         return {"ok": False, "code": result.code}

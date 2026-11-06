@@ -23,7 +23,8 @@ def fake_github(seen: list[httpx.Request]):
             return httpx.Response(200, json={"access_token": "gho_test_token", "token_type": "bearer"})
         if request.url.path == "/user":
             assert request.headers["authorization"] == "Bearer gho_test_token"
-            return httpx.Response(200, json={"id": 4242, "login": "octocat", "name": "Octo Cat", "avatar_url": "a"})
+            return httpx.Response(200, json={"id": 4242, "login": "octocat", "name": "Octo Cat", "avatar_url": "a",
+                                             "created_at": "2020-01-01T00:00:00Z"})
         return httpx.Response(404)
 
     return handler
@@ -35,7 +36,7 @@ def start_login(client, next_path: str = "/start") -> str:
     location = urlparse(response.headers["location"])
     assert location.netloc == "github.com"
     query = parse_qs(location.query)
-    assert query["scope"] == ["read:user"]
+    assert query["scope"] == ["read:user repo"]
     assert query["redirect_uri"] == ["http://127.0.0.1:8740/auth/github/callback"]
     return query["state"][0]
 
@@ -50,6 +51,7 @@ def test_github_login_round_trip(client_factory):
     assert "kc_session" in response.cookies
     me = client.get("/api/me").json()
     assert (me["login"], me["name"]) == ("octocat", "Octo Cat")
+    assert client.get("/api/billing/eligibility").json()["trial_eligible"]
     assert [request.url.path for request in seen] == ["/login/oauth/access_token", "/user"]
 
 
@@ -118,7 +120,7 @@ def test_dev_login_needs_no_network(client_factory):
     assert client.get("/api/me").json()["login"] == "dev"
 
 
-def test_public_repositories_are_listed(client_factory, engine):
+def test_public_and_private_repositories_are_listed(client_factory, engine):
     seen: list[httpx.Request] = []
 
     def github(request: httpx.Request) -> httpx.Response:
@@ -135,7 +137,10 @@ def test_public_repositories_are_listed(client_factory, engine):
     client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
     body = client.get("/api/github/repos").json()
     assert body == {"repos": [{"name": "octocat/hello", "url": "https://github.com/octocat/hello.git",
-                               "description": ""}], "reason": ""}
+                               "description": "", "private": False},
+                              {"name": "octocat/secret", "url": "https://github.com/octocat/secret.git",
+                               "description": "", "private": True}], "reason": ""}
+    assert seen[0].url.params["visibility"] == "all"
     assert seen[0].headers["authorization"] == "Bearer gho_test_token"
     from sqlalchemy import text
 

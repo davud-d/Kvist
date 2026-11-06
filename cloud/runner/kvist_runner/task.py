@@ -72,10 +72,12 @@ class TaskProcess:
         session: str = "",
         folder: str = "",
         follow_up: bool = False,
+        github_token: str = "",
     ) -> None:
         self.task_id = task_id
         self.goal = goal
         self.repo_url = repo_url
+        self._github_token = github_token
         self.resume = resume
         self.limits = limits
         self.config = config
@@ -128,16 +130,19 @@ class TaskProcess:
             # The key goes with the process.
             self._secrets.clear()
             self._model_env = None
+            self._github_token = ""
 
     async def _run(self) -> None:
         try:
             workdir = await prepare(
-                self.config.work_dir, self.task_id, self.repo_url, self.limits.allow_local_repos, self.folder
+                self.config.work_dir, self.task_id, self.repo_url, self.limits.allow_local_repos,
+                self.folder, self._github_token
             )
         except WorkspaceError as error:
             log.warning("task %s: workspace not ready: %s %s", self.task_id, error.reason, error.detail)
             self._exit(None, error.reason)
             return
+        self._github_token = ""
         argv = [
             *self.config.kvist_command,
             "--workspace", str(workdir),
@@ -169,6 +174,7 @@ class TaskProcess:
         finally:
             env.clear()
             self._model_env = None
+            self._github_token = ""
         if self.resume:
             first = {"type": "command", "name": "resume"}
         elif self.session:

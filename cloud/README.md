@@ -72,14 +72,51 @@ Environment variables only. The required ones:
 
 Optional: `DATABASE_URL` (default SQLite in `KVIST_CLOUD_DATA_DIR`), `GITHUB_CLIENT_ID` /
 `GITHUB_CLIENT_SECRET`, `BILLING_ENABLED` with `PADDLE_WEBHOOK_SECRET`, `PADDLE_API_KEY`,
-`PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `PADDLE_PRICE_START|PRO|MAX|HOURS`;
+`PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `PADDLE_PRICE_TRIAL|START|PRO|MAX|HOURS`;
 `MACHINE_PROVIDER` (`local`), `KVIST_COMMAND`, `RUNNER_COMMAND`, `HEARTBEAT_SECONDS` (15),
 `HEARTBEAT_MAX_GAP_SECONDS` (45), `MACHINE_IDLE_SLEEP_SECONDS` (900), `PROVIDER_OUTAGE_SECONDS`
 (300), `HOURS_GRACE_SECONDS` (300), `ADMIN_GITHUB_LOGINS`, and the dev-only `AUTH_DEV_LOGIN`,
 `ALLOW_LOCAL_ENDPOINTS` (both refused unless `PUBLIC_URL` is loopback).
 
-For Paddle the Start price needs a 7-day trial configured in Paddle; the webhook URL is
-`<PUBLIC_URL>/billing/paddle/webhook`.
+Paddle requires a separate `PADDLE_PRICE_TRIAL`: a monthly $15 Start price with a 7-day,
+card-required **paid trial of $1** (`trial_period.unit_price.amount="100"`, currency `USD`).
+The ordinary Start/Pro/Max prices must have no trial. All prices use USD, tax-inclusive
+`tax_mode=internal`, no regional overrides, quantity 1, and the amounts in `plans.py`.
+The server checks the price configuration before creating a transaction. Discounts/credits do not
+qualify for provisioning: the exact charge must be captured. The browser opens only the server's
+`transactionId`; `custom_data`, browser success callbacks and profile fields cannot grant access.
+
+The webhook URL is `<PUBLIC_URL>/billing/paddle/webhook`. Subscribe to `transaction.completed`,
+`subscription.*`, `adjustment.created` and `adjustment.updated`. The API key needs transaction-create,
+price-read, subscription-read/cancel, and adjustment-read/create permissions. Trial access waits for
+a captured $1 payment and an **approved full refund**, not just a card authorization. Refund approval
+and bank settlement can take time; rejected refunds need operator attention. Ordinary refunds and
+chargebacks reverse purchased hours and suspend refunded subscription periods. A reversed chargeback
+needs operator reconciliation; it does not automatically restore access.
+
+Trial eligibility uses GitHub's authenticated `created_at`, strictly older than one calendar month,
+and a durable lifetime trial-use marker. Unknown ages fail closed until GitHub is reconnected.
+Dev checkout/top-ups and synthetic renewals require `AUTH_DEV_LOGIN=true`, billing disabled, and a
+loopback `PUBLIC_URL`. `MACHINE_PROVIDER=local` is restricted to loopback: it does **not** isolate
+hostile tenants. The Sprites adapter remains unimplemented, so this is not yet public hosting.
+
+OAuth requests `read:user repo`. Existing users must reconnect GitHub and authorize `repo` (and any
+organization access) to list and clone private repositories. OAuth's `repo` scope is broad; the token
+is encrypted at rest, used in a GitHub-scoped Git header for cloning, and never written to the remote
+URL or the agent environment. Repository inputs accept GitHub HTTPS URLs only (local file URLs are
+a development-only exception). Authenticated fetch/push from the agent is not provided by this clone
+integration; existing archive export remains available.
+
+Migration `0005` preserves prior trial usage and suspends legacy Paddle subscriptions.
+Existing Paddle subscriptions from the older,
+client-metadata-based flow need operator reconciliation against Paddle and server-owned checkout/payment
+records before future notifications can renew them. Do not backfill ownership from `custom_data`.
+Before enabling live billing, exercise the complete charge/refund/renewal flow in Paddle sandbox;
+repository tests use mocks and do not verify your merchant account configuration.
+
+Provider contracts: [paid trials](https://developer.paddle.com/build/trials/create-trial/),
+[refund approvals](https://developer.paddle.com/build/transactions/create-transaction-adjustments/),
+[GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
 
 ## Checks
 

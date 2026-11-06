@@ -11,7 +11,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from fastapi import Request
-from sqlalchemy import DateTime, Engine, create_engine, event
+from sqlalchemy import DateTime, Engine, create_engine, event, update
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
@@ -50,6 +50,19 @@ class UTCDateTime(TypeDecorator):
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def lock_account(db: Session, user_id: int) -> None:
+    """Serialize account mutations across workers, on SQLite as well as PostgreSQL.
+
+    Call before reading admission state, and hold until commit. A no-op UPDATE also
+    acquires SQLite's write lock, where SELECT FOR UPDATE would do nothing.
+    """
+    from .models import User
+
+    with db.no_autoflush:
+        db.execute(update(User).where(User.id == user_id).values(session_version=User.session_version)
+                   .execution_options(synchronize_session=False))
 
 
 def make_engine(database_url: str) -> Engine:

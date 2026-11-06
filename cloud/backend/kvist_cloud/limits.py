@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import ledger, plans
-from .db import session_scope
+from .db import lock_account, session_scope
 from .models import Task, TaskStatus
 
 log = logging.getLogger("kvist_cloud.limits")
@@ -33,6 +33,11 @@ def active_count(db: Session, user_id: int, exclude: int | None = None) -> int:
 
 def admit(db: Session, task: Task) -> None:
     """Start now if the plan has a free slot, otherwise wait in the queue."""
+    lock_account(db, task.user_id)
+    if ledger.balance_seconds(db, task.user_id) <= 0:
+        task.status = TaskStatus.PAUSED
+        task.status_reason = "hours_exhausted"
+        return
     limit = user_plan(db, task.user_id).max_parallel_tasks
     if active_count(db, task.user_id, exclude=task.id) >= limit:
         task.status = TaskStatus.QUEUED
@@ -42,6 +47,7 @@ def admit(db: Session, task: Task) -> None:
 
 def promote(db: Session, user_id: int) -> list[int]:
     """Move queued tasks to starting, oldest first, while slots are free. Returns their machines."""
+    lock_account(db, user_id)
     free = user_plan(db, user_id).max_parallel_tasks - active_count(db, user_id)
     if free <= 0:
         return []
@@ -83,7 +89,7 @@ async def on_hours_exhausted(app: FastAPI, machine_id: int) -> None:
             db.scalars(
                 select(Task).where(
                     Task.machine_id == machine_id,
-                    Task.status == TaskStatus.RUNNING,
+                    Task.status.in_(TaskStatus.ACTIVE),
                     Task.status_reason != "hours_exhausted",
                 )
             )

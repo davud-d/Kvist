@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from .db import get_db
 from .errors import ApiError, not_found
 from .machines import live_machine
 from .models import Project, Task, User
+from .validation import InputModel
 
 router = APIRouter()
 
@@ -43,12 +44,13 @@ def name_problem(name: str) -> str:
     return ""
 
 
-def prepare_message(app: object, project: Project) -> dict[str, object]:
+def prepare_message(app: object, project: Project, user: User | None = None) -> dict[str, object]:
     """Ask the machine to have this project's folder: made empty, or cloned from the repository."""
     return {
         "type": "prepare_project",
         "folder": project.folder,
         "repo_url": project.repo_url,
+        "github_token": app.state.vault.decrypt(user.github_token_enc) if user and user.github_token_enc else "",
         "allow_local": app.state.settings.allow_local_endpoints,
     }
 
@@ -76,7 +78,7 @@ def _name_taken() -> ApiError:
     return ApiError(409, "name_taken", "A project with this name already exists. / Проект с таким именем уже есть.")
 
 
-class ProjectIn(BaseModel):
+class ProjectIn(InputModel):
     name: str = Field(min_length=1, max_length=200)
     # A repository of the person's own, to clone into the folder; empty for an empty folder.
     repo_url: str = Field(default="", max_length=500)
@@ -121,5 +123,5 @@ async def create_project(
     machine = live_machine(db, user.id)
     if machine is not None:
         # The folder is made on the machine now if it is awake; if not, when its runner next connects.
-        await request.app.state.gateway.send(machine.id, prepare_message(request.app, project))
+        await request.app.state.gateway.send(machine.id, prepare_message(request.app, project, user))
     return view

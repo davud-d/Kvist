@@ -1,24 +1,12 @@
 // Funnel step 3: attach a card. Paddle.js overlay on top of this page when billing is on; a stub
 // with the same form and a "skip (dev)" button when it is off. The trial's terms are above both.
+import { openCheckout } from "../billing.js";
 import { api } from "../api.js";
 import { fromBoot } from "../boot.js";
 import { h, replace, skeleton } from "../dom.js";
 import { t } from "../i18n.js";
 import { watchMachine } from "../machine.js";
 import { errorBox, liveRegion, machinePill } from "../ui.js";
-
-const PADDLE_JS = "https://cdn.paddle.com/paddle/v2/paddle.js";
-
-function loadPaddle() {
-  if (window.Paddle) return Promise.resolve(window.Paddle);
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = PADDLE_JS;
-    script.onload = () => resolve(window.Paddle);
-    script.onerror = () => reject(Object.assign(new Error("paddle"), { code: "billing_unavailable" }));
-    document.head.append(script);
-  });
-}
 
 async function waitForSubscription(tries = 60) {
   for (let i = 0; i < tries; i += 1) {
@@ -68,7 +56,7 @@ export async function startScreen(root, { me, navigate }) {
   const done = () => navigate("/onboarding");
   const fail = (error) => replace(action, errorBox(error, () => location.reload()));
 
-  if (!config.enabled) {
+  if (!config.enabled && config.dev) {
     replace(action, stubForm(async () => {
       try {
         api("/api/billing/checkout-opened", { method: "POST" }).catch(() => {});
@@ -78,36 +66,39 @@ export async function startScreen(root, { me, navigate }) {
         fail(error);
       }
     }));
-  } else {
-    const open = async () => {
+  } else if (config.enabled) {
+    const eligible = await api("/api/billing/eligibility");
+    if (eligible.trial_pending) {
+      replace(action, h("p.hint.wait", { text: t("start.confirming") }));
+      waitForSubscription().then(done).catch(() => {});
+      return null;
+    }
+    const problem = h("div");
+    const open = async (plan) => {
       status.textContent = t("start.opening");
+      replace(problem);
       try {
-        const Paddle = await loadPaddle();
-        if (config.paddle.environment === "sandbox") Paddle.Environment.set("sandbox");
-        Paddle.Initialize({
-          token: config.paddle.client_token,
-          eventCallback: async (event) => {
-            if (event.name !== "checkout.completed") return;
-            replace(action, h("p.hint.wait", { text: t("start.confirming") }));
-            try {
-              await waitForSubscription();
-              done();
-            } catch (error) {
-              fail(error);
-            }
-          },
-        });
-        api("/api/billing/checkout-opened", { method: "POST" }).catch(() => {});
-        Paddle.Checkout.open({
-          items: [{ priceId: config.paddle.prices.start, quantity: 1 }],
-          customData: { user_id: String(me.id) },
-          settings: { displayMode: "overlay", locale: document.documentElement.lang },
+        await openCheckout(config, plan, async () => {
+          replace(action, h("p.hint.wait", { text: t("start.confirming") }));
+          try {
+            await waitForSubscription();
+            done();
+          } catch (error) { fail(error); }
         });
       } catch (error) {
-        fail(error);
+        // Next to the choices, not instead of them: a refused trial still leaves the paid plans.
+        replace(problem, errorBox(error));
       }
     };
-    replace(action, h("button.btn.wide", { type: "button", onclick: open, text: t("start.addCard") }));
+    replace(action, h("div.stack", {},
+      eligible.trial_eligible ? h("button.btn.wide", { type: "button", onclick: () => open("trial"), text: t("start.addCard") })
+        : h("p.hint", { text: t("errors.trial_ineligible") }),
+      h("div.row", {}, ...["start", "pro", "max"].map((plan) => h("button.btn.ghost", { type: "button",
+        onclick: () => open(plan),
+        text: `${plan.toUpperCase()} · $${config.plans.find((p) => p.id === plan).price_usd}/` + t("start.month") }))),
+      problem));
+  } else {
+    replace(action, errorBox({ code: "billing_unavailable" }));
   }
 
   return watchMachine((machine) => {

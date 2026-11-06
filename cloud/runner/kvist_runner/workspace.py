@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
+import re
 import tarfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -34,15 +36,18 @@ def folder_for(work_root: Path, task_id: int, folder: str = "") -> Path:
 
 
 def allowed_repo(url: str, allow_local: bool) -> bool:
-    parsed = urlparse(url)
-    if parsed.scheme == "https" and parsed.hostname:
-        return True
-    return allow_local and parsed.scheme == "file"
+    if re.fullmatch(r"https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+", url):
+        return url.rsplit("/", 1)[-1] not in {".", ".."}
+    return allow_local and urlparse(url).scheme == "file"
 
 
-async def prepare(work_root: Path, task_id: int, repo_url: str, allow_local: bool, project: str = "") -> Path:
+async def prepare(
+    work_root: Path, task_id: int, repo_url: str, allow_local: bool, project: str = "", github_token: str = ""
+) -> Path:
     """The task's folder: the project's when it has one, else its own. Made (or cloned) the first time only."""
     folder = folder_for(work_root, task_id, project)
+    if folder.is_symlink():
+        raise WorkspaceError("bad_folder")
     if folder.exists():
         return folder
     work_root.mkdir(parents=True, exist_ok=True)
@@ -52,6 +57,16 @@ async def prepare(work_root: Path, task_id: int, repo_url: str, allow_local: boo
     if not allowed_repo(repo_url, allow_local):
         raise WorkspaceError("repo_not_allowed")
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GIT_TERMINAL_PROMPT": "0", "LANG": "C.UTF-8"}
+    env.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+    auth = ""
+    config = [("http.followRedirects", "false"), ("credential.helper", "")]
+    if github_token and urlparse(repo_url).hostname == "github.com":
+        auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
+        config.append(("http.https://github.com/.extraHeader", f"Authorization: Basic {auth}"))
+    env["GIT_CONFIG_COUNT"] = str(len(config))
+    for index, (key, value) in enumerate(config):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
     process = await asyncio.create_subprocess_exec(
         "git", "clone", "--depth", "50", "--", repo_url, str(folder),
         stdin=asyncio.subprocess.DEVNULL,
@@ -66,7 +81,11 @@ async def prepare(work_root: Path, task_id: int, repo_url: str, allow_local: boo
         await process.wait()
         raise WorkspaceError("clone_failed", "timed out") from None
     if process.returncode != 0:
-        raise WorkspaceError("clone_failed", err.decode("utf-8", "replace")[-300:])
+        detail = err.decode("utf-8", "replace")
+        for secret in (github_token, auth):
+            if secret:
+                detail = detail.replace(secret, "[redacted]")
+        raise WorkspaceError("clone_failed", detail[-300:])
     return folder
 
 

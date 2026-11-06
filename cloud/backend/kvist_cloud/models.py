@@ -61,6 +61,7 @@ class LedgerKind:
     PURCHASE = "purchase"
     REFUND = "refund"
     USAGE = "usage"
+    REVERSAL = "reversal"
 
 
 class User(Base):
@@ -73,6 +74,8 @@ class User(Base):
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     email: Mapped[str] = mapped_column(String(320), default="")
     github_token_enc: Mapped[str] = mapped_column(Text, default="")
+    github_created_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    trial_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # Raised to sign out every cookie at once.
     session_version: Mapped[int] = mapped_column(Integer, default=1)
     model_provider: Mapped[str] = mapped_column(String(40), default="")
@@ -97,6 +100,7 @@ class Subscription(Base):
     trial_ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False)
     paddle_subscription_id: Mapped[str] = mapped_column(String(100), default="", index=True)
+    provider_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     paddle_customer_id: Mapped[str] = mapped_column(String(100), default="")
     trial_reminder_sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -250,7 +254,39 @@ class PaddleEvent(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[str] = mapped_column(String(100), unique=True)
     event_type: Mapped[str] = mapped_column(String(100))
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class BillingCheckout(Base):
+    """Only transactions created by our server can provision a new purchase."""
+
+    __tablename__ = "billing_checkouts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    price_id: Mapped[str] = mapped_column(String(100))
+    transaction_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    subscription_id: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    purchase_entry_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    refund_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    refunded: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class BillingPayment(Base):
+    """Payment proof for a subscription period; transaction IDs, not notification IDs, deduplicate it."""
+
+    __tablename__ = "billing_payments"
+
+    transaction_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    subscription_id: Mapped[str] = mapped_column(String(100), index=True)
+    price_id: Mapped[str] = mapped_column(String(100))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    period_start: Mapped[datetime] = mapped_column(UTCDateTime)
+    period_end: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
 class Outbox(Base):

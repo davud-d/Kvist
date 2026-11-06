@@ -10,7 +10,7 @@ import secrets
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from .auth import admin_user
 from .db import get_db, utcnow
 from .errors import ApiError, not_found
 from .models import Dispute, FunnelEvent, User
+from .validation import InputModel
 
 STEPS = (
     "pricing_view",
@@ -84,7 +85,7 @@ def admin_funnel(days: int | None = None, _admin: User = Depends(admin_user), db
     return {"steps": conversion(db, days), "days": days}
 
 
-class RefundIn(BaseModel):
+class RefundIn(InputModel):
     minutes: int = Field(gt=0, le=100_000)
     note: str = Field(min_length=3, max_length=300)
 

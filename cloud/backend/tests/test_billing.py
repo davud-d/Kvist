@@ -6,15 +6,15 @@ import json
 import time
 from datetime import timedelta
 
-import httpx
 import pytest
-from conftest import dev_login, make_user, settle
+from conftest import dev_login, make_user
+from paddle_fake import open_checkout, paid_client
 from sqlalchemy import select
 
 from kvist_cloud import billing, ledger
 from kvist_cloud.config import ConfigError, load_settings
 from kvist_cloud.db import make_session_factory, session_scope, utcnow
-from kvist_cloud.models import FunnelEvent, Outbox, Subscription, SubscriptionStatus
+from kvist_cloud.models import Outbox, Subscription, SubscriptionStatus
 
 SECRET = "pdl_ntfset_test_secret_value"
 PADDLE = {"BILLING_ENABLED": "true", "PADDLE_WEBHOOK_SECRET": SECRET, "PADDLE_API_KEY": "pdl_api_key_test_value",
@@ -65,39 +65,33 @@ def test_billing_needs_a_webhook_secret(env):
 
 
 def test_webhook_starts_the_trial_and_its_hours(client_factory, engine):
-    client = client_factory(**PADDLE)
-    dev_login(client)
-    settle(client)
-    response = webhook(client, "evt_1", "subscription.created",
-                       paddle_subscription("trialing", "2026-11-05T00:00:00Z", "2026-11-12T00:00:00Z"))
-    assert response.json() == {"ok": True}
+    client, paddle = paid_client(client_factory)
+    txn = open_checkout(client)
+    payment = paddle.payment(txn)
+    assert webhook(client, "evt_1", "transaction.completed", payment).status_code == 200
     row = subscription(engine)
     assert (row.plan, row.status, row.paddle_subscription_id) == ("trial", "trialing", "sub_01")
-    assert row.trial_ends_at.isoformat().startswith("2026-11-12")
     assert balance(engine) == 5 * 3600
-    with session_scope(make_session_factory(engine)) as db:
-        assert "card_added" in [row.step for row in db.scalars(select(FunnelEvent))]
+    assert len(paddle.adjustments) == 1
+    assert paddle.adjustments[0]["action"] == "refund"
 
 
 def test_trial_turns_into_start_with_a_new_period(client_factory, engine):
-    client = client_factory(**PADDLE)
-    dev_login(client)
-    webhook(client, "evt_1", "subscription.created",
-            paddle_subscription("trialing", "2026-11-05T00:00:00Z", "2026-11-12T00:00:00Z"))
-    webhook(client, "evt_2", "subscription.updated",
-            paddle_subscription("active", "2026-11-12T00:00:00Z", "2026-12-12T00:00:00Z"))
+    client, paddle = paid_client(client_factory)
+    txn = open_checkout(client)
+    webhook(client, "evt_1", "transaction.completed", paddle.payment(txn))
+    payment = paddle.payment("txn_renewal", "start")
+    webhook(client, "evt_2", "transaction.completed", payment)
     row = subscription(engine)
     assert (row.plan, row.status) == ("start", "active")
-    # The trial's hours belong to the trial period; the new period starts with 50 h.
     assert balance(engine) == 50 * 3600
 
 
 def test_a_retried_webhook_changes_nothing(client_factory, engine):
-    client = client_factory(**PADDLE)
-    dev_login(client)
-    data = paddle_subscription("active", "2026-11-05T00:00:00Z", "2026-12-05T00:00:00Z", price="pri_pro")
+    client, paddle = paid_client(client_factory)
+    payment = paddle.payment(open_checkout(client, "pro"), "pro")
     for _ in range(3):
-        assert webhook(client, "evt_same", "subscription.created", data).status_code == 200
+        assert webhook(client, "evt_same", "transaction.completed", payment).status_code == 200
     assert balance(engine) == 150 * 3600
 
 
@@ -112,11 +106,9 @@ def test_bad_or_stale_signature_is_refused(client_factory, engine):
 
 
 def test_hour_pack_purchase(client_factory, engine):
-    client = client_factory(**PADDLE)
-    dev_login(client)
-    webhook(client, "evt_1", "subscription.created",
-            paddle_subscription("active", "2026-11-05T00:00:00Z", "2026-12-05T00:00:00Z"))
-    webhook(client, "evt_2", "transaction.completed", {"id": "txn_1", "custom_data": {"kind": "hours", "user_id": 1}})
+    client, paddle = paid_client(client_factory)
+    webhook(client, "evt_1", "transaction.completed", paddle.payment(open_checkout(client, "start"), "start"))
+    webhook(client, "evt_2", "transaction.completed", paddle.payment(open_checkout(client, "hours"), "hours"))
     assert balance(engine) == 60 * 3600
 
 
@@ -160,25 +152,20 @@ def test_cancel_is_one_call_and_access_lasts_the_period(client_factory, engine):
 
 
 def test_cancel_with_paddle_asks_paddle(client_factory, engine):
-    seen: list[httpx.Request] = []
-
-    def paddle(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return httpx.Response(200, json={"data": {}})
-
-    client = client_factory(paddle, **PADDLE)
-    dev_login(client)
-    webhook(client, "evt_1", "subscription.created",
-            paddle_subscription("trialing", "2026-11-05T00:00:00Z", "2026-11-12T00:00:00Z"))
+    client, paddle = paid_client(client_factory)
+    webhook(client, "evt_1", "transaction.completed", paddle.payment(open_checkout(client)))
     assert client.post("/api/billing/cancel").json()["cancel_at_period_end"] is True
-    assert str(seen[0].url) == "https://sandbox-api.paddle.com/subscriptions/sub_01/cancel"
-    assert json.loads(seen[0].content) == {"effective_from": "next_billing_period"}
+    last = paddle.requests[-1]
+    assert str(last.url) == "https://sandbox-api.paddle.com/subscriptions/sub_01/cancel"
+    assert json.loads(last.content) == {"effective_from": "next_billing_period"}
 
 
-def test_dev_trial_turns_into_start(db):
+def test_dev_trial_turns_into_start(db, monkeypatch):
     user = make_user(db)
     billing.create_trial(db, user)
-    billing.roll_dev_subscriptions(db, now=utcnow() + timedelta(days=7, minutes=1))
+    later = utcnow() + timedelta(days=7, minutes=1)
+    billing.roll_dev_subscriptions(db, now=later)
+    monkeypatch.setattr(ledger, "utcnow", lambda: later)
     row = ledger.current_subscription(db, user.id)
     assert (row.plan, row.status) == ("start", "active")
     assert ledger.balance_seconds(db, user.id) == 50 * 3600

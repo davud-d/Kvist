@@ -10,7 +10,7 @@ export function escapeHtml(text) {
 
 /** Only web links; `javascript:` and friends stay text. */
 export function safeUrl(url) {
-  return /^https?:\/\/[^\s"'<>]+$/i.test(url) ? url : null;
+  return /^https?:\/\/[^\s"'<>]+$/i.test(url) && !/[\u0000-\u001f\u007f]/.test(url) ? url : null;
 }
 
 function inline(source) {
@@ -82,7 +82,7 @@ function takeFormulas(source, found) {
 
 export function renderMarkdown(raw) {
   const formulas = [];
-  const source = takeFormulas(String(raw), formulas);
+  const source = takeFormulas(String(raw).replace(/[\u0000\u0001]/g, ""), formulas);
   return putFormulas(renderBlocks(source), formulas);
 }
 

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from . import ledger, plans
 from .auth import current_user
-from .db import get_db, session_scope, utcnow
+from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
 from .models import Export, Machine, MachineStatus, Task, TaskStatus, User
@@ -139,6 +139,8 @@ async def wake(app: FastAPI, machine_id: int) -> None:
             machine.status = MachineStatus.AWAKE
             machine.last_active_at = utcnow()
             return
+        if not app.state.settings.dev_billing and ledger.balance_seconds(db, machine.user_id) <= 0:
+            return
         ref = machine.provider_ref
         machine.status = MachineStatus.WAKING
         machine.last_active_at = utcnow()
@@ -226,6 +228,9 @@ async def on_signed_in(request: Request, db: Session, user: User, _github_token:
     """Sign-in hook: the machine starts being created while the person enters their card."""
     app = request.app
     record_step(db, "github_login", user_id=user.id, visitor_id=request.cookies.get("kc_visitor", ""))
+    if not app.state.settings.dev_billing and ledger.balance_seconds(db, user.id) <= 0:
+        return
+    lock_account(db, user.id)
     machine = live_machine(db, user.id)
     if machine is None:
         spec = new_machine(app, db, user)
@@ -247,6 +252,8 @@ def list_machines(user: User = Depends(current_user), db: Session = Depends(get_
 
 @router.post("/api/machines", status_code=201)
 async def create_machine(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    lock_account(db, user.id)
+    _require_hours(request.app, db, user.id)
     existing = live_machine(db, user.id)
     if existing is not None:
         return machine_view(db, existing)
@@ -261,6 +268,7 @@ async def wake_machine(
     machine_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
     owned_machine(db, user, machine_id)
+    _require_hours(request.app, db, user.id)
     spawn(request.app, wake(request.app, machine_id))
     return {"ok": True}
 
@@ -285,3 +293,8 @@ async def delete_machine(
         raise ApiError(409, "machine_busy", "A task is running on it. / На ней идёт задача.")
     spawn(request.app, destroy(request.app, machine_id))
     return {"ok": True}
+
+
+def _require_hours(app: FastAPI, db: Session, user_id: int) -> None:
+    if not app.state.settings.dev_billing and ledger.balance_seconds(db, user_id) <= 0:
+        raise ApiError(402, "no_hours", "A paid plan with hours is required. / Нужен тариф с доступными часами.")

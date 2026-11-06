@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """Sign-in with GitHub OAuth; the session is a signed cookie.
 
-The only scope asked for is ``read:user``. With ``AUTH_DEV_LOGIN=true`` and no GitHub app
-configured, the same button signs in a local dev user without any network call (loopback only,
+Scopes are ``read:user repo`` so authorized private repositories can be cloned.
+With ``AUTH_DEV_LOGIN=true`` and no GitHub app configured, the button signs in a local dev user
+without a network call (loopback only,
 enforced in config.py).
 """
 from __future__ import annotations
 
 import secrets
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Literal
 from urllib.parse import urlencode
 
@@ -16,7 +18,6 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ from .config import Settings
 from .db import get_db
 from .errors import ApiError, not_signed_in
 from .models import User
+from .validation import InputModel
 
 SESSION_COOKIE = "kc_session"
 OAUTH_COOKIE = "kc_oauth"
@@ -48,7 +50,7 @@ def http_client(request: Request) -> httpx.AsyncClient:
 
 def safe_next(raw: str | None, default: str = "/start") -> str:
     """Only same-site paths: '/x', never '//evil' or 'https://evil'."""
-    if not raw or not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+    if not raw or not raw.startswith("/") or raw.startswith("//") or "\\" in raw or any(ord(c) < 32 for c in raw):
         return default
     return raw
 
@@ -105,7 +107,7 @@ async def github_login(request: Request, next: str | None = None) -> RedirectRes
             {
                 "client_id": settings.github_client_id,
                 "redirect_uri": f"{settings.public_url}/auth/github/callback",
-                "scope": "read:user",
+                "scope": "read:user repo",
                 "state": state,
                 "allow_signup": "true",
             }
@@ -172,6 +174,12 @@ def _upsert_user(db: Session, profile: dict, locale: str) -> User:
     user.name = str(profile.get("name") or "")
     user.avatar_url = str(profile.get("avatar_url") or "")
     user.email = str(profile.get("email") or "")
+    raw_created = profile.get("created_at")
+    try:
+        created = datetime.fromisoformat(raw_created.replace("Z", "+00:00")) if raw_created else None
+        user.github_created_at = created if created is not None and created.tzinfo else None
+    except (ValueError, TypeError, AttributeError):
+        user.github_created_at = None
     db.flush()
     return user
 
@@ -200,7 +208,7 @@ async def github_callback(
     profile, github_token = await _github_profile(request, code)
     user = _upsert_user(db, profile, request_locale(request))
     if github_token:
-        # Kept only to list the person's public repositories at onboarding.
+        # Encrypted at rest; used only for GitHub listing and authenticated clones.
         user.github_token_enc = request.app.state.vault.encrypt(github_token)
     hook: Callable[[Request, Session, User, str], Awaitable[None]] | None = request.app.state.on_signed_in
     if hook is not None:
@@ -226,7 +234,7 @@ def me(request: Request, user: User = Depends(current_user)) -> dict[str, object
 
 @router.get("/api/github/repos")
 async def github_repos(request: Request, user: User = Depends(current_user)) -> dict[str, object]:
-    """The person's public repositories, most recently pushed first."""
+    """Repositories accessible to this OAuth token, including private ones."""
     if not user.github_token_enc:
         return {"repos": [], "reason": "no_token"}
     token = request.app.state.vault.decrypt(user.github_token_enc)
@@ -234,7 +242,7 @@ async def github_repos(request: Request, user: User = Depends(current_user)) -> 
         try:
             response = await client.get(
                 "https://api.github.com/user/repos",
-                params={"per_page": 30, "sort": "pushed", "visibility": "public"},
+                params={"per_page": 30, "sort": "pushed", "visibility": "all"},
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
             )
         except httpx.HTTPError as error:
@@ -245,14 +253,14 @@ async def github_repos(request: Request, user: User = Depends(current_user)) -> 
         raise ApiError(502, "github_unreachable", "GitHub is not answering. / GitHub не отвечает.")
     repos = [
         {"name": str(item.get("full_name", "")), "url": str(item.get("clone_url", "")),
-         "description": str(item.get("description") or "")}
+         "description": str(item.get("description") or ""), "private": bool(item.get("private"))}
         for item in response.json()
-        if isinstance(item, dict) and not item.get("private")
+        if isinstance(item, dict)
     ]
     return {"repos": repos, "reason": ""}
 
 
-class MeIn(BaseModel):
+class MeIn(InputModel):
     locale: Literal["en", "ru"]
 
 

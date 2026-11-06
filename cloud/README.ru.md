@@ -73,14 +73,54 @@ scripts/dev.sh         локальный запуск одной командо
 
 Необязательные: `DATABASE_URL` (по умолчанию SQLite в `KVIST_CLOUD_DATA_DIR`), `GITHUB_CLIENT_ID` /
 `GITHUB_CLIENT_SECRET`, `BILLING_ENABLED` вместе с `PADDLE_WEBHOOK_SECRET`, `PADDLE_API_KEY`,
-`PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `PADDLE_PRICE_START|PRO|MAX|HOURS`;
+`PADDLE_CLIENT_TOKEN`, `PADDLE_ENVIRONMENT`, `PADDLE_PRICE_TRIAL|START|PRO|MAX|HOURS`;
 `MACHINE_PROVIDER` (`local`), `KVIST_COMMAND`, `RUNNER_COMMAND`, `HEARTBEAT_SECONDS` (15),
 `HEARTBEAT_MAX_GAP_SECONDS` (45), `MACHINE_IDLE_SLEEP_SECONDS` (900), `PROVIDER_OUTAGE_SECONDS`
 (300), `HOURS_GRACE_SECONDS` (300), `ADMIN_GITHUB_LOGINS` и только для разработки
 `AUTH_DEV_LOGIN`, `ALLOW_LOCAL_ENDPOINTS` (обе запрещены, если `PUBLIC_URL` не loopback).
 
-Для Paddle у цены Start в самом Paddle должен быть настроен 7-дневный пробный период; адрес
-вебхука — `<PUBLIC_URL>/billing/paddle/webhook`.
+Для Paddle нужна отдельная цена `PADDLE_PRICE_TRIAL`: Start за $15 в месяц с 7-дневным
+**платным пробным периодом за $1** и обязательной платёжной картой
+(`trial_period.unit_price.amount="100"`, валюта `USD`). Обычные Start/Pro/Max — без trial.
+Все цены — USD, с включённым налогом (`tax_mode=internal`), без региональных переопределений,
+количество 1, суммы из `plans.py`. Перед созданием checkout backend проверяет настройки цены.
+Для выдачи доступа требуется списание точной суммы; скидки и кредиты не подходят.
+Браузер получает только серверный `transactionId`; `custom_data`, событие успешной оплаты
+в браузере и поля профиля не меняют тариф или баланс.
+
+Адрес вебхука: `<PUBLIC_URL>/billing/paddle/webhook`. Нужны события `transaction.completed`,
+`subscription.*`, `adjustment.created`, `adjustment.updated`. API-ключу нужны права создания
+транзакций, чтения цен и подписок, отмены подписок, чтения и создания adjustments.
+Trial открывается после фактического списания $1 и **одобренного полного возврата**.
+Авторизации карты недостаточно. Одобрение возврата и зачисление банком могут занимать время;
+отклонённый возврат требует вмешательства оператора. Обычные возвраты и chargeback отзывают
+купленные часы и доступ к возвращённому периоду подписки. Отмена chargeback не восстанавливает
+доступ автоматически: нужна сверка оператором.
+
+Возраст берётся из `created_at`, полученного от GitHub после OAuth: аккаунт должен быть строго
+старше календарного месяца. Trial доступен один раз; неизвестный возраст запрещает его до
+повторного входа. Dev-оплата, бесплатные часы и искусственные продления работают только при
+`AUTH_DEV_LOGIN=true`, выключенном биллинге и loopback `PUBLIC_URL`.
+`MACHINE_PROVIDER=local` ограничен loopback: он **не изолирует** недоверенных пользователей.
+Адаптер Sprites ещё не реализован, поэтому публичный хостинг пока не готов.
+
+OAuth запрашивает `read:user repo`. Для приватных репозиториев существующим пользователям
+нужно переподключить GitHub и разрешить `repo`, а при необходимости — доступ организации.
+Scope `repo` широкий. Токен зашифрован в базе; при клонировании передаётся через Git-заголовок,
+ограниченный github.com, не попадает в URL remote или окружение агента. Принимаются только
+GitHub HTTPS URL; локальные file URL разрешены лишь в dev-режиме. Авторизованные fetch/push
+из агента эта интеграция клонирования не предоставляет; экспорт архива сохранён.
+
+Миграция `0005` сохраняет факт использования старых trial и приостанавливает старые Paddle-подписки.
+Подписки, созданные
+через доверие к клиентскому `custom_data`, перед продлением требуют сверки оператором с Paddle
+и привязки к серверным checkout/payment-записям. Нельзя восстанавливать владельца из `custom_data`.
+Перед live-оплатой нужно пройти списание, возврат и продление в Paddle sandbox: локальные тесты
+используют заглушки и не проверяют настройки вашего merchant-аккаунта.
+
+Контракты провайдеров: [платный trial](https://developer.paddle.com/build/trials/create-trial/),
+[возвраты](https://developer.paddle.com/build/transactions/create-transaction-adjustments/),
+[GitHub OAuth scopes](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
 
 ## Проверки
 

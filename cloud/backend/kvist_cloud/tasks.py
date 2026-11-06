@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from pydantic import Field
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from . import ledger
 from .auth import SESSION_COOKIE, current_user, user_from_cookie
-from .db import get_db, session_scope, utcnow
+from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
 from .models import Machine, MachineStatus, Task, TaskEvent, TaskStatus, User
 from .secrets import redact_obj
+from .validation import InputModel
 
 router = APIRouter()
 GOAL_LIMIT = 20_000
@@ -230,7 +232,7 @@ def _first_done(db: Session, task: Task) -> None:
 # -- API ---------------------------------------------------------------------------------
 
 
-class TaskIn(BaseModel):
+class TaskIn(InputModel):
     goal: str = Field(min_length=1, max_length=GOAL_LIMIT)
     # A task belongs to a project (a folder on the machine). Without one it gets a folder of its own, as it
     # did before projects: the older screens still start tasks that way.
@@ -238,11 +240,11 @@ class TaskIn(BaseModel):
     repo_url: str = Field(default="", max_length=500)
 
 
-class MessageIn(BaseModel):
+class MessageIn(InputModel):
     text: str = Field(min_length=1, max_length=GOAL_LIMIT)
 
 
-class InputIn(BaseModel):
+class InputIn(InputModel):
     request_id: str = Field(min_length=1, max_length=200)
     value: str | None = Field(default=None, max_length=GOAL_LIMIT)
     approved: bool | None = None
@@ -258,10 +260,9 @@ def owned_task(db: Session, user: User, task_id: int) -> Task:
 def repo_problem(url: str, allow_local: bool) -> str:
     if not url:
         return ""
-    parsed = urlparse(url)
-    if parsed.scheme == "https" and parsed.hostname and "@" not in parsed.netloc:
-        return ""
-    if allow_local and parsed.scheme == "file":
+    if re.fullmatch(r"https://github\.com/[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+(?:\.git)?", url):
+        return "" if url.rsplit("/", 1)[-1] not in {".", ".."} else "bad_repo"
+    if allow_local and urlparse(url).scheme == "file":
         return ""
     return "bad_repo"
 
@@ -280,9 +281,14 @@ def _machine_for_task(app: FastAPI, db: Session, user: User) -> Machine:
     from .machines import live_machine, new_machine, provision, spawn
 
     machine = live_machine(db, user.id)
-    if machine is not None and machine.status != MachineStatus.ERROR:
+    if machine is not None and (machine.status != MachineStatus.ERROR or machine.provider_ref):
         return machine
     spec = new_machine(app, db, user)
+    if machine is not None:
+        # Never created at the provider, so nothing to clean up there; retiring the row keeps one machine per user.
+        machine.status = MachineStatus.DELETED
+        db.execute(update(Task).where(Task.machine_id == machine.id, Task.status.not_in(TaskStatus.FINISHED))
+                   .values(machine_id=spec.machine_id))
     db.commit()
     spawn(app, provision(app, spec))
     return db.get(Machine, spec.machine_id)
@@ -301,6 +307,7 @@ async def create_task(
     from .limits import admit
 
     app = request.app
+    lock_account(db, user.id)
     can_run(db, user)
     project = None
     if payload.project_id is not None:
@@ -313,6 +320,7 @@ async def create_task(
     if repo_problem(repo_url, app.state.settings.allow_local_endpoints):
         raise ApiError(400, "bad_repo", "That is not a repository link. / Это не ссылка на репозиторий.")
     machine = _machine_for_task(app, db, user)
+    lock_account(db, user.id)
     first = not db.scalar(select(func.count()).select_from(Task).where(Task.user_id == user.id))
     task = Task(
         user_id=user.id,
@@ -406,6 +414,7 @@ async def _control(app: FastAPI, task: Task, action: str) -> bool:
 async def cancel_task(
     task_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict[str, object]:
+    lock_account(db, user.id)
     task = owned_task(db, user, task_id)
     if task.status in TaskStatus.FINISHED:
         return task_payload(db, task)
@@ -437,6 +446,7 @@ async def cancel_task(
 async def pause_task(
     task_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict[str, object]:
+    lock_account(db, user.id)
     task = owned_task(db, user, task_id)
     if task.status not in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
         raise ApiError(409, "not_running", "The task is not running. / Задача сейчас не выполняется.")
@@ -452,6 +462,7 @@ async def resume_task(
 ) -> dict[str, object]:
     from .limits import admit
 
+    lock_account(db, user.id)
     task = owned_task(db, user, task_id)
     if task.status != TaskStatus.PAUSED:
         raise ApiError(409, "not_paused", "Only a paused task can continue. / Продолжить можно только задачу на паузе.")
@@ -489,6 +500,7 @@ async def post_message(
 ) -> dict[str, object]:
     """Another message in the conversation. A task is a session: it takes as many as the hours allow."""
     app = request.app
+    lock_account(db, user.id)
     task = owned_task(db, user, task_id)
     text = payload.text.strip()
     if not text:
@@ -502,6 +514,7 @@ async def post_message(
         )
     if task.status in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
         # Kvist queues a goal that arrives during a turn and takes it when the turn ends.
+        db.commit()
         delivered = await app.state.gateway.send(task.machine_id, {"type": "message", "task_id": task.id, "text": text})
         if not delivered:
             raise ApiError(503, "machine_offline", "The machine is not reachable. / Машина недоступна.")
@@ -526,6 +539,7 @@ async def answer_input(
     task = owned_task(db, user, task_id)
     if task.status != TaskStatus.WAITING_FOR_USER:
         raise ApiError(409, "not_waiting", "The agent is not waiting for an answer. / Агент сейчас ничего не ждёт.")
+    can_run(db, user)
     response: dict[str, object] = {"request_id": payload.request_id}
     if payload.approved is not None:
         response["approved"] = payload.approved

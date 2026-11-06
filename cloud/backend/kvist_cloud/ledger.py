@@ -11,12 +11,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .auth import current_user
-from .db import get_db
+from .db import get_db, utcnow
 from .errors import not_found
 from .models import (
     Dispute,
@@ -29,6 +29,7 @@ from .models import (
     TaskStatus,
     User,
 )
+from .validation import InputModel
 
 router = APIRouter()
 
@@ -57,7 +58,8 @@ def _at(second: int) -> datetime:
 def current_subscription(db: Session, user_id: int) -> Subscription | None:
     return db.scalars(
         select(Subscription)
-        .where(Subscription.user_id == user_id, Subscription.status.in_(SubscriptionStatus.USABLE))
+        .where(Subscription.user_id == user_id, Subscription.status.in_(SubscriptionStatus.USABLE),
+               Subscription.current_period_start <= utcnow(), Subscription.current_period_end > utcnow())
         .order_by(Subscription.id.desc())
     ).first()
 
@@ -313,7 +315,7 @@ def period_feed(db: Session, user_id: int, period_start: datetime) -> list[dict[
 # -- API: the person's own feed, and disputing a charge ------------------------------------
 
 
-class DisputeIn(BaseModel):
+class DisputeIn(InputModel):
     task_id: int | None = None
     message: str = Field(min_length=3, max_length=4000)
 
