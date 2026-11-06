@@ -244,6 +244,13 @@ class ScreenViewer:
         return not origin or origin in {f"http://{item}" for item in allowed} or origin == "null"
 
 
+def _bounded(values: list[str] | None, default: int, low: int, high: int) -> int:
+    try:
+        return min(max(int((values or [""])[0]), low), high)
+    except ValueError:
+        return default
+
+
 class _ViewerHandler(BaseHTTPRequestHandler):
     owner: ScreenViewer
     server_version = "KvistScreen/1"
@@ -270,7 +277,7 @@ class _ViewerHandler(BaseHTTPRequestHandler):
         elif parts.path == "/view":
             self._page()
         elif parts.path == "/frame.jpg":
-            self._frame()
+            self._frame(parse_qs(parts.query))
         elif parts.path == "/stream.mjpeg":
             self._stream()
         elif parts.path == "/state.json":
@@ -293,9 +300,12 @@ document.getElementById('s').textContent=j.state+(j.detail?' — '+j.detail:'')}
 setTimeout(poll,1000)}}poll()</script></body></html>""".encode("utf-8")
         self._send(HTTPStatus.OK, "text/html; charset=utf-8", body)
 
-    def _frame(self) -> None:
+    def _frame(self, query: dict[str, list[str]]) -> None:
+        # A relay that forwards frames over a thin link asks for a smaller picture: ?w=<px>&q=<1..95>.
+        width = _bounded(query.get("w"), PREVIEW_WIDTH, 160, PREVIEW_WIDTH)
+        quality = _bounded(query.get("q"), PREVIEW_QUALITY, 20, 95)
         try:
-            body = frame_jpeg(self.owner.fb_path, cursor=read_cursor(self.owner.cursor_path))
+            body = frame_jpeg(self.owner.fb_path, max_width=width, quality=quality, cursor=read_cursor(self.owner.cursor_path))
         except FramebufferError as error:
             self._plain(HTTPStatus.SERVICE_UNAVAILABLE, str(error))
             return

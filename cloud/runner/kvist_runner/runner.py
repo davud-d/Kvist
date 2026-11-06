@@ -2,7 +2,8 @@
 """The runner: one outbound WebSocket to the server, a heartbeat, and a Kvist process per task.
 
 Messages to the server: hello, heartbeat, event (a Kvist event, unchanged, with its task id),
-task_reason, task_exit, export_done. From the server: start_task, input_response, control, export.
+task_reason, task_exit, export_done, screen_frame (a picture of the agent's screen, only while the owner
+watches). From the server: start_task, input_response, control, export, screen_watch.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from .task import Limits, TaskProcess
 log = logging.getLogger("kvist_runner")
 VERSION = "0.1.0"
 OUTBOX_LIMIT = 20_000
+FRAME_BACKLOG_LIMIT = 100
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 RECONNECT_MAX_SECONDS = 30.0
 
@@ -43,6 +45,13 @@ class Runner:
         """Queued in order; kept while the connection is down and sent after it is back."""
         self._outbox.append(message)
         self._wakeup.set()
+
+    def emit_frame(self, message: dict) -> bool:
+        """A screen picture is worth nothing late: never queued behind a dead connection or a backlog."""
+        if not self._connected or len(self._outbox) > FRAME_BACKLOG_LIMIT:
+            return False
+        self.emit(message)
+        return True
 
     def heartbeat_now(self) -> None:
         # A heartbeat queued while disconnected would describe the past; the server bills by
@@ -144,9 +153,11 @@ class Runner:
             await task.answer(message.get("response") or {})
         elif kind == "control" and task is not None:
             await task.control(str(message.get("action", "")))
+        elif kind == "screen_watch" and task is not None:
+            task.screens.watch(str(message.get("screen_id", "")), float(message.get("lease_seconds") or 0))
         elif kind == "export" and self.exporter is not None:
             self._spawn(self.exporter(self, message))
-        elif kind in ("input_response", "control"):
+        elif kind in ("input_response", "control", "screen_watch"):
             log.info("message for a task this runner does not have: %s", kind)
         else:
             log.warning("unknown message from the server: %r", kind)
@@ -165,6 +176,7 @@ class Runner:
             config=self.config,
             emit=self.emit,
             on_change=self.heartbeat_now,
+            send_frame=self.emit_frame,
         )
         # The message carried the key; nothing here keeps it past the task's own copy.
         message.pop("env", None)

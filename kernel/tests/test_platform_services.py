@@ -380,6 +380,25 @@ def test_the_viewer_needs_its_token_and_its_own_host_name(tmp_path):
         socket.create_connection(("127.0.0.1", viewer.port), timeout=1)
 
 
+def test_the_viewer_can_be_asked_for_a_smaller_picture(tmp_path):
+    from PIL import Image
+
+    _xwd(tmp_path / "Xvfb_screen0", width=400, height=200)
+    viewer = ScreenViewer(tmp_path, title="Test")
+    viewer.start()
+    try:
+        def size(query: str):
+            with urllib.request.urlopen(f"{viewer.frame_url}{query}", timeout=5) as reply:
+                return Image.open(io.BytesIO(reply.read())).size
+
+        assert size("") == (400, 200)
+        assert size("&w=200&q=40") == (200, 100)
+        # Out-of-range and nonsense values are clamped or ignored, never an error.
+        assert size("&w=1&q=abc")[0] == 160
+    finally:
+        viewer.close()
+
+
 # --- connections ---------------------------------------------------------------
 
 

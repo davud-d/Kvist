@@ -14,7 +14,7 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import exports, ledger, limits, plans, tasks
+from . import exports, ledger, limits, plans, screens, tasks
 from .db import session_scope, utcnow
 from .keys import kvist_environment
 from .machines import spawn, wake
@@ -207,6 +207,19 @@ def _event(app: FastAPI, machine_id: int, message: dict) -> bool:
         return before in TaskStatus.ACTIVE and task.status not in TaskStatus.ACTIVE
 
 
+def _screen_frame(app: FastAPI, machine_id: int, message: dict) -> None:
+    """A picture of the agent's screen: kept in memory for its owner, never written anywhere."""
+    with session_scope(app.state.session_factory) as db:
+        task = _owned_task(db, machine_id, int(message.get("task_id") or 0))
+        task_id = task.id if task is not None else None
+    if task_id is None:
+        log.warning("machine %s sent a screen picture for a task it does not own", machine_id)
+        return
+    jpeg = screens.decode_frame(message)
+    if jpeg is None or not app.state.screens.put_frame(task_id, str(message.get("screen_id") or ""), jpeg):
+        log.info("machine %s: a screen picture was refused", machine_id)
+
+
 def _reason(app: FastAPI, machine_id: int, message: dict) -> None:
     with session_scope(app.state.session_factory) as db:
         task = _owned_task(db, machine_id, int(message.get("task_id") or 0))
@@ -221,6 +234,8 @@ def _exit(app: FastAPI, machine_id: int, message: dict) -> None:
             return
         before = task.status
         tasks.apply_exit(task, str(message.get("reason", "crashed"))[:60])
+        if task.status in TaskStatus.FINISHED:
+            app.state.screens.forget_task(task.id)
         if task.status != before:
             app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
 
@@ -236,6 +251,8 @@ async def handle(app: FastAPI, machine_id: int, message: dict) -> None:
     elif kind == "event":
         if _event(app, machine_id, message):
             await limits.admit_queued(app, machine_id)
+    elif kind == "screen_frame":
+        _screen_frame(app, machine_id, message)
     elif kind == "task_reason":
         _reason(app, machine_id, message)
     elif kind == "task_exit":

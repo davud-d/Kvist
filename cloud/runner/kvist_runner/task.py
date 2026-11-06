@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from .config import RunnerConfig
 from .guard import provider_trouble, scrub, with_machine_limits
+from .screens import ScreenRelay
 from .workspace import WorkspaceError, prepare
 
 log = logging.getLogger("kvist_runner.task")
@@ -67,6 +68,7 @@ class TaskProcess:
         config: RunnerConfig,
         emit: Callable[[dict], None],
         on_change: Callable[[], None],
+        send_frame: Callable[[dict], bool] = lambda _message: False,
     ) -> None:
         self.task_id = task_id
         self.goal = goal
@@ -88,6 +90,7 @@ class TaskProcess:
         self.pause_deadline: float | None = None
         self.background_deadline: float | None = None
         self._stdin_closed = False
+        self.screens = ScreenRelay(task_id, send_frame)
 
     # -- state the heartbeat reports ------------------------------------------------------
 
@@ -106,6 +109,7 @@ class TaskProcess:
         try:
             await self._run()
         finally:
+            await self.screens.stop()
             # The key goes with the process.
             self._secrets.clear()
             self._model_env = None
@@ -200,6 +204,8 @@ class TaskProcess:
             return
         if not isinstance(event, dict):
             return
+        if event.get("type") == "screen":
+            event = self.screens.sanitize(event)
         self._emit({"type": "event", "task_id": self.task_id, "event": event})
         await self._track(event)
 

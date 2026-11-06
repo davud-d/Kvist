@@ -157,6 +157,12 @@ def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
     # Second line of defence after the runner's own scrub: every secret this process has seen.
     event = redact_obj(event)
     kind = str(event.get("type", ""))
+    if kind == "screen":
+        # Live only, and only the whitelisted view with our own address: never the machine's URL or token.
+        view = app.state.screens.apply(task.id, event)
+        if view is not None:
+            app.state.hub.publish(task.id, {"type": "event", "seq": None, "event": view})
+        return task.status
     seq = None
     if kind in PERSISTED:
         seq = task.next_seq
@@ -166,6 +172,8 @@ def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
     db.flush()
     app.state.hub.publish(task.id, {"type": "event", "seq": seq, "event": event})
     if task.status != before:
+        if task.status in TaskStatus.FINISHED:
+            app.state.screens.forget_task(task.id)
         app.state.hub.publish(task.id, {"type": "task", "task": task_view(db, task)})
         if task.status == TaskStatus.DONE:
             _first_done(db, task)
@@ -447,6 +455,9 @@ async def stream(socket: WebSocket, task_id: int, after: int = 0) -> None:
             for row in rows:
                 await socket.send_json({"type": "event", "seq": row.seq, "event": row.payload})
         await socket.send_json({"type": "history_end"})
+        # Screens are live only: a page that joins late is told which are open (owner only, checked above).
+        for view in app.state.screens.views(task_id):
+            await socket.send_json({"type": "event", "seq": None, "event": view})
         receiver = asyncio.create_task(_drain_browser(socket))
         try:
             while not receiver.done():

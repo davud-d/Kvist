@@ -13,13 +13,14 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import auth, billing, exports, funnel, gateway, keys, ledger, machines, tasks, web
+from . import auth, billing, exports, funnel, gateway, keys, ledger, machines, screens, tasks, web
 from .config import Settings, load_settings
 from .db import make_engine, make_session_factory, upgrade
 from .errors import ApiError, api_error_handler, unhandled_error_handler, validation_error_handler
 from .events import EventHub
 from .gateway import Gateway
 from .providers import MachineProvider, make_provider
+from .screens import ScreenStore
 from .secrets import Vault, install_log_scrubber
 
 log = logging.getLogger("kvist_cloud")
@@ -77,6 +78,7 @@ def create_app(
     app.state.on_signed_in = machines.on_signed_in
     app.state.gateway = Gateway()
     app.state.hub = EventHub()
+    app.state.screens = ScreenStore()
     # The ledger's clock; tests move it by hand.
     app.state.clock = time.time
 
@@ -101,6 +103,7 @@ def create_app(
     app.include_router(machines.router)
     app.include_router(gateway.router)
     app.include_router(tasks.router)
+    app.include_router(screens.router)
     app.include_router(billing.router)
     app.include_router(ledger.router)
     app.include_router(funnel.router)

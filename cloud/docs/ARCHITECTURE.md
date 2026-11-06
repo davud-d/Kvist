@@ -76,6 +76,34 @@ socket. The runner packs the folder into a `.tar.gz` and uploads it with an HTTP
 the machine token. The browser polls the export and downloads it. Export goes through the
 runner, not the provider, so it works the same on any hosting.
 
+### The agent's screen (private)
+
+The browser and desktop skills draw on a virtual screen that Kvist serves on a loopback address of
+the machine, behind a secret token. What the agent does there is as private as its files, so:
+
+1. **The address and token never leave the machine.** The runner rewrites every `screen` event
+   (`url`, `stream_url`, `frame_url` emptied) and keeps the address to itself. The server whitelists
+   the event again (`screens.public_view`) and puts its own address in `frame_url`.
+2. **Pictures are pulled only while the owner looks.** The owner's page polls
+   `GET /api/tasks/{id}/screens/{screen}/frame.jpg`; each poll renews a 10 s lease on the machine
+   (`screen_watch`), and the runner fetches a 960 px JPEG from its loopback viewer about twice a
+   second until the lease runs out. Pictures are sent over the machine's one authenticated socket
+   as `screen_frame`; a frame is dropped, never queued, when the link is down or backed up.
+3. **Memory only.** Frames live in one process dictionary (`ScreenStore`, at most 64, each at most
+   1 MB and checked for a JPEG header), go stale after 10 s and are forgotten when the screen
+   closes or the task ends. They are not in the database, `task_events`, logs or exports, and a
+   `screen` event is not persisted either.
+4. **Owner only.** The route resolves the task with the same `owned_task` as every other task route:
+   another account, an admin and a signed-out visitor get the answer for a task that does not
+   exist (404; 401 when signed out), not even a hint that a screen exists. The live stream
+   refuses non-owners the same way. The route also needs the `X-Kvist-Client` header, which an
+   `<img>` on another site cannot send, and answers `private, no-store`.
+5. **A machine can only speak for its own tasks.** A `screen_frame` for a task the machine does
+   not own is dropped and logged.
+
+Tests: `backend/tests/test_screens.py` (isolation between accounts, admin, signed-out, stream,
+storage, limits) and `runner/tests/test_screens.py` (address stripped, loopback-only fetch, lease).
+
 ## Hours ledger rules
 
 `ledger_entries` is append-only. Every row has a signed `seconds` value and a `kind`:
