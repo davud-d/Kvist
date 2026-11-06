@@ -47,6 +47,13 @@ def install(app: FastAPI) -> None:
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
     pixel = dist / "pixel"
     if pixel.is_dir():
+        async def pixel_page() -> FileResponse:
+            # The same page at every address of a session or a project; what it shows, it asks the API for,
+            # and the API answers only the owner.
+            return FileResponse(pixel / "index.html", media_type="text/html; charset=utf-8")
+
+        for path in ("/pixel/s/{public_id}", "/pixel/p/{project_id}"):
+            app.add_api_route(path, pixel_page, methods=["GET"], include_in_schema=False)
         app.mount("/pixel", StaticFiles(directory=pixel, html=True), name="pixel")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
     app.add_middleware(GZipMiddleware, minimum_size=500)

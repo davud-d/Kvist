@@ -41,6 +41,8 @@ export function createAgent(id, workspace, session = "") {
     screens: new Map(),
     // The cloud task behind this agent ({id, goal, status, reason, used_seconds}); null while it is a draft.
     cloud: null,
+    // The id in the session's address (/pixel/s/<publicId>), known once the cloud has told about the task.
+    publicId: "",
     context: { tokens: 0, limit: 0 },
     spend: { input: 0, output: 0 },
     changed: new Map(),
@@ -443,6 +445,7 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "cloud_task":
       agent.cloud = ev.task;
+      agent.publicId = ev.task.public_id ?? agent.publicId;
       if (!agent.title) agent.title = String(ev.task.goal ?? "").trim().split("\n")[0].slice(0, 120);
       if (!replay) agent.state = taskState(ev.task.status, agent.state);
       return;

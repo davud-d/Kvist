@@ -1,9 +1,9 @@
-// The left rail: repositories (and the empty folder) that open into their tasks, an "add repository" button and,
+// The left rail: projects that open into their tasks (sessions), an "add project" button and,
 // bottom left, the gear that opens the settings. Picking a task shows it (its stream opens when it is used);
 // a running one carries a dot, and its cross only hides it from the page.
 
 import { closeTab, newAgent, openSession, refreshSessions, toggleProject } from "../actions.js";
-import { account, onAccount, projectName, workspaceOf } from "../cloud.js";
+import { account, onAccount, projectName, sessionUrl, workspaceOf } from "../cloud.js";
 import { fill, frameThrottle, h, icon, keyedList } from "../dom.js";
 import { t } from "../i18n.js";
 import { enter } from "../motion.js";
@@ -17,14 +17,19 @@ function sessionRow(project, session) {
   const stop = session.agentId
     ? h("button", { class: "sess-close", type: "button", title: t("close tab"), onclick: (event) => { event.stopPropagation(); closeTab(session.agentId); } }, icon("close", 10))
     : null;
+  // A real link: it can be copied, opened in a tab of its own, or typed into the address bar.
   const row = h(
-    "button",
-    { class: `sess${session.active ? " on" : ""}${session.attention ? " attention" : ""}`, type: "button", title: session.title },
+    "a",
+    { class: `sess${session.active ? " on" : ""}${session.attention ? " attention" : ""}`, href: session.publicId ? sessionUrl(session.publicId) : "#", title: session.title },
     dot,
     h("span", { class: "sess-title" }, session.title || t("new task")),
     stop,
   );
-  row.addEventListener("click", () => openSession(project.workspace, session.session, session.title));
+  row.addEventListener("click", (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    openSession(project.workspace, session.session, session.title, session.publicId);
+  });
   return row;
 }
 
@@ -40,7 +45,7 @@ function paintProject(el, project) {
     project.running ? h("span", { class: "state-dot running" }) : null,
     project.sessions.length ? h("span", { class: "proj-count" }, String(project.sessions.length)) : null,
   );
-  const create = h("button", { class: "sess new", type: "button" }, icon("plus", 12), h("span", { class: "sess-title" }, t("new task")));
+  const create = h("button", { class: `sess new${project.draftActive ? " on" : ""}`, type: "button" }, icon("plus", 12), h("span", { class: "sess-title" }, t("new task")));
   create.addEventListener("click", () => newAgent(project.workspace));
   // The older tasks have no project to start a new one in.
   fill(el.querySelector(".proj-body > div"), project.sessions.map((session) => sessionRow(project, session)), project.workspace ? create : null);
@@ -76,7 +81,7 @@ export function mountDock(root) {
     update: paintProject,
     onEnter: (el) => enter(el, { from: "translateX(-12px)" }),
     // A cheap fingerprint: what the rows show, so an unchanged folder is not repainted.
-    rev: (project) => JSON.stringify([project.open, project.running, project.sessions.map((s) => [s.session, s.title, s.state, s.active, s.attention, s.closed])]),
+    rev: (project) => JSON.stringify([project.name, project.open, project.running, project.draftActive, project.sessions.map((s) => [s.session, s.publicId, s.title, s.state, s.active, s.attention, s.closed])]),
   });
   const redraw = frameThrottle(() => {
     const tree = buildTree({

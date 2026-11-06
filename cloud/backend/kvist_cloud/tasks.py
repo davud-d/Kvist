@@ -136,6 +136,7 @@ def task_view(db: Session, task: Task) -> dict[str, object]:
     used = ledger.task_used_seconds(db, task.id)
     return {
         "id": task.id,
+        "public_id": task.public_id,
         "machine_id": task.machine_id,
         "project_id": task.project_id,
         "goal": task.goal,
@@ -341,6 +342,17 @@ async def _dispatch(app: FastAPI, machine_id: int) -> None:
 def list_tasks(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, object]]:
     rows = db.scalars(select(Task).where(Task.user_id == user.id).order_by(Task.id.desc()).limit(100))
     return [task_view(db, task) for task in rows]
+
+
+@router.get("/api/sessions/{public_id}")
+def get_session(
+    public_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    """A session by the id in its address. Someone else's, or one that does not exist, is the same answer."""
+    task = db.scalar(select(Task).where(Task.public_id == public_id, Task.user_id == user.id))
+    if task is None:
+        raise not_found("session")
+    return task_payload(db, task)
 
 
 @router.get("/api/tasks/{task_id}")

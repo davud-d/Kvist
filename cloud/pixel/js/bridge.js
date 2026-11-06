@@ -6,7 +6,7 @@
 // A task has one goal and cannot be given a second one, so an agent in this page is a *draft* until its
 // first goal is sent, and a task from then on. A draft needs no server at all.
 
-import { account, api, ApiError, firstLine, listItem, LOGIN_URL, refreshHours, refreshTasks, tasksOf, WORKING } from "./cloud.js";
+import { account, api, ApiError, firstLine, isPlumbing, listItem, loginUrl, refreshHours, refreshTasks, tasksOf, WORKING } from "./cloud.js";
 import { t } from "./i18n.js";
 
 const listeners = new Set();
@@ -53,7 +53,7 @@ function connect(agent, taskId) {
     socket.onclose = (close) => {
       if (entry.stopped) return;
       if (close.code === 4401) {
-        location.assign(LOGIN_URL);
+        location.assign(loginUrl());
         return;
       }
       emit(agent, { type: "remote_state", state: "reconnecting", host: "cloud", reason: t("connection lost") });
@@ -67,8 +67,6 @@ function connect(agent, taskId) {
 // The core names its own session inside; on this page a task is its id, so that is what stays the session.
 const SESSION_EVENTS = new Set(["hello", "session"]);
 
-/** What a run of Kvist says about finding its way back into the conversation is plumbing, not news. */
-const isPlumbing = (event, entry) => (event.type === "hello" && entry.announced) || (event.type === "command_result" && event.name === "session");
 
 function handle(agent, taskId, entry, data) {
   if (data.type === "event") {
@@ -76,7 +74,7 @@ function handle(agent, taskId, entry, data) {
       if (data.seq <= entry.lastSeq) return;
       entry.lastSeq = data.seq;
     }
-    if (isPlumbing(data.event, entry)) return;
+    if (isPlumbing(data.event, entry.announced)) return;
     emit(agent, SESSION_EVENTS.has(data.event.type) ? { ...data.event, session: String(taskId) } : data.event);
   } else if (data.type === "task") {
     onTask(agent, entry, data.task);
@@ -126,7 +124,7 @@ export function closeAgent(id) {
 // -- what the person can do -----------------------------------------------------------------
 
 function taskEvent(task) {
-  return { type: "cloud_task", task: { id: task.id, goal: task.goal, repo_url: task.repo_url, status: task.status, reason: task.reason, used_seconds: task.used_seconds } };
+  return { type: "cloud_task", task: { id: task.id, public_id: task.public_id, goal: task.goal, repo_url: task.repo_url, status: task.status, reason: task.reason, used_seconds: task.used_seconds } };
 }
 
 /** Another message in the conversation: the cloud starts the agent again if it had stopped, or queues it if it is busy. */
@@ -180,6 +178,10 @@ async function history(taskId) {
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const reply = await api(`/api/tasks/${taskId}/events?after=${after}`);
     for (const row of reply.events) {
+      if (isPlumbing(row.event, true)) {
+        after = row.seq;
+        continue;
+      }
       events.push({ seq: row.seq, event: SESSION_EVENTS.has(row.event.type) ? { ...row.event, session: String(taskId) } : row.event });
       after = row.seq;
     }

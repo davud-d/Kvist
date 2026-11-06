@@ -4,7 +4,7 @@
 // the server makes the final decision.
 
 import { addProject } from "../actions.js";
-import { account, api, createProject, LOGIN_URL, nameProblem, NAME_LIMIT, suggestedName } from "../cloud.js";
+import { account, api, createProject, loginUrl, nameProblem, NAME_LIMIT, suggestedName } from "../cloud.js";
 import { fill, h } from "../dom.js";
 import { t } from "../i18n.js";
 import { openModal } from "./modal.js";
@@ -47,7 +47,7 @@ export function openProjectDialog() {
     const found = await loadRepos();
     if (choice.source !== "github") return;
     if (found.reason === "no_token" || found.reason === "token_expired") {
-      fill(list, h("p", { class: "dim" }, t("github sign in again")), h("a", { class: "btn", href: LOGIN_URL }, "GitHub"));
+      fill(list, h("p", { class: "dim" }, t("github sign in again")), h("a", { class: "btn", href: loginUrl() }, "GitHub"));
     } else if (found.reason) {
       fill(list, h("p", { class: "dim" }, found.message ?? t("github unreachable")));
     } else if (!found.repos.length) {

@@ -1,8 +1,8 @@
 // Kvist Cloud, pixel edition: wires the modules together, loads the account and opens the first task.
 
-import { activate, newAgent, onNeedKey, onNeedProject, openSession, refreshSessions, startListening } from "./actions.js";
+import { activate, newAgent, onNeedKey, onNeedProject, openSession, refreshSessions, startListening, syncAddress } from "./actions.js";
 import { openExternal } from "./bridge.js";
-import { account, keepFresh, loadAccount, workspaceOf } from "./cloud.js";
+import { account, keepFresh, loadAccount, parseLocation, resolveSession, workspaceOf } from "./cloud.js";
 import { $ } from "./dom.js";
 import { detectLanguage, setLanguage } from "./i18n.js";
 import { setMathRenderer } from "./markdown.js";
@@ -11,6 +11,7 @@ import { active, loadPrefs, setMode, setPref, store, subscribe } from "./store.j
 import { mountChat } from "./views/chat.js";
 import { mountDock } from "./views/dock.js";
 import { mountInspector } from "./views/inspector.js";
+import { mountNotices, setNotices } from "./views/notices.js";
 import { mountOverview } from "./views/overview.js";
 import { openProjectDialog } from "./views/project-dialog.js";
 import { openKeyDialog } from "./views/settings-dialogs.js";
@@ -42,23 +43,41 @@ function wireGlobalKeys() {
   });
 }
 
-// The rail lists the person's projects. A link like /pixel/#/tasks/12 opens that task; otherwise the page opens a
-// draft in the project used last. With no project at all the first thing to do is add one, so that is asked.
-async function openFirst() {
-  const wanted = location.hash.match(/^#\/tasks\/(\d+)$/)?.[1];
-  const task = account.tasks.find((item) => String(item.id) === wanted);
-  const workspace = task ? workspaceOf(task) : String(workspaceOf(account.tasks[0] ?? {}) || account.projects[0]?.id || "");
-  if (!workspace && !task) {
-    openProjectDialog();
-    return;
+// What the address asks for is what opens: /pixel/s/<id> is that session, /pixel/p/<id> a draft in that project, and a
+// bare /pixel/ the project used last. A session that is not the person's (or does not exist) is said so, and the page
+// falls back to a draft; the cloud answers a stranger exactly as it answers a missing one.
+async function openByAddress() {
+  const wanted = parseLocation(location.pathname, location.hash);
+  setNotices([]);
+  if (wanted?.kind === "session" || wanted?.kind === "task") {
+    const task = wanted.kind === "session"
+      ? account.tasks.find((item) => item.public_id === wanted.id) ?? await resolveSession(wanted.id)
+      : account.tasks.find((item) => String(item.id) === wanted.id);
+    if (task) return showTask(task);
+    setNotices([{ id: "session-missing", level: "error", text: "warn session missing" }]);
   }
-  if (!store.prefs.expanded.includes(workspace)) setPref("expanded", [...store.prefs.expanded, workspace]);
-  if (task) {
-    refreshSessions(workspace);
-    await openSession(workspace, String(task.id), task.goal.trim().split("\n")[0]);
-    return;
-  }
+  const project = wanted?.kind === "project" && account.projects.some((item) => String(item.id) === wanted.id) ? wanted.id : null;
+  if (wanted?.kind === "project" && !project) setNotices([{ id: "project-missing", level: "error", text: "warn project missing" }]);
+  const workspace = project ?? lastWorkspace();
+  if (!workspace) return syncAddress(null);
+  expand(workspace);
+  const draft = [...store.agents.values()].find((agent) => agent.workspace === workspace && !agent.session);
+  if (draft) return activate(draft.id);
   newAgent(workspace);
+  return undefined;
+}
+
+const lastWorkspace = () => String(workspaceOf(account.tasks[0] ?? {}) || account.projects[0]?.id || "");
+
+function expand(workspace) {
+  if (!store.prefs.expanded.includes(workspace)) setPref("expanded", [...store.prefs.expanded, workspace]);
+}
+
+async function showTask(task) {
+  const workspace = workspaceOf(task);
+  expand(workspace);
+  refreshSessions(workspace);
+  await openSession(workspace, String(task.id), task.goal.trim().split("\n")[0], task.public_id);
 }
 
 async function boot() {
@@ -69,6 +88,7 @@ async function boot() {
   const app = $("#app");
   const pane = $("#pane");
   mountTitlebar($("#titlebar"));
+  mountNotices($("#notices"));
   mountDock($("#dock"));
   mountChat(pane);
   mountInspector($("#inspector"));
@@ -77,6 +97,16 @@ async function boot() {
   startListening();
   onNeedKey(openKeyDialog);
   onNeedProject(openProjectDialog);
+  // The address bar follows what is in front, and back/forward move between sessions.
+  let settled = false;
+  subscribe((change) => {
+    // The first open replaces the address the page was loaded with; after that, each change is a step in history.
+    if (change.kind !== "active") return;
+    syncAddress(active(), { push: settled });
+    // A warning about the address that was asked for is about that moment: moving on to something else ends it.
+    if (settled) setNotices([]);
+  });
+  window.addEventListener("popstate", () => openByAddress().catch((error) => console.error(error)));
   subscribe((change) => {
     if (change.kind !== "prefs") return;
     applyPrefs(store.prefs);
@@ -86,7 +116,8 @@ async function boot() {
   // A signed-out visitor is sent to sign in from inside loadAccount.
   await loadAccount();
   keepFresh();
-  await openFirst();
+  await openByAddress();
+  settled = true;
 }
 
 boot().catch((error) => console.error(error));

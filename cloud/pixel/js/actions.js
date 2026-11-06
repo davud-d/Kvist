@@ -2,7 +2,7 @@
 // bridge and feed what comes back into the store.
 
 import * as bridge from "./bridge.js";
-import { account, cannotRun } from "./cloud.js";
+import { account, cannotRun, projectUrl, sessionUrl } from "./cloud.js";
 import { t } from "./i18n.js";
 import { addNote, beginTurn, clearFeed, createAgent, replayHistory } from "./reducer.js";
 import { addAgent, announce, dispatch, removeAgent, setActive, setPref, store } from "./store.js";
@@ -31,6 +31,8 @@ export function startListening() {
     if (event.type === "hello") ready.get(id)?.();
     const agent = store.agents.get(id);
     if (agent && ["session", "cloud_task"].includes(event.type) && store.prefs.expanded.includes(agent.workspace)) refreshSessions(agent.workspace);
+    // The first message gives the draft its session id: the address becomes the session's own.
+    if (agent && event.type === "cloud_task" && id === store.activeId) syncAddress(agent);
   });
 }
 
@@ -65,10 +67,10 @@ export function addProject(workspace) {
 }
 
 /** A stored task: the agent that already shows it, or one made for it (its stream opens on first use). */
-export async function openSession(workspace, name, title) {
+export async function openSession(workspace, name, title, publicId = "") {
   const open = [...store.agents.values()].find((agent) => agent.workspace === workspace && agent.session === name);
   if (open) return activate(open.id);
-  const agent = restoreTab({ workspace, session: name, title });
+  const agent = restoreTab({ workspace, session: name, title, publicId });
   return activate(agent.id);
 }
 
@@ -97,10 +99,11 @@ export async function wake(agent) {
   await startCore(agent, agent.session || null);
 }
 
-export function restoreTab({ workspace, session, title }) {
+export function restoreTab({ workspace, session, title, publicId = "" }) {
   const agent = createAgent(newId(), workspace, session);
   agent.state = "asleep";
   agent.title = title ?? "";
+  agent.publicId = publicId;
   addAgent(agent);
   return agent;
 }
@@ -117,10 +120,19 @@ export async function loadHistory(agent) {
   announce({ kind: "agent", id: agent.id });
 }
 
+/** The address that shows this agent: its session's own, or the project it is a draft in. */
+export const addressOf = (agent) => (agent.publicId ? sessionUrl(agent.publicId) : agent.workspace ? projectUrl(agent.workspace) : "/pixel/");
+
+/** The address bar follows what is in front, so a link to it works anywhere; back and forward move between them. */
+export function syncAddress(agent, { push = false } = {}) {
+  if (!agent) return;
+  const address = addressOf(agent);
+  if (location.pathname === address && !location.hash) return;
+  history[push ? "pushState" : "replaceState"](null, "", address);
+}
+
 export async function activate(id) {
   setActive(id);
-  const agent = store.agents.get(id);
-  if (agent) history.replaceState(null, "", agent.session ? `#/tasks/${agent.session}` : location.pathname);
 }
 
 export async function closeTab(id) {

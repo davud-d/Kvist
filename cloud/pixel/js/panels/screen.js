@@ -8,7 +8,7 @@
 
 import { fill, h } from "../dom.js";
 import { t } from "../i18n.js";
-import { LOGIN_URL } from "../cloud.js";
+import { loginUrl } from "../cloud.js";
 
 const FRAME_PATH = /^\/api\/tasks\/\d+\/screens\/[\w.-]+\/frame\.jpg$/;
 const POLL_VISIBLE_MS = 600;
@@ -28,7 +28,7 @@ function watch(key, frameUrl, picture, waiting) {
     }
     try {
       const reply = await fetch(frameUrl, { credentials: "same-origin", cache: "no-store", headers: { "X-Kvist-Client": "1" } });
-      if (reply.status === 401) location.assign(LOGIN_URL);
+      if (reply.status === 401) location.assign(loginUrl());
       else if (reply.status === 200) {
         const next = URL.createObjectURL(await reply.blob());
         picture.src = next;

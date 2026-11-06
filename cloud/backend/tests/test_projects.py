@@ -135,3 +135,24 @@ def test_a_machine_that_was_asleep_gets_every_folder_when_it_connects(client_fac
             if message["type"] == "prepare_project":
                 got[message["folder"]] = message["repo_url"]
         assert got == {"docs": "", "site": "https://github.com/o/site.git"}
+
+
+def test_a_session_has_an_address_of_its_own_that_only_its_owner_can_open(client_factory, engine):
+    client = signed_in(client_factory, engine)
+    first = client.post("/api/tasks", json={"goal": "one"}).json()
+    second = client.post("/api/tasks", json={"goal": "two"}).json()
+    assert second["public_id"] != first["public_id"]
+    # Not the row number: an opaque id, different for every session.
+    assert len(first["public_id"]) >= 12 and first["public_id"] != str(first["id"])
+    mine = client.get(f"/api/sessions/{first['public_id']}")
+    assert mine.status_code == 200 and mine.json()["id"] == first["id"]
+    assert first["public_id"] in [item["public_id"] for item in client.get("/api/tasks").json()]
+
+    sign_in_as(client, engine, "stranger", 81)
+    refused = client.get(f"/api/sessions/{first['public_id']}")
+    missing = client.get("/api/sessions/nothing-like-that")
+    assert refused.status_code == 404 and refused.json() == missing.json()
+    # The row number gets a stranger nowhere either.
+    assert client.get(f"/api/tasks/{first['id']}").status_code == 404
+    client.cookies.clear()
+    assert client.get(f"/api/sessions/{first['public_id']}").status_code == 401

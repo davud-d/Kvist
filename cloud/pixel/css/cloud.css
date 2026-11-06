@@ -48,3 +48,13 @@
 
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .repo-list { max-height: 220px; overflow-y: auto; }
+
+/* Warnings: above the chat, one bar each, said before the thing bites. */
+#notices:empty { display: none; }
+#notices { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.notice { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--surface-2); box-shadow: var(--outline); font-size: 13px; }
+.notice::before { content: ""; flex: none; width: 10px; height: 10px; background: var(--warn); }
+.notice.error::before { background: var(--err); }
+.notice-text { flex: 1; min-width: 0; }
+.notice .btn { min-height: 28px; font-size: 12px; }
+a.sess { text-decoration: none; }

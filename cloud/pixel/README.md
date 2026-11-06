@@ -5,7 +5,7 @@
 The pixel-game window of [Kvist Pixel (Tauri)](../../frontends/gui/tauri/README.md), copied here and changed
 only where the cloud has different data. It is plain files, no bundler: `cloud/frontend/build.mjs` copies it to
 `dist/pixel/` and the server serves it at **`/pixel/`** (the old pages stay as they are; the header has a "Workspace"
-link). Open a task directly with `/pixel/#/tasks/<id>`.
+link). Every session has its own address, `/pixel/s/<id>` (an opaque id), so a link opens it; only its owner can open it.
 
 ## What is the same
 

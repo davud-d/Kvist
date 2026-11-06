@@ -2,6 +2,7 @@
 """Tables. ledger_entries is append-only: the ORM refuses UPDATE and DELETE on it."""
 from __future__ import annotations
 
+import secrets
 from datetime import datetime
 
 from sqlalchemy import (
@@ -141,10 +142,17 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+def new_public_id() -> str:
+    """72 random bits, url-safe: a session's address. The row number would be guessable; this is not."""
+    return secrets.token_urlsafe(9)
+
+
 class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # What the address of the session carries (/pixel/s/<public_id>). Knowing it opens nothing for anyone but the owner.
+    public_id: Mapped[str] = mapped_column(String(24), unique=True, index=True, default=new_public_id)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     machine_id: Mapped[int] = mapped_column(ForeignKey("machines.id"), index=True)
     # None for the tasks from before projects existed: each had a folder of its own.

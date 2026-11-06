@@ -5,22 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Kvist Cloud</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="css/theme.css" />
-    <link rel="stylesheet" href="css/layout.css" />
-    <link rel="stylesheet" href="css/components.css" />
-    <link rel="stylesheet" href="css/chat.css" />
-    <link rel="stylesheet" href="css/cloud.css" />
-    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
-    <script src="vendor/katex/katex.min.js"></script>
-    <script type="module" src="js/main.js"></script>
+    <link rel="stylesheet" href="/pixel/css/theme.css" />
+    <link rel="stylesheet" href="/pixel/css/layout.css" />
+    <link rel="stylesheet" href="/pixel/css/components.css" />
+    <link rel="stylesheet" href="/pixel/css/chat.css" />
+    <link rel="stylesheet" href="/pixel/css/cloud.css" />
+    <link rel="stylesheet" href="/pixel/vendor/katex/katex.min.css" />
+    <script src="/pixel/vendor/katex/katex.min.js"></script>
+    <script type="module" src="/pixel/js/main.js"></script>
   </head>
   <body>
     <div id="app">
       <header id="titlebar"></header>
       <aside id="dock"></aside>
       <main id="stage">
-        <section id="pane"></section>
-        <section id="overview" hidden></section>
+        <div id="notices" aria-live="polite"></div>
+        <div id="panes">
+          <section id="pane"></section>
+          <section id="overview" hidden></section>
+        </div>
       </main>
       <aside id="inspector"></aside>
     </div>

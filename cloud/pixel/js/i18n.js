@@ -89,6 +89,19 @@ const RU = {
   "failed": "не удалась",
   "new task": "Новая задача",
   // -- Kvist Cloud ---
+  "warn no plan": "Пробный период не начат: без него агент не запустится.",
+  "warn no hours": "Часы закончились: агент не запустится, пока не докупишь.",
+  "warn low hours": "Осталось мало часов:",
+  "warn no key": "Ключ модели не задан: без него агент не запустится.",
+  "warn machine error": "С сервером беда, задачи не стартуют.",
+  "warn paused": "Задача на паузе",
+  "warn failed": "Задача закончилась ошибкой",
+  "warn no projects": "Проектов пока нет. Добавь первый: задача живёт в его папке на сервере.",
+  "warn session missing": "Такой сессии нет, или она принадлежит другому аккаунту.",
+  "warn project missing": "Такого проекта нет, или он принадлежит другому аккаунту.",
+  "warn fix key": "Задать ключ",
+  "dismiss": "Скрыть",
+
   "from github": "Из GitHub",
   "new project": "Новый проект",
   "project name": "Имя проекта",
@@ -189,6 +202,19 @@ const RU = {
 
 // Keys that are codes or labels rather than English sentences need their English words.
 const EN = {
+  "warn no plan": "The trial has not started: the agent cannot run without it.",
+  "warn no hours": "Your hours are used up: the agent will not start until you buy more.",
+  "warn low hours": "Few hours left:",
+  "warn no key": "No model key: the agent cannot run without one.",
+  "warn machine error": "Something is wrong with your server; tasks will not start.",
+  "warn paused": "The task is paused",
+  "warn failed": "The task ended with an error",
+  "warn no projects": "No projects yet. Add the first one: a task lives in its folder on your server.",
+  "warn session missing": "There is no such session, or it belongs to another account.",
+  "warn project missing": "There is no such project, or it belongs to another account.",
+  "warn fix key": "Set the key",
+  "dismiss": "Dismiss",
+
   "from github": "From GitHub", "new project": "New project", "project name": "Project name",
   "project folder note": "A folder with this name is made on your server.", "create": "Create", "loading": "Loading…",
   "no project": "No project", "no_project": "Add a project first: a task lives in its folder.",

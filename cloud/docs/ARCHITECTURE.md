@@ -102,6 +102,23 @@ socket. The runner packs the folder into a `.tar.gz` and uploads it with an HTTP
 the machine token. The browser polls the export and downloads it. Export goes through the
 runner, not the provider, so it works the same on any hosting.
 
+### Session addresses and who may open them
+
+Every task has a **public id** (`tasks.public_id`: 72 random bits, url-safe; not the row number, never reused) and
+the workspace shows each session at its own address, **`/pixel/s/<id>`** (a draft in a project at `/pixel/p/<project>`).
+Typing the address, following a link or reloading opens that session without any button; the address bar follows
+what is in front, so back and forward move between sessions.
+
+The page at that address is the same for everyone (`pixel/index.html`); what it shows it asks the API for. The API
+resolves a session only for its owner: `GET /api/sessions/<id>` (and `/api/tasks/{n}`, `/events`, `/stream`, the
+screen routes) answer another account exactly as they answer an id that does not exist (404), and a signed-out visitor
+is sent to sign in and back to the same address. The page says "no such session, or it belongs to another account"
+without telling which. Knowing a session's id opens nothing for anyone else.
+
+The workspace also warns before things bite: no trial, no hours or few left (under 30 minutes or 10% of the plan),
+no model key, no project yet, the server in error, a task that stopped (and why) or failed
+(`cloud.warnings`, `views/notices.js`).
+
 ### Projects
 
 A project is a named folder on the person's machine: **empty** (just a name) or a **clone of one of their public

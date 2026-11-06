@@ -6,7 +6,8 @@ import { lang, localized } from "./i18n.js";
 
 export const FINISHED = new Set(["done", "cancelled", "failed"]);
 export const WORKING = new Set(["queued", "starting", "running"]);
-export const LOGIN_URL = "/auth/github/login?next=/pixel/";
+/** Sign in, then come back to exactly this address (a session's link works after signing in). */
+export const loginUrl = () => `/auth/github/login?next=${encodeURIComponent(location.pathname)}`;
 
 // -- pure helpers -------------------------------------------------------------------------
 
@@ -40,10 +41,29 @@ export function repoLabel(url) {
 export function listItem(task) {
   return {
     name: String(task.id),
+    public_id: task.public_id,
     title: firstLine(task.goal),
     updated_at: task.finished_at ?? task.started_at ?? task.created_at ?? "",
     closed: FINISHED.has(task.status),
   };
+}
+
+// -- addresses -------------------------------------------------------------------------------------------------
+// A session is /pixel/s/<its own id>, a draft in a project /pixel/p/<project id>. The id in the address is an
+// opaque one (not the row number) and opens nothing for anyone but the owner: the page asks the API, which
+// answers "not found" to everyone else.
+
+export const sessionUrl = (publicId) => `/pixel/s/${publicId}`;
+export const projectUrl = (projectId) => `/pixel/p/${projectId}`;
+
+/** What an address asks for: {kind: "session", id} | {kind: "project", id} | {kind: "task", id} (an old #/tasks/N link) | null. */
+export function parseLocation(pathname, hash = "") {
+  const session = pathname.match(/^\/pixel\/s\/([A-Za-z0-9_-]{6,40})\/?$/);
+  if (session) return { kind: "session", id: session[1] };
+  const project = pathname.match(/^\/pixel\/p\/(\d+)\/?$/);
+  if (project) return { kind: "project", id: project[1] };
+  const old = hash.match(/^#\/tasks\/(\d+)$/);
+  return old ? { kind: "task", id: old[1] } : null;
 }
 
 // A "workspace" on this page is a project's id as text; "" holds the tasks from before projects existed.
@@ -90,6 +110,40 @@ export function cannotRun(account) {
 
 export const displayState = (machine) => machine?.display_status ?? "none";
 
+/** What a run of Kvist says about opening or switching a session is plumbing, not news; it must not reach the feed. */
+export const isPlumbing = (event, announced) =>
+  (event.type === "hello" && announced) || (event.type === "command_result" && ["session", "new"].includes(event.name));
+
+// -- warnings ---------------------------------------------------------------------------------------------------
+
+const LOW_SECONDS = 30 * 60;
+const LOW_SHARE = 0.1;
+const PAUSE_REASONS = ["hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted", "machine_sleeping"];
+
+/**
+ * What the person should be told before it bites: nothing to run on, hours nearly gone, the server in trouble, a
+ * task that stopped and why. `extra` carries what the page itself found (a session that is not theirs, no project).
+ * Each warning is {id, level: "warn"|"error", text, action?: "key"|"plan"|"project"|"start"} with `text` an i18n key.
+ */
+export function warnings(state, agent = null, extra = []) {
+  const found = [...extra];
+  const { sub, key, machine } = state;
+  if (state.ready && !state.projects?.length) found.push({ id: "no-projects", level: "warn", text: "warn no projects", action: "project" });
+  if (!sub || sub.status === "none") found.push({ id: "no-plan", level: "warn", text: "warn no plan", action: "start" });
+  else if (sub.balance_seconds <= 0) found.push({ id: "no-hours", level: "error", text: "warn no hours", action: "plan" });
+  else if (sub.balance_seconds < LOW_SECONDS || share(sub.balance_seconds, sub.plan_seconds) < LOW_SHARE) {
+    found.push({ id: "low-hours", level: "warn", text: "warn low hours", action: "plan", value: duration(sub.balance_seconds) });
+  }
+  if (!key?.set) found.push({ id: "no-key", level: "warn", text: "warn no key", action: "key" });
+  if (machine?.display_status === "error") found.push({ id: "machine-error", level: "error", text: "warn machine error", value: machine.detail ?? "" });
+  const cloud = agent?.cloud;
+  if (cloud?.status === "paused" && PAUSE_REASONS.includes(cloud.reason)) {
+    found.push({ id: `paused-${cloud.reason}`, level: "warn", text: "warn paused", reason: `pause: ${cloud.reason}`, action: cloud.reason === "invalid_key" ? "key" : cloud.reason === "hours_exhausted" ? "plan" : undefined });
+  }
+  if (cloud?.status === "failed") found.push({ id: "failed", level: "error", text: "warn failed", reason: cloud.reason ? `pause: ${cloud.reason}` : "" });
+  return found;
+}
+
 // -- the account ----------------------------------------------------------------------------
 
 export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], projects: [], ready: false };
@@ -120,7 +174,7 @@ export async function api(path, { method = "GET", body } = {}) {
     throw new ApiError(0, "network", "No connection. / Нет связи.");
   }
   if (response.status === 401) {
-    location.assign(LOGIN_URL);
+    location.assign(loginUrl());
     throw new ApiError(401, "signed_out", "Signed out. / Вход не выполнен.");
   }
   if (response.status === 204) return null;
@@ -182,6 +236,16 @@ export async function createProject(name, repoUrl = "") {
   const project = await api("/api/projects", { method: "POST", body: { name, repo_url: repoUrl } });
   await refreshProjects();
   return project;
+}
+
+/** A session by the id in an address: the task, or null when it is not there or not yours (the cloud says the same either way). */
+export async function resolveSession(publicId) {
+  try {
+    return await api(`/api/sessions/${encodeURIComponent(publicId)}`);
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
 }
 
 export async function refreshKey() {
