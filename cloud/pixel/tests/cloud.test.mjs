@@ -110,6 +110,12 @@ test("warnings come before the trouble: no plan, no hours, few hours, no key, no
   assert.deepEqual(ids({ ...fine, projects: [] }), ["no-projects"]);
   assert.deepEqual(ids({ ...fine, ready: false, projects: [] }), []);
   assert.deepEqual(ids({ ...fine, machine: { display_status: "error", detail: "x" } }), ["machine-error"]);
+  // A person cannot act on a code: a known one gets a sentence of its own and a retry, with the code kept in it.
+  const trouble = (detail) => warnings({ ...fine, machine: { display_status: "error", detail } })[0];
+  assert.deepEqual([trouble("wake_failed").text, trouble("wake_failed").value, trouble("wake_failed").action],
+    ["warn machine wake_failed", "wake_failed", "machine"]);
+  assert.equal(trouble("create_failed").action, undefined);
+  assert.equal(trouble("something_new").text, "warn machine error");
   assert.deepEqual(ids(fine, { cloud: { status: "paused", reason: "hours_exhausted" } }), ["paused-hours_exhausted"]);
   assert.deepEqual(ids(fine, { cloud: { status: "paused", reason: "user" } }), []);
   assert.deepEqual(ids(fine, { cloud: { status: "failed", reason: "agent_error" } }), ["failed"]);

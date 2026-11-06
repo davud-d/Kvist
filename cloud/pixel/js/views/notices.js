@@ -1,7 +1,7 @@
 // Warnings above the chat: said before the thing bites (hours nearly gone, no key, no project, a task that
 // stopped and why). Each says what to do about it where there is something to do.
 
-import { account, onAccount, warnings } from "../cloud.js";
+import { account, onAccount, retryMachine, warnings } from "../cloud.js";
 import { fill, frameThrottle, h } from "../dom.js";
 import { t } from "../i18n.js";
 import { active, subscribe } from "../store.js";
@@ -23,6 +23,7 @@ const ACTIONS = {
   plan: ["manage plan", () => location.assign("/dashboard")],
   start: ["start trial", () => location.assign("/start")],
   project: ["add project", () => openProjectDialog()],
+  machine: ["retry machine", () => retryMachine().catch(() => {})],
 };
 
 function bar(item) {

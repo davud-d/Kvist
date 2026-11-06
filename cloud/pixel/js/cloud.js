@@ -118,6 +118,7 @@ export const isPlumbing = (event, announced) =>
 
 const LOW_SECONDS = 30 * 60;
 const LOW_SHARE = 0.1;
+const MACHINE_REASONS = ["create_failed", "wake_failed", "wake_timeout", "sleep_failed", "delete_failed"];
 const PAUSE_REASONS = ["hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted", "machine_sleeping"];
 
 /**
@@ -135,7 +136,14 @@ export function warnings(state, agent = null, extra = []) {
     found.push({ id: "low-hours", level: "warn", text: "warn low hours", action: "plan", value: duration(sub.balance_seconds) });
   }
   if (!key?.set) found.push({ id: "no-key", level: "warn", text: "warn no key", action: "key" });
-  if (machine?.display_status === "error") found.push({ id: "machine-error", level: "error", text: "warn machine error", value: machine.detail ?? "" });
+  if (machine?.display_status === "error") {
+    // A person cannot act on "wake_failed", so each known reason says what happened and what to try; the code
+    // stays at the end of the sentence for whoever they write to.
+    const detail = machine.detail ?? "";
+    const known = MACHINE_REASONS.includes(detail);
+    found.push({ id: "machine-error", level: "error", text: known ? `warn machine ${detail}` : "warn machine error",
+      value: detail, action: detail === "create_failed" ? undefined : "machine" });
+  }
   const cloud = agent?.cloud;
   if (cloud?.status === "paused" && PAUSE_REASONS.includes(cloud.reason)) {
     found.push({ id: `paused-${cloud.reason}`, level: "warn", text: "warn paused", reason: `pause: ${cloud.reason}`, action: cloud.reason === "invalid_key" ? "key" : cloud.reason === "hours_exhausted" ? "plan" : undefined });
@@ -206,6 +214,13 @@ export async function refreshMachine() {
   const machines = await quietly("/api/machines");
   if (machines !== undefined) account.machine = machines[0] ?? null;
   changed();
+}
+
+/** "Try again" on a machine in trouble: ask the server to start it, then look at it. */
+export async function retryMachine() {
+  if (!account.machine) return;
+  await api(`/api/machines/${account.machine.id}/wake`, { method: "POST" });
+  await refreshMachine();
 }
 
 export async function refreshHours() {
