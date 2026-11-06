@@ -23,14 +23,15 @@ fake model on port 8799 and the server on port 8740.
 
 * **Sign in:** the GitHub button signs you in as the local user `dev` (`AUTH_DEV_LOGIN`, loopback
   only).
-* **Card:** billing is off, so the card step is a stub: press "Skip (dev)".
+* **Card:** billing is off unless `cloud/.env` says `BILLING_ENABLED=true` (see Payments below). Off, the
+  payment step is a stub: press "Skip (dev)". Nothing else to pass: no flags, no variables.
 * **Model:** pick "Other", base URL `http://127.0.0.1:8799/v1`, model `fake-model`, any key of
   8+ characters. The fake model plays a short script through the **real Kvist core**: it writes
   `CLOUD_NOTES.md`, reads it back and answers. Nothing leaves the computer.
 * **Admin:** <http://127.0.0.1:8740/admin> shows funnel conversion and open disputes.
 
-`./cloud/scripts/dev.sh --fake-kvist` uses a scripted stand-in for Kvist instead of the core
-(`runner/tests/fake_kvist.py`), for working on the UI without the core's environment.
+Without the core installed, `dev.sh` uses a scripted stand-in for Kvist by itself
+(`runner/tests/fake_kvist.py`); `--fake-kvist` forces it, for working on the UI without the core.
 
 The real core runs from the repository's own `.venv` (`python -m kernel`). If it is missing:
 

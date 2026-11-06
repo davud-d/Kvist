@@ -610,7 +610,9 @@ async def stream(socket: WebSocket, task_id: int, after: int = 0) -> None:
         pass
     finally:
         app.state.hub.unsubscribe(task_id, queue)
-        with contextlib.suppress(RuntimeError):
+        # The browser is often gone by now (tab closed, laptop asleep, Ctrl+C on the server): closing then
+        # raises WebSocketDisconnect, which is not news and must not reach the log as a traceback.
+        with contextlib.suppress(WebSocketDisconnect, RuntimeError):
             await socket.close()
 
 
