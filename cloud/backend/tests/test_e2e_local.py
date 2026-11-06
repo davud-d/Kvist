@@ -124,3 +124,49 @@ def test_end_to_end_with_the_real_kvist_core(live_stack, fake_model, dist):
     check_the_outcome(stack, task_id, received, "CLOUD_NOTES.md")
     folder = Path(stack.app.state.settings.data_dir) / "machines" / "m1" / "work" / f"task-{task_id}"
     assert "Written by the fake model." in (folder / "CLOUD_NOTES.md").read_text()
+
+
+def test_the_agents_screen_reaches_only_its_owner_through_a_real_runner(live_stack, fake_model, dist):
+    """The desktop skill's picture: machine, runner, server, the owner's page; no address, no token, no stranger."""
+    import httpx
+    from sqlalchemy import select as sql_select
+
+    from kvist_cloud.auth import SESSION_COOKIE, _serializer
+    from kvist_cloud.models import TaskEvent
+
+    stack = live_stack(network=True, FRONTEND_DIST=str(dist), ADMIN_GITHUB_LOGINS="dev")
+    task_id = walk_the_funnel(stack, fake_model, "screen 30")
+    cookies = "; ".join(f"{name}={value}" for name, value in stack.http.cookies.items())
+    url = stack.url.replace("http://", "ws://") + f"/api/tasks/{task_id}/stream"
+    seen: list[str] = []
+    with connect(url, additional_headers={"Cookie": cookies, "Origin": stack.url}, open_timeout=10) as socket:
+        view = None
+        while view is None:
+            message = json.loads(socket.recv(timeout=30))
+            seen.append(json.dumps(message))
+            if message["type"] == "event" and message["event"]["type"] == "screen":
+                view = message["event"]
+    frame_url = view["frame_url"]
+    assert frame_url == f"/api/tasks/{task_id}/screens/desktop/frame.jpg"
+    assert view["url"] == view["stream_url"] == ""
+
+    picture = eventually(lambda: (lambda r: r if r.status_code == 200 else None)(stack.http.get(frame_url)), timeout=20)
+    assert picture.content.startswith(b"\xff\xd8\xff") and "no-store" in picture.headers["cache-control"]
+
+    # A signed-out visitor, and another account, learn nothing.
+    assert httpx.get(stack.url + frame_url, headers={"X-Kvist-Client": "1"}).status_code == 401
+    with stack.db() as db:
+        stranger = User(github_id=777, github_login="stranger")
+        db.add(stranger)
+        db.commit()
+        session = {"u": stranger.id, "v": stranger.session_version}
+        cookie = _serializer(stack.app.state.settings, "session").dumps(session)
+    other = httpx.get(stack.url + frame_url, headers={"X-Kvist-Client": "1"}, cookies={SESSION_COOKIE: cookie})
+    missing = httpx.get(stack.url + f"/api/tasks/{task_id + 99}/screens/desktop/frame.jpg",
+                        headers={"X-Kvist-Client": "1"}, cookies={SESSION_COOKIE: cookie})
+    assert other.status_code == 404 and other.json() == missing.json()
+
+    assert stack.http.post(f"/api/tasks/{task_id}/cancel").status_code == 200
+    with stack.db() as db:
+        stored = "\n".join(json.dumps(row.payload) for row in db.scalars(sql_select(TaskEvent)))
+    assert "fake-screen-token" not in "".join(seen) + stored

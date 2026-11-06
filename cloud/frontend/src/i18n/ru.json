@@ -21,7 +21,7 @@
     "source": "Исходный код (AGPL)",
     "site": "kvist.site"
   },
-  "nav": { "dashboard": "Дашборд", "newTask": "Новая задача", "settings": "Настройки", "admin": "Админ" },
+  "nav": { "dashboard": "Дашборд", "newTask": "Новая задача", "pixel": "Pixel", "settings": "Настройки", "admin": "Админ" },
   "units": { "min": "{m} мин", "hm": "{h} ч {m} мин", "h": "{h} ч" },
   "taskStatus": {
     "queued": "В очереди",

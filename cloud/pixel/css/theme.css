@@ -1,0 +1,111 @@
+/* Design tokens. The look is modern pixel art, not a retro desktop: flat surfaces, a limited
+   palette, a 3px ink outline whose corners are notched (never a bevel or a gradient), a darker
+   band inside buttons, and a readable monospace for everything the person reads. The pixel
+   typeface is kept for the wordmark only, because its Cyrillic does not survive small sizes. */
+
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono.ttf") format("truetype"); font-weight: 100 800; font-display: block; }
+@font-face { font-family: "Pixelify Sans"; src: url("../fonts/PixelifySans.ttf") format("truetype"); font-weight: 400 700; font-display: block; }
+
+:root {
+  --font-text: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-pixel: "Pixelify Sans", var(--font-text);
+  --font-size: 14px;
+  --zoom: 1;
+  --glass: 1;
+  --o: 3px; /* one pixel step of the outline */
+
+  --ink: #0d0b16;
+  --bg: #17142a;
+  --surface: #211d38;
+  --surface-2: #2c2748;
+  --raise: #38325b;
+  --shade: #1a1730;      /* the darker band inside a button */
+  --line: #4a4272;
+  --text: #f4ecdb;
+  --dim: #aaa2c9;
+  --accent: #ffb347;
+  --accent-shade: #d4851f;
+  --accent-ink: #1d1206;
+  --mint: #6fe3c1;
+  --pink: #ff86ab;
+  --warn: #ffd166;
+  --ok: #7ee08a;
+  --err: #ff6b7a;
+  --add: rgba(126, 224, 138, 0.16);
+  --del: rgba(255, 107, 122, 0.17);
+}
+
+:root[data-theme="moss"] {
+  --ink: #07100b; --bg: #0f1d15; --surface: #16291d; --surface-2: #1f3a29; --raise: #2a4d37; --shade: #0f1f16; --line: #3d6a4d;
+  --text: #e9f5e6; --dim: #9bbca3; --accent: #b6e35a; --accent-shade: #86ad2f; --accent-ink: #0d1904; --mint: #6fe3c1; --pink: #f3c969;
+}
+:root[data-theme="ember"] {
+  --ink: #120706; --bg: #231110; --surface: #321a17; --surface-2: #44241f; --raise: #5a312a; --shade: #251210; --line: #7a4639;
+  --text: #fbece4; --dim: #c9a496; --accent: #ff8a4c; --accent-shade: #d1612a; --accent-ink: #220b02; --mint: #ffd166; --pink: #ff86ab;
+}
+:root[data-theme="paper"] {
+  --ink: #2a2437; --bg: #f1ead9; --surface: #fbf6ea; --surface-2: #efe6d0; --raise: #e5d9bd; --shade: #d9ccaa; --line: #bfae86;
+  --text: #2a2437; --dim: #6b6483; --accent: #e0561d; --accent-shade: #a83c0d; --accent-ink: #fff5ea; --mint: #1f8f77; --pink: #c63a68;
+  --warn: #9a6a00; --ok: #23803c; --err: #c4352f; --add: rgba(35, 128, 60, 0.16); --del: rgba(196, 53, 47, 0.14);
+}
+:root[data-theme="mono"] {
+  --ink: #0b0b0b; --bg: #161616; --surface: #1f1f1f; --surface-2: #2b2b2b; --raise: #383838; --shade: #181818; --line: #4d4d4d;
+  --text: #f0f0f0; --dim: #a5a5a5; --accent: #c4c4c4; --accent-shade: #8e8e8e; --accent-ink: #0b0b0b; --mint: #b9b9b9; --pink: #a9a9a9;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent; /* the window itself may be see-through */
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: var(--font-size);
+  line-height: 1.55;
+  overflow: hidden;
+  zoom: var(--zoom);
+  text-rendering: optimizeLegibility;
+}
+
+button, input, textarea, select { font: inherit; color: inherit; }
+img { image-rendering: pixelated; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+[hidden] { display: none !important; }
+
+/* Surfaces. `--outline` is a one-pixel-step ink border with the four corner pixels left out. */
+:root {
+  --outline: calc(var(--o) * -1) 0 0 0 var(--ink), var(--o) 0 0 0 var(--ink), 0 calc(var(--o) * -1) 0 0 var(--ink), 0 var(--o) 0 0 var(--ink);
+  --paint: color-mix(in srgb, var(--surface) calc(var(--glass) * 100%), transparent);
+  --paint-2: color-mix(in srgb, var(--surface-2) calc(var(--glass) * 100%), transparent);
+}
+.px { background: var(--paint); box-shadow: var(--outline); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; border: 2px solid transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* The squirrel: three frames of the mascot, stepped (never tweened). */
+.squirrel {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  background: url("../sprites/squirrel-1.png") 0 0 / 100% 100% no-repeat;
+  image-rendering: pixelated;
+  flex: none;
+}
+.squirrel.small { width: 28px; height: 28px; }
+#app[data-busy="1"] .brand .squirrel, .squirrel.working { animation: squirrel 0.8s steps(1) infinite; }
+@keyframes squirrel {
+  0% { background-image: url("../sprites/squirrel-1.png"); }
+  34% { background-image: url("../sprites/squirrel-2.png"); }
+  67% { background-image: url("../sprites/squirrel-3.png"); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; transition-duration: 0.001s !important; }
+}
+
+/* Every boxed region wears the same outline on the same paint. */
+.chat-header, .composer, .tabs, .inspector-body, .dialog, .settings, #dock, .tile { background: var(--paint); box-shadow: var(--outline); }

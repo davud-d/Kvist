@@ -12,15 +12,18 @@ The goal text picks the script:
   auth-error   the model refuses the key
   rate-limit   the model keeps answering 429 until paused
   bg N         starts a background job that runs N seconds after the answer
+  screen N     opens a virtual desktop (a loopback viewer behind a secret token, like Kvist's own) for N seconds
 Never calls a model, never touches the network.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 lock = threading.Lock()
@@ -99,6 +102,43 @@ def work(seconds: float) -> bool:
     return False
 
 
+SCREEN_TOKEN = "fake-screen-token-0123456789"
+
+
+def start_viewer() -> ThreadingHTTPServer:
+    """A stand-in for Kvist's screen viewer: loopback only, a token in the URL, two alternating pictures."""
+    frames = [base64.b64decode(item) for item in json.loads(Path(__file__).with_name("screen_frames.json").read_text())]
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args) -> None:
+            return
+
+        def do_GET(self) -> None:  # noqa: N802
+            if not self.path.startswith("/frame.jpg") or f"t={SCREEN_TOKEN}" not in self.path:
+                self.send_response(401)
+                self.end_headers()
+                return
+            body = frames[int(time.time()) % len(frames)]
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def screen_event(server: ThreadingHTTPServer, state: str) -> dict:
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    closed = state == "closed"
+    return {"type": "screen", "screen_id": "desktop", "skill": "desktop", "title": "Desktop", "state": state,
+            "url": "" if closed else f"{base}/?t={SCREEN_TOKEN}",
+            "stream_url": "" if closed else f"{base}/stream.mjpeg?t={SCREEN_TOKEN}",
+            "frame_url": "" if closed else f"{base}/frame.jpg?t={SCREEN_TOKEN}"}
+
+
 def write_result(workspace: Path, step: int) -> None:
     (workspace / "hello.txt").write_text("hello from the cloud\n", encoding="utf-8")
     emit({"type": "step", "step": step, "action_type": "write_file", "action_args": {"path": "hello.txt"},
@@ -171,6 +211,14 @@ def run_turn(goal: str, workspace: Path) -> None:
         emit({"type": "task_state", "state": "running", "reason": ""})
         if not (answer or {}).get("approved"):
             finish("You said no, so nothing was removed.")
+            return
+    if script == "screen":
+        viewer = start_viewer()
+        emit(screen_event(viewer, "running"))
+        stopped = work(float(words[1]) if len(words) > 1 else 8.0)
+        emit(screen_event(viewer, "closed"))
+        viewer.shutdown()
+        if stopped:
             return
     if script == "bg":
         emit({"type": "job_started", "job_id": "job_1", "command": ["sleep", words[1] if len(words) > 1 else "2"],

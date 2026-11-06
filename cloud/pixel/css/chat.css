@@ -1,0 +1,111 @@
+/* The conversation: header, feed items, composer, closed banner. Content is set in the readable
+   monospace; the pixel look comes from outlines, colour and the sprite, not from the typeface. */
+
+.chat-header { display: flex; align-items: center; gap: 16px; padding: 14px 18px; }
+.chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.chat-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.title-text { font-weight: 700; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title-sub { color: var(--dim); font-size: 12px; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; margin: -3px; }
+.chat-controls { display: flex; gap: 10px; }
+
+.feed-wrap { position: relative; flex: 1; min-height: 0; background: color-mix(in srgb, var(--bg) calc(var(--glass) * 100%), transparent); box-shadow: var(--outline); }
+.feed { position: absolute; inset: 0; overflow-y: auto; padding: 24px 9% 28px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 40px; color: var(--dim); pointer-events: none; }
+
+.item { min-width: 0; }
+/* What the person said: a bubble on the right, pictures above it. */
+.item-user { align-self: flex-end; max-width: 78%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.user-text { padding: 9px 16px 12px; background: var(--accent); color: var(--accent-ink); box-shadow: inset 0 -4px 0 0 var(--accent-shade), var(--outline); white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.user-image { max-width: 240px; max-height: 160px; object-fit: cover; image-rendering: auto; box-shadow: var(--outline); }
+
+.item-reply, .item-final { max-width: 820px; }
+.item-reply.aside { color: var(--dim); }
+.chip + .md, .md + .chip { margin-top: 8px; }
+.item-final .chip { display: inline-block; margin-top: 10px; }
+
+.md { font-size: 14px; line-height: 1.7; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 0.8em; overflow-wrap: anywhere; }
+.md-h { margin: 1.1em 0 0.5em; font-size: 15px; font-weight: 800; color: var(--accent); }
+.md-list { margin: 0 0 0.8em; padding-left: 1.5em; }
+.md-list li { margin: 0.15em 0; }
+.md blockquote { margin: 0 0 0.8em; padding: 2px 14px; border-left: 4px solid var(--line); color: var(--dim); }
+.md a { color: var(--mint); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.md-code { font-size: 13px; padding: 1px 6px; background: var(--surface-2); color: var(--pink); }
+.md-pre { position: relative; margin: 0 0 1em; padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.55; background: var(--shade); box-shadow: var(--outline); }
+.md-pre[data-lang]::before { content: attr(data-lang); position: absolute; top: 0; right: 0; padding: 1px 8px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); background: var(--surface-2); }
+.md-pre code { font: inherit; white-space: pre; }
+.caret { display: inline-block; width: 8px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom; background: var(--accent); animation: blink 0.8s steps(2) infinite; }
+
+/* Formulas: KaTeX, in the text colour. */
+.math-block { margin: 0.6em 0 1em; padding: 12px 16px; overflow-x: auto; text-align: center; background: var(--surface); box-shadow: var(--outline); }
+.math.raw, .math-block.raw { color: var(--pink); }
+.katex { font-size: 1.12em; color: var(--text); }
+.katex-display { margin: 0; }
+
+.item-thought { color: var(--dim); }
+.thought-head { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
+.thought-head .icon { transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.item-thought.open .thought-head .icon { transform: rotate(90deg); }
+.thought-body { display: none; margin-top: 8px; padding: 8px 14px; max-height: 200px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; border-left: 4px solid var(--line); }
+.item-thought.open .thought-body, .item-thought.live .thought-body { display: block; }
+.dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
+@keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+
+.item-call { background: var(--surface); box-shadow: inset 4px 0 0 0 var(--line), var(--outline); max-width: 820px; margin: 3px 0; }
+.item-call[data-phase="run"] { box-shadow: inset 4px 0 0 0 var(--accent), var(--outline); }
+.item-call[data-phase="fail"] { box-shadow: inset 4px 0 0 0 var(--err), var(--outline); }
+.call-head { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
+.call-label { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-summary { flex: 1; text-align: right; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.counts { font-size: 12px; }
+.call-detail { display: none; padding: 0 16px 12px; }
+.item-call.open .call-detail { display: block; }
+.call-output, .call-tail { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; font-size: 12px; line-height: 1.5; background: var(--shade); white-space: pre-wrap; overflow-wrap: anywhere; }
+.call-tail { margin: 0 16px 10px; max-height: 70px; color: var(--dim); }
+.call-output.dim { color: var(--dim); }
+
+.diff { font-size: 12px; line-height: 1.5; background: var(--shade); max-height: 320px; overflow: auto; }
+.diff-line { padding: 0 12px; white-space: pre; }
+.diff-line.add { background: var(--add); color: var(--ok); }
+.diff-line.del { background: var(--del); color: var(--err); }
+.diff-line.hunk { color: var(--mint); opacity: 0.8; }
+
+.item-plan { padding: 14px 18px; max-width: 820px; background: var(--surface-2); box-shadow: var(--outline), inset 0 0 0 3px var(--pink); }
+.item-note { font-size: 12px; color: var(--dim); }
+.item-note.error { color: var(--err); }
+.item-error { display: flex; gap: 10px; padding: 10px 16px; color: var(--err); background: var(--del); max-width: 820px; box-shadow: var(--outline); }
+.artifact-image { max-width: 420px; display: block; image-rendering: auto; box-shadow: var(--outline); }
+.artifact-caption { margin-top: 6px; font-size: 12px; color: var(--dim); }
+
+/* Bottom: status line, composer or the closed banner. */
+.chat-bottom { display: flex; flex-direction: column; gap: 10px; position: relative; }
+.status { display: none; align-items: center; gap: 12px; height: 34px; padding: 0 6px; font-size: 14px; }
+.status.on { display: flex; }
+.shimmer { font-weight: 700; white-space: nowrap; }
+.status-detail { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.composer { position: relative; display: flex; align-items: flex-end; gap: 10px; padding: 12px 14px; flex-wrap: wrap; }
+.composer-input { flex: 1; min-width: 0; min-height: 34px; max-height: 180px; resize: none; border: 0; outline: none; background: transparent; padding: 6px 4px; font-size: 14px; line-height: 1.55; }
+.composer-input::placeholder { color: var(--dim); }
+.composer .attach-tray { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 12px; padding-bottom: 4px; }
+.thumb { position: relative; width: 68px; height: 68px; box-shadow: var(--outline); animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; image-rendering: auto; display: block; }
+.thumb-remove { position: absolute; top: -9px; right: -9px; width: 22px; height: 22px; border: 0; cursor: pointer; background: var(--err); color: #fff; line-height: 1; font-size: 15px; box-shadow: var(--outline); }
+@keyframes pop { from { transform: scale(0.4); opacity: 0; } }
+
+/* A closed conversation has no input at all: a bar of the same height. */
+.closed-bar { min-height: 60px; width: 100%; border: 0; cursor: pointer; color: var(--dim); text-align: center; background: var(--surface); box-shadow: var(--outline); }
+.closed-bar:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; color: var(--text); }
+
+/* The block a write is typed into */
+.codebox { position: relative; margin: 0 16px 10px; background: var(--shade); box-shadow: var(--outline); }
+.code-mark { position: absolute; top: 6px; right: 10px; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.9; pointer-events: none; }
+.code-body { max-height: 280px; overflow: auto; padding: 8px 0; font-size: 12px; line-height: 1.5; }
+.code-body.has-above { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px); mask-image: linear-gradient(to bottom, transparent 0, #000 34px); }
+.code-line { padding: 0 12px; white-space: pre; }
+.code-line.add { background: var(--add); }
+.code-line.del { background: var(--del); }
+.code-line .sign { display: inline-block; width: 1.4em; color: var(--dim); }

@@ -25,7 +25,7 @@ export function navigate(path, { replace: swap = false } = {}) {
 function header(active, funnel) {
   // Inside the funnel there is one way forward; the app's navigation would only be a way out.
   const items = state.me && !funnel
-    ? [["/dashboard", "nav.dashboard"], ["/new", "nav.newTask"], ["/settings", "nav.settings"],
+    ? [["/dashboard", "nav.dashboard"], ["/new", "nav.newTask"], ["/pixel/", "nav.pixel"], ["/settings", "nav.settings"],
        ...(state.me.is_admin ? [["/admin", "nav.admin"]] : [])]
     : [];
   return h("header.top", {},
@@ -33,7 +33,8 @@ function header(active, funnel) {
       h("a.mark", { href: state.me ? "/dashboard" : "/", "data-link": "" },
         h("span.dot", { "aria-hidden": "true" }), t("common.brand"), h("span.sub", { text: t("common.cloud") })),
       h("nav.nav", { "aria-label": "main" },
-        items.map(([href, key]) => h("a", { href, "data-link": "", "aria-current": active === href ? "page" : null,
+        // The pixel window is its own page, not a screen of this app: a plain link, a full load.
+        items.map(([href, key]) => h("a", { href, "data-link": href.startsWith("/pixel") ? null : "", "aria-current": active === href ? "page" : null,
           text: t(key) })),
         h("button.chip", { type: "button", lang: locale() === "ru" ? "en" : "ru", "aria-label": t("common.otherLangName"),
           onclick: switchLanguage, text: t("common.otherLang") }))));

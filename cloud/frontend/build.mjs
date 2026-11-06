@@ -11,6 +11,7 @@ import { checkLocales } from "./tools/i18n-check.mjs";
 
 const SRC = new URL("./src/", import.meta.url);
 const DIST = new URL("./dist/", import.meta.url);
+const PIXEL = new URL("../pixel/", import.meta.url);
 const BUDGET_BYTES = 100 * 1024;
 const FONTS = {
   latin: ["kvist-mono-latin-400.woff2", "kvist-mono-latin-700.woff2"],
@@ -68,6 +69,8 @@ async function buildOnce() {
   for (const name of [...FONTS.latin, ...FONTS.cyrillic, "OFL.txt"]) {
     cpSync(new URL(`fonts/${name}`, SRC), new URL(`assets/fonts/${name}`, DIST));
   }
+  // The pixel window is plain files (no bundler), served as they are under /pixel.
+  cpSync(PIXEL, new URL("pixel/", DIST), { recursive: true, filter: (from) => !/\/(tests|node_modules)(\/|$)/.test(from) });
   const styles = await css();
   await build({
     entryPoints: [new URL("js/app.js", SRC).pathname],

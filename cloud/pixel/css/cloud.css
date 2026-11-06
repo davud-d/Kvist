@@ -1,0 +1,40 @@
+/* What Kvist Cloud adds to the pixel window: the hours and the server in the title strip, the server and
+   hours panels, the private screen card. Everything else is the desktop app's own styling, unchanged. */
+
+.brand { width: auto; min-width: 0; }
+.brand-sub { font-family: var(--font-pixel); font-size: 14px; letter-spacing: 0.2em; color: var(--dim); align-self: flex-end; padding-bottom: 3px; }
+
+#titlebar .crumb { display: flex; align-items: center; gap: 18px; overflow: visible; }
+.hours-meter { display: flex; align-items: center; gap: 10px; }
+.hours-meter .meter-label { font-size: 12px; color: var(--text); letter-spacing: 0.04em; }
+.hours-meter .meter-bar i { height: 12px; }
+.server-chip { display: inline-flex; align-items: center; gap: 8px; margin: 0; text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
+.btn.lang { min-width: 44px; font-family: var(--font-pixel); }
+
+.chip.repo { text-transform: none; letter-spacing: 0.02em; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.chip.hours { color: var(--ok); }
+
+/* The inspector holds six tabs; they share the row evenly. */
+.inspector-inner .tabs { display: flex; }
+.inspector-inner .tabs .tab { flex: 1; min-width: 0; padding-inline: 4px; }
+
+.kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.kv-key { color: var(--dim); }
+.server-status { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.server-status b { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 13px; }
+
+.hours-big { font-family: var(--font-pixel); font-size: 28px; line-height: 1.1; color: var(--accent); }
+.feed-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 6px; border-top: 2px solid var(--shade); font-size: 13px; }
+.feed-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-row b { font-weight: 600; }
+.feed-row.plus b { color: var(--ok); }
+.feed-when { grid-column: 1 / -1; font-size: 11px; color: var(--dim); }
+
+.screen-view { display: block; width: 100%; height: auto; background: var(--ink); image-rendering: auto; }
+.screen-card[hidden], .screen-view[hidden] { display: none; }
+.privacy { font-size: 12px; }
+
+.dialog .bad { color: var(--err); }
+
+/* The model key is the settings' first row; it gets the whole width so its text does not wrap. */
+.settings-group .action-grid .setting:first-child { grid-column: 1 / -1; }

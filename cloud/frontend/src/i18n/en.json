@@ -21,7 +21,7 @@
     "source": "Source code (AGPL)",
     "site": "kvist.site"
   },
-  "nav": { "dashboard": "Dashboard", "newTask": "New task", "settings": "Settings", "admin": "Admin" },
+  "nav": { "dashboard": "Dashboard", "newTask": "New task", "pixel": "Pixel", "settings": "Settings", "admin": "Admin" },
   "units": { "min": "{m} min", "hm": "{h} h {m} min", "h": "{h} h" },
   "taskStatus": {
     "queued": "Queued",

@@ -60,6 +60,20 @@ def test_security_headers_and_caching(client_factory, dist):
     assert font.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
+def test_the_pixel_window_is_served_and_may_show_pictures_it_fetched(client_factory, dist):
+    (dist / "pixel" / "js").mkdir(parents=True)
+    (dist / "pixel" / "index.html").write_text("<!doctype html><title>pixel</title>")
+    (dist / "pixel" / "js" / "main.js").write_text("export {};")
+    client = client_factory(FRONTEND_DIST=str(dist))
+    page = client.get("/pixel/")
+    assert "pixel" in page.text and page.headers["cache-control"] == "no-cache"
+    assert client.get("/pixel/js/main.js").status_code == 200
+    # The agent's screen is drawn from a blob the page fetched itself; nothing else widens what pages may load.
+    policy = page.headers["content-security-policy"]
+    assert "img-src 'self' data: blob: https://avatars.githubusercontent.com" in policy
+    assert "script-src 'self' https://cdn.paddle.com" in policy
+
+
 def test_missing_build_is_a_clear_message(client_factory, tmp_path):
     client = client_factory(FRONTEND_DIST=str(tmp_path / "nothing"))
     response = client.get("/")

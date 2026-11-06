@@ -28,7 +28,8 @@ def csp(public_url: str) -> str:
             "default-src 'self'",
             "script-src 'self' https://cdn.paddle.com",
             "style-src 'self' 'unsafe-inline' https://cdn.paddle.com",
-            "img-src 'self' data: https://avatars.githubusercontent.com",
+            # blob: is the pixel window showing the agent's screen, one picture at a time, from a fetch it made itself.
+            "img-src 'self' data: blob: https://avatars.githubusercontent.com",
             "font-src 'self'",
             f"connect-src 'self' {socket} https://*.paddle.com",
             "frame-src https://*.paddle.com",
@@ -44,6 +45,9 @@ def install(app: FastAPI) -> None:
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
+    pixel = dist / "pixel"
+    if pixel.is_dir():
+        app.mount("/pixel", StaticFiles(directory=pixel, html=True), name="pixel")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
