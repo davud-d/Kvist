@@ -60,6 +60,9 @@ function hoursCard(view, config, refresh, announce) {
     h("p", {}, t("dashboard.hoursLeft", { left: hoursMinutes(view.balance_seconds, t), total: hoursMinutes(total, t) })),
     h("div.bar", { role: "img", "aria-label": `${percentLeft(view.balance_seconds, total)}%` },
       h("i", { style: `width:${percentLeft(view.balance_seconds, total)}%` })),
+    view.purchased_seconds > 0
+      ? h("p.small", {}, t("dashboard.purchased", { h: hoursMinutes(view.purchased_seconds, t) }))
+      : null,
     h("p", {}, buy));
 }
 

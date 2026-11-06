@@ -76,6 +76,18 @@ def balance_seconds(db: Session, user_id: int, period_start: datetime | None = N
     return int(total or 0)
 
 
+def purchased_seconds(db: Session, user_id: int, period_start: datetime) -> int:
+    """Hour packs bought in the period; they sit in the balance next to the plan's own hours."""
+    total = db.scalar(
+        select(func.coalesce(func.sum(LedgerEntry.seconds), 0)).where(
+            LedgerEntry.user_id == user_id,
+            LedgerEntry.period_start == period_start,
+            LedgerEntry.kind == LedgerKind.PURCHASE,
+        )
+    )
+    return int(total or 0)
+
+
 def grant_period(db: Session, subscription: Subscription, seconds: int, reason: str) -> LedgerEntry | None:
     """The plan's hours for the subscription's current period, once per period."""
     exists = db.scalar(

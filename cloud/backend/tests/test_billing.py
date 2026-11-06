@@ -133,10 +133,12 @@ def test_dev_stub_starts_the_trial_without_paddle(client_factory, engine):
     view = client.post("/api/billing/dev/skip-checkout").json()
     assert (view["status"], view["plan"], view["balance_seconds"], view["price_after_trial_usd"]) == (
         "trialing", "trial", 5 * 3600, 15)
+    assert view["purchased_seconds"] == 0
     client.post("/api/billing/dev/skip-checkout")
     with session_scope(make_session_factory(engine)) as db:
         assert len(list(db.scalars(select(Subscription)))) == 1
-    assert client.post("/api/billing/dev/buy-hours").json()["balance_seconds"] == 15 * 3600
+    bought = client.post("/api/billing/dev/buy-hours").json()
+    assert (bought["balance_seconds"], bought["purchased_seconds"]) == (15 * 3600, 10 * 3600)
 
 
 def test_dev_stub_is_off_when_billing_is_on(client_factory):

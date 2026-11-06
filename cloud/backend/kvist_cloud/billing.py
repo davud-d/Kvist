@@ -181,6 +181,7 @@ def subscription_view(db: Session, user: User, now: datetime | None = None) -> d
         "price_after_trial_usd": plans.get_plan(plan.converts_to).price_usd if plan.converts_to else plan.price_usd,
         "plan_seconds": plan.seconds,
         "balance_seconds": balance,
+        "purchased_seconds": ledger.purchased_seconds(db, user.id, subscription.current_period_start),
         "balance_minutes": ledger.minutes(max(balance, 0)),
         "period_start": subscription.current_period_start.isoformat(),
         "period_end": subscription.current_period_end.isoformat(),

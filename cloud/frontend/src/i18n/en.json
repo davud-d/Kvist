@@ -236,6 +236,7 @@
     "startTrial": "Start the free trial",
     "hoursTitle": "Hours",
     "hoursLeft": "{left} left of {total}",
+    "purchased": "Of which purchased: {h}",
     "periodEnds": "Until {date}",
     "buyHours": "Buy {h} h for ${p}",
     "bought": "Added {h} h.",

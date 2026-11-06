@@ -236,6 +236,7 @@
     "startTrial": "Начать пробный период",
     "hoursTitle": "Часы",
     "hoursLeft": "Осталось {left} из {total}",
+    "purchased": "Из них докуплено: {h}",
     "periodEnds": "До {date}",
     "buyHours": "Докупить {h} ч за ${p}",
     "bought": "Добавлено {h} ч.",
