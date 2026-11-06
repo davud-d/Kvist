@@ -103,7 +103,7 @@
     "lede": "Paste your model key, write a task, and Kvist does it on the machine. The machine sleeps between tasks. You pay for the hours the agent works.",
     "trialName": "Free trial",
     "trialPrice": "$0 for 7 days",
-    "facts": ["5 agent hours", "2 vCPU · 4 GB RAM · 10 GB disk", "one task at a time", "your own model key"],
+    "facts": ["5 agent hours", "2 vCPU (shared) · 4 GB RAM · 10 GB disk", "one task at a time", "your own model key"],
     "cta": "Try free for 7 days",
     "terms": "In 7 days, $15 a month. Cancel in one click at any time.",
     "github": "You sign in with GitHub. No password, no forms, no email to confirm.",

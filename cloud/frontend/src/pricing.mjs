@@ -15,7 +15,7 @@ function table(t, plans) {
 <th scope="row">${esc(p.planNames[plan.id])}</th>
 <td${plan.id === "trial" ? ' class="now"' : ""}>${esc(plan.id === "trial" ? p.trialPerWeek : p.perMonth.replace("{p}", plan.price_usd))}</td>
 <td>${plan.hours}</td>
-<td>${plan.vcpu} vCPU · ${plan.memory_gb} GB</td>
+<td>${plan.vcpu} vCPU (shared) · ${plan.memory_gb} GB</td>
 <td>${plan.disk_gb} GB</td>
 <td>${plan.max_parallel_tasks}</td>
 <td>${esc(duration(plan.command_minutes, t))}</td>
