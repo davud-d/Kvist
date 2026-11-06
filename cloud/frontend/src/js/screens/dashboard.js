@@ -201,7 +201,7 @@ export async function dashboardScreen(root) {
   const reload = () => load().catch((error) => replace(root, errorBox(error, reload)));
   replace(root, skeleton(3), h("span.skeleton.block"), skeleton(4));
   // Back from paying: the server asks Platega, so a payment shows up even if its callback is late.
-  await syncPayments().catch(() => {});
+  await syncPayments().catch((error) => console.error(error));
   await load();
   const timer = setInterval(() => load().catch(() => {}), 15000);
   return () => clearInterval(timer);

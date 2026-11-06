@@ -350,8 +350,8 @@ async def gateway_socket(socket: WebSocket) -> None:
             message = await socket.receive_json()
             if isinstance(message, dict):
                 await handle(app, machine_id, message)
-    except (WebSocketDisconnect, RuntimeError):
-        pass  # the runner left (RuntimeError: it left while a message was being read)
+    except WebSocketDisconnect:
+        pass
     finally:
         if app.state.gateway.detach(machine_id, socket):
             _on_disconnect(app, machine_id)

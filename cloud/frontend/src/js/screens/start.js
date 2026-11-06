@@ -71,7 +71,7 @@ export async function startScreen(root, { me, navigate }) {
     const eligible = await api("/api/billing/eligibility");
     if (eligible.payment_pending) {
       replace(action, h("p.hint.wait", { text: t("start.confirming") }));
-      waitForSubscription().then(done).catch(() => {});
+      waitForSubscription().then(done).catch(fail);
       return null;
     }
     const problem = h("div");

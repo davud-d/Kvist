@@ -203,7 +203,9 @@ async def reset(app: FastAPI, machine_id: int) -> int:
         if ref:
             await provider.delete(ref)
     except (ProviderError, NotImplementedError, OSError) as error:
-        if not await _gone_at_provider(provider, ref):
+        if await _gone_at_provider(provider, ref):
+            log.warning("machine %s was already gone at the provider (%s); reset goes on", machine_id, error)
+        else:
             log.error("machine %s could not be removed for a reset: %s", machine_id, error)
             raise ApiError(502, "reset_failed", "The machine could not be reset right now, try again in a minute. "
                            "/ Не получилось сбросить машину, попробуй через минуту.") from error

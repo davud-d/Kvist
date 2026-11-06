@@ -4,6 +4,7 @@
 import { account, onAccount, retryMachine, warnings } from "../cloud.js";
 import { fill, frameThrottle, h } from "../dom.js";
 import { t } from "../i18n.js";
+import { toast } from "./toast.js";
 import { active, subscribe } from "../store.js";
 import { openProjectDialog } from "./project-dialog.js";
 import { openKeyDialog } from "./settings-dialogs.js";
@@ -23,7 +24,7 @@ const ACTIONS = {
   plan: ["manage plan", () => location.assign("/dashboard")],
   start: ["start trial", () => location.assign("/start")],
   project: ["add project", () => openProjectDialog()],
-  machine: ["retry machine", () => retryMachine().catch(() => {})],
+  machine: ["retry machine", () => retryMachine().catch((error) => toast(error.localized ?? String(error), "error"))],
 };
 
 function bar(item) {

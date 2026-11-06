@@ -130,7 +130,7 @@ def test_reset_gives_a_clean_machine_and_keeps_unfinished_tasks(client_factory, 
         assert db.get(Task, task_id).machine_id == new.id
 
 
-def test_a_dead_machine_can_still_be_reset(client_factory, engine, fake_provider):
+def test_a_dead_machine_can_still_be_reset(client_factory, engine, fake_provider, caplog):
     client = client_factory(AUTH_DEV_LOGIN="true")
     dev_login(client)
     settle(client)
@@ -144,6 +144,8 @@ def test_a_dead_machine_can_still_be_reset(client_factory, engine, fake_provider
     assert client.post(f"/api/machines/{old.id}/reset").status_code == 200
     settle(client)
     assert [row.id for row in live(engine)] != [old.id]
+    # Tolerated, not silent: the failed delete is in the log.
+    assert "already gone at the provider" in caplog.text and "not found" in caplog.text
 
 
 def test_a_machine_that_cannot_be_removed_is_kept_and_the_person_is_told(client_factory, engine, fake_provider):
