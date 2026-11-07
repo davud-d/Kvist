@@ -123,8 +123,8 @@ def test_the_core_providers_are_all_offered_with_the_partner_first():
     ids = list(PROVIDERS)
     assert ids[0] == "anymodel" and PROVIDERS["anymodel"].partner
     assert [p for p in PROVIDERS.values() if p.partner] == [PROVIDERS["anymodel"]]
-    assert set(MANUAL_OPENAI_PROVIDERS) | {"deepseek", "openai", "anthropic", "other"} == set(ids)
-    assert len(ids) - 1 == 40  # the 40 of the core, then the customer's own endpoint
+    assert set(MANUAL_OPENAI_PROVIDERS) | {"deepseek", "openai", "anthropic", "chatgpt", "other"} == set(ids)
+    assert len(ids) - 1 == 41  # the core's 40 and the ChatGPT sign-in, then the customer's own endpoint
 
 
 def test_registry_provider_environment_uses_the_names_the_core_reads():
@@ -173,6 +173,7 @@ def test_saved_key_is_encrypted_and_shown_by_last4(client_factory, engine):
     assert response.json()["ok"] is True
     assert client.get("/api/model-key").json() == {
         "provider": "deepseek", "last4": "cdef", "base_url": "", "model": "", "set": True,
+        "chatgpt_state": "", "chatgpt_email": "",
     }
     from kvist_cloud.db import make_session_factory
 

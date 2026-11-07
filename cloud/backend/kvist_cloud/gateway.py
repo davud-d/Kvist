@@ -2,7 +2,7 @@
 """WebSocket for runners. The machine dials out; it never accepts a connection.
 
 Runner → server: hello, heartbeat, event, task_reason, task_exit, export_done.
-Server → runner: start_task, input_response, control, export.
+Server → runner: start_task, input_response, control, export, chatgpt_access.
 """
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import exports, ledger, limits, plans, projects, screens, tasks
+from . import chatgpt, exports, ledger, limits, plans, projects, screens, tasks
+from .chatgpt import ChatGPTError
 from .db import lock_account, session_scope, utcnow
-from .keys import kvist_environment
+from .keys import has_model_access, kvist_environment
 from .machines import spawn, wake
 from .models import Machine, MachineStatus, Project, Task, TaskStatus, User
 from .secrets import SecretError
@@ -24,6 +25,9 @@ from .secrets import SecretError
 log = logging.getLogger("kvist_cloud.gateway")
 router = APIRouter()
 POLICY_VIOLATION = 4401
+# A token is renewed when less than ten minutes of it is left (chatgpt.RENEW_BEFORE_SECONDS), so looking this
+# often means a machine never holds one that is about to end.
+CHATGPT_PUSH_SECONDS = 240.0
 REPLACED = 4000
 
 
@@ -33,6 +37,8 @@ class Gateway:
     def __init__(self) -> None:
         self.sockets: dict[int, WebSocket] = {}
         self._locks: dict[int, asyncio.Lock] = {}
+        # The ChatGPT access token each machine was last given, so only a changed one is sent again.
+        self.lent: dict[int, str] = {}
 
     def attach(self, machine_id: int, socket: WebSocket) -> WebSocket | None:
         previous = self.sockets.get(machine_id)
@@ -43,6 +49,7 @@ class Gateway:
     def detach(self, machine_id: int, socket: WebSocket) -> bool:
         if self.sockets.get(machine_id) is socket:
             del self.sockets[machine_id]
+            self.lent.pop(machine_id, None)
             return True
         return False
 
@@ -61,16 +68,25 @@ class Gateway:
         return True
 
 
-def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
-    """Everything the runner needs for one task, the decrypted key included. None: cannot start."""
+def start_message(app: FastAPI, db: Session, task: Task, chatgpt_access: dict | None = None) -> dict | None:
+    """Everything the runner needs for one task, the decrypted key included. None: cannot start.
+
+    ``chatgpt_access`` is the customer's short-lived ChatGPT token, for a customer who signed in instead of
+    pasting a key; without it such a task cannot start.
+    """
     user = db.get(User, task.user_id)
-    if user is None or not user.model_key_enc:
+    if user is None or not has_model_access(user):
         return None
-    try:
-        key = app.state.vault.decrypt(user.model_key_enc)
-    except SecretError:
-        log.error("task %s: the stored key cannot be decrypted", task.id)
-        return None
+    key = ""
+    if user.model_provider == chatgpt.PROVIDER_ID:
+        if chatgpt_access is None:
+            return None
+    else:
+        try:
+            key = app.state.vault.decrypt(user.model_key_enc)
+        except SecretError:
+            log.error("task %s: the stored key cannot be decrypted", task.id)
+            return None
     settings = app.state.settings
     subscription = ledger.current_subscription(db, user.id)
     if subscription is None or not ledger.has_hours(db, user.id):
@@ -95,6 +111,7 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
         "github_token": app.state.vault.decrypt(user.github_token_enc) if user.github_token_enc else "",
         "resume": task.resume_requested,
         "env": kvist_environment(user, key),
+        **({"chatgpt": chatgpt_access} if chatgpt_access is not None else {}),
         "limits": {
             "command_seconds": plan.command_minutes * 60,
             "background_seconds": plan.background_minutes * 60,
@@ -107,11 +124,60 @@ def start_message(app: FastAPI, db: Session, task: Task) -> dict | None:
     }
 
 
+async def _chatgpt_access(app: FastAPI, machine_id: int) -> dict | None:
+    """The owner's ChatGPT token for this machine, or None (not their choice, or the sign-in is gone).
+
+    Fetched before any database transaction is opened: renewing it talks to OpenAI and writes the new token.
+    """
+    with session_scope(app.state.session_factory) as db:
+        machine = db.get(Machine, machine_id)
+        user = db.get(User, machine.user_id) if machine is not None else None
+        if user is None or user.model_provider != chatgpt.PROVIDER_ID:
+            return None
+        user_id = user.id
+    try:
+        return await chatgpt.lent_access(app, user_id)
+    except ChatGPTError as error:
+        log.warning("machine %s: no ChatGPT access to hand out (%s)", machine_id, error.code)
+        return None
+
+
+async def push_chatgpt_tokens(app: FastAPI) -> None:
+    """Gives every connected machine of a ChatGPT customer a renewed token before the one it holds runs out."""
+    gateway: Gateway = app.state.gateway
+    with session_scope(app.state.session_factory) as db:
+        machine_ids = list(
+            db.scalars(
+                select(Machine.id)
+                .join(User, User.id == Machine.user_id)
+                .where(User.model_provider == chatgpt.PROVIDER_ID, Machine.connected.is_(True))
+            )
+        )
+    for machine_id in machine_ids:
+        if not gateway.connected(machine_id):
+            continue
+        access = await _chatgpt_access(app, machine_id)
+        if access is None or gateway.lent.get(machine_id) == access["access_token"]:
+            continue
+        if await gateway.send(machine_id, {"type": "chatgpt_access", **access}):
+            gateway.lent[machine_id] = str(access["access_token"])
+
+
+async def push_chatgpt_forever(app: FastAPI) -> None:
+    while True:
+        await asyncio.sleep(CHATGPT_PUSH_SECONDS)
+        try:
+            await push_chatgpt_tokens(app)
+        except Exception:  # noqa: BLE001 - the loop must survive one bad pass; the error is logged
+            log.exception("handing out ChatGPT tokens failed")
+
+
 async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None) -> None:
     """Send every task waiting to start on this machine; wake the machine if it is not here."""
     if not app.state.gateway.connected(machine_id):
         spawn(app, wake(app, machine_id))
         return
+    access = await _chatgpt_access(app, machine_id)
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
         if machine is None:
@@ -131,9 +197,13 @@ async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None)
                 tasks.apply_exit(task, "hours_exhausted")
                 app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
                 continue
-            message = start_message(app, db, task)
+            message = start_message(app, db, task, access)
             if message is None:
-                tasks.apply_exit(task, "no_key")
+                # A ChatGPT sign-in that is gone pauses the task (the customer signs in and continues);
+                # a missing key fails it, as before.
+                owner = db.get(User, task.user_id)
+                lost_sign_in = owner is not None and owner.model_provider == chatgpt.PROVIDER_ID
+                tasks.apply_exit(task, "invalid_key" if lost_sign_in else "no_key")
                 app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
                 continue
             task.started_at = utcnow()

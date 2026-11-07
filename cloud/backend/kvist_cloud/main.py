@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(machines.sweep_forever(app)),
         asyncio.create_task(billing.sweep_forever(app)),
         asyncio.create_task(chatgpt.check_forever(app)),
+        asyncio.create_task(gateway.push_chatgpt_forever(app)),
     ]
     try:
         yield

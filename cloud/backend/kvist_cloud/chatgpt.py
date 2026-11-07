@@ -53,6 +53,7 @@ LOGIN_SECONDS = 180
 RENEW_BEFORE_SECONDS = 600
 FIRST_CHECK_SECONDS = 60.0
 CONNECTED, NEEDS_LOGIN = "connected", "needs_login"
+PROVIDER_ID = "chatgpt"
 
 router = APIRouter()
 _locks: dict[int, asyncio.Lock] = {}
@@ -229,6 +230,9 @@ async def complete_login(
     except ChatGPTError as error:
         return target, error.code
     _save(vault, user, record)
+    # One model per account, as with a key: the plan replaces whatever was chosen before.
+    user.model_provider = PROVIDER_ID
+    user.model_key_enc = user.model_key_last4 = user.model_base_url = user.model_name = ""
     db.commit()
     return target, "ok"
 
@@ -237,7 +241,20 @@ async def complete_login(
 
 
 async def fresh_access_token(app: FastAPI, user_id: int, *, force: bool = False) -> str:
-    """An access token with time left, renewed here when it is running out (or ``force``).
+    return (await fresh_record(app, user_id, force=force))["access_token"]
+
+
+async def lent_access(app: FastAPI, user_id: int) -> dict[str, object]:
+    """What a machine is given: the short-lived access token and when it ends, never the refresh token."""
+    record = await fresh_record(app, user_id)
+    return {
+        "access_token": record["access_token"], "expires_at": record["expires_at"],
+        "scopes": record["scopes"], "email": record.get("email", ""),
+    }
+
+
+async def fresh_record(app: FastAPI, user_id: int, *, force: bool = False) -> dict:
+    """The saved sign-in with an access token that has time left, renewed here when it is running out (or ``force``).
 
     The one place that uses the refresh token. Renewal runs outside any database transaction (it is a call to
     another company), under a per-customer lock; if another worker renewed in the meantime the new token is used.
@@ -252,7 +269,7 @@ async def fresh_access_token(app: FastAPI, user_id: int, *, force: bool = False)
                 raise ChatGPTError("needs_login")
             record = _load(vault, user)
         if not force and record["expires_at"] > time.time() + RENEW_BEFORE_SECONDS:
-            return record["access_token"]
+            return record
         try:
             async with app_http_client(app) as client:
                 tokens = await _token_request(client, {
@@ -272,13 +289,13 @@ async def fresh_access_token(app: FastAPI, user_id: int, *, force: bool = False)
                 user = db.get(User, user_id)
                 current = _load(vault, user)
                 if current["refresh_token"] != record["refresh_token"]:
-                    return current["access_token"]
+                    return current
                 user.chatgpt_state = NEEDS_LOGIN
                 user.chatgpt_checked_at = utcnow()
             raise
         with session_scope(app.state.session_factory) as db:
             _save(vault, db.get(User, user_id), renewed)
-        return renewed["access_token"]
+        return renewed
 
 
 async def check_all(app: FastAPI) -> None:
@@ -369,5 +386,7 @@ async def disconnect(
     user.chatgpt_state = ""
     user.chatgpt_email = ""
     user.chatgpt_checked_at = None
+    if user.model_provider == PROVIDER_ID:
+        user.model_provider = ""
     db.commit()
     return {**summary(user), "revoked": revoked}

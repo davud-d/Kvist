@@ -119,6 +119,12 @@ nothing listens on the customer's computer:
    a per-customer lock and outside any database transaction. A machine only ever gets the short-lived access token.
 5. Once a day (`CHATGPT_CHECK_SECONDS`) every saved sign-in is renewed. One that OpenAI refuses becomes
    `needs_login` and the customer signs in again; OpenAI being unreachable changes nothing.
+6. A task of a ChatGPT customer starts without a key: `start_task` carries the access token (`chatgpt`) and Kvist's
+   provider is `chatgpt`. The runner writes the token into Kvist's config (`home/.kvist/config.json`) as a "lent"
+   account, the form a core serving someone else's frontend holds, and hides it from events like a key. Every
+   four minutes the server looks at each connected machine of such a customer and sends `chatgpt_access` when
+   the token changed (it is renewed ten minutes before it ends); Kvist re-reads its config on every request, so
+   a long task keeps working. A sign-in that is gone pauses the task (`invalid_key`) instead of failing it.
 
 ### Session addresses and who may open them
 

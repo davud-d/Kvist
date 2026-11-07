@@ -17,6 +17,7 @@ from .auth import SESSION_COOKIE, current_user, user_from_cookie
 from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
+from .keys import has_model_access
 from .models import Machine, MachineStatus, Task, TaskEvent, TaskStatus, User
 from .secrets import redact_obj
 from .validation import InputModel
@@ -273,7 +274,9 @@ def can_run(db: Session, user: User) -> None:
         raise ApiError(402, "no_subscription", "Start the trial first. / Сначала начни пробный период.")
     if not ledger.has_hours(db, user.id):
         raise ApiError(402, "no_hours", "Your hours are used up. / Часы закончились.")
-    if not user.model_key_enc:
+    if not has_model_access(user):
+        if user.model_provider == "chatgpt":
+            raise ApiError(400, "chatgpt_login", "Sign in with ChatGPT again. / Войди через ChatGPT снова.")
         raise ApiError(400, "no_key", "Add your model key first. / Сначала добавь ключ модели.")
     from .machines import live_machine, machine_plan
 

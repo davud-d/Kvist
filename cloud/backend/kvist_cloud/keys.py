@@ -43,6 +43,8 @@ class ModelProvider:
     # Vendors that change model ids too often for Kvist to guess: the customer types one.
     needs_model: bool = False
     partner: bool = False
+    # No key to paste: the customer signs in with their ChatGPT plan (chatgpt.py).
+    sign_in: bool = False
 
 
 def _registry_provider(provider_id: str, config: dict[str, str]) -> ModelProvider:
@@ -72,6 +74,7 @@ PROVIDERS: dict[str, ModelProvider] = {
     "anthropic": ModelProvider(
         "anthropic", "Anthropic", "https://console.anthropic.com/settings/keys", "anthropic", "ANTHROPIC_API_KEY"
     ),
+    "chatgpt": ModelProvider("chatgpt", "ChatGPT", "", "chatgpt", "", sign_in=True),
     **{
         provider_id: _registry_provider(provider_id, config)
         for provider_id, config in MANUAL_OPENAI_PROVIDERS.items()
@@ -197,7 +200,9 @@ async def check_key(
 def kvist_environment(user: User, key: str) -> dict[str, str]:
     """What Kvist needs in its environment to talk to the customer's model."""
     provider = PROVIDERS[user.model_provider]
-    env = {"AGENT_LLM_PROVIDER": provider.kvist_provider, provider.key_env: key}
+    env = {"AGENT_LLM_PROVIDER": provider.kvist_provider}
+    if provider.key_env:
+        env[provider.key_env] = key
     if provider.needs_base_url:
         env[provider.base_url_env] = user.model_base_url
     if provider.needs_model:
@@ -206,13 +211,22 @@ def kvist_environment(user: User, key: str) -> dict[str, str]:
     return env
 
 
+def has_model_access(user: User) -> bool:
+    """A key is saved, or the customer's ChatGPT sign-in is chosen and still good."""
+    if user.model_provider == "chatgpt":
+        return user.chatgpt_state == "connected"
+    return bool(user.model_key_enc)
+
+
 def key_summary(user: User) -> dict[str, object]:
     return {
         "provider": user.model_provider,
         "last4": user.model_key_last4,
         "base_url": user.model_base_url,
         "model": user.model_name,
-        "set": bool(user.model_key_enc),
+        "set": has_model_access(user),
+        "chatgpt_state": user.chatgpt_state,
+        "chatgpt_email": user.chatgpt_email,
     }
 
 
@@ -220,7 +234,7 @@ def key_summary(user: User) -> dict[str, object]:
 def list_providers() -> list[dict[str, object]]:
     return [
         {"id": p.id, "label": p.label, "keys_page": p.keys_page, "needs_base_url": p.needs_base_url,
-         "needs_model": p.needs_model, "partner": p.partner}
+         "needs_model": p.needs_model, "partner": p.partner, "sign_in": p.sign_in}
         for p in PROVIDERS.values()
     ]
 
@@ -243,6 +257,8 @@ async def save_key(
     provider = PROVIDERS.get(payload.provider)
     if provider is None:
         raise ApiError(400, "unknown_provider", "Pick a provider. / Выбери провайдера.")
+    if provider.sign_in:
+        raise ApiError(400, "sign_in_required", "This one is connected by signing in. / Он подключается входом.")
     # Only what this provider asks for is kept: a stale address or model from another choice is dropped.
     base_url = payload.base_url.strip() if provider.needs_base_url else ""
     model = payload.model.strip() if provider.needs_model else ""

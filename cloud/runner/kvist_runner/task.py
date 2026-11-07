@@ -73,6 +73,7 @@ class TaskProcess:
         folder: str = "",
         follow_up: bool = False,
         github_token: str = "",
+        secrets: list[str] | None = None,
     ) -> None:
         self.task_id = task_id
         self.goal = goal
@@ -84,7 +85,8 @@ class TaskProcess:
         self._emit = emit
         self._on_change = on_change
         self._model_env: dict[str, str] | None = dict(env)
-        self._secrets = [value for name, value in env.items() if name.endswith("_API_KEY")]
+        # Whatever must never reach the server's event stream: the keys in the environment and any token lent.
+        self._secrets = [value for name, value in env.items() if name.endswith("_API_KEY")] + list(secrets or [])
         self.process: asyncio.subprocess.Process | None = None
         self.running = False
         self.turn_open = False
@@ -108,6 +110,9 @@ class TaskProcess:
         # finishing is one of them: the stdin stays open until its turn has been taken too.
         self._goals_waiting = 0
         self._woken = False
+
+    def hide(self, secret: str) -> None:
+        self._secrets.append(secret)
 
     # -- state the heartbeat reports ------------------------------------------------------
 

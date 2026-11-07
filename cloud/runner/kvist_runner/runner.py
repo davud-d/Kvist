@@ -3,7 +3,8 @@
 
 Messages to the server: hello, heartbeat, event (a Kvist event, unchanged, with its task id),
 task_reason, task_exit, export_done, message_undelivered, screen_frame (a picture of the agent's screen, only
-while the owner watches). From the server: start_task, message, input_response, control, export, screen_watch.
+while the owner watches). From the server: start_task, message, input_response, control, export, screen_watch,
+chatgpt_access.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from collections import deque
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
+from .chatgpt import AccessError, lend
 from .config import RunnerConfig
 from .export import run_export
 from .task import Limits, TaskProcess
@@ -33,6 +35,7 @@ class Runner:
     def __init__(self, config: RunnerConfig) -> None:
         self.config = config
         self.tasks: dict[int, TaskProcess] = {}
+        self._chatgpt_token = ""
         self._jobs: set[asyncio.Task] = set()
         self._runs: dict[int, asyncio.Task] = {}
         self._outbox: deque[dict] = deque(maxlen=OUTBOX_LIMIT)
@@ -150,7 +153,13 @@ class Runner:
         kind = message.get("type")
         task = self.tasks.get(int(message.get("task_id") or 0))
         if kind == "start_task":
+            access = message.pop("chatgpt", None)
+            if isinstance(access, dict):
+                self._lend_chatgpt(access)
             self._start(message)
+        elif kind == "chatgpt_access":
+            # A renewed token for the tasks that are running: Kvist reads it from its config the next time it asks.
+            self._lend_chatgpt({name: value for name, value in message.items() if name != "type"})
         elif kind == "input_response" and task is not None:
             await task.answer(message.get("response") or {})
         elif kind == "control" and task is not None:
@@ -172,6 +181,16 @@ class Runner:
             log.info("message for a task this runner does not have: %s", kind)
         else:
             log.warning("unknown message from the server: %r", kind)
+
+    def _lend_chatgpt(self, access: dict) -> None:
+        try:
+            lend(self.config.home_dir / ".kvist", access)
+        except (AccessError, OSError) as error:
+            log.warning("the ChatGPT token was not written: %s", error)
+            return
+        self._chatgpt_token = str(access["access_token"])
+        for task in self.tasks.values():
+            task.hide(self._chatgpt_token)
 
     async def _prepare_project(self, message: dict) -> None:
         """A project was added: make its folder (or clone its repository) now, so it is there before any task."""
@@ -204,6 +223,7 @@ class Runner:
             github_token=str(message.pop("github_token", "") or ""),
             resume=bool(message.get("resume")),
             env={str(k): str(v) for k, v in (message.get("env") or {}).items()},
+            secrets=[self._chatgpt_token] if self._chatgpt_token else [],
             limits=Limits.from_message(message["limits"]),
             session=str(message.get("session") or ""),
             folder=str(message.get("folder") or ""),
