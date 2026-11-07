@@ -73,6 +73,7 @@
     "already_subscribed": "You already have a subscription.",
     "checkout_pending": "Checkout is being created. Try again shortly.",
     "trial_ineligible": "The trial is available once, for GitHub accounts older than one month. You can choose a paid plan.",
+    "trial_used": "Your trial has already started. Open the dashboard or choose a paid plan.",
     "not_signed_in": "Your session ended. Sign in again.",
     "no_subscription": "Choose a trial or paid plan first.",
     "no_hours": "Your hours are used up. Buy more on the dashboard.",

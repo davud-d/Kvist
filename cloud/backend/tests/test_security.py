@@ -36,6 +36,16 @@ def test_month_boundary_and_leap_year():
     assert billing.trial_eligible(user, now)
 
 
+def test_second_trial_request_says_the_trial_is_used_not_that_the_account_is_young(client_factory):
+    client, _ = paid_client(client_factory)
+    with session_scope(client.app.state.session_factory) as db:
+        db.get(User, 1).github_created_at = utcnow() - timedelta(days=400)
+    assert client.post("/api/billing/checkout", json={"plan": "trial"}).status_code == 200
+    response = client.post("/api/billing/checkout", json={"plan": "trial"})
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "trial_used"
+
+
 @pytest.mark.parametrize("age", [None, timedelta(0), timedelta(days=20)])
 def test_unknown_or_young_github_age_cannot_start_a_trial(client_factory, age):
     client, platega = paid_client(client_factory)

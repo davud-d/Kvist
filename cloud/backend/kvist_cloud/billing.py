@@ -497,6 +497,9 @@ async def checkout(payload: CheckoutIn, request: Request, user: User = Depends(c
     db.refresh(user)
     if payload.plan == "trial":
         # Nothing to pay: the trial is the one thing the server grants without Platega, and only once.
+        # A used trial gets its own code: "older than a month" would blame an account that is old enough.
+        if user.trial_used_at is not None:
+            raise ApiError(403, "trial_used", "Trial already used. / Пробный период уже использован.")
         if not trial_eligible(user):
             raise ApiError(403, "trial_ineligible", "Trial is available once, for GitHub accounts older than one "
                            "month. / Пробный период доступен один раз, с GitHub-аккаунтом старше месяца.")
