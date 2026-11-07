@@ -57,8 +57,9 @@ export async function settingsScreen(root, { me, navigate }) {
   drawPlan(view);
 
   const keyBox = h("div.stack", {}, keyWidget({ providers, saved, onValid: () => {} }),
-    saved.set ? h("p", {}, h("button.linkbtn", { type: "button", text: t("settings.removeKey"), onclick: async () => {
-      await api("/api/model-key", { method: "DELETE" });
+    saved.set ? h("p", {}, h("button.linkbtn", { type: "button",
+      text: saved.provider === "chatgpt" ? t("chatgpt.disconnect") : t("settings.removeKey"), onclick: async () => {
+      await api(saved.provider === "chatgpt" ? "/api/chatgpt" : "/api/model-key", { method: "DELETE" });
       navigate("/settings", { replace: true });
     } })) : null);
 

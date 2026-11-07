@@ -219,8 +219,10 @@ def has_model_access(user: User) -> bool:
 
 
 def key_summary(user: User) -> dict[str, object]:
+    known = PROVIDERS.get(user.model_provider)
     return {
         "provider": user.model_provider,
+        "label": known.label if known else "",
         "last4": user.model_key_last4,
         "base_url": user.model_base_url,
         "model": user.model_name,

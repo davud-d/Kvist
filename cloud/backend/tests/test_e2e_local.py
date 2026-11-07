@@ -69,7 +69,7 @@ def walk_the_funnel(stack, fake_model: str, goal: str) -> int:
     assert http.post("/api/billing/dev/skip-checkout").json()["status"] == "trialing"
     checked = http.post("/api/model-key", json={"provider": "other", "key": KEY, "base_url": fake_model,
                                                  "model": "fake-model"}).json()
-    assert checked == {"ok": True, "code": "", "key": {"provider": "other", "last4": KEY[-4:],
+    assert checked == {"ok": True, "code": "", "key": {"provider": "other", "label": "Other", "last4": KEY[-4:],
                                                        "base_url": fake_model, "model": "fake-model", "set": True,
                                                        "chatgpt_state": "", "chatgpt_email": ""}}
     created = http.post("/api/tasks", json={"goal": goal, "repo_url": ""})

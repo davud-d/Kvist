@@ -74,6 +74,8 @@ test("a message is held back, with the reason, until the account can run it", ()
   const ready = { sub: { status: "trialing", balance_seconds: 60 }, key: { set: true } };
   assert.equal(cannotRun(ready), null);
   assert.equal(cannotRun({ ...ready, sub: { status: "none" } }), "no_subscription");
+  assert.equal(cannotRun({ ...ready, key: { set: false, provider: "chatgpt" } }), "chatgpt_login");
+  assert.equal(cannotRun({ ...ready, key: { set: false, provider: "" } }), "no_key");
   assert.equal(cannotRun({ ...ready, sub: null }), "no_subscription");
   assert.equal(cannotRun({ ...ready, sub: { status: "active", balance_seconds: 0 } }), "no_hours");
   assert.equal(cannotRun({ ...ready, key: { set: false } }), "no_key");

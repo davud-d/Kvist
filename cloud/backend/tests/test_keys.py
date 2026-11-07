@@ -172,7 +172,7 @@ def test_saved_key_is_encrypted_and_shown_by_last4(client_factory, engine):
     response = client.post("/api/model-key", json={"provider": "deepseek", "key": KEY})
     assert response.json()["ok"] is True
     assert client.get("/api/model-key").json() == {
-        "provider": "deepseek", "last4": "cdef", "base_url": "", "model": "", "set": True,
+        "provider": "deepseek", "label": "DeepSeek", "last4": "cdef", "base_url": "", "model": "", "set": True,
         "chatgpt_state": "", "chatgpt_email": "",
     }
     from kvist_cloud.db import make_session_factory

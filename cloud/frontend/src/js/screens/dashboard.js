@@ -147,7 +147,11 @@ function tasksCard(tasks) {
 // Under a minute the shown value is 0, and "−0" would read as a glitch.
 const sign = (seconds) => (Math.abs(seconds) < 60 ? "" : seconds < 0 ? "−" : "+");
 
-const PROVIDER_NAMES = { deepseek: "DeepSeek", openai: "OpenAI", anthropic: "Anthropic" };
+// What the customer chose to pay for the model: a key shows its last four, a ChatGPT sign-in its account.
+function modelLine(key) {
+  const name = key.provider === "other" ? t("onboarding.otherName") : key.label;
+  return key.provider === "chatgpt" ? `${name}${key.chatgpt_email ? ` · ${key.chatgpt_email}` : ""}` : `${name} ••••${key.last4}`;
+}
 
 function feedCard(feed, refresh) {
   return h("section.card", { "aria-labelledby": "feed-title" },
@@ -193,7 +197,7 @@ export async function dashboardScreen(root) {
       feedCard(ledgerView.feed, reload),
       h("section.card", {}, h("h2.h3", {}, t("dashboard.keyTitle")),
         h("p.row", {}, key.set
-          ? `${PROVIDER_NAMES[key.provider] || t("onboarding.otherName")} ••••${key.last4}`
+          ? modelLine(key)
           : t("dashboard.keyNone"),
           h("a.inline", { href: "/settings", "data-link": "" }, t("common.change")))),
       announce));

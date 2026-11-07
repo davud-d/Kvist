@@ -4,7 +4,7 @@ import { activate, newAgent, onNeedKey, onNeedProject, openSession, refreshSessi
 import { openExternal } from "./bridge.js";
 import { account, keepFresh, loadAccount, parseLocation, resolveSession, workspaceOf } from "./cloud.js";
 import { $ } from "./dom.js";
-import { detectLanguage, setLanguage } from "./i18n.js";
+import { detectLanguage, setLanguage, t } from "./i18n.js";
 import { setMathRenderer } from "./markdown.js";
 import { applyPrefs } from "./theme.js";
 import { active, loadPrefs, setMode, setPref, store, subscribe } from "./store.js";
@@ -15,6 +15,7 @@ import { mountNotices, setNotices } from "./views/notices.js";
 import { mountOverview } from "./views/overview.js";
 import { openProjectDialog } from "./views/project-dialog.js";
 import { openKeyDialog } from "./views/settings-dialogs.js";
+import { toast } from "./views/toast.js";
 import { mountTitlebar } from "./views/titlebar.js";
 
 function mountMath() {
@@ -115,9 +116,21 @@ async function boot() {
   app.classList.toggle("no-inspector", !store.prefs.inspector);
   // A signed-out visitor is sent to sign in from inside loadAccount.
   await loadAccount();
+  sayHowSignInWent();
   keepFresh();
   await openByAddress();
   settled = true;
+}
+
+/** Back from OpenAI the address says how it went (`?chatgpt=ok` or a reason): said once, then removed. */
+function sayHowSignInWent() {
+  const url = new URL(location.href);
+  const result = url.searchParams.get("chatgpt");
+  if (!result) return;
+  url.searchParams.delete("chatgpt");
+  history.replaceState(history.state, "", url);
+  toast(t(`chatgpt ${result}`), result === "ok" ? "ok" : "error");
+  if (result !== "ok") openKeyDialog();
 }
 
 boot().catch((error) => console.error(error));

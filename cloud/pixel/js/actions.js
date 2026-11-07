@@ -146,7 +146,7 @@ export async function closeTab(id) {
 function explain(problem) {
   toast(t(problem), "error");
   if (problem === "no_project") openProjectDialog();
-  else if (problem === "no_key") openKeyDialog();
+  else if (problem === "no_key" || problem === "chatgpt_login") openKeyDialog();
   else location.assign(problem === "no_subscription" ? "/start" : "/dashboard");
 }
 
@@ -168,7 +168,7 @@ export async function sendGoal(agent, text) {
     await bridge.sendToAgent(agent.id, { type: "goal", text: line });
   } catch (error) {
     toast(error.localized ?? String(error), "error");
-    if (error.code === "no_key") openKeyDialog();
+    if (error.code === "no_key" || error.code === "chatgpt_login") openKeyDialog();
     else if (error.code === "no_hours") location.assign("/dashboard");
     else if (error.code === "no_subscription") location.assign("/start");
     return false;

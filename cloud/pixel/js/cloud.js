@@ -104,7 +104,7 @@ export const canResume = (cloud) => cloud?.status === "paused";
 export function cannotRun(account) {
   if (!account.sub || account.sub.status === "none") return "no_subscription";
   if (account.sub.balance_seconds <= 0) return "no_hours";
-  if (!account.key?.set) return "no_key";
+  if (!account.key?.set) return account.key?.provider === "chatgpt" ? "chatgpt_login" : "no_key";
   return null;
 }
 

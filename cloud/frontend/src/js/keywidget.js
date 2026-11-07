@@ -5,10 +5,22 @@ import { h, replace } from "./dom.js";
 import { t } from "./i18n.js";
 
 const DEBOUNCE_MS = 700;
+const SIGN_IN_RESULTS = ["denied", "expired", "refused", "unreachable", "no_plan", "identity"];
+
+/** Back from OpenAI the address says how it went (`?chatgpt=ok` or a reason); it is read once and removed. */
+function takeSignInResult() {
+  const url = new URL(location.href);
+  const result = url.searchParams.get("chatgpt") || "";
+  if (!result) return "";
+  url.searchParams.delete("chatgpt");
+  history.replaceState(history.state, "", url);
+  return result;
+}
 
 export function keyWidget({ providers, saved, onValid }) {
-  let provider = saved.set ? saved.provider : providers[0].id;
-  let changing = !saved.set;
+  const returned = takeSignInResult();
+  let provider = returned ? "chatgpt" : saved.set ? saved.provider : providers[0].id;
+  let changing = !saved.set || (returned !== "" && returned !== "ok");
   let timer = null;
   let sequence = 0;
   const root = h("div.stack");
@@ -65,7 +77,8 @@ export function keyWidget({ providers, saved, onValid }) {
       h("legend.sr", { text: t("onboarding.modelTitle") }),
       providers.map((item) => {
         const name = item.id === "other" ? t("onboarding.otherName") : item.label;
-        const note = item.partner ? t("onboarding.partnerNote") : item.id === "other" ? t("onboarding.otherNote") : "";
+        const note = item.partner ? t("onboarding.partnerNote") : item.id === "other" ? t("onboarding.otherNote")
+          : item.sign_in ? t("onboarding.signInNote") : "";
         return h(item.partner ? "label.tile.partner" : "label.tile", {},
           h("input", {
             type: "radio", name: "provider", value: item.id, checked: item.id === provider,
@@ -80,9 +93,52 @@ export function keyWidget({ providers, saved, onValid }) {
       }));
   }
 
+  // The plan instead of a key: the customer signs in at OpenAI and comes back here (the server keeps it good).
+  function chatgptPanel() {
+    const state = saved.provider === "chatgpt" ? saved.chatgpt_state : "";
+    const notice = h("p.hint", { "aria-live": "polite" });
+    const say = (kind, text) => { notice.className = `hint ${kind}`; notice.textContent = text; };
+    if (returned && returned !== "ok") {
+      say("err", t(`chatgpt.result.${SIGN_IN_RESULTS.includes(returned) ? returned : "refused"}`));
+    }
+    if (state === "connected") {
+      return h("div.stack", {},
+        h("p.row", {},
+          h("span.hint.ok", { tabindex: "-1", "data-saved": "",
+            text: saved.chatgpt_email ? t("chatgpt.connected", { email: saved.chatgpt_email }) : t("chatgpt.connectedNoEmail") }),
+          h("button.linkbtn", { type: "button", text: t("chatgpt.disconnect"), onclick: async () => {
+            await api("/api/chatgpt", { method: "DELETE" });
+            saved = await api("/api/model-key");
+            changing = true;
+            onValid(false);
+            draw();
+          } })),
+        notice);
+    }
+    const signIn = h("button.btn", { type: "button", text: t(state === "needs_login" ? "chatgpt.signInAgain" : "chatgpt.signIn") });
+    signIn.addEventListener("click", async () => {
+      signIn.disabled = true;
+      say("wait", t("chatgpt.opening"));
+      try {
+        const { url } = await api("/api/chatgpt/start", { method: "POST", body: { next: location.pathname } });
+        if (new URL(url).protocol !== "https:") throw Object.assign(new Error("url"), { code: "internal" });
+        location.assign(url);
+      } catch (error) {
+        signIn.disabled = false;
+        say("err", t(`errors.${error.code}`));
+      }
+    });
+    return h("div.stack", {}, h("p.dim", { text: t(state === "needs_login" ? "chatgpt.needsLogin" : "chatgpt.intro") }),
+      h("p", {}, signIn), notice);
+  }
+
   function draw() {
     const chosen = providers.find((item) => item.id === provider) ?? {};
     const showSaved = !changing && saved.set && saved.provider === provider;
+    if (chosen.sign_in) {
+      replace(root, tiles(), chatgptPanel());
+      return;
+    }
     replace(root, tiles(),
       showSaved
         ? h("p.row", {},

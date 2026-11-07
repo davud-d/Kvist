@@ -49,7 +49,7 @@
   "reason": {
     "hours_exhausted": "Your hours ran out. Buy more and press Continue: the task picks up where it stopped.",
     "provider_unavailable": "The model provider did not answer for 5 minutes. The meter stopped. Press Continue when it is back.",
-    "invalid_key": "The model provider refused your key. Change it in Settings, then press Continue.",
+    "invalid_key": "The model provider did not accept the key or the ChatGPT sign-in. Change the key in settings or sign in again, then press Continue.",
     "command_time_limit": "A command ran longer than your plan allows, so the task was stopped. Press Continue to go on.",
     "machine_restarted": "The machine restarted. Nothing is lost: press Continue.",
     "machine_sleeping": "The machine went to sleep. Press Continue.",
@@ -78,6 +78,8 @@
     "no_subscription": "Choose a trial or paid plan first.",
     "no_hours": "Your hours are used up. Buy more on the dashboard.",
     "no_key": "Add your model key first.",
+    "chatgpt_login": "Sign in with ChatGPT again: the sign-in ran out.",
+    "sign_in_required": "This one is connected by signing in, not by a key.",
     "bad_repo": "That does not look like a GitHub repository link. It should look like https://github.com/owner/repo",
     "machine_offline": "The machine is not reachable right now. Wait a moment and try again.",
     "machine_busy": "A task is running on this machine.",
@@ -95,6 +97,24 @@
     "not_found": "This page does not exist or is not yours.",
     "forbidden": "Admins only.",
     "fallback": "Something went wrong."
+  },
+  "chatgpt": {
+    "intro": "Tasks run on your ChatGPT plan, no key needed. You sign in on OpenAI's site and allow your plan to be used; we keep the sign-in good ourselves, and your password and email never reach us.",
+    "signIn": "Sign in with ChatGPT",
+    "signInAgain": "Sign in again",
+    "opening": "Opening OpenAI…",
+    "connected": "Signed in · {email}",
+    "connectedNoEmail": "Signed in with ChatGPT",
+    "needsLogin": "Your ChatGPT sign-in ran out or was revoked. Sign in again and tasks will run again.",
+    "disconnect": "Disconnect ChatGPT",
+    "result": {
+      "denied": "You declined access on OpenAI's side. Sign in again and allow it.",
+      "expired": "The time to sign in ran out (three minutes) or the link was already used. Start again.",
+      "refused": "OpenAI did not accept the sign-in. Try again.",
+      "unreachable": "OpenAI is not answering right now. Try again in a minute.",
+      "no_plan": "Signing in needs permission to use your ChatGPT plan. Sign in again and leave that box ticked.",
+      "identity": "Could not verify the ChatGPT account. Try again."
+    }
   },
   "keyCheck": {
     "checking": "Checking the key…",
@@ -171,6 +191,7 @@
     "otherNote": "Any OpenAI-compatible API",
     "partnerBadge": "Partner",
     "partnerNote": "Kvist's partner: one key, many models",
+    "signInNote": "ChatGPT plan, no key",
     "keyLabel": "API key",
     "keyPlaceholder": "Paste the key here",
     "keySaved": "Key ••••{last4} is saved",

@@ -7,12 +7,11 @@ import { setPref } from "../store.js";
 import { THEMES } from "../theme.js";
 import { openKeyDialog } from "./settings-dialogs.js";
 
-const PROVIDER_NAMES = { deepseek: "DeepSeek", openai: "OpenAI", anthropic: "Anthropic", other: "" };
-
 function keyLabel() {
   const key = account.key;
   if (!key?.set) return `${t("model key")}: ${t("key not set")}`;
-  const name = PROVIDER_NAMES[key.provider] || key.model || t("model key");
+  if (key.provider === "chatgpt") return `${t("model key")}: ${key.label}${key.chatgpt_email ? ` · ${key.chatgpt_email}` : ""}`;
+  const name = key.provider === "other" ? key.model || t("model key") : key.label;
   return `${t("model key")}: ${name} ••••${key.last4}`;
 }
 

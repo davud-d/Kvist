@@ -8,6 +8,7 @@ import { t } from "../i18n.js";
 import { openModal } from "./modal.js";
 
 export function openKeyDialog() {
+  const saved = () => (account.key?.provider === "chatgpt" ? account.key : null);
   const choice = { provider: account.key?.set ? account.key.provider : "deepseek" };
   const key = h("input", { class: "field", type: "password", autocomplete: "off", spellcheck: "false", placeholder: "sk-…" });
   const base = h("input", { class: "field", type: "url", placeholder: "https://…", spellcheck: "false", value: account.key?.base_url ?? "" });
@@ -22,12 +23,44 @@ export function openKeyDialog() {
     content: [providers, link, extra, key, status, h("div", { class: "dialog-buttons" }, save, h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("cancel")))],
   });
 
+  // The plan instead of a key: sign in at OpenAI and come back to this address (the server keeps it good).
+  const chatgptRows = () => {
+    const state = saved()?.chatgpt_state ?? "";
+    if (state === "connected") {
+      const email = saved().chatgpt_email;
+      const off = h("button", { class: "btn", type: "button" }, t("chatgpt disconnect"));
+      off.addEventListener("click", async () => {
+        await api("/api/chatgpt", { method: "DELETE" });
+        await refreshKey();
+        paint();
+      });
+      return [h("p", { class: "dim" }, `${t("chatgpt connected")}${email ? ` · ${email}` : ""}`), off];
+    }
+    const start = h("button", { class: "btn primary", type: "button" }, t(state === "needs_login" ? "chatgpt sign in again" : "chatgpt sign in"));
+    start.addEventListener("click", async () => {
+      start.disabled = true;
+      status.textContent = t("chatgpt opening");
+      try {
+        const { url } = await api("/api/chatgpt/start", { method: "POST", body: { next: location.pathname } });
+        if (new URL(url).protocol !== "https:") throw new Error("not https");
+        location.assign(url);
+      } catch (error) {
+        start.disabled = false;
+        status.textContent = error.localized ?? String(error);
+      }
+    });
+    return [h("p", { class: "dim" }, t(state === "needs_login" ? "chatgpt needs login" : "chatgpt intro")), start];
+  };
+
   const paint = () => {
     const list = account.providers.length ? account.providers : [{ id: "deepseek", label: "DeepSeek" }, { id: "openai", label: "OpenAI" }, { id: "anthropic", label: "Anthropic" }, { id: "other", label: "…", needs_base_url: true, needs_model: true }];
     fill(providers, list.map((item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === choice.provider ? " on" : ""}`, type: "button", onclick: () => { choice.provider = item.id; paint(); } }, item.id === "other" ? t("other") : item.label)));
     const current = list.find((item) => item.id === choice.provider);
     fill(link, current?.keys_page ? h("a", { href: current.keys_page, target: "_blank", rel: "noopener" }, `${t("get a key")} ↗`) : null);
-    fill(extra, [current?.needs_base_url ? base : null, current?.needs_model ? model : null].filter(Boolean));
+    // A sign-in has no key to paste and nothing to save: its own button does the work.
+    const signIn = Boolean(current?.sign_in);
+    key.style.display = save.style.display = signIn ? "none" : "";
+    fill(extra, signIn ? chatgptRows() : [current?.needs_base_url ? base : null, current?.needs_model ? model : null].filter(Boolean));
   };
 
   save.addEventListener("click", async () => {
