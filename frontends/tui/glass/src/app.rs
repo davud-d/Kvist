@@ -41,6 +41,8 @@ use crate::view::{self, Hit};
 use crate::water::{self, Pos, Pour, TextView};
 
 /// The photograph stays alone on screen at least this long.
+/// Columns a long dialog line pans per ←/→ press.
+const PAN_STEP: i32 = 8;
 const SPLASH_MIN: Duration = Duration::from_millis(2400);
 /// How long it takes to rise from black.
 const RISE: Duration = Duration::from_millis(800);
@@ -1210,23 +1212,33 @@ impl App {
                 ask.text_scroll = (ask.text_scroll as i32 + delta).clamp(0, most as i32) as usize;
                 None
             }
+            KeyCode::Left | KeyCode::Right if matches!(ask.body, Body::Choice { .. }) => {
+                let delta = if key.code == KeyCode::Left { -PAN_STEP } else { PAN_STEP };
+                ask.hscroll = (ask.hscroll as i32 + delta).clamp(0, view::ask_pan_max(ask, card) as i32) as usize;
+                None
+            }
             KeyCode::Up => {
+                ask.hscroll = 0;
                 ask.step(-1);
                 None
             }
             KeyCode::Down | KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+                ask.hscroll = 0;
                 ask.step(if key.code == KeyCode::Left { -1 } else { 1 });
                 None
             }
             KeyCode::Backspace => {
+                ask.hscroll = 0;
                 ask.backspace();
                 None
             }
             KeyCode::Char('u') if ctrl => {
+                ask.hscroll = 0;
                 ask.clear();
                 None
             }
             KeyCode::Char(c) if !ctrl => {
+                ask.hscroll = 0;
                 ask.type_char(c);
                 None
             }

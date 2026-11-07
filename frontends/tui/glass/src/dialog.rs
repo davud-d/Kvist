@@ -48,6 +48,9 @@ pub struct Ask {
     /// What an overwrite approval would change, shown under `text` (the path).
     pub diff: Option<Patch>,
     pub text_scroll: usize,
+    /// Columns the title and the highlighted choice are panned left (←/→),
+    /// for text too long to show on one line.
+    pub hscroll: usize,
     pub help: String,
     pub body: Body,
 }
@@ -86,7 +89,7 @@ impl Ask {
             Some(subject) => subject,
             None => (field("body"), None),
         };
-        Some(Ask { request_id: field("request_id"), title: field("title"), text, diff, text_scroll: 0, help: field("help_text"), body })
+        Some(Ask { request_id: field("request_id"), title: field("title"), text, diff, text_scroll: 0, hscroll: 0, help: field("help_text"), body })
             .filter(|ask| !ask.request_id.is_empty())
     }
 
@@ -99,6 +102,7 @@ impl Ask {
             text: String::new(),
             diff: None,
             text_scroll: 0,
+            hscroll: 0,
             help: String::new(),
             body: Body::Choice { query: String::new(), choices, selected, scroll: 0 },
         }
