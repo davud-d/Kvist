@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 
 from kvist_cloud import secrets as vaultmod
-from kvist_cloud.keys import check_key, endpoint_problem, kvist_environment
+from kvist_cloud.keys import PROVIDERS, check_key, endpoint_problem, kvist_environment
 from kvist_cloud.models import User
 
 KEY = "sk-test-0123456789abcdef"
@@ -115,6 +115,53 @@ def test_kvist_environment_per_provider():
     assert env["AGENT_LLM_PROVIDER"] == "omniroute"
     assert env["OMNIROUTE_API_KEY"] == KEY
     assert (env["OMNIROUTE_BASE_URL"], env["AGENT_SMART_MODEL"]) == (other.model_base_url, "m1")
+
+
+def test_the_core_providers_are_all_offered_with_the_partner_first():
+    from kernel.llm.provider_registry import MANUAL_OPENAI_PROVIDERS
+
+    ids = list(PROVIDERS)
+    assert ids[0] == "anymodel" and PROVIDERS["anymodel"].partner
+    assert [p for p in PROVIDERS.values() if p.partner] == [PROVIDERS["anymodel"]]
+    assert set(MANUAL_OPENAI_PROVIDERS) | {"deepseek", "openai", "anthropic", "other"} == set(ids)
+    assert len(ids) - 1 == 40  # the 40 of the core, then the customer's own endpoint
+
+
+def test_registry_provider_environment_uses_the_names_the_core_reads():
+    env = kvist_environment(User(model_provider="qwen", model_name="qwen-max"), KEY)
+    assert env == {"AGENT_LLM_PROVIDER": "qwen", "QWEN_API_KEY": KEY,
+                   "AGENT_FAST_MODEL": "qwen-max", "AGENT_SMART_MODEL": "qwen-max"}
+    # No fixed address (a workspace of the customer's own): the address is passed too.
+    workspace = User(model_provider="databricks", model_name="m", model_base_url="https://w.example/v1")
+    own = kvist_environment(workspace, KEY)
+    assert own["DATABRICKS_BASE_URL"] == "https://w.example/v1"
+
+
+async def test_registry_provider_is_checked_at_its_own_address_and_a_missing_model_list_is_accepted():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"data": [{"id": "models/gemini-x"}]})
+
+    base = PROVIDERS["gemini"].default_base_url
+    assert (await run_check(handler, "gemini", base_url=base, model="gemini-x")).ok
+    assert seen == [base.rstrip("/") + "/models"]
+    vendor = "https://x.example/v1"
+    assert (await run_check(lambda r: httpx.Response(404, json={}), "perplexity", base_url=vendor)).ok
+    refused = await run_check(lambda r: httpx.Response(401, json={}), "perplexity", base_url=vendor)
+    assert refused.code == "invalid_key"
+
+
+def test_registry_provider_needs_a_model_and_keeps_no_foreign_address(client_factory):
+    from conftest import dev_login
+
+    client = client_factory(lambda request: httpx.Response(200, json={"data": []}), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    body = {"provider": "qwen", "key": KEY, "base_url": "https://evil.example/v1"}
+    assert client.post("/api/model-key", json=body).json() == {"ok": False, "code": "model_missing"}
+    assert client.post("/api/model-key", json={**body, "model": "qwen-max"}).json()["ok"] is True
+    assert client.get("/api/model-key").json()["base_url"] == ""
 
 
 def test_saved_key_is_encrypted_and_shown_by_last4(client_factory, engine):

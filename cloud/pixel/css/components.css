@@ -84,6 +84,7 @@
 .segment { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .seg { border: 0; cursor: pointer; padding: 3px 10px 5px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--dim); box-shadow: inset 0 -3px 0 0 var(--shade), var(--outline); margin: 3px; transition: background 0.12s, color 0.12s; }
 .seg:hover { color: var(--text); background: var(--raise); }
+.seg.partner { display: block; width: calc(100% - 6px); padding: 10px 14px 12px; font-size: 16px; }
 .seg.on { background: var(--accent); color: var(--accent-ink); box-shadow: inset 0 -3px 0 0 var(--accent-shade), var(--outline); }
 
 .switch { position: relative; width: 48px; height: 24px; border: 0; cursor: pointer; background: var(--shade); box-shadow: var(--outline); flex: none; margin: 3px; }

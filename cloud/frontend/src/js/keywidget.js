@@ -7,7 +7,7 @@ import { t } from "./i18n.js";
 const DEBOUNCE_MS = 700;
 
 export function keyWidget({ providers, saved, onValid }) {
-  let provider = saved.set ? saved.provider : "deepseek";
+  let provider = saved.set ? saved.provider : providers[0].id;
   let changing = !saved.set;
   let timer = null;
   let sequence = 0;
@@ -65,20 +65,23 @@ export function keyWidget({ providers, saved, onValid }) {
       h("legend.sr", { text: t("onboarding.modelTitle") }),
       providers.map((item) => {
         const name = item.id === "other" ? t("onboarding.otherName") : item.label;
-        return h("label.tile", {},
+        const note = item.partner ? t("onboarding.partnerNote") : item.id === "other" ? t("onboarding.otherNote") : "";
+        return h(item.partner ? "label.tile.partner" : "label.tile", {},
           h("input", {
             type: "radio", name: "provider", value: item.id, checked: item.id === provider,
             onchange: () => { provider = item.id; changing = true; onValid(false); draw(); keyInput.focus(); },
           }),
+          item.partner ? h("span.badge", { text: t("onboarding.partnerBadge") }) : null,
           h("span.name", { text: name }),
           item.keys_page
             ? h("a.where.inline", { href: item.keys_page, target: "_blank", rel: "noopener",
                 text: `${t("onboarding.keysLink")} ↗` })
-            : h("span.where.small", { text: t("onboarding.otherNote") }));
+            : note ? h("span.where.small", { text: note }) : null);
       }));
   }
 
   function draw() {
+    const chosen = providers.find((item) => item.id === provider) ?? {};
     const showSaved = !changing && saved.set && saved.provider === provider;
     replace(root, tiles(),
       showSaved
@@ -87,10 +90,10 @@ export function keyWidget({ providers, saved, onValid }) {
             h("button.linkbtn", { type: "button", text: t("onboarding.changeKey"),
               onclick: () => { changing = true; onValid(false); draw(); keyInput.focus(); } }))
         : h("div.stack", {},
-            provider === "other"
-              ? [h("label.field", { for: "model-base" }, h("span", { text: t("onboarding.baseUrl") }), baseInput),
-                 h("label.field", { for: "model-name" }, h("span", { text: t("onboarding.modelName") }), modelInput)]
-              : null,
+            chosen.needs_base_url
+              ? h("label.field", { for: "model-base" }, h("span", { text: t("onboarding.baseUrl") }), baseInput) : null,
+            chosen.needs_model
+              ? h("label.field", { for: "model-name" }, h("span", { text: t("onboarding.modelName") }), modelInput) : null,
             h("label.field", { for: "model-key" }, h("span", { text: t("onboarding.keyLabel") }), keyInput),
             hint));
   }

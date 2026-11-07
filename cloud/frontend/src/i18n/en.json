@@ -169,6 +169,8 @@
     "keysLink": "Where to get a key",
     "otherName": "Other",
     "otherNote": "Any OpenAI-compatible API",
+    "partnerBadge": "Partner",
+    "partnerNote": "Kvist's partner: one key, many models",
     "keyLabel": "API key",
     "keyPlaceholder": "Paste the key here",
     "keySaved": "Key ••••{last4} is saved",

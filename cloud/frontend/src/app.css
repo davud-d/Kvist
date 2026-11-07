@@ -207,6 +207,11 @@ textarea.input { min-height: 112px; resize: vertical; line-height: 1.5; }
 .tile .name { font-weight: 700; display: block; }
 .tile .where { font-size: var(--t-13); pointer-events: none; }
 .tile a.where { position: relative; z-index: 1; pointer-events: auto; }
+/* The partner: first, and the whole row. */
+.tile.partner { grid-column: 1 / -1; min-height: 132px; padding: var(--s-4); border-color: var(--acc); }
+.tile.partner .name { font-size: var(--t-21); }
+.tile.partner .where { font-size: var(--t-14); }
+.tile .badge { font-size: var(--t-13); color: var(--acc); text-transform: uppercase; letter-spacing: .08em; display: block; }
 .tile:has(input:checked) { border-color: var(--tx); background: var(--panel-2); }
 .tile:has(input:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
 

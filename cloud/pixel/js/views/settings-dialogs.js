@@ -23,11 +23,11 @@ export function openKeyDialog() {
   });
 
   const paint = () => {
-    const list = account.providers.length ? account.providers : [{ id: "deepseek", label: "DeepSeek" }, { id: "openai", label: "OpenAI" }, { id: "anthropic", label: "Anthropic" }, { id: "other", label: "…" }];
-    fill(providers, list.map((item) => h("button", { class: `seg${item.id === choice.provider ? " on" : ""}`, type: "button", onclick: () => { choice.provider = item.id; paint(); } }, item.id === "other" ? t("other") : item.label)));
+    const list = account.providers.length ? account.providers : [{ id: "deepseek", label: "DeepSeek" }, { id: "openai", label: "OpenAI" }, { id: "anthropic", label: "Anthropic" }, { id: "other", label: "…", needs_base_url: true, needs_model: true }];
+    fill(providers, list.map((item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === choice.provider ? " on" : ""}`, type: "button", onclick: () => { choice.provider = item.id; paint(); } }, item.id === "other" ? t("other") : item.label)));
     const current = list.find((item) => item.id === choice.provider);
     fill(link, current?.keys_page ? h("a", { href: current.keys_page, target: "_blank", rel: "noopener" }, `${t("get a key")} ↗`) : null);
-    fill(extra, choice.provider === "other" ? [base, model] : null);
+    fill(extra, [current?.needs_base_url ? base : null, current?.needs_model ? model : null].filter(Boolean));
   };
 
   save.addEventListener("click", async () => {

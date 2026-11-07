@@ -169,6 +169,8 @@
     "keysLink": "Где взять ключ",
     "otherName": "Другой",
     "otherNote": "Любой OpenAI-совместимый API",
+    "partnerBadge": "Партнёр",
+    "partnerNote": "Партнёр Kvist: один ключ, много моделей",
     "keyLabel": "API-ключ",
     "keyPlaceholder": "Вставь ключ сюда",
     "keySaved": "Ключ ••••{last4} сохранён",

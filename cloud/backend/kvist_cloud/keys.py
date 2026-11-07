@@ -8,7 +8,9 @@ Check results are codes the frontend turns into plain words next to the field:
 from __future__ import annotations
 
 import ipaddress
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -26,6 +28,12 @@ from .outbound import PublicEndpointTransport
 from .secrets import Vault, last4, remember
 from .validation import InputModel
 
+# The provider list belongs to the core one directory up; the cloud reads it instead of keeping a copy.
+_REPO_ROOT = str(Path(__file__).resolve().parents[3])
+if _REPO_ROOT not in sys.path:
+    sys.path.append(_REPO_ROOT)
+from kernel.llm.provider_registry import ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS  # noqa: E402
+
 
 @dataclass(frozen=True, slots=True)
 class ModelProvider:
@@ -34,9 +42,36 @@ class ModelProvider:
     keys_page: str
     kvist_provider: str
     key_env: str
+    # Where the customer's requests go when the provider has one fixed address.
+    default_base_url: str = ""
+    # Only for providers without a fixed address (the customer's own endpoint).
+    needs_base_url: bool = False
+    base_url_env: str = ""
+    # Vendors that change model ids too often for Kvist to guess: the customer types one.
+    needs_model: bool = False
+    partner: bool = False
 
 
+def _registry_provider(provider_id: str, config: dict[str, str]) -> ModelProvider:
+    """A third-party OpenAI-compatible provider, as the core describes it."""
+    return ModelProvider(
+        provider_id,
+        config["label"],
+        "",
+        provider_id,
+        config["api_key_key"].upper(),
+        default_base_url=config["default_base_url"],
+        needs_base_url=not config["default_base_url"],
+        base_url_env=config["base_url_key"].upper(),
+        needs_model=True,
+        partner=provider_id == ANYMODEL_PROVIDER,
+    )
+
+
+# The partner first, then the three vendors with their own balance check, then the rest of the core's
+# list, then the customer's own endpoint.
 PROVIDERS: dict[str, ModelProvider] = {
+    ANYMODEL_PROVIDER: _registry_provider(ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]),
     "deepseek": ModelProvider(
         "deepseek", "DeepSeek", "https://platform.deepseek.com/api_keys", "deepseek", "DEEPSEEK_API_KEY"
     ),
@@ -44,8 +79,16 @@ PROVIDERS: dict[str, ModelProvider] = {
     "anthropic": ModelProvider(
         "anthropic", "Anthropic", "https://console.anthropic.com/settings/keys", "anthropic", "ANTHROPIC_API_KEY"
     ),
+    **{
+        provider_id: _registry_provider(provider_id, config)
+        for provider_id, config in MANUAL_OPENAI_PROVIDERS.items()
+        if provider_id != ANYMODEL_PROVIDER
+    },
     # Any OpenAI-compatible endpoint, run through Kvist's omniroute provider.
-    "other": ModelProvider("other", "Other", "", "omniroute", "OMNIROUTE_API_KEY"),
+    "other": ModelProvider(
+        "other", "Other", "", "omniroute", "OMNIROUTE_API_KEY",
+        needs_base_url=True, base_url_env="OMNIROUTE_BASE_URL", needs_model=True,
+    ),
 }
 
 router = APIRouter()
@@ -136,13 +179,18 @@ async def check_key(
                     headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
                 )
             )
-        if provider == "other":
+        if base_url:
             response = await client.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {key}"})
+            if response.status_code in (404, 405) and provider != "other":
+                # A vendor with no model list: nothing cheap to ask, and a wrong key is caught by its first task.
+                return KeyCheck(True)
             result = _classify(response)
             if not result.ok:
                 return result
-            served = {str(item.get("id")) for item in response.json().get("data", []) if isinstance(item, dict)}
-            if served and model not in served:
+            # Some vendors list ids as "models/<id>".
+            served = {str(item.get("id")).removeprefix("models/")
+                      for item in response.json().get("data", []) if isinstance(item, dict)}
+            if served and model.removeprefix("models/") not in served:
                 return KeyCheck(False, "model_not_found")
             return result
     except httpx.HTTPError:
@@ -157,8 +205,9 @@ def kvist_environment(user: User, key: str) -> dict[str, str]:
     """What Kvist needs in its environment to talk to the customer's model."""
     provider = PROVIDERS[user.model_provider]
     env = {"AGENT_LLM_PROVIDER": provider.kvist_provider, provider.key_env: key}
-    if provider.id == "other":
-        env["OMNIROUTE_BASE_URL"] = user.model_base_url
+    if provider.needs_base_url:
+        env[provider.base_url_env] = user.model_base_url
+    if provider.needs_model:
         env["AGENT_FAST_MODEL"] = user.model_name
         env["AGENT_SMART_MODEL"] = user.model_name
     return env
@@ -175,8 +224,12 @@ def key_summary(user: User) -> dict[str, object]:
 
 
 @router.get("/api/model-providers")
-def list_providers() -> list[dict[str, str]]:
-    return [{"id": p.id, "label": p.label, "keys_page": p.keys_page} for p in PROVIDERS.values()]
+def list_providers() -> list[dict[str, object]]:
+    return [
+        {"id": p.id, "label": p.label, "keys_page": p.keys_page, "needs_base_url": p.needs_base_url,
+         "needs_model": p.needs_model, "partner": p.partner}
+        for p in PROVIDERS.values()
+    ]
 
 
 @router.get("/api/model-key")
@@ -194,22 +247,24 @@ async def save_key(
     settings: Settings = request.app.state.settings
     key = payload.key.strip()
     remember(key)
-    if payload.provider not in PROVIDERS:
+    provider = PROVIDERS.get(payload.provider)
+    if provider is None:
         raise ApiError(400, "unknown_provider", "Pick a provider. / Выбери провайдера.")
-    base_url = payload.base_url.strip()
-    model = payload.model.strip()
-    if payload.provider == "other":
+    # Only what this provider asks for is kept: a stale address or model from another choice is dropped.
+    base_url = payload.base_url.strip() if provider.needs_base_url else ""
+    model = payload.model.strip() if provider.needs_model else ""
+    if provider.needs_base_url:
         problem = endpoint_problem(base_url, settings.allow_local_endpoints)
-        if problem or not model:
-            return {"ok": False, "code": problem or "model_missing"}
-    else:
-        base_url, model = "", ""
+        if problem:
+            return {"ok": False, "code": problem}
+    if provider.needs_model and not model:
+        return {"ok": False, "code": "model_missing"}
     client = http_client(request)
-    if payload.provider == "other" and not settings.allow_local_endpoints and request.app.state.http_transport is None:
+    if provider.needs_base_url and not settings.allow_local_endpoints and request.app.state.http_transport is None:
         await client.aclose()
         client = httpx.AsyncClient(transport=PublicEndpointTransport(), trust_env=False, timeout=10.0)
     async with client:
-        result = await check_key(client, payload.provider, key, base_url, model)
+        result = await check_key(client, payload.provider, key, base_url or provider.default_base_url, model)
     if not result.ok:
         return {"ok": False, "code": result.code}
     vault: Vault = request.app.state.vault
