@@ -123,7 +123,8 @@ trap 'cleanup_on_error' ERR
 umask 077
 cat > "$seed_dir/meta-data" << EOF
 instance-id: $DOMAIN
-local-hostname: $DOMAIN
+# Inside the VM the agent only ever sees "kvist@kvist"; the machine id stays on the host side.
+local-hostname: kvist
 EOF
 
 # JSON built by Python so a token can never break the quoting. Same shape as LocalProvider's runner.json.
