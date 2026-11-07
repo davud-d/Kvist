@@ -36,6 +36,8 @@ const MAX_LIST_ROWS: u16 = 14;
 /// The most lines of a dialog's explanation (or an approval's diff) shown
 /// above its answer.
 const MAX_BODY_LINES: usize = 12;
+const MAX_TITLE_LINES: usize = 3;
+const MAX_CHOICE_LINES: usize = 3;
 /// The most rows of an overwrite's diff shown at once; the rest scroll.
 const MAX_DIFF_LINES: usize = 30;
 /// A helper's latest calls in the helpers panel; earlier ones are in its
@@ -948,15 +950,66 @@ pub fn ask_height(ask: &Ask, cols: u16) -> u16 {
         Body::Text { .. } => 1 + u16::from(!ask.help.is_empty()),
         Body::Confirm { .. } => 1,
     };
+    let width = ask_text_width(ask, cols);
     // padding, title, gap, body, answer, gap, footer, padding
-    1 + 1 + 1 + body + answer + 1 + 1 + 1
+    1 + 1 + 1 + body + answer + 1 + 1 + 1 + ask_extra_rows(ask, width) as u16
+}
+
+/// Rows a long title and the full text of the highlighted choice add: a
+/// truncated question or option is unreadable, so both are shown whole.
+fn ask_extra_rows(ask: &Ask, width: usize) -> usize {
+    title_lines(ask, width).len() - 1 + choice_rows(ask, width)
+}
+
+/// The title wrapped to what fits beside "esc", at most `MAX_TITLE_LINES`.
+fn title_lines(ask: &Ask, width: usize) -> Vec<String> {
+    let title = if ask.title.is_empty() { strings().question } else { ask.title.as_str() };
+    let mut lines: Vec<String> = text::wrap(&vec![(title.to_string(), Style::default())], width.saturating_sub(5))
+        .iter()
+        .map(|line| line.iter().map(|(word, _)| word.as_str()).collect::<String>())
+        .collect();
+    if lines.len() > MAX_TITLE_LINES {
+        let rest = lines.split_off(MAX_TITLE_LINES - 1).join(" ");
+        lines.push(text::fit(&rest, width.saturating_sub(5)));
+    }
+    lines
+}
+
+/// Rows reserved under the list for the full highlighted choice (its gap
+/// included), or 0 when every label and detail fits on one line. Decided from
+/// all choices, not the highlighted one, so the dialog does not change size
+/// as the highlight moves.
+fn choice_rows(ask: &Ask, width: usize) -> usize {
+    let Body::Choice { choices, .. } = &ask.body else { return 0 };
+    let cut = |c: &crate::dialog::Choice| {
+        let label = text::width(&c.label);
+        label > width.saturating_sub(4) || (!c.detail.is_empty() && label + 2 + text::width(&c.detail) > width)
+    };
+    if choices.iter().any(cut) { MAX_CHOICE_LINES + 1 } else { 0 }
+}
+
+/// The highlighted choice whole: label, then detail, wrapped to `width`.
+fn choice_lines(ask: &Ask, width: usize) -> Vec<Line> {
+    let Body::Choice { choices, selected, .. } = &ask.body else { return Vec::new() };
+    let Some(choice) = choices.get(*selected) else { return Vec::new() };
+    let mut spans = vec![span(choice.label.as_str(), FOG)];
+    if !choice.detail.is_empty() {
+        spans.push(span(format!(" {}", choice.detail), DUSK));
+    }
+    let mut lines = text::wrap(&spans, width);
+    if lines.len() > MAX_CHOICE_LINES {
+        let rest: String = lines.split_off(MAX_CHOICE_LINES - 1).iter().flatten().map(|(word, _)| word.as_str()).collect::<Vec<_>>().join(" ");
+        lines.push(vec![(text::fit(&rest, width), st(DUSK))]);
+    }
+    lines
 }
 
 /// Rows of choices the dialog in `card` shows for `ask`.
 pub fn ask_list_rows(ask: &Ask, card: Rect) -> usize {
     let body = body_lines(ask, card.width.saturating_sub(6) as usize).len().min(ask_body_rows(ask, card));
     let body = if body > 0 { body + 1 } else { 0 };
-    (card.height as usize).saturating_sub(8 + body)
+    let width = card.width.saturating_sub(6) as usize;
+    (card.height as usize).saturating_sub(8 + body + ask_extra_rows(ask, width))
 }
 
 fn ask_text_width(ask: &Ask, cols: u16) -> usize {
@@ -995,7 +1048,8 @@ fn ask_body_rows(ask: &Ask, card: Rect) -> usize {
         Body::Text { .. } => 1 + usize::from(!ask.help.is_empty()),
         Body::Confirm { .. } => 1,
     };
-    (card.height as usize).saturating_sub(7 + answer).min(body_cap(ask))
+    let extra = ask_extra_rows(ask, card.width.saturating_sub(6) as usize);
+    (card.height as usize).saturating_sub(7 + answer + extra).min(body_cap(ask))
 }
 
 pub fn ask_text_max_scroll(ask: &Ask, card: Rect) -> usize {
@@ -1018,11 +1072,13 @@ fn draw_ask(p: &mut Painter, app: &App, ask: Option<&Ask>, open: f32, ms: u128, 
         p.line(x, top, &line);
         return;
     };
-    let title = if ask.title.is_empty() { s.question } else { ask.title.as_str() };
-    p.text(x, top, &text::fit(title, (right - x - 5).max(4) as usize), Style::default().fg(FOG).add_modifier(Modifier::BOLD));
-    p.text(right - 3, top, "esc", st(DUSK));
     let width = (right - x).max(8) as usize;
-    let mut y = top + 2;
+    let title = title_lines(ask, width);
+    for (i, line) in title.iter().enumerate() {
+        p.text(x, top + i as i32, line, Style::default().fg(FOG).add_modifier(Modifier::BOLD));
+    }
+    p.text(right - 3, top, "esc", st(DUSK));
+    let mut y = top + 2 + (title.len() as i32 - 1);
     let body = body_lines(ask, width);
     let offset = ask.text_scroll.min(ask_text_max_scroll(ask, card));
     for line in body.iter().skip(offset).take(ask_body_rows(ask, card)) {
@@ -1046,7 +1102,11 @@ fn draw_ask(p: &mut Painter, app: &App, ask: Option<&Ask>, open: f32, ms: u128, 
             if visible.is_empty() {
                 p.text(x, y, s.nothing_found, st(DUSK));
             }
-            let rows = ((card.bottom() as i32 + dy - 3) - y).max(1) as usize;
+            let tail = choice_rows(ask, width) as i32;
+            let rows = ((card.bottom() as i32 + dy - 3 - tail) - y).max(1) as usize;
+            for (i, line) in choice_lines(ask, width).iter().enumerate().filter(|_| tail > 0) {
+                p.line(x, card.bottom() as i32 + dy - 3 - MAX_CHOICE_LINES as i32 + i as i32, line);
+            }
             for (row, &index) in visible.iter().enumerate().skip(*scroll).take(rows) {
                 let line_y = y + (row - scroll) as i32;
                 let choice = &choices[index];
@@ -1307,6 +1367,20 @@ mod tests {
         assert_eq!(ask_height(&ask(40), 160), ask_height(&ask(80), 160));
         let card = layout::dialog(&layout::Grid { cols: 160, rows: 60, cw: 1, ch: 1 }, layout::DIALOG_WIDTH, small);
         assert_eq!(ask_list_rows(&ask(3), card), 3);
+    }
+
+    #[test]
+    fn a_long_title_and_choice_are_shown_whole_instead_of_cut() {
+        let long = "слово ".repeat(30);
+        let ask = Ask::from_request(&json!({
+            "request_id": "r", "kind": "choice", "title": long,
+            "options": [{"value": "a", "label": long}, {"value": "b", "label": "short"}],
+        })).unwrap();
+        let short = Ask::from_request(&json!({"request_id": "r", "kind": "choice", "options": [{"value": "a", "label": "x"}]})).unwrap();
+        assert!(ask_height(&ask, 160) > ask_height(&short, 160) + 4);
+        assert_eq!(title_lines(&ask, 50).len(), MAX_TITLE_LINES);
+        assert_eq!(choice_lines(&ask, 50).len(), MAX_CHOICE_LINES);
+        assert_eq!(choice_rows(&short, 50), 0);
     }
 
     #[test]
