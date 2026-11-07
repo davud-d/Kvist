@@ -1451,7 +1451,8 @@ class LocalAgent:
             # All models exhausted — show friendly error, don't crash REPL
             self._chat_history = history_before
             fallback_msg = _no_response_message(self._state.response_language, last_error)
-            self.console.print(Text(fallback_msg, style="yellow"))
+            # An event, not console text: a frontend over stdio never sees the console.
+            self._ui.print_error(fallback_msg)
             return fallback_msg
 
         if use_tag and end_session.tag_only(content):
@@ -1604,7 +1605,7 @@ class LocalAgent:
             # The gate has already acted, so the turn is answered, not retried.
             detail = redact_text(str(error).strip() or type(error).__name__)
             message = _no_response_message(self._state.response_language, detail)
-            self.console.print(Text(message, style="yellow"))
+            self._ui.print_error(message)
             return message
         finally:
             self._persist_end_session_log()
