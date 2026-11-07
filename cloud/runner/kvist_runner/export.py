@@ -39,7 +39,7 @@ async def run_export(runner, message: dict) -> None:
         _failed(runner, export_id, "nothing_to_export")
         return
     try:
-        await asyncio.to_thread(write_archive, source, archive)
+        await asyncio.to_thread(write_archive, source, archive, skip_hidden=not task_id)
         async with httpx.AsyncClient(timeout=UPLOAD_TIMEOUT_SECONDS) as client:
             response = await client.put(
                 str(message["upload_url"]),

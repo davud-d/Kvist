@@ -89,9 +89,17 @@ async def prepare(
     return folder
 
 
-def write_archive(source: Path, target: Path) -> int:
-    """A .tar.gz of ``source``; returns its size. Symlinks are stored as links, never followed."""
+def write_archive(source: Path, target: Path, *, skip_hidden: bool = False) -> int:
+    """A .tar.gz of ``source``; returns its size. Symlinks are stored as links, never followed.
+
+    ``skip_hidden`` leaves out the dot-entries directly under ``source``: when source is the home directory
+    they are Kvist's config (model credentials) and shell files, not the customer's work.
+    """
+    def keep(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        top = info.name.split("/")[1:2]
+        return None if skip_hidden and top and top[0].startswith(".") else info
+
     target.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(target, "w:gz") as archive:
-        archive.add(source, arcname=source.name, recursive=True)
+        archive.add(source, arcname=source.name, recursive=True, filter=keep)
     return target.stat().st_size

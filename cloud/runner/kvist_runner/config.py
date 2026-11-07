@@ -20,14 +20,18 @@ class RunnerConfig:
     kvist_command: tuple[str, ...] = ("kvist",)
     kvist_env: dict[str, str] = field(default_factory=dict)
     heartbeat_seconds: float = 15.0
+    # Where projects and the Kvist home live. By default under ``root``; on a customer VM both are the
+    # user's home directory, so a project is just ``~/<name>``.
+    work_path: Path | None = None
+    home_path: Path | None = None
 
     @property
     def work_dir(self) -> Path:
-        return self.root / "work"
+        return self.work_path or self.root / "work"
 
     @property
     def home_dir(self) -> Path:
-        return self.root / "home"
+        return self.home_path or self.root / "home"
 
 
 def load_config(path: Path) -> RunnerConfig:
@@ -48,4 +52,6 @@ def load_config(path: Path) -> RunnerConfig:
         kvist_command=tuple(raw.get("kvist_command") or ("kvist",)),
         kvist_env={str(k): str(v) for k, v in (raw.get("kvist_env") or {}).items()},
         heartbeat_seconds=float(raw.get("heartbeat_seconds") or 15.0),
+        work_path=Path(raw["work_dir"]) if raw.get("work_dir") else None,
+        home_path=Path(raw["home_dir"]) if raw.get("home_dir") else None,
     )
