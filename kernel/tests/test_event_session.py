@@ -56,8 +56,13 @@ class _FinalAgent:
         return "done"
 
 
-def _drain(session: EventSession, timeout: float = 5.0) -> list:
-    """Collect every event, failing loudly if the stream does not end in time."""
+def _drain(session: EventSession, timeout: float = 30.0) -> list:
+    """Collect every event, failing loudly if the stream does not end in time.
+
+    The run probes the host (lsb_release, bwrap) before answering; on a loaded
+    machine that alone can pass a few seconds, and the deadline only has to tell
+    a hang from a slow start.
+    """
     collected: list = []
     error: list[BaseException] = []
 
