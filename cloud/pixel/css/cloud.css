@@ -5,6 +5,7 @@
 .brand-sub { font-family: var(--font-pixel); font-size: 14px; letter-spacing: 0.2em; color: var(--dim); align-self: flex-end; padding-bottom: 3px; }
 
 #titlebar .crumb { display: flex; align-items: center; gap: 18px; overflow: visible; }
+.session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hours-meter { display: flex; align-items: center; gap: 10px; }
 .hours-meter .meter-label { font-size: 12px; color: var(--text); letter-spacing: 0.04em; }
 .hours-meter .meter-bar i { height: 12px; }

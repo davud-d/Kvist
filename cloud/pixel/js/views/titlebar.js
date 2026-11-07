@@ -2,9 +2,9 @@
 // and the buttons that matter. It is a web page, so there is no window frame to draw.
 
 import { account, displayState, duration, onAccount, share } from "../cloud.js";
-import { frameThrottle, h, icon } from "../dom.js";
+import { basename, frameThrottle, h, icon } from "../dom.js";
 import { chooseLanguage, lang, t } from "../i18n.js";
-import { setMode, setPref, store, subscribe } from "./../store.js";
+import { active, setMode, setPref, store, subscribe } from "./../store.js";
 
 const BLOCKS = 12;
 
@@ -17,7 +17,8 @@ function serverSpec(machine) {
 export function mountTitlebar(root) {
   const hours = h("div", { class: "hours-meter", title: t("hours left") });
   const server = h("div", { class: "server-chip chip" });
-  const crumb = h("div", { class: "crumb" }, hours, server);
+  const session = h("span", { class: "session-name" });
+  const crumb = h("div", { class: "crumb" }, hours, server, session);
   const overview = h("button", { class: "btn", type: "button", title: `${t("overview")} (Ctrl+\\)` }, icon("grid", 14));
   const inspector = h("button", { class: "btn", type: "button", title: t("inspector") }, icon("panel", 14));
   const language = h("button", { class: "btn lang", type: "button", title: t("language"), onclick: () => chooseLanguage(lang.current === "ru" ? "en" : "ru") }, lang.current === "ru" ? "EN" : "RU");
@@ -41,6 +42,8 @@ export function mountTitlebar(root) {
     const status = displayState(account.machine);
     server.replaceChildren(h("span", { class: `state-dot ${machineDot(status)}` }), h("span", {}, `${t("status " + status)}${account.machine ? ` · ${serverSpec(account.machine)}` : ""}`));
     server.title = `${t("server")}: ${t("status " + status)}`;
+    const agent = active();
+    session.textContent = agent ? `${basename(agent.workspace)}${agent.title ? ` — ${agent.title}` : ""}` : "";
     overview.classList.toggle("on", store.mode === "overview");
     inspector.classList.toggle("on", store.prefs.inspector);
   });
