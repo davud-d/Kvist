@@ -259,8 +259,8 @@ def main() -> int:
             remembered.write_text("\n".join([*earlier, text]) + "\n", encoding="utf-8")
             if text == "launch":
                 emit({"type": "task_state", "state": "running", "reason": ""})
-                emit({"type": "message", "markdown": f"args={' '.join(args)} auto={os.environ.get('AGENT_AUTO_APPROVAL', '')}",
-                      "source": "reply"})
+                auto = os.environ.get("AGENT_AUTO_APPROVAL", "")
+                emit({"type": "message", "markdown": f"args={' '.join(args)} auto={auto}", "source": "reply"})
                 emit({"type": "task_state", "state": "completed", "reason": ""})
                 emit({"type": "turn_end"})
                 continue
