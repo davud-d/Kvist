@@ -17,7 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
 )
-from sqlalchemy.orm import Mapped, ORMExecuteState, Session, mapped_column
+from sqlalchemy.orm import Mapped, ORMExecuteState, Session, mapped_column, relationship
 
 from .db import Base, LedgerAppendOnlyError, UTCDateTime, utcnow
 
@@ -92,6 +92,8 @@ class User(Base):
     chatgpt_email: Mapped[str] = mapped_column(String(320), default="")
     chatgpt_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # Navigation only, not a schema change: the link is machines.user_id.
+    machines: Mapped[list[Machine]] = relationship(back_populates="user")
 
 
 class ChatGPTLogin(Base):
@@ -144,6 +146,7 @@ class Machine(Base):
     last_beat_running: Mapped[list] = mapped_column(JSON, default=list)
     last_active_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    user: Mapped[User] = relationship(back_populates="machines")
 
 
 class Project(Base):
