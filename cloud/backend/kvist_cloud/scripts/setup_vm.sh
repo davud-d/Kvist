@@ -123,7 +123,7 @@ trap 'cleanup_on_error' ERR
 umask 077
 cat > "$seed_dir/meta-data" << EOF
 instance-id: $DOMAIN
-# Inside the VM the agent only ever sees "kvist@kvist"; the machine id stays on the host side.
+# The machine id stays on the host side; `hostname` inside the VM does not reveal it.
 local-hostname: kvist
 EOF
 
@@ -193,6 +193,9 @@ runcmd:
   - install -d -o kvist -g kvist /home/kvist/work /home/kvist/home /home/kvist/home/.kvist
   - install -m 600 -o kvist -g kvist /mnt/runner.json /home/kvist/runner.json
   - if [ -d /mnt/skel ]; then cp -r /mnt/skel/. /home/kvist/home/.kvist/ && chown -R kvist:kvist /home/kvist/home; fi
+  # The runner's HOME is /home/kvist/home, a login shell's is /home/kvist: both get the same prompt.
+  - 'for rc in /home/kvist/.bashrc /home/kvist/home/.bashrc; do echo "PS1=''kvist :-) ''" >> "$rc"; done'
+  - chown kvist:kvist /home/kvist/.bashrc /home/kvist/home/.bashrc
   - umount /mnt
   - systemctl disable --now ssh
   - systemctl enable --now kvist-runner
