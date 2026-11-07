@@ -313,3 +313,28 @@ def test_submit_resume_without_checkpoint_emits_error_event():
         isinstance(event, ErrorEvent) and "checkpoint" in event.message
         for event in events
     )
+
+
+def test_frontend_gate_reminds_when_a_command_approval_waits_unanswered(monkeypatch):
+    sent = []
+    monkeypatch.setattr("kernel.sandbox.approvals._REMINDER_DELAY", 0.01)
+    monkeypatch.setattr("kernel.sandbox.approvals.subprocess.Popen", lambda *a, **k: sent.append(a))
+    monkeypatch.setattr("kernel.sandbox.approvals.subprocess.run", lambda *a, **k: sent.append(a))
+
+    timer = EventApprovalGate(FrontendChannel()).waiting_confirm_command()
+    timer.join(2)
+
+    assert sent
+
+
+def test_frontend_gate_reminder_is_cancelled_once_the_answer_arrived(monkeypatch):
+    sent = []
+    monkeypatch.setattr("kernel.sandbox.approvals._REMINDER_DELAY", 0.05)
+    monkeypatch.setattr("kernel.sandbox.approvals.subprocess.Popen", lambda *a, **k: sent.append(a))
+    monkeypatch.setattr("kernel.sandbox.approvals.subprocess.run", lambda *a, **k: sent.append(a))
+
+    timer = EventApprovalGate(FrontendChannel()).waiting_confirm_command()
+    timer.cancel()
+    timer.join(1)
+
+    assert not sent

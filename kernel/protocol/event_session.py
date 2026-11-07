@@ -16,7 +16,7 @@ import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from kernel.sandbox.approvals import ApprovalTimedOut, FetchDecision
+from kernel.sandbox.approvals import ApprovalTimedOut, FetchDecision, start_approval_reminder
 from kernel.protocol.frontend_protocol import ErrorEvent, FrontendChannel, InputResponse
 
 
@@ -93,8 +93,8 @@ class EventApprovalGate:
             self._save_allow_pattern(pattern)
 
     def waiting_confirm_command(self) -> threading.Timer | None:
-        # The frontend shows the pending request itself; no extra reminder.
-        return None
+        # The frontend shows the request, but a window the user is not looking at cannot say so.
+        return start_approval_reminder()
 
     def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         _ = question

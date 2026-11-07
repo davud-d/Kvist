@@ -19,6 +19,45 @@ from typing import Literal, Protocol, runtime_checkable
 FetchDecision = Literal["once", "always", "deny"]
 
 
+# A reminder that fires only after this long: a window in plain sight needs none.
+_REMINDER_DELAY = 120
+
+
+def start_approval_reminder() -> threading.Timer:
+    """Start a timer that reminds the user to answer a pending confirmation.
+
+    The caller cancels the returned timer once the answer arrived. Every frontend
+    needs it: a GUI window the user is not looking at shows nothing by itself.
+    """
+    def send_notification():
+        import sys
+
+        if sys.platform == "win32":
+            subprocess.Popen(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    'msg "$env:USERNAME" "Kvist waiting your approval"',
+                ],
+                creationflags=0x08000000,
+            )
+        elif sys.platform == "darwin":
+            subprocess.Popen(["osascript", "-e", 'display notification "Kvist waiting your approval"'])
+        else:
+            subprocess.Popen(["notify-send", "Kvist", "Kvist waiting your approval"])
+            subprocess.run(["dbus-send", "--session", "--type=method_call", "--dest=org.freedesktop.Notifications",
+                            "/org/freedesktop/Notifications", "org.freedesktop.Notifications.Notify",
+                            "string:Kvist",
+                            "uint32:0", "string:", "string:Kvist waiting your approval", "string:", "array:string:",
+                            "dict:string:string:", "int32:-1"])
+
+    notification_timer = threading.Timer(_REMINDER_DELAY, send_notification)
+    notification_timer.daemon = True
+    notification_timer.start()
+    return notification_timer
+
+
 class ApprovalTimedOut(Exception):
     """The person was asked with a deadline (auto mode) and did not answer in time."""
 
@@ -93,39 +132,7 @@ class TerminalApprovalGate:
         return "deny"
 
     def waiting_confirm_command(self) -> threading.Timer | None:
-        """Start a timer that reminds the user to answer a pending confirmation.
-
-        Returns the started timer; the caller cancels it once the answer arrived.
-        """
-        TIMEOUT: int = 120
-
-        def send_notification():
-            import sys
-
-            if sys.platform == "win32":
-                subprocess.Popen(
-                    [
-                        "powershell",
-                        "-NoProfile",
-                        "-Command",
-                        'msg "$env:USERNAME" "Kvist waiting your approval"',
-                    ],
-                    creationflags=0x08000000,
-                )
-            elif sys.platform == "darwin":
-                subprocess.Popen(["osascript", "-e", 'display notification "Kvist waiting your approval"'])
-            else:
-                subprocess.Popen(["notify-send", "Kvist", "Kvist waiting your approval"])
-                subprocess.run(["dbus-send", "--session", "--type=method_call", "--dest=org.freedesktop.Notifications",
-                                "/org/freedesktop/Notifications", "org.freedesktop.Notifications.Notify",
-                                "string:Kvist",
-                                "uint32:0", "string:", "string:Kvist waiting your approval", "string:", "array:string:",
-                                "dict:string:string:", "int32:-1"])
-
-        notification_timer = threading.Timer(TIMEOUT, send_notification)
-        notification_timer.daemon = True
-        notification_timer.start()
-        return notification_timer
+        return start_approval_reminder()
 
     def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
         """Interactive approval prompt (Human-in-the-Loop).
