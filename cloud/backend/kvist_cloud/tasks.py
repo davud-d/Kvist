@@ -85,6 +85,12 @@ def apply_event(task: Task, event: dict) -> None:
         task.final_message = str(event.get("markdown", ""))
         task.outcome = task.outcome or "replied"
         return
+    if kind == "stream_commit" and str(event.get("text", "")).strip():
+        # The same answer when the provider streams it. An empty commit is the end-of-session tag that is
+        # never shown: its answer comes as a message or a final.
+        task.final_message = str(event["text"])
+        task.outcome = task.outcome or "replied"
+        return
     if kind == "error" and task.outcome == "replied":
         task.outcome = ""
         return

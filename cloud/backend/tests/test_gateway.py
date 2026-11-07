@@ -201,6 +201,19 @@ def test_turn_end_settles_the_status():
         apply_event(replied, event)
     assert (replied.status, replied.final_message) == (TaskStatus.DONE, "It is a FastAPI app.")
 
+    # The same reply from a provider that streams it: a stream_commit is the answer, not a turn that ended on an error.
+    streamed = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
+    for event in ({"type": "stream_start", "stream_id": "s"}, {"type": "stream_commit", "stream_id": "s", "text": "hi"},
+                  {"type": "turn_end"}):
+        apply_event(streamed, event)
+    assert (streamed.status, streamed.final_message) == (TaskStatus.DONE, "hi")
+
+    # An empty commit (the end-of-session tag) is not an answer.
+    tag_only = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
+    for event in ({"type": "stream_commit", "stream_id": "s", "text": ""}, {"type": "turn_end"}):
+        apply_event(tag_only, event)
+    assert (tag_only.status, tag_only.status_reason) == (TaskStatus.FAILED, "agent_error")
+
     notice_only = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
     for event in ({"type": "message", "markdown": "cleaned up", "source": "notice"}, {"type": "turn_end"}):
         apply_event(notice_only, event)
