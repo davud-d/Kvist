@@ -65,7 +65,7 @@ MODEL_PID=$!
 trap 'kill "$MODEL_PID" 2>/dev/null || true' EXIT
 
 say "Kvist Cloud: http://127.0.0.1:$PORT"
-echo "  Sign in: the GitHub button signs you in as the local user 'dev'."
+echo "  Sign in: GitHub OAuth when configured in cloud/.env; otherwise the local user 'dev'."
 if grep -qE '^[[:space:]]*BILLING_ENABLED[[:space:]]*=[[:space:]]*true' "$CLOUD/.env" 2>/dev/null; then
   echo "  Payments: ON, real Platega from cloud/.env."
 else

@@ -21,8 +21,12 @@ Then open <http://127.0.0.1:8740>. The script creates `cloud/.venv`, builds the 
 local secrets once (in `cloud/.cloud-data/dev-secrets.env`, mode 0600, never printed), starts a
 fake model on port 8799 and the server on port 8740.
 
-* **Sign in:** the GitHub button signs you in as the local user `dev` (`AUTH_DEV_LOGIN`, loopback
-  only).
+* **Sign in:** without a configured GitHub app the button signs in the local user `dev`
+  (`AUTH_DEV_LOGIN`, loopback only). For real sign-in, create a GitHub OAuth App with callback URL
+  `http://127.0.0.1:8740/auth/github/callback` and put `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`
+  in `cloud/.env`. If using another `PORT`, use that port in the callback URL. Never commit the secret.
+  For a deployed server use `<PUBLIC_URL>/auth/github/callback` and HTTPS. A real GitHub account
+  can start a trial only once and strictly after one calendar month.
 * **Card:** billing is off unless `cloud/.env` says `BILLING_ENABLED=true` (see Payments below). Off, the
   payment step is a stub: press "Skip (dev)". Nothing else to pass: no flags, no variables.
 * **Model:** pick "Other", base URL `http://127.0.0.1:8799/v1`, model `fake-model`, any key of

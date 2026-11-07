@@ -189,3 +189,22 @@ def test_api_writes_need_the_client_header(client_factory):
     response = client.post("/api/anything", headers={"X-Kvist-Client": ""})
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "csrf"
+
+
+def test_real_github_dev_checkout_checks_account_age(client_factory):
+    from datetime import timedelta
+
+    from kvist_cloud.db import session_scope, utcnow
+    from kvist_cloud.models import User
+
+    client = client_factory(fake_github([]), AUTH_DEV_LOGIN="true", **GITHUB)
+    state = start_login(client)
+    client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
+    with session_scope(client.app.state.session_factory) as db:
+        db.get(User, 1).github_created_at = utcnow() - timedelta(days=10)
+    response = client.post("/api/billing/dev/skip-checkout")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "trial_ineligible"
+    with session_scope(client.app.state.session_factory) as db:
+        db.get(User, 1).github_created_at = utcnow() - timedelta(days=60)
+    assert client.post("/api/billing/dev/skip-checkout").status_code == 200

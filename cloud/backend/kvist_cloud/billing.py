@@ -559,6 +559,9 @@ def dev_skip_checkout(request: Request, user: User = Depends(current_user), db: 
     if ledger.current_subscription(db, user.id) is None:
         if user.trial_used_at is not None:
             raise ApiError(403, "trial_used", "Trial already used. / Пробный период уже использован.")
+        if request.app.state.settings.github_client_id and not trial_eligible(user):
+            raise ApiError(403, "trial_ineligible", "Trial is available once, for GitHub accounts older than one "
+                           "month. / Пробный период доступен один раз, с GitHub-аккаунтом старше месяца.")
         create_trial(db, user)
         record_step(db, "card_added", user_id=user.id)
     db.commit()
