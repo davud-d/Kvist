@@ -257,6 +257,13 @@ def main() -> int:
             remembered = session_file(workspace, session)
             earlier = remembered.read_text(encoding="utf-8").splitlines() if remembered.exists() else []
             remembered.write_text("\n".join([*earlier, text]) + "\n", encoding="utf-8")
+            if text == "launch":
+                emit({"type": "task_state", "state": "running", "reason": ""})
+                emit({"type": "message", "markdown": f"args={' '.join(args)} auto={os.environ.get('AGENT_AUTO_APPROVAL', '')}",
+                      "source": "reply"})
+                emit({"type": "task_state", "state": "completed", "reason": ""})
+                emit({"type": "turn_end"})
+                continue
             if text.split()[:1] == ["say"]:
                 emit({"type": "task_state", "state": "running", "reason": ""})
                 remembered_words = "; ".join(earlier)

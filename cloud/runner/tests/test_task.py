@@ -96,6 +96,13 @@ async def test_the_key_reaches_kvist_only_through_its_environment(tmp_path):
     assert KEY not in (tmp_path / "logs" / "task-5.log").read_text()
 
 
+async def test_kvist_starts_as_universal_with_auto_mode(tmp_path):
+    recorder = Recorder()
+    await run(make(tmp_path, "launch", recorder))
+    markdown = recorder.events("message")[0]["markdown"]
+    assert "--role universal" in markdown and "--approval-mode ask" in markdown and "auto=1" in markdown
+
+
 async def test_wrong_key_pauses_the_task(tmp_path):
     recorder = Recorder()
     await run(make(tmp_path, "auth-error", recorder))

@@ -324,7 +324,7 @@ Where the brief left a choice open, the simple option was taken and written down
    The trial is its own period of 7 days.
 9. **The 5-minute grace after hours run out is free.** Billing stops at zero rather than
    running the balance negative.
-10. **Approvals.** Kvist runs with `--approval-mode ask` and `AGENT_WRITE_APPROVAL=0`: a
+10. **Approvals.** Kvist runs with `--role universal`, `--approval-mode ask`, `AGENT_AUTO_APPROVAL=1` (the auto-mode classifier answers approval questions and the person is asked only when it cannot decide) and `AGENT_WRITE_APPROVAL=0`: a
     dangerous command still asks the person (status `waiting_for_user`, meter stopped), file
     writes inside the task folder do not. Network inside the sandbox is allowed
     (`AGENT_SANDBOX_NET=allow`): a cloud machine without network cannot install dependencies.

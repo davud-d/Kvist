@@ -153,6 +153,7 @@ class TaskProcess:
             "--workspace", str(workdir),
             "--frontend", "stdio-multi",
             "--approval-mode", "ask",
+            "--role", "universal",
         ]
         if self.limits.background_seconds > 0:
             argv.append("--wake")
@@ -216,6 +217,8 @@ class TaskProcess:
                 "PYTHONUTF8": "1",
                 # The task folder is the agent's own; asking before every file write helps nobody.
                 "AGENT_WRITE_APPROVAL": "0",
+                # A second model answers the approvals it can; the customer is asked only when it cannot decide.
+                "AGENT_AUTO_APPROVAL": "1",
                 "AGENT_SANDBOX_NET": "allow",
             }
         )

@@ -2132,7 +2132,8 @@ def build_agent(
         perf_logger=perf_logger,
     )
     warnings.extend(getattr(agent, "_storage_warnings", []))
-    if get_auto_approval():
+    # The env switch lets a host that owns the config (the cloud runner) start in auto mode without saving it.
+    if get_auto_approval() or os.getenv("AGENT_AUTO_APPROVAL") == "1":
         agent.set_auto_approval(True)
         warnings.append(AUTO_MODE_STARTUP_WARNING)
     effort_note = effort_advisory(config.provider, config.reasoning_effort)
