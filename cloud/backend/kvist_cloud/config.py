@@ -58,6 +58,8 @@ class Settings:
     machine_idle_sleep_seconds: float = 900.0
     provider_outage_seconds: float = 300.0
     hours_grace_seconds: float = 300.0
+    # How often the saved ChatGPT sign-ins are used once, so an expired one is noticed before a task needs it.
+    chatgpt_check_seconds: float = 86400.0
     admin_logins: frozenset[str] = frozenset()
     # Dev only: lets a model endpoint or a repository live on this computer.
     allow_local_endpoints: bool = False
@@ -238,6 +240,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         machine_idle_sleep_seconds=_number(env, "MACHINE_IDLE_SLEEP_SECONDS", 900.0),
         provider_outage_seconds=_number(env, "PROVIDER_OUTAGE_SECONDS", 300.0),
         hours_grace_seconds=_number(env, "HOURS_GRACE_SECONDS", 300.0),
+        chatgpt_check_seconds=_number(env, "CHATGPT_CHECK_SECONDS", 86400.0),
         admin_logins=admins,
         allow_local_endpoints=allow_local,
         frontend_dist=Path(env.get("FRONTEND_DIST", "") or CLOUD_ROOT / "frontend" / "dist"),

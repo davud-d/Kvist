@@ -133,6 +133,7 @@ FIELDS = [
     *[("POST", "/api/disputes", {"message": "please review"}, k) for k in ("task_id", "message")],
     *[("POST", "/api/admin/disputes/1/refund", {"minutes": 1, "note": "refund"}, k) for k in ("minutes", "note")],
     *[("POST", "/api/billing/checkout", {"plan": "trial"}, k) for k in ("plan", "method")],
+    ("POST", "/api/chatgpt/start", {"next": "/onboarding"}, "next"),
 ]
 
 

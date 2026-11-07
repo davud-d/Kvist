@@ -103,6 +103,23 @@ socket. The runner packs the folder into a `.tar.gz` and uploads it with an HTTP
 the machine token. The browser polls the export and downloads it. Export goes through the
 runner, not the provider, so it works the same on any hosting.
 
+### Sign in with ChatGPT (`chatgpt.py`)
+
+The customer's ChatGPT plan can pay for their model instead of an API key. The sign-in runs on the server, so
+nothing listens on the customer's computer:
+
+1. `POST /api/chatgpt/start` opens an attempt (3 minutes, one use, bound to the signed-in customer) and returns
+   OpenAI's address. Only the hash of its `state` is stored; the PKCE verifier is encrypted.
+2. OpenAI sends the browser back to `/auth/chatgpt/callback`. The attempt is looked up by that state, deleted at
+   once, and its code is exchanged for tokens.
+3. The tokens are stored as one encrypted blob on the user row (they must be sent back to OpenAI, so a hash would
+   be useless). The identity token is read without its signature: it came straight from OpenAI's token endpoint
+   over TLS (OpenID Connect Core 3.1.3.7).
+4. A refresh token is replaced whenever it is used, so `fresh_access_token` is the only place that renews it, under
+   a per-customer lock and outside any database transaction. A machine only ever gets the short-lived access token.
+5. Once a day (`CHATGPT_CHECK_SECONDS`) every saved sign-in is renewed. One that OpenAI refuses becomes
+   `needs_login` and the customer signs in again; OpenAI being unreachable changes nothing.
+
 ### Session addresses and who may open them
 
 Every task has a **public id** (`tasks.public_id`: 72 random bits, url-safe; not the row number, never reused) and

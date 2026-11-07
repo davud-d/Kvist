@@ -85,7 +85,28 @@ class User(Base):
     model_base_url: Mapped[str] = mapped_column(String(500), default="")
     model_name: Mapped[str] = mapped_column(String(200), default="")
     locale: Mapped[str] = mapped_column(String(5), default="en")
+    # "Sign in with ChatGPT": the tokens are one encrypted JSON blob (they must be sent back to OpenAI, so a hash
+    # would be useless). "" = never connected, "connected", or "needs_login" once OpenAI refused the renewal.
+    chatgpt_enc: Mapped[str] = mapped_column(Text, default="")
+    chatgpt_state: Mapped[str] = mapped_column(String(12), default="")
+    chatgpt_email: Mapped[str] = mapped_column(String(320), default="")
+    chatgpt_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class ChatGPTLogin(Base):
+    """One open "Sign in with ChatGPT": minutes long, used once, kept only until it ends."""
+
+    __tablename__ = "chatgpt_logins"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # The browser brings the state back; only its hash is kept here.
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    verifier_enc: Mapped[str] = mapped_column(Text)
+    nonce: Mapped[str] = mapped_column(String(64))
+    redirect_to: Mapped[str] = mapped_column(String(200), default="/onboarding")
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
 class Subscription(Base):

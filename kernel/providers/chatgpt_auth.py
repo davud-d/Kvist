@@ -17,12 +17,10 @@ import httpx
 import jwt
 
 from kernel.config.user_config import _update_user_config, load_user_config
+from kernel.providers.chatgpt_endpoints import (  # noqa: F401 - re-exported for callers of this module
+    AGENT_CLIENT_ID, AUTHORIZE_ENDPOINT, ISSUER, PLAN_SCOPE, RESOURCE, SCOPES, TOKEN_ENDPOINT,
+)
 
-ISSUER = "https://auth.openai.com"
-RESOURCE = "https://api.openai.com/v1"
-TOKEN_ENDPOINT = ISSUER + "/api/accounts/oauth/token"
-PLAN_SCOPE = "chatgpt.tokens.use.direct"
-SCOPES = "openid profile email offline_access resource.invoke " + PLAN_SCOPE
 STORE_KEY = "chatgpt_oauth"
 _ATTEMPTS: dict[str, LoginAttempt] = {}
 _ATTEMPTS_LOCK = threading.RLock()
@@ -242,14 +240,14 @@ class LoginAttempt:
         self.server = CallbackServer(("127.0.0.1", 0), Handler)
         self.server.timeout = 0.5
         self.redirect_uri = f"http://127.0.0.1:{self.server.server_port}/auth/callback"
-        params = {"client_id": self.previous.get("client_id", "dynamic_agent_client"),
+        params = {"client_id": self.previous.get("client_id", AGENT_CLIENT_ID),
                   "ext_agent_host_id": self.host_id, "response_type": "code", "redirect_uri": self.redirect_uri,
                   "scope": SCOPES, "resource": RESOURCE, "state": self.state, "nonce": self.nonce,
                   "code_challenge_method": "S256", "code_challenge": base64.urlsafe_b64encode(
                       hashlib.sha256(self.verifier.encode()).digest()).rstrip(b"=").decode()}
         if not self.previous:
             params["agent_name_hint"] = "Kvist"
-        self.url = ISSUER + "/api/accounts/authorize?" + urlencode(params)
+        self.url = AUTHORIZE_ENDPOINT + "?" + urlencode(params)
         threading.Thread(target=self._listen, daemon=True, name="chatgpt-oauth").start()
 
     def _listen(self):
@@ -268,7 +266,7 @@ class LoginAttempt:
         if any(len(params.get(k, [])) > 1 for k in ("code", "client_id")):
             raise ChatGPTAuthError("Invalid ChatGPT callback / Некорректный ответ входа.")
         client_id = params.get("client_id", [self.previous.get("client_id", "")])[0]
-        if not client_id or client_id == "dynamic_agent_client":
+        if not client_id or client_id == AGENT_CLIENT_ID:
             raise ChatGPTAuthError("ChatGPT registration incomplete / Регистрация ChatGPT не завершена.")
         if self.previous and client_id != self.previous["client_id"]:
             raise ChatGPTAuthError("ChatGPT registration mismatch / Регистрация ChatGPT не совпадает.")

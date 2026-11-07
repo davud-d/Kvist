@@ -8,13 +8,12 @@ Check results are codes the frontend turns into plain words next to the field:
 from __future__ import annotations
 
 import ipaddress
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Request
+from kernel.llm.provider_registry import ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS
 from pydantic import Field
 from sqlalchemy.orm import Session
 
@@ -27,12 +26,6 @@ from .models import User
 from .outbound import PublicEndpointTransport
 from .secrets import Vault, last4, remember
 from .validation import InputModel
-
-# The provider list belongs to the core one directory up; the cloud reads it instead of keeping a copy.
-_REPO_ROOT = str(Path(__file__).resolve().parents[3])
-if _REPO_ROOT not in sys.path:
-    sys.path.append(_REPO_ROOT)
-from kernel.llm.provider_registry import ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
