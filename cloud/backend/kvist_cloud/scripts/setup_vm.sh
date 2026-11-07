@@ -136,7 +136,10 @@ print(json.dumps({
     "machine_id": int(env["MACHINE_ID"]),
     "gateway_url": env["GATEWAY_URL"],
     "token": env["TOKEN"],
-    "root": "/home/kvist",
+    # Projects are ~/<name> and Kvist keeps its config in ~/.kvist; the runner's own state lives apart.
+    "root": "/var/lib/kvist-runner",
+    "work_dir": "/home/kvist",
+    "home_dir": "/home/kvist",
     "kvist_command": ["/opt/kvist/bin/kvist"],
     "heartbeat_seconds": 15,
     "machine": {"vcpu": int(env["VCPU"]), "memory_gb": int(env["MEMORY_GB"]), "disk_gb": int(env["DISK_GB"])},
@@ -179,7 +182,7 @@ write_files:
       [Service]
       User=kvist
       WorkingDirectory=/home/kvist
-      ExecStart=/opt/kvist/bin/kvist-runner --config /home/kvist/runner.json
+      ExecStart=/opt/kvist/bin/kvist-runner --config /etc/kvist-runner/runner.json
       Restart=always
       RestartSec=5
       NoNewPrivileges=true
@@ -190,12 +193,11 @@ runcmd:
   - mount -o ro /dev/disk/by-label/cidata /mnt
   - python3 -m venv /opt/kvist
   - /opt/kvist/bin/pip install --no-index --find-links /mnt/wheels kvist kvist-runner
-  - install -d -o kvist -g kvist /home/kvist/work /home/kvist/home /home/kvist/home/.kvist
-  - install -m 600 -o kvist -g kvist /mnt/runner.json /home/kvist/runner.json
-  - if [ -d /mnt/skel ]; then cp -r /mnt/skel/. /home/kvist/home/.kvist/ && chown -R kvist:kvist /home/kvist/home; fi
-  # The runner's HOME is /home/kvist/home, a login shell's is /home/kvist: both get the same prompt.
-  - 'for rc in /home/kvist/.bashrc /home/kvist/home/.bashrc; do echo "PS1=''kvist :-) ''" >> "$rc"; done'
-  - chown kvist:kvist /home/kvist/.bashrc /home/kvist/home/.bashrc
+  - install -d -o kvist -g kvist /home/kvist/.kvist /var/lib/kvist-runner
+  - install -d /etc/kvist-runner
+  - install -m 600 -o kvist -g kvist /mnt/runner.json /etc/kvist-runner/runner.json
+  - if [ -d /mnt/skel ]; then cp -r /mnt/skel/. /home/kvist/.kvist/ && chown -R kvist:kvist /home/kvist/.kvist; fi
+  - 'echo "PS1=''kvist :-) ''" >> /home/kvist/.bashrc'
   - umount /mnt
   - systemctl disable --now ssh
   - systemctl enable --now kvist-runner
