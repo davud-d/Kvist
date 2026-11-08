@@ -15,6 +15,9 @@ import { MASCOT_OCTANTS, MASCOT_QUADRANTS, MASCOT_THINKING_QUADRANTS } from "../
 const MASCOT_FRAMES = MASCOT_QUADRANTS
 import { MASCOT_COLUMNS, MASCOT_FPS, MASCOT_ROWS, Mascot, MascotFrame, mascotGlyphs, runsOf } from "../ui/skins/claude-code/mascot.js"
 
+// These tests are about the greeting, which in January and February goes on into the winter loop.
+process.env.KVIST_WINTER = "0"
+
 const plain = (text: string | undefined) => (text ?? "").replace(/\x1b\[[0-9;]*m/g, "")
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 

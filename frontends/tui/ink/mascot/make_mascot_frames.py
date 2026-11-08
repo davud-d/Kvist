@@ -231,6 +231,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Convert PNG animation frames to terminal cells.")
     parser.add_argument("--source", default="mascot/frames", help="directory with frame_1.png, frame_2.png, …")
     parser.add_argument("--rows", type=int, default=8, help="text rows tall (the picture is twice as many columns wide)")
+    parser.add_argument("--opaque", action="store_true", help="keep each frame whole, scenery included (the winter squirrel sits in a snowy night)")
     parser.add_argument("--output", default="ui/skins/claude-code/mascot-frames.ts")
     parser.add_argument("--images-output", default="ui/skins/claude-code/mascot-images.ts")
     args = parser.parse_args()
@@ -238,8 +239,12 @@ def main() -> None:
     paths = sorted(source.glob("frame_*.png"), key=lambda p: int(p.stem.split("_")[1]))
     if not paths:
         raise SystemExit(f"no frame_*.png in {source}")
-    frames = [transparent_background(path) for path in paths]
-    box = shared_box(frames)
+    if args.opaque:
+        frames = [Image.open(path).convert("RGBA") for path in paths]
+        box = (0, 0, *frames[0].size)
+    else:
+        frames = [transparent_background(path) for path in paths]
+        box = shared_box(frames)
     thinking = transparent_background(REPO / THINKING_SOURCE, THINKING_BUBBLE)
     thinking_box = square_box(shared_box([thinking]))
     sets = {

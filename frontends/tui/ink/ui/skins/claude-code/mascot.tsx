@@ -1,5 +1,5 @@
 // The squirrel of the welcome block: six frames played once at two a second, then it
-// stays on the last one. The frames are cells made by make_mascot_frames.py, so
+// stays on the last one (from January to February it then goes on with the winter frames, in a loop). The frames are cells made by make_mascot_frames.py, so
 // this only draws them; a cell without a background lets the terminal's own show through.
 //
 // A terminal that can draw pictures (kitty graphics protocol) is shown the frames as real
@@ -16,7 +16,10 @@ import { MASCOT_OCTANTS, MASCOT_QUADRANTS, MASCOT_THINKING_OCTANTS, MASCOT_THINK
 import { MASCOT_OCTANTS as HEIST_OCTANTS, MASCOT_QUADRANTS as HEIST_QUADRANTS } from "./mascot-heist-frames.js"
 import { MASCOT_PNGS as HEIST_PNGS } from "./mascot-heist-images.js"
 import { MASCOT_PNGS, MASCOT_THINKING_PNG } from "./mascot-images.js"
+import { MASCOT_OCTANTS as WINTER_OCTANTS, MASCOT_QUADRANTS as WINTER_QUADRANTS } from "./mascot-winter-frames.js"
+import { MASCOT_PNGS as WINTER_PNGS } from "./mascot-winter-images.js"
 import { isHeistDay } from "./heist.js"
+import { WINTER_FRAME_MS, isWinter } from "./winter.js"
 
 export const MASCOT_FPS = 2
 // With no key pressed for this long the squirrel sits and thinks, until the next key.
@@ -26,6 +29,19 @@ export const THINKING_FRAME = -1
 export const MASCOT_ROWS = MASCOT_QUADRANTS[0]?.length ?? 0
 export const MASCOT_COLUMNS = MASCOT_QUADRANTS[0]?.[0]?.length ?? 0
 const FRAME_COUNT = MASCOT_QUADRANTS.length
+const WINTER_COUNT = WINTER_QUADRANTS.length
+
+// The winter frames follow the greeting's, so one index runs through both. The heist day keeps its own squirrel.
+const wintry = () => isWinter() && !isHeistDay()
+
+// The frame after `index` and how long to wait for it; null once the greeting is over and it is not winter.
+export function nextFrame(index: number, winter: boolean): { index: number; delay: number } | null {
+  const greeting = 1000 / MASCOT_FPS
+  if (index < FRAME_COUNT - 1) return { index: index + 1, delay: greeting }
+  if (!winter) return null
+  if (index === FRAME_COUNT - 1) return { index: index + 1, delay: greeting }
+  return { index: index + 1 < FRAME_COUNT + WINTER_COUNT ? index + 1 : FRAME_COUNT, delay: WINTER_FRAME_MS }
+}
 
 export type Glyphs = "octants" | "quadrants"
 
@@ -94,7 +110,7 @@ export function syncMascotImage(pointer: Pointer | null): void {
   const skipTop = view ? Math.max(0, view.y - y) : 0
   const skipBottom = view ? Math.max(0, y + height - (view.y + view.height)) : 0
   if (width <= 0 || skipTop + skipBottom >= height) return pointer.showImage(null)
-  const pictures = isHeistDay() ? HEIST_PNGS : MASCOT_PNGS
+  const pictures = isHeistDay() ? HEIST_PNGS : wintry() ? [...MASCOT_PNGS, ...WINTER_PNGS] : MASCOT_PNGS
   pointer.showImage({ png: (mascotSlot.frame === THINKING_FRAME ? MASCOT_THINKING_PNG : pictures[mascotSlot.frame]) ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height, skipTop, skipBottom })
 }
 
@@ -102,6 +118,7 @@ function mascotFrames(thinking = false): MascotFrames {
   const octants = mascotGlyphs(process.env) === "octants"
   if (thinking) return octants ? MASCOT_THINKING_OCTANTS : MASCOT_THINKING_QUADRANTS
   if (isHeistDay()) return octants ? HEIST_OCTANTS : HEIST_QUADRANTS
+  if (wintry()) return octants ? [...MASCOT_OCTANTS, ...WINTER_OCTANTS] : [...MASCOT_QUADRANTS, ...WINTER_QUADRANTS]
   return octants ? MASCOT_OCTANTS : MASCOT_QUADRANTS
 }
 
@@ -126,10 +143,12 @@ export function Mascot({ thinking = false }: { thinking?: boolean }) {
   const [index, setIndex] = useState(0)
   const pictures = pointer?.images ?? false
   useEffect(() => {
-    if (index >= FRAME_COUNT - 1) return
-    const timer = setTimeout(() => setIndex(index + 1), 1000 / MASCOT_FPS)
+    // The thinking squirrel is one picture, so there is nothing to step through behind it.
+    const next = thinking ? null : nextFrame(index, wintry())
+    if (!next) return
+    const timer = setTimeout(() => setIndex(next.index), next.delay)
     return () => clearTimeout(timer)
-  }, [index])
+  }, [index, thinking])
   useEffect(() => {
     mascotSlot.node = slot.current
     return () => {
