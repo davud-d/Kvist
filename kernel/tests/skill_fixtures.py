@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,11 @@ from kernel.plugins.registry import SkillRegistry
 from kernel.plugins.sandbox import runner_unavailable_reason
 
 requires_runner = pytest.mark.skipif(bool(runner_unavailable_reason()), reason=runner_unavailable_reason() or "")
+
+# Skills attach only on the platforms a manifest may name; the BSDs are not among them, so a skill is "not supported" there.
+requires_skill_platform = pytest.mark.skipif(
+    sys.platform not in PLATFORMS, reason=f"skills are not supported on {sys.platform}"
+)
 
 ECHO_TOOL = {
     "name": "say",

@@ -11,7 +11,7 @@ import pytest
 from kernel.plugins.host import RunnerStartError, check_description
 from kernel.plugins.manifest import PLATFORMS, ManifestError, load_manifest, package_digest, parse_manifest
 from kernel.plugins.registry import RegistryError, SkillRegistry
-from kernel.tests.skill_fixtures import ECHO_TOOL, install, write_skill
+from kernel.tests.skill_fixtures import ECHO_TOOL, install, requires_skill_platform, write_skill
 
 
 def _registry(tmp_path):
@@ -141,6 +141,7 @@ def test_installed_versions_are_immutable_and_activation_is_separate(tmp_path):
     assert registry.entry("echo").digest == first.digest
 
 
+@requires_skill_platform
 def test_a_crash_after_copying_leaves_the_active_version_working(tmp_path, monkeypatch):
     registry = _registry(tmp_path)
     # Instructions only: a tools skill is unavailable wherever the runner is missing, so `available` would say

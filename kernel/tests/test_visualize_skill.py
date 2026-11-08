@@ -12,6 +12,9 @@ from pathlib import Path
 import pytest
 
 from kernel.plugins import host_actions
+from kernel.tests.skill_fixtures import requires_skill_platform
+
+pytestmark = requires_skill_platform
 from kernel.plugins.grants import GrantStore
 from kernel.plugins.host import ServiceError
 from kernel.plugins.manifest import load_manifest, package_digest

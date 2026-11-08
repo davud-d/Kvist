@@ -158,7 +158,9 @@ def _ps_listing(*selector: str) -> list[list[str]]:
     """Rows of `ps` (POSIX options, so the BSDs and macOS answer too); empty when ps cannot run."""
     try:
         done = subprocess.run(
-            ["ps", *selector, "-o", "pid=,ppid=,lstart="], capture_output=True, text=True, timeout=5, check=False,
+            # One -o per column: NetBSD's ps reads "pid=,ppid=" as a single column whose header is ",ppid=".
+            ["ps", *selector, "-o", "pid=", "-o", "ppid=", "-o", "lstart="],
+            capture_output=True, text=True, timeout=5, check=False,
             env={"LC_ALL": "C", "PATH": os.defpath},
         )
     except (OSError, subprocess.SubprocessError):

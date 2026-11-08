@@ -200,6 +200,8 @@ def _make_tty(monkeypatch, entry):
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(main, "_TUI_ENTRY", entry)
+    # The command is faked below, so a machine without Node (the BSD CI images) must not change the outcome.
+    monkeypatch.setattr(main, "find_node", lambda: "node")
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "openai")
     monkeypatch.setattr(main, "resolve_workspace_path", lambda raw: raw)
     calls = []
@@ -470,7 +472,7 @@ def test_launch_tui_needs_node_on_path(monkeypatch, tmp_path, capsys):
     entry = tmp_path / "kvist-tui.mjs"
     entry.write_text("")
     calls = _make_tty(monkeypatch, entry)
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(main, "find_node", lambda: None)
     assert main.launch_tui(_tui_args()) is None
     assert "Node.js 22" in capsys.readouterr().err
     assert calls == []

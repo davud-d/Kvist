@@ -96,7 +96,13 @@ def _unix_resource_limits(limits: ResourceLimits) -> None:
     )
     for name, value in requested:
         try:
-            resource.setrlimit(getattr(resource, name), (value, value))
+            kind = getattr(resource, name)
+            # A hard limit can only be lowered. When the system already holds a stricter one (NetBSD's NPROC
+            # does), that limit does the job and asking for more would only print a warning into the output.
+            hard = resource.getrlimit(kind)[1]
+            if hard != resource.RLIM_INFINITY:
+                value = min(value, hard)
+            resource.setrlimit(kind, (value, value))
         except (ValueError, OSError) as error:
             import sys
 

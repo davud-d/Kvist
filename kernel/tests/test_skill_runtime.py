@@ -10,7 +10,9 @@ from kernel.plugins.registry import SkillRegistry
 from kernel.sandbox.redaction import DEFANGED_TAG
 from kernel.plugins.resources import Owner
 from kernel.tests.conftest import NullUI
-from kernel.tests.skill_fixtures import ECHO_TOOL, grant_all, install, requires_runner, write_skill
+from kernel.tests.skill_fixtures import (
+    ECHO_TOOL, grant_all, install, requires_runner, requires_skill_platform, write_skill,
+)
 
 
 class AnsweringUI(NullUI):
@@ -79,6 +81,7 @@ def _feedback(agent, action_type):
     return [log for log in agent._state.step_logs if (log.get("command") or {}).get("action", {}).get("type") == action_type]
 
 
+@requires_skill_platform
 def test_an_instruction_only_skill_attaches_without_any_runner(agent_factory, registry, tmp_path, monkeypatch):
     install(registry, write_skill(tmp_path / "src", "style", kind="instructions", instructions="# Style\nUse tabs.\n"))
     agent, ui = _agent(agent_factory)
@@ -98,6 +101,7 @@ def test_an_instruction_only_skill_attaches_without_any_runner(agent_factory, re
     assert ui.confirms == []  # no code, nothing to approve
 
 
+@requires_skill_platform
 def test_reference_pages_are_listed_on_attach_and_read_one_at_a_time(agent_factory, registry, tmp_path):
     source = write_skill(tmp_path / "src", "guide", kind="instructions", instructions="# Guide\nSee the pages.\n")
     (source / "references").mkdir()
@@ -500,6 +504,7 @@ def test_a_sandboxed_skill_cannot_reach_the_desktop_even_with_the_capability(age
         CoreServices.handle(agent.skills.services, call, "host.open_url", {"url": "https://example.com/"})
 
 
+@requires_skill_platform
 def test_a_core_tool_is_attached_with_approval_and_runs_without_a_runner(agent_factory, registry, monkeypatch):
     from kernel.plugins import host_actions
 
@@ -521,6 +526,7 @@ def test_a_core_tool_is_attached_with_approval_and_runs_without_a_runner(agent_f
     assert opened == ["https://www.youtube.com/watch?v=abc"]
 
 
+@requires_skill_platform
 def test_a_core_tool_that_changes_things_is_refused_for_a_read_only_task(agent_factory, registry, monkeypatch):
     from kernel.agent.agent_runtime import _is_read_only_violation
     from kernel.plugins import host_actions
@@ -546,6 +552,7 @@ def test_a_core_tool_that_changes_things_is_refused_for_a_read_only_task(agent_f
     assert refused["ok"] is False and "read-only" in refused["error"] and opened == []
 
 
+@requires_skill_platform
 def test_what_is_missing_reaches_the_model_in_full_so_it_can_tell_the_person(agent_factory, registry, monkeypatch):
     from kernel.plugins import host_actions
 

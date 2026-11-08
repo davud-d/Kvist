@@ -239,6 +239,22 @@ def _never_start_the_tray(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _close_cached_sqlite_connections():
+    """The memory and skill-storage stores keep one connection per path open for the thread's life.
+
+    Every test uses a fresh tmp path, so over a whole run they pile up (3 descriptors each: database,
+    WAL, shared memory). NetBSD's select() refuses a descriptor past 256, which broke prompt_toolkit's
+    input reader late in the run.
+    """
+    yield
+    from kernel.memory import store as memory_store
+    from kernel.plugins import storage as skill_storage
+
+    memory_store.close_connections()
+    skill_storage.close_connections()
+
+
+@pytest.fixture(autouse=True)
 def _disable_session_titles(monkeypatch):
     """Keep background session-title generation from firing in ordinary tests.
 

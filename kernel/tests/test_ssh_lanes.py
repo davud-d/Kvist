@@ -221,6 +221,10 @@ def test_a_connection_that_went_quiet_without_being_closed_stops_counting_as_an_
 
     ghost.wait_closed(timeout=3)
 
+    # The client sees the close a moment before the daemon drops it from its list; a slow machine loses that race.
+    deadline = time.monotonic() + 3
+    while core.daemon.status()["attached"] and time.monotonic() < deadline:
+        time.sleep(0.02)
     assert core.daemon.status()["attached"] == 0
 
 

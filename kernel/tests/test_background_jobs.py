@@ -32,6 +32,9 @@ from kernel.sandbox.process_tree import run_supervised
 from kernel.sandbox.sandbox import host_network_launcher
 from kernel.tests.conftest import AllowAllApprovals, requires_posix
 
+# NetBSD's python312 package installs only python3.12, no python3.
+PYTHON = "python3" if shutil.which("python3") else f"python{sys.version_info.major}.{sys.version_info.minor}"
+
 
 def _commands_without_network_can_start() -> bool:
     try:
@@ -260,7 +263,7 @@ def test_a_real_command_runs_in_the_background_and_is_followed(tmp_path):
     code = "import time\nprint('up', flush=True)\ntime.sleep(0.6)\nprint('done', flush=True)"
 
     started = executor._run_shell(
-        ["python3", "-c", code], background=True, network=True, justification="test",
+        [PYTHON, "-c", code], background=True, network=True, justification="test",
     )
 
     assert started.ok and started.data["started_in_background"] is True
@@ -312,7 +315,7 @@ def test_expose_port_on_a_foreground_command_is_ignored_with_a_note(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
 
     result = executor._run_shell(
-        ["python3", "-c", "print('ok')"], expose_port=8000, network=True, justification="test",
+        [PYTHON, "-c", "print('ok')"], expose_port=8000, network=True, justification="test",
     )
 
     assert result.ok and result.data["stdout"].strip() == "ok"
@@ -323,11 +326,11 @@ def test_expose_port_on_a_foreground_command_is_ignored_with_a_note(tmp_path):
 def test_a_second_command_runs_while_a_job_is_running(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     job = executor._run_shell(
-        ["python3", "-c", "import time;time.sleep(30)"],
+        [PYTHON, "-c", "import time;time.sleep(30)"],
         background=True, network=True, justification="test",
     ).data["job_id"]
     try:
-        other = executor._run_shell(["python3", "-c", "print('hi')"], network=True, justification="test")
+        other = executor._run_shell([PYTHON, "-c", "print('hi')"], network=True, justification="test")
         assert other.ok and other.data["stdout"].strip() == "hi"
         assert executor.jobs.get(job).status == "running"
     finally:
@@ -344,7 +347,7 @@ def test_unknown_job_is_an_executor_error(tmp_path):
 def test_a_job_without_timeout_lives_up_to_the_profile_ceiling(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     started = executor._run_shell(
-        ["python3", "-c", "import time;time.sleep(30)"],
+        [PYTHON, "-c", "import time;time.sleep(30)"],
         background=True, network=True, justification="test",
     )
     try:
@@ -358,9 +361,9 @@ def test_a_job_without_timeout_lives_up_to_the_profile_ceiling(tmp_path):
 @requires_network_isolation
 def test_the_start_note_says_a_job_without_network_is_unreachable(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
-    offline = executor._run_shell(["python3", "-c", "pass"], background=True)
+    offline = executor._run_shell([PYTHON, "-c", "pass"], background=True)
     online = executor._run_shell(
-        ["python3", "-c", "pass"], background=True, network=True, justification="test",
+        [PYTHON, "-c", "pass"], background=True, network=True, justification="test",
     )
 
     assert "network namespace of its own" in offline.data["note"]
@@ -372,7 +375,7 @@ def test_inline_code_with_a_long_assignment_is_not_an_executor_crash(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     code = "x = " + "'" + "a" * 400 + "'\nprint(len(x))"
 
-    result = executor._run_shell(["python3", "-c", code], network=True, justification="test")
+    result = executor._run_shell([PYTHON, "-c", code], network=True, justification="test")
 
     assert result.ok, result.data
     assert result.data["stdout"].strip() == "400"
@@ -382,7 +385,7 @@ def test_inline_code_with_a_long_assignment_is_not_an_executor_crash(tmp_path):
 def test_a_background_job_ignores_a_timeout_the_model_gave(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     started = executor._run_shell(
-        ["python3", "-c", "import time;time.sleep(30)"],
+        [PYTHON, "-c", "import time;time.sleep(30)"],
         timeout=10, background=True, network=True, justification="test",
     )
     try:

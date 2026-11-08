@@ -1075,7 +1075,8 @@ def test_git_read_operations_do_not_launch_repository_helpers_or_index_hooks(
     home = tmp_path / "home"
     home.mkdir()
     setup_env = {
-        "PATH": os.defpath,
+        # git lives outside /bin:/usr/bin on the BSDs (/usr/pkg/bin, /usr/local/bin).
+        "PATH": os.pathsep.join([os.defpath, str(Path(shutil.which("git")).parent)]),
         "HOME": str(home),
         "GIT_CONFIG_NOSYSTEM": "1",
         "LANG": "C",
