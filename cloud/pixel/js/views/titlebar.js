@@ -47,6 +47,13 @@ export function mountTitlebar(root) {
     overview.classList.toggle("on", store.mode === "overview");
     inspector.classList.toggle("on", store.prefs.inspector);
   });
+  // Not throttled by a frame: a background tab gets no animation frames, and that is where the tab's name matters.
+  const paintPageTitle = () => {
+    const name = active()?.title;
+    document.title = name ? `Kvist Cloud | ${name}` : "Kvist Cloud";
+  };
+  subscribe(paintPageTitle);
+  paintPageTitle();
   subscribe(redraw);
   onAccount(redraw);
   redraw();

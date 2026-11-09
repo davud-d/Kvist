@@ -30,7 +30,8 @@ const hello = (agent) => ({
   protocol_version: 1,
   provider: account.key?.provider ?? "",
   models: account.key?.model ? { fast: account.key.model, smart: account.key.model } : {},
-  role: "",
+  // The runner starts every cloud core with --role universal (runner/task.py), so there is no routing to wait for.
+  role: "universal",
   effort: "",
   session: String(agents.get(agent)?.taskId ?? ""),
 });
@@ -65,7 +66,8 @@ function connect(agent, taskId) {
 }
 
 // The core names its own session inside; on this page a task is its id, so that is what stays the session.
-const SESSION_EVENTS = new Set(["hello", "session"]);
+// The page names a session by its task, not by the core's own id: a title for the core's id would match nothing.
+const SESSION_EVENTS = new Set(["hello", "session", "session_title"]);
 
 
 function handle(agent, taskId, entry, data) {

@@ -30,6 +30,8 @@ export function mountChat(root) {
   // A cloud task takes words only: no pictures to attach.
   const attachments = { images: [] };
   const banner = h("button", { class: "closed-bar px", type: "button" });
+  // paintBottom only runs once there is an agent; until then the empty bar would sit under the composer.
+  banner.hidden = true;
   const dock = h("div", { class: "chat-bottom" }, status, composer, banner);
   const overlay = h("div", { class: "dialog-layer" });
   root.append(header, h("div", { class: "feed-wrap" }, feed, empty), dock, overlay);
@@ -64,7 +66,7 @@ export function mountChat(root) {
     fill(chips, 
       h("span", { class: "chip" }, t(stateLabel)),
       h("span", { class: "chip repo", title: project }, project),
-      role ? h("span", { class: "chip role" }, role) : null,
+      role ? h("span", { class: "chip role" }, t(role)) : null,
       agent.models?.fast ? h("span", { class: "chip model", title: `${agent.provider}: ${agent.models.fast} / ${agent.models.smart}` }, agent.models.smart || agent.models.fast) : null,
       agent.cloud ? h("span", { class: "chip hours", title: t("this task") }, duration(agent.cloud.used_seconds)) : null,
     );
@@ -156,7 +158,13 @@ export function mountChat(root) {
   const redraw = frameThrottle(() => {
     const agent = active();
     root.toggleAttribute("data-empty", !agent);
-    if (!agent) return;
+    // A task lives in a project's folder: with no project picked there is nowhere to write it.
+    if (!agent) {
+      composer.hidden = true;
+      empty.textContent = t("empty cloud");
+      empty.hidden = false;
+      return;
+    }
     if (agent !== shownAgent) bindFeed(agent);
     const stick = atBottom();
     drawFeed(agent.items);
