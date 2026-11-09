@@ -48,6 +48,17 @@ def test_clean_generated_title_truncates_to_fifty_chars_at_word_boundary():
     assert not cleaned.endswith("b" * 40)
 
 
+def test_clean_generated_title_drops_model_markup():
+    assert clean_generated_title("<tool_call>") == ""
+    assert clean_generated_title('<tool_call>\n{"name": "x"}\n</tool_call>') == ""
+    assert clean_generated_title("<think>hmm</think>\nFix the login bug") == "Fix the login bug"
+    assert clean_generated_title("<think>unclosed reasoning") == ""
+
+
+def test_clean_generated_title_keeps_ordinary_angle_brackets():
+    assert clean_generated_title("Fix <div> layout") == "Fix <div> layout"
+
+
 def test_clean_generated_title_empty_after_cleaning_is_failure():
     assert clean_generated_title('""') == ""
     assert clean_generated_title("   ") == ""

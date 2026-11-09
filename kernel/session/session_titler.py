@@ -46,6 +46,12 @@ _TITLE_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 _TRAILING_PUNCT_RE = re.compile(r"[.\s]+$")
+# Some models answer a plain request in their own tool-call or reasoning markup (Nemotron's "<tool_call>").
+# That is never a title; an unclosed block runs to the end of the reply.
+_MODEL_MARKUP_RE = re.compile(
+    r"<(think|thinking|tool_call)\b[^>]*>.*?(?:</\1>|\Z)|</?(?:think|thinking|tool_call)\b[^>]*>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class _TitleUI:
@@ -98,7 +104,8 @@ def clean_generated_title(raw: str) -> str:
     left to the model's discipline. An empty result after cleaning is a
     generation failure, handled by the caller's fallback.
     """
-    text = raw.strip().splitlines()[0].strip() if raw.strip() else ""
+    raw = _MODEL_MARKUP_RE.sub("", raw).strip()
+    text = raw.splitlines()[0].strip() if raw else ""
     text = _TITLE_PREFIX_RE.sub("", text).strip()
     while len(text) >= 2 and text[0] in _QUOTE_CHARS and text[-1] in _QUOTE_CHARS:
         text = text[1:-1].strip()
