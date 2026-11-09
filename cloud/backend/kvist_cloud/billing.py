@@ -208,6 +208,35 @@ def _grant_plan(db: Session, checkout: BillingCheckout, now: datetime) -> bool:
     return True
 
 
+def admin_grant_plan(db: Session, user_id: int, plan_id: str, days: int | None, now: datetime) -> Subscription:
+    """A plan given by an admin, starting now and replacing whatever runs: no payment, no checkout row.
+
+    Hours left on a paid plan carry over into the new period (they were paid for); a trial's do not, as
+    when paying replaces it.
+    """
+    plan = plans.get_plan(plan_id)
+    current = ledger.current_subscription(db, user_id)
+    carried = 0
+    if current is not None and current.plan != plans.TRIAL.id and plans.get_plan(current.plan).metered:
+        carried = max(0, ledger.balance_seconds(db, user_id, current.current_period_start))
+    # Every usable row ends: the one running, and a renewal queued behind it.
+    for row in db.scalars(select(Subscription).where(
+            Subscription.user_id == user_id, Subscription.status.in_(SubscriptionStatus.USABLE),
+            Subscription.current_period_end > now)):
+        row.status = SubscriptionStatus.CANCELLED
+        row.current_period_end = min(row.current_period_end, now)
+    length = timedelta(days=days or (plan.trial_days if plan.id == plans.TRIAL.id else plan.period_days))
+    trial = plan.id == plans.TRIAL.id
+    subscription = Subscription(user_id=user_id, plan=plan.id, status=SubscriptionStatus.TRIALING if trial
+                                else SubscriptionStatus.ACTIVE, current_period_start=now,
+                                current_period_end=now + length, trial_ends_at=now + length if trial else None)
+    db.add(subscription)
+    _start_period(db, subscription, now, now + length)
+    if carried and plan.metered:
+        ledger.adjust(db, user_id, carried, "Hours left on the previous plan")
+    return subscription
+
+
 def _grant_hours(db: Session, checkout: BillingCheckout) -> bool:
     try:
         entry = ledger.purchase(db, checkout.user_id, plans.HOUR_PACK_HOURS * 3600, "Hour pack (Platega)")

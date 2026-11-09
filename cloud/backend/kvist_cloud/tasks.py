@@ -13,7 +13,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from . import ledger
-from .auth import SESSION_COOKIE, current_user, user_from_cookie
+from .auth import SESSION_COOKIE, ban_active, current_user, user_from_cookie
 from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
@@ -39,7 +39,7 @@ PERSISTED = frozenset(
 # Reasons the runner gives for stopping a task that can be continued later.
 PAUSE_REASONS = frozenset(
     {"hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted",
-     "machine_sleeping"}
+     "machine_sleeping", "machine_suspended"}
 )
 
 
@@ -286,8 +286,12 @@ def can_run(db: Session, user: User) -> None:
         raise ApiError(400, "no_key", "Add your model key first. / Сначала добавь ключ модели.")
     from .machines import live_machine, machine_plan
 
-    if machine_plan(db, user.id).own_machine and live_machine(db, user.id) is None:
+    machine = live_machine(db, user.id)
+    if machine_plan(db, user.id).own_machine and machine is None:
         raise ApiError(409, "no_machine", "Connect your machine first. / Сначала подключи свою машину.")
+    if machine is not None and machine.suspended:
+        raise ApiError(409, "machine_suspended", "The machine is stopped by the administrator. "
+                       "/ Машина остановлена администратором.")
 
 
 def _machine_for_task(app: FastAPI, db: Session, user: User) -> Machine:
@@ -583,7 +587,8 @@ async def stream(socket: WebSocket, task_id: int, after: int = 0) -> None:
     with session_scope(app.state.session_factory) as db:
         user = user_from_cookie(db, settings, socket.cookies.get(SESSION_COOKIE))
         task = db.get(Task, task_id)
-        allowed = user is not None and task is not None and task.user_id == user.id
+        allowed = (user is not None and not ban_active(user) and task is not None
+                   and task.user_id == user.id)
     if not allowed:
         await socket.close(code=4401)
         return

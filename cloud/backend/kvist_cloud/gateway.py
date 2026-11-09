@@ -18,7 +18,7 @@ from . import chatgpt, exports, ledger, limits, plans, projects, screens, tasks
 from .chatgpt import ChatGPTError
 from .db import lock_account, session_scope, utcnow
 from .keys import has_model_access, kvist_environment
-from .machines import spawn, wake
+from .machines import is_blocked, spawn, wake
 from .models import Machine, MachineStatus, Project, Task, TaskStatus, User
 from .secrets import SecretError
 
@@ -180,7 +180,7 @@ async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None)
     access = await _chatgpt_access(app, machine_id)
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
-        if machine is None:
+        if machine is None or is_blocked(db, machine):
             return
         lock_account(db, machine.user_id)
         waiting = list(

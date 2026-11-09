@@ -32,7 +32,7 @@ fake model on port 8799 and the server on port 8740.
 * **Model:** pick "Other", base URL `http://127.0.0.1:8799/v1`, model `fake-model`, any key of
   8+ characters. The fake model plays a short script through the **real Kvist core**: it writes
   `CLOUD_NOTES.md`, reads it back and answers. Nothing leaves the computer.
-* **Admin:** <http://127.0.0.1:8740/admin> shows funnel conversion and open disputes.
+* **Admin:** <http://127.0.0.1:8740/admin> is the admin panel: people (plans, hours, admin rights, stopping a machine, bans), funnel conversion and open disputes.
 
 Without the core installed, `dev.sh` uses a scripted stand-in for Kvist by itself
 (`runner/tests/fake_kvist.py`); `--fake-kvist` forces it, for working on the UI without the core.

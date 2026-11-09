@@ -242,6 +242,27 @@ with a `reason`), `usage` (−, agent time). The balance of a period is the sum 
   command the agent starts inherits the limits. Without systemd it logs a warning and runs
   without them.
 
+## Admin panel (`admin.py`, `notifications.py`)
+
+Admins are the owners in `ADMIN_GITHUB_LOGINS` plus anyone an owner promoted (`users.is_admin`). Only an
+owner gives or takes admin rights; an owner's own rights and an owner's account cannot be touched from the panel.
+
+* **People.** `GET /api/admin/users?q=` searches login, name, email or id; `/{id}` adds the ledger and the audit trail.
+* **Plan.** Starts now, replaces whatever runs and any queued renewal, no checkout row. Hours left on a paid plan
+  carry over as an `adjustment` row; a trial's do not (the same rule as paying over a trial).
+* **Hours.** A signed `adjustment` ledger row with a reason the person sees. It cannot take more than the balance
+  holds and means nothing on Remote (no hours). The ledger stays append-only.
+* **Machine.** `machines.suspended` stops one of *our* machines: tasks pause (`machine_suspended`), the machine
+  sleeps, and wake, dispatch, reset and new tasks refuse until it is released. Remote machines are the customer's
+  own hardware and cannot be stopped.
+* **Ban.** `ban_until` or `ban_permanent`. `current_user` answers 403 `banned` to every API call; `/api/me` and
+  sign-out still work, so the page shows the reason. The account's machines are stopped as for a suspension.
+  A temporary ban ends by itself (it is a comparison with the clock); paused tasks are continued by the person.
+* **Bell.** Every change that concerns what the person has writes a `notifications` row (kind and parameters, worded
+  by the page in the reader's language). No email: the outbox only queues.
+* **Audit.** Each action is an `admin_actions` row: who, whom, what.
+* **Privacy.** An admin still cannot see a customer's files or screens (`screens.py`): the panel has no way in.
+
 ## Secrets
 
 * Model keys are encrypted with Fernet (`KVIST_CLOUD_MASTER_KEY`, from the environment only).

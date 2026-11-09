@@ -62,6 +62,8 @@ class LedgerKind:
     REFUND = "refund"
     USAGE = "usage"
     REVERSAL = "reversal"
+    # An operator's correction, signed: the one kind that may be negative without being usage.
+    ADJUSTMENT = "adjustment"
 
 
 class User(Base):
@@ -85,6 +87,12 @@ class User(Base):
     model_base_url: Mapped[str] = mapped_column(String(500), default="")
     model_name: Mapped[str] = mapped_column(String(200), default="")
     locale: Mapped[str] = mapped_column(String(5), default="en")
+    # Admin rights given from the panel; the owners in ADMIN_GITHUB_LOGINS need no row.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # A ban lasts until ban_until, or for good when ban_permanent; both empty = not banned.
+    ban_until: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    ban_permanent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    ban_reason: Mapped[str] = mapped_column(String(300), default="", server_default="")
     # "Sign in with ChatGPT": the tokens are one encrypted JSON blob (they must be sent back to OpenAI, so a hash
     # would be useless). "" = never connected, "connected", or "needs_login" once OpenAI refused the renewal.
     chatgpt_enc: Mapped[str] = mapped_column(Text, default="")
@@ -141,6 +149,8 @@ class Machine(Base):
     memory_gb: Mapped[int] = mapped_column(Integer)
     disk_gb: Mapped[int] = mapped_column(Integer)
     connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Stopped by an admin: it does not wake and starts nothing until the admin lets it. Our machines only.
+    suspended: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # The previous heartbeat: its whole second (server clock) and the tasks it named.
     last_beat_second: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_beat_running: Mapped[list] = mapped_column(JSON, default=list)
@@ -316,6 +326,32 @@ class Outbox(Base):
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
+class Notification(Base):
+    """A line for the person's bell. Kind and parameters, not text: the page words it in the reader's language."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    read_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
+class AdminAction(Base):
+    """Who did what to whose account from the panel; the answer to "why does this person have 20 hours"."""
+
+    __tablename__ = "admin_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    admin_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    action: Mapped[str] = mapped_column(String(40))
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 @event.listens_for(LedgerEntry, "before_update")

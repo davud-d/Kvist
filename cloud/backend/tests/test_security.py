@@ -132,6 +132,10 @@ FIELDS = [
     *[("POST", "/api/projects", {"name": "safe"}, k) for k in ("name", "repo_url")],
     *[("POST", "/api/disputes", {"message": "please review"}, k) for k in ("task_id", "message")],
     *[("POST", "/api/admin/disputes/1/refund", {"minutes": 1, "note": "refund"}, k) for k in ("minutes", "note")],
+    *[("POST", "/api/admin/users/1/plan", {"plan": "pro"}, k) for k in ("plan", "days", "note")],
+    *[("POST", "/api/admin/users/1/hours", {"minutes": 5, "note": "gift"}, k) for k in ("minutes", "note")],
+    ("POST", "/api/admin/users/1/admin", {"value": True}, "value"),
+    *[("POST", "/api/admin/users/1/ban", {"days": 1, "reason": "abuse"}, k) for k in ("permanent", "days", "reason")],
     *[("POST", "/api/billing/checkout", {"plan": "trial"}, k) for k in ("plan", "method")],
     ("POST", "/api/chatgpt/start", {"next": "/onboarding"}, "next"),
 ]
@@ -188,7 +192,7 @@ def test_body_field_matrix_covers_every_api_input(app_factory):
     declared = set()
     schema = app_factory().openapi()
     for path, operations in schema["paths"].items():
-        normalized = path.replace("{task_id}", "1").replace("{dispute_id}", "1")
+        normalized = path.replace("{task_id}", "1").replace("{dispute_id}", "1").replace("{user_id}", "1")
         for method, operation in operations.items():
             body = operation.get("requestBody", {}).get("content", {}).get("application/json")
             if body is None:

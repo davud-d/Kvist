@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .db import get_db
+from .db import get_db, utcnow
 from .errors import ApiError, not_signed_in
 from .models import User
 from .validation import InputModel
@@ -89,14 +89,44 @@ def optional_user(request: Request, db: Session = Depends(get_db)) -> User | Non
     return user_from_cookie(db, request.app.state.settings, request.cookies.get(SESSION_COOKIE))
 
 
-def current_user(user: User | None = Depends(optional_user)) -> User:
+def signed_user(user: User | None = Depends(optional_user)) -> User:
+    """Signed in, banned or not: the few calls a banned person still needs (who am I, sign out)."""
     if user is None:
         raise not_signed_in()
     return user
 
 
+def is_owner(settings: Settings, user: User) -> bool:
+    """Listed in ADMIN_GITHUB_LOGINS: cannot be demoted or banned from the panel."""
+    return user.github_login.lower() in settings.admin_logins
+
+
+def is_admin(settings: Settings, user: User) -> bool:
+    return user.is_admin or is_owner(settings, user)
+
+
+def ban_active(user: User, now: datetime | None = None) -> bool:
+    if user.ban_permanent:
+        return True
+    return user.ban_until is not None and user.ban_until > (now or utcnow())
+
+
+def ban_view(user: User) -> dict[str, object] | None:
+    if not ban_active(user):
+        return None
+    return {"permanent": user.ban_permanent, "until": user.ban_until.isoformat() if user.ban_until else None,
+            "reason": user.ban_reason}
+
+
+def current_user(user: User = Depends(signed_user)) -> User:
+    view = ban_view(user)
+    if view is not None:
+        raise ApiError(403, "banned", "This account is blocked. / Аккаунт заблокирован.", ban=view)
+    return user
+
+
 def admin_user(request: Request, user: User = Depends(current_user)) -> User:
-    if user.github_login.lower() not in request.app.state.settings.admin_logins:
+    if not is_admin(request.app.state.settings, user):
         raise ApiError(403, "forbidden", "Admins only. / Только для администраторов.")
     return user
 
@@ -225,14 +255,16 @@ async def github_callback(
 
 
 @router.get("/api/me")
-def me(request: Request, user: User = Depends(current_user)) -> dict[str, object]:
+def me(request: Request, user: User = Depends(signed_user)) -> dict[str, object]:
     return {
         "id": user.id,
         "login": user.github_login,
         "name": user.name,
         "avatar_url": user.avatar_url,
         "locale": user.locale,
-        "is_admin": user.github_login.lower() in request.app.state.settings.admin_logins,
+        "is_admin": is_admin(request.app.state.settings, user),
+        "is_owner": is_owner(request.app.state.settings, user),
+        "ban": ban_view(user),
     }
 
 

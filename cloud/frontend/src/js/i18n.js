@@ -12,6 +12,11 @@ export function detectLocale(cookie = document.cookie, languages = navigator.lan
   return (languages || []).some((lang) => String(lang).toLowerCase().startsWith("ru")) ? "ru" : "en";
 }
 
+/** A screen that is loaded on demand brings its own strings: {en: {...}, ru: {...}} under `namespace`. */
+export function extend(namespace, byLocale) {
+  for (const [lang, strings] of Object.entries(byLocale)) LOCALES[lang][namespace] = strings;
+}
+
 export function setLocale(lang) {
   current = LOCALES[lang] || en;
   document.documentElement.lang = current.lang;

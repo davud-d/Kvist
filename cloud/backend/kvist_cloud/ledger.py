@@ -172,6 +172,26 @@ def refund(
     return entry
 
 
+def adjust(db: Session, user_id: int, seconds: int, reason: str) -> LedgerEntry:
+    """An operator's signed correction of this period's hours; it cannot take more than the balance holds."""
+    if seconds == 0:
+        raise LedgerError("an adjustment changes the balance")
+    if not reason.strip():
+        raise LedgerError("an adjustment needs a reason")
+    subscription = current_subscription(db, user_id)
+    if subscription is None:
+        raise LedgerError("no active subscription to adjust")
+    if not plans.get_plan(subscription.plan).metered:
+        raise LedgerError("this plan is not counted in hours")
+    if seconds < 0 and -seconds > balance_seconds(db, user_id, subscription.current_period_start):
+        raise LedgerError("the balance holds less than that")
+    entry = LedgerEntry(user_id=user_id, period_start=subscription.current_period_start, kind=LedgerKind.ADJUSTMENT,
+                        seconds=seconds, reason=reason.strip())
+    db.add(entry)
+    db.flush()
+    return entry
+
+
 def split_seconds(seconds: int, task_ids: list[int]) -> dict[int, int]:
     """Shares for display; they add up to exactly ``seconds``."""
     ordered = sorted(set(task_ids))

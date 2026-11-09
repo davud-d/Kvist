@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { readBoot } from "./boot.js";
 import { append, h, replace } from "./dom.js";
 import { detectLocale, locale, rememberLocale, setLocale, t } from "./i18n.js";
+import { banScreen, bellButton } from "./notifications.js";
 import { errorBox } from "./ui.js";
 import { routes } from "./routes.js";
 
@@ -22,6 +23,11 @@ export function navigate(path, { replace: swap = false } = {}) {
   render();
 }
 
+async function signOut() {
+  await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+  location.href = "/";
+}
+
 function header(active, funnel) {
   // Inside the funnel there is one way forward; the app's navigation would only be a way out.
   const items = state.me && !funnel
@@ -36,6 +42,7 @@ function header(active, funnel) {
         // The pixel window is its own page, not a screen of this app: a plain link, a full load.
         items.map(([href, key]) => h("a", { href, "data-link": href.startsWith("/pixel") ? null : "", "aria-current": active === href ? "page" : null,
           text: t(key) })),
+        state.me && !state.me.ban && !funnel ? bellButton() : null,
         h("button.chip", { type: "button", lang: locale() === "ru" ? "en" : "ru", "aria-label": t("common.otherLangName"),
           onclick: switchLanguage, text: t("common.otherLang") }))));
 }
@@ -65,6 +72,11 @@ async function render() {
   const app = document.getElementById("app");
   const main = h("main.wrap", { id: "main", tabindex: "-1" });
   replace(app, header(found ? found.route.nav : null, found ? found.route.funnel : false), main, footer());
+  if (state.me && state.me.ban) {
+    // A blocked account sees why and nothing else: every call would answer "banned" anyway.
+    banScreen(main, state.me.ban, signOut);
+    return;
+  }
   if (!found) {
     append(main, [errorBox({ code: "not_found" })]);
     return;

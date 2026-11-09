@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from starlette.status import WS_1008_POLICY_VIOLATION
 
 from . import ledger, plans
-from .auth import current_user
+from .auth import ban_active, current_user
 from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
@@ -72,8 +72,16 @@ def owned_machine(db: Session, user: User, machine_id: int) -> Machine:
     return machine
 
 
+def is_blocked(db: Session, machine: Machine) -> bool:
+    """An admin stopped this machine, or its owner is banned: it neither wakes nor starts tasks."""
+    owner = db.get(User, machine.user_id)
+    return machine.suspended or (owner is not None and ban_active(owner))
+
+
 def display_status(db: Session, machine: Machine) -> str:
     """What the dashboard says: asleep, working, waiting for you."""
+    if machine.suspended:
+        return "suspended"
     statuses = set(
         db.scalars(select(Task.status).where(Task.machine_id == machine.id, Task.status.in_(TaskStatus.ACTIVE)))
     )
@@ -95,6 +103,7 @@ def machine_view(db: Session, machine: Machine) -> dict[str, object]:
         "display_status": display_status(db, machine),
         "detail": machine.status_detail,
         "connected": machine.connected,
+        "suspended": machine.suspended,
         "vcpu": machine.vcpu,
         "memory_gb": machine.memory_gb,
         "disk_gb": machine.disk_gb,
@@ -149,6 +158,8 @@ async def wake(app: FastAPI, machine_id: int) -> None:
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
         if machine is None or machine.status in (MachineStatus.CREATING, MachineStatus.DELETED):
+            return
+        if is_blocked(db, machine):
             return
         if machine.connected:
             machine.status = MachineStatus.AWAKE
@@ -267,6 +278,9 @@ async def on_signed_in(request: Request, db: Session, user: User, _github_token:
     """Sign-in hook: the machine starts being created while the person enters their card."""
     app = request.app
     record_step(db, "github_login", user_id=user.id, visitor_id=request.cookies.get("kc_visitor", ""))
+    if ban_active(user):
+        db.commit()
+        return
     if not app.state.settings.dev_billing and not ledger.has_hours(db, user.id):
         return
     if machine_plan(db, user.id).own_machine:
@@ -336,7 +350,7 @@ async def connect_remote_machine(request: Request, user: User = Depends(current_
 async def wake_machine(
     machine_id: int, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
-    owned_machine(db, user, machine_id)
+    _require_not_suspended(owned_machine(db, user, machine_id))
     _require_hours(request.app, db, user.id)
     spawn(request.app, wake(request.app, machine_id))
     return {"ok": True}
@@ -363,6 +377,7 @@ async def reset_machine(
     if machine.provider == REMOTE_PROVIDER:
         raise ApiError(409, "own_machine", "This is your own machine: connect it again instead. "
                        "/ Это твоя машина: подключи её заново.")
+    _require_not_suspended(machine)  # a reset would hand out a fresh machine and undo the suspension
     if _has_work(db, machine):
         raise ApiError(409, "machine_busy", "A task is running on it. / На ней идёт задача.")
     _require_hours(request.app, db, user.id)
@@ -370,6 +385,12 @@ async def reset_machine(
     new_id = await reset(request.app, machine_id)
     db.expire_all()
     return machine_view(db, db.get(Machine, new_id))
+
+
+def _require_not_suspended(machine: Machine) -> None:
+    if machine.suspended:
+        raise ApiError(409, "machine_suspended", "The machine is stopped by the administrator. "
+                       "/ Машина остановлена администратором.")
 
 
 def _require_hours(app: FastAPI, db: Session, user_id: int) -> None:

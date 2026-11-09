@@ -30,7 +30,7 @@ export function taskPill(status) {
 
 const MACHINE_PILL = {
   creating: "waking", waking: "waking", working: "working", waiting_for_you: "waiting",
-  ready: "ready", awake: "ready", error: "failed",
+  ready: "ready", awake: "ready", error: "failed", suspended: "failed",
 };
 
 export function machinePill(status) {

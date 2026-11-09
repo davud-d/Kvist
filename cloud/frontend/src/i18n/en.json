@@ -44,6 +44,7 @@
     "waiting_for_you": "Waiting for you",
     "sleeping": "Falling asleep",
     "error": "Needs attention",
+    "suspended": "Stopped by an administrator",
     "deleted": "Deleted"
   },
   "reason": {
@@ -52,6 +53,7 @@
     "invalid_key": "The model provider did not accept the key or the ChatGPT sign-in. Change the key in settings or sign in again, then press Continue.",
     "command_time_limit": "A command ran longer than your plan allows, so the task was stopped. Press Continue to go on.",
     "machine_restarted": "The machine restarted. Nothing is lost: press Continue.",
+    "machine_suspended": "An administrator stopped the machine. Write to support.",
     "machine_sleeping": "The machine went to sleep. Press Continue.",
     "user": "You paused it. Press Continue when you want.",
     "cancelled": "You stopped this task.",
@@ -82,6 +84,13 @@
     "sign_in_required": "This one is connected by signing in, not by a key.",
     "bad_repo": "That does not look like a GitHub repository link. It should look like https://github.com/owner/repo",
     "machine_offline": "The machine is not reachable right now. Wait a moment and try again.",
+    "banned": "This account is blocked.",
+    "machine_suspended": "An administrator stopped your machine. Write to support.",
+    "owners_only": "Only an owner can do this.",
+    "owner": "An owner’s rights come from the server settings.",
+    "self_ban": "You cannot ban yourself.",
+    "not_banned": "This account is not banned.",
+    "hours_refused": "The balance holds less than that, or the plan has no hours to change.",
     "machine_busy": "A task is running on this machine.",
     "not_running": "The task is not running.",
     "not_paused": "Only a paused task can continue.",
@@ -299,7 +308,7 @@
     "firstTask": "Run your first task",
     "feedTitle": "Charges this period",
     "feedEmpty": "Nothing charged yet.",
-    "kind": { "reversal": "Payment reversed", "grant": "Plan hours", "purchase": "Bought hours", "refund": "Refund", "usage": "Task" },
+    "kind": { "reversal": "Payment reversed", "grant": "Plan hours", "purchase": "Bought hours", "refund": "Refund", "adjustment": "Correction", "usage": "Task" },
     "dispute": "Dispute",
     "disputeTitle": "Dispute this charge",
     "disputeBody": "Tell us what went wrong. A person reads it and answers by email; a refund comes back as a separate line here.",
@@ -331,17 +340,27 @@
     "signedInAs": "Signed in with GitHub as {login}",
     "machineTitle": "Machine"
   },
-  "admin": {
-    "title": "Admin",
-    "funnel": "Funnel",
-    "step": "Step",
-    "people": "People",
-    "fromPrevious": "From previous",
-    "disputes": "Open disputes",
-    "noDisputes": "No open disputes.",
-    "refundMinutes": "Minutes to refund",
-    "refund": "Refund",
-    "reject": "Close without refund"
+  "notify": {
+    "title": "Notifications",
+    "none": "Nothing new.",
+    "label": "Notifications, {n} unread",
+    "note": "Note: {note}",
+    "kind": {
+      "plan_granted": "An administrator gave you the {plan} plan until {date}.",
+      "hours_granted": "An administrator added {time} of agent hours to your account.",
+      "hours_removed": "An administrator took {time} of agent hours off your account.",
+      "machine_suspended": "An administrator stopped your machine. Your tasks are paused.",
+      "machine_resumed": "Your machine is available again. Press Continue on the paused tasks.",
+      "admin_granted": "You are now an administrator.",
+      "admin_revoked": "Your administrator rights were taken away.",
+      "unbanned": "Your account is unblocked."
+    }
+  },
+  "ban": {
+    "title": "Your account is blocked",
+    "permanent": "The block has no end date.",
+    "until": "Blocked until {date}.",
+    "reason": "Reason: {reason}"
   },
   "machine": {
     "reset": "Reset the machine",

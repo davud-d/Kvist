@@ -164,7 +164,7 @@ function feedCard(feed, refresh) {
               ? h("a.title", { href: `/tasks/${row.task_id}`, "data-link": "" }, row.goal.split("\n")[0] || t("dashboard.kind.usage"))
               : t(`dashboard.kind.${row.kind}`)),
             h("b", {}, `${sign(row.seconds)}${hoursMinutes(Math.abs(row.seconds), t)}`)),
-          h("p.row.meta", {}, dateTime(row.at, locale()), row.kind === "refund" && row.reason ? ` · ${row.reason}` : "",
+          h("p.row.meta", {}, dateTime(row.at, locale()), (row.kind === "refund" || row.kind === "adjustment") && row.reason ? ` · ${row.reason}` : "",
             row.kind === "usage" && row.task_id
               ? row.disputed
                 ? h("span", {}, t("dashboard.disputeSent"))

@@ -61,7 +61,7 @@ function fontBytes(scripts) {
 }
 
 async function buildOnce() {
-  const problems = [...checkLocales(new URL("i18n/", SRC)), ...checkContrast(new URL("tokens.css", SRC)).failures];
+  const problems = [...checkLocales(new URL("i18n/", SRC)), ...checkLocales(new URL("i18n/", SRC), "admin."), ...checkContrast(new URL("tokens.css", SRC)).failures];
   if (problems.length) throw new Error(`gates failed:\n${problems.join("\n")}`);
 
   rmSync(DIST, { recursive: true, force: true });
@@ -78,7 +78,10 @@ async function buildOnce() {
     minify: true,
     format: "esm",
     target: "es2020",
-    outfile: new URL("assets/app.js", DIST).pathname,
+    // Screens loaded on demand (the admin's) become chunks next to app.js, outside the first-screen budget.
+    splitting: true,
+    outdir: new URL("assets/", DIST).pathname,
+    chunkNames: "[name]-[hash]",
     legalComments: "none",
   });
   const js = readFileSync(new URL("assets/app.js", DIST), "utf8");
