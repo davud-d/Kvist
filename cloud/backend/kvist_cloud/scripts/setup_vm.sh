@@ -160,17 +160,44 @@ users:
 ssh_pwauth: false
 disable_root: true
 package_update: true
+# One missing name fails the whole apt transaction, so every name below is a Debian 12 (bookworm) package.
 packages:
+  # Python for the core and the runner, a compiler for wheels that have to be built, the usual project tools.
   - python3
   - python3-venv
   - python3-pip
   - build-essential
   - git
+  - openssh-client
   - curl
   - ca-certificates
   - nodejs
   - npm
+  - ripgrep
+  - jq
+  - unzip
+  - zip
+  - procps
+  # The sandbox of the core and of the skills.
   - bubblewrap
+  # Virtual screen of the skills: Xvfb plus a window manager (i3 for browser, JWM for app_screen).
+  - xvfb
+  - i3-wm
+  - jwm
+  - xclip
+  # A skill's runner starts under the system python3 -I, so python-xlib (app_screen) has to come from apt.
+  - python3-xlib
+  # browser skill: Chromium renders in software; Mesa gives app_screen's gl=true programs a software OpenGL.
+  - chromium
+  - libgl1-mesa-dri
+  - libglx-mesa0
+  - libegl-mesa0
+  # A program app_screen can open without OpenGL.
+  - xterm
+  # Fonts with Cyrillic and emoji, or pages and windows show boxes.
+  - fonts-dejavu-core
+  - fonts-liberation
+  - fonts-noto-color-emoji
   - qemu-guest-agent
 write_files:
   - path: /etc/systemd/system/kvist-runner.service
