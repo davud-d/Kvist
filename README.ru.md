@@ -96,6 +96,11 @@ python3 -m venv .venv
 .venv/bin/python scripts/installer/install.py   # по желанию: кладёт `kvist` в PATH
 ```
 
+Одной строкой:
+```bash
+git clone https://github.com/davud-d/Kvist; cd Kvist; python3 -m venv .venv; .venv/bin/python -m pip install -r requirements.txt; .venv/bin/python scripts/installer/install.py   # по желанию: кладёт `kvist` в PATH
+```
+
 В Windows используйте `py -m venv .venv`, `.venv\Scripts\python.exe` и
 `scripts\installer\install.py`. Установщик спрашивает, что настроить (CLI,
 JetBrains, VS Code, десктопное приложение, Zed). Подробности — в
