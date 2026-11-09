@@ -58,7 +58,11 @@ export PUBLIC_URL="http://127.0.0.1:$PORT"
 export AUTH_DEV_LOGIN=true
 export ALLOW_LOCAL_ENDPOINTS=true
 # Billing is whatever cloud/.env says (off when there is no such file): no variable to pass.
-export ADMIN_GITHUB_LOGINS="${ADMIN_GITHUB_LOGINS:-dev}"
+# The dev user is an admin unless the environment or cloud/.env names the admins itself: a real variable
+# beats the file, so exporting a default here would hide whatever the file says.
+if [[ -z "${ADMIN_GITHUB_LOGINS:-}" ]] && ! grep -qE '^[[:space:]]*ADMIN_GITHUB_LOGINS[[:space:]]*=' "$CLOUD/.env" 2>/dev/null; then
+  export ADMIN_GITHUB_LOGINS=dev
+fi
 
 "$PY" "$CLOUD/scripts/fake_model.py" --port "$MODEL_PORT" &
 MODEL_PID=$!
