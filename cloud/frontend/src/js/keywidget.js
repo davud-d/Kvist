@@ -31,13 +31,26 @@ export function keyWidget({ providers, saved, onValid }) {
     placeholder: t("onboarding.keyPlaceholder"), "aria-describedby": "key-hint", id: "model-key",
   });
   const baseInput = h("input.input", { type: "url", placeholder: t("onboarding.baseUrlPlaceholder"), id: "model-base" });
-  const modelInput = h("input.input", { type: "text", spellcheck: "false", autocapitalize: "off", id: "model-name" });
+  const modelList = h("datalist", { id: "model-catalog" });
+  const modelInput = h("input.input", { type: "text", spellcheck: "false", autocapitalize: "off", id: "model-name",
+    list: "model-catalog", autocomplete: "off" });
 
   const setHint = (kind, text) => {
     hint.className = `hint ${kind}`;
     hint.textContent = text;
     keyInput.setAttribute("aria-invalid", kind === "err" ? "true" : "false");
   };
+
+  // The provider's own model list fills the suggestions; an empty Model field takes the first one.
+  async function loadCatalog(key) {
+    const chosen = providers.find((item) => item.id === provider) ?? {};
+    if (!chosen.needs_model) return;
+    const { models } = await api("/api/model-catalog", {
+      method: "POST", body: { provider, key, base_url: baseInput.value.trim() },
+    });
+    replace(modelList, models.map((id) => h("option", { value: id })));
+    if (!modelInput.value.trim() && models.length) modelInput.value = models[0];
+  }
 
   async function check() {
     const key = keyInput.value.trim();
@@ -46,6 +59,8 @@ export function keyWidget({ providers, saved, onValid }) {
     setHint("wait", t("keyCheck.checking"));
     onValid(false);
     try {
+      await loadCatalog(key).catch(() => {});
+      if (mine !== sequence) return;
       const result = await api("/api/model-key", {
         method: "POST",
         body: { provider, key, base_url: baseInput.value.trim(), model: modelInput.value.trim() },
@@ -69,6 +84,17 @@ export function keyWidget({ providers, saved, onValid }) {
   const soon = () => { clearTimeout(timer); timer = setTimeout(check, DEBOUNCE_MS); };
   keyInput.addEventListener("input", soon);
   keyInput.addEventListener("paste", () => { clearTimeout(timer); setTimeout(check, 0); });
+  const pasteButton = h("button.btn.ghost", { type: "button", text: t("onboarding.paste"), onclick: async () => {
+    try {
+      keyInput.value = (await navigator.clipboard.readText()).trim();
+    } catch {
+      // Clipboard access refused: the field still takes a normal paste.
+      keyInput.focus();
+      return;
+    }
+    clearTimeout(timer);
+    check();
+  } });
   baseInput.addEventListener("change", check);
   modelInput.addEventListener("change", check);
 
@@ -82,7 +108,12 @@ export function keyWidget({ providers, saved, onValid }) {
         return h(item.partner ? "label.tile.partner" : "label.tile", {},
           h("input", {
             type: "radio", name: "provider", value: item.id, checked: item.id === provider,
-            onchange: () => { provider = item.id; changing = true; onValid(false); draw(); keyInput.focus(); },
+            onchange: () => {
+              provider = item.id; changing = true; onValid(false); draw();
+              // The form is below a long tile list: bring it into view so the pick visibly did something.
+              form()?.scrollIntoView({ behavior: "smooth", block: "start" });
+              keyInput.focus({ preventScroll: true });
+            },
           }),
           item.partner ? h("span.badge", { text: t("onboarding.partnerBadge") }) : null,
           h("span.name", { text: name }),
@@ -132,6 +163,8 @@ export function keyWidget({ providers, saved, onValid }) {
       h("p", {}, signIn), notice);
   }
 
+  const form = () => root.querySelector("[data-form]");
+
   function draw() {
     const chosen = providers.find((item) => item.id === provider) ?? {};
     const showSaved = !changing && saved.set && saved.provider === provider;
@@ -145,12 +178,13 @@ export function keyWidget({ providers, saved, onValid }) {
             h("span.hint.ok", { tabindex: "-1", "data-saved": "", text: t("keyCheck.ok", { last4: saved.last4 }) }),
             h("button.linkbtn", { type: "button", text: t("onboarding.changeKey"),
               onclick: () => { changing = true; onValid(false); draw(); keyInput.focus(); } }))
-        : h("div.stack", {},
+        : h("div.stack", { "data-form": "" },
             chosen.needs_base_url
               ? h("label.field", { for: "model-base" }, h("span", { text: t("onboarding.baseUrl") }), baseInput) : null,
             chosen.needs_model
-              ? h("label.field", { for: "model-name" }, h("span", { text: t("onboarding.modelName") }), modelInput) : null,
-            h("label.field", { for: "model-key" }, h("span", { text: t("onboarding.keyLabel") }), keyInput),
+              ? h("label.field", { for: "model-name" }, h("span", { text: t("onboarding.modelName") }), modelInput, modelList) : null,
+            h("label.field", { for: "model-key" }, h("span", { text: t("onboarding.keyLabel") }),
+              h("span.keyrow", {}, keyInput, pasteButton)),
             hint));
   }
 

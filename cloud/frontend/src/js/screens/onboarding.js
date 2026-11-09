@@ -11,7 +11,7 @@ import { errorBox, machinePill } from "../ui.js";
 const MACHINE_TEXT = {
   ready: "onboarding.machineReady", asleep: "onboarding.machineReady", working: "onboarding.machineReady",
   waiting_for_you: "onboarding.machineReady", waking: "onboarding.machineWaking", awake: "onboarding.machineWaking",
-  creating: "onboarding.machineCreating", error: "onboarding.machineError",
+  none: "onboarding.machineCreating", creating: "onboarding.machineWaking", error: "onboarding.machineError",
 };
 
 function repoSection(repos, loading) {
@@ -117,7 +117,9 @@ export async function onboardingScreen(root, { navigate }) {
       h("div.stack", {}, run, why, failure)));
   update();
   return watchMachine((machine) => {
-    const state = machine ? machine.display_status : "creating";
-    replace(machineLine, machinePill(state), h("span", { text: t(MACHINE_TEXT[state] || "onboarding.machineWaking") }));
+    // No machine yet is not "being created": it is made when the first task starts, so no status pill.
+    const state = machine ? machine.display_status : "none";
+    replace(machineLine, machine ? machinePill(state) : null,
+      h("span", { text: t(MACHINE_TEXT[state] || "onboarding.machineWaking") }));
   });
 }

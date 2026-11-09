@@ -193,6 +193,7 @@
     "partnerNote": "Kvist's partner: one key, many models",
     "signInNote": "ChatGPT plan, no key",
     "keyLabel": "API key",
+    "paste": "Paste",
     "keyPlaceholder": "Paste the key here",
     "keySaved": "Key ••••{last4} is saved",
     "changeKey": "Use another key",

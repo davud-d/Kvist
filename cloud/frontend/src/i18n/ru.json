@@ -193,6 +193,7 @@
     "partnerNote": "Партнёр Kvist: один ключ, много моделей",
     "signInNote": "Подписка ChatGPT, без ключа",
     "keyLabel": "API-ключ",
+    "paste": "Вставить",
     "keyPlaceholder": "Вставь ключ сюда",
     "keySaved": "Ключ ••••{last4} сохранён",
     "changeKey": "Другой ключ",

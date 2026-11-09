@@ -175,6 +175,8 @@ table.plans td.now { color: var(--tx); font-weight: 700; }
 
 .field { display: block; }
 .field > span { display: block; font-size: var(--t-14); color: var(--dim); margin-bottom: var(--s-1); }
+.field > .keyrow { display: flex; gap: var(--s-2); margin-bottom: 0; }
+.keyrow .input { flex: 1; min-width: 0; }
 .input, textarea.input, select.input {
   width: 100%;
   min-height: 44px;

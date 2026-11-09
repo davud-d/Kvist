@@ -232,6 +232,16 @@ def key_summary(user: User) -> dict[str, object]:
     }
 
 
+async def _provider_client(request: Request, provider: ModelProvider) -> httpx.AsyncClient:
+    """The customer's own endpoint is only ever reached through the public-address guard."""
+    settings: Settings = request.app.state.settings
+    client = http_client(request)
+    if provider.needs_base_url and not settings.allow_local_endpoints and request.app.state.http_transport is None:
+        await client.aclose()
+        client = httpx.AsyncClient(transport=PublicEndpointTransport(), trust_env=False, timeout=10.0)
+    return client
+
+
 @router.get("/api/model-providers")
 def list_providers() -> list[dict[str, object]]:
     return [
@@ -239,6 +249,38 @@ def list_providers() -> list[dict[str, object]]:
          "needs_model": p.needs_model, "partner": p.partner, "sign_in": p.sign_in}
         for p in PROVIDERS.values()
     ]
+
+
+class CatalogIn(InputModel):
+    provider: str
+    key: str = Field(min_length=8, max_length=500)
+    base_url: str = Field(default="", max_length=500)
+
+
+@router.post("/api/model-catalog")
+async def model_catalog(payload: CatalogIn, request: Request, user: User = Depends(current_user)) -> dict[str, object]:
+    """The provider's live model list, so the customer picks a model instead of typing its id.
+
+    An empty list is not an error: some vendors publish none and the customer types the id.
+    """
+    settings: Settings = request.app.state.settings
+    key = payload.key.strip()
+    remember(key)
+    provider = PROVIDERS.get(payload.provider)
+    if provider is None or provider.sign_in or not provider.needs_model:
+        return {"models": []}
+    base_url = payload.base_url.strip() if provider.needs_base_url else provider.default_base_url
+    if not base_url or endpoint_problem(base_url, settings.allow_local_endpoints):
+        return {"models": []}
+    try:
+        async with await _provider_client(request, provider) as client:
+            response = await client.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {key}"})
+        data = response.json().get("data", []) if response.status_code == 200 else []
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return {"models": []}
+    # Some vendors list ids as "models/<id>".
+    ids = {str(item.get("id")).removeprefix("models/") for item in data if isinstance(item, dict) and item.get("id")}
+    return {"models": sorted(ids)}
 
 
 @router.get("/api/model-key")
@@ -270,11 +312,7 @@ async def save_key(
             return {"ok": False, "code": problem}
     if provider.needs_model and not model:
         return {"ok": False, "code": "model_missing"}
-    client = http_client(request)
-    if provider.needs_base_url and not settings.allow_local_endpoints and request.app.state.http_transport is None:
-        await client.aclose()
-        client = httpx.AsyncClient(transport=PublicEndpointTransport(), trust_env=False, timeout=10.0)
-    async with client:
+    async with await _provider_client(request, provider) as client:
         result = await check_key(client, payload.provider, key, base_url or provider.default_base_url, model)
     if not result.ok:
         return {"ok": False, "code": result.code}
