@@ -50,6 +50,7 @@ frontends/ide/jetbrains/.gradle-user-home/
 frontends/ide/jetbrains/.intellijPlatform/
 frontends/ide/jetbrains/.kotlin/
 frontends/ide/jetbrains/build/
+frontends/ide/jetbrains/bin/
 frontends/ide/jetbrains/out/
 frontends/ide/jetbrains/bin/linux/kvist.bin
 frontends/ide/jetbrains/bin/win/kvist.exe
