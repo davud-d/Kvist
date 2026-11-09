@@ -103,12 +103,13 @@ export function mountChat(root) {
   // drives, a session that was closed.
   function bannerWords(agent) {
     if (agent.remote) return agent.remote.text;
-    return null;
+    return agent.closed !== null ? agent.closed || t("closed hint") : null;
   }
 
-  // What Enter on the banner does; the link that is down offers nothing.
-  function bannerAction() {
-    return () => {};
+  // What Enter on the banner does; the link that is down offers nothing, a closed session opens a new task.
+  function bannerAction(agent) {
+    if (agent.remote) return () => {};
+    return () => runCommand(agent, "new");
   }
 
   function paintDialog(agent) {
