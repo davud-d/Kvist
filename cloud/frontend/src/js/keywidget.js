@@ -5,6 +5,7 @@ import { h, replace } from "./dom.js";
 import { t } from "./i18n.js";
 
 const DEBOUNCE_MS = 700;
+const DRAFT_KEY = "kvist.keyDraft";
 const SIGN_IN_RESULTS = ["denied", "expired", "refused", "unreachable", "no_plan", "identity"];
 
 /** Back from OpenAI the address says how it went (`?chatgpt=ok` or a reason); it is read once and removed. */
@@ -17,9 +18,30 @@ function takeSignInResult() {
   return result;
 }
 
+// The provider, address and model survive a reload or a trip to another page; the key itself never does
+// (it is saved the moment it is pasted, so there is nothing to lose).
+function readDraft() {
+  try {
+    return JSON.parse(sessionStorage.getItem(DRAFT_KEY)) ?? {};
+  } catch {
+    // Storage blocked or the entry is not JSON: start without a draft.
+    return {};
+  }
+}
+
+function writeDraft(draft) {
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // Storage blocked: the draft is only a convenience.
+  }
+}
+
 export function keyWidget({ providers, saved, onValid }) {
   const returned = takeSignInResult();
-  let provider = returned ? "chatgpt" : saved.set ? saved.provider : providers[0].id;
+  const draft = readDraft();
+  const draftProvider = providers.some((item) => item.id === draft.provider) ? draft.provider : "";
+  let provider = returned ? "chatgpt" : saved.set ? saved.provider : draftProvider || providers[0].id;
   let changing = !saved.set || (returned !== "" && returned !== "ok");
   let timer = null;
   let sequence = 0;
@@ -34,6 +56,14 @@ export function keyWidget({ providers, saved, onValid }) {
   const modelList = h("datalist", { id: "model-catalog" });
   const modelInput = h("input.input", { type: "text", spellcheck: "false", autocapitalize: "off", id: "model-name",
     list: "model-catalog", autocomplete: "off" });
+
+  if (!saved.set && draft.provider === provider) {
+    baseInput.value = draft.base_url ?? "";
+    modelInput.value = draft.model ?? "";
+  }
+  const remember = () => writeDraft({ provider, base_url: baseInput.value.trim(), model: modelInput.value.trim() });
+  baseInput.addEventListener("input", remember);
+  modelInput.addEventListener("input", remember);
 
   const setHint = (kind, text) => {
     hint.className = `hint ${kind}`;
@@ -109,7 +139,8 @@ export function keyWidget({ providers, saved, onValid }) {
           h("input", {
             type: "radio", name: "provider", value: item.id, checked: item.id === provider,
             onchange: () => {
-              provider = item.id; changing = true; onValid(false); draw();
+              provider = item.id; changing = true; onValid(false); baseInput.value = ""; modelInput.value = "";
+              remember(); draw();
               // The form is below a long tile list: bring it into view so the pick visibly did something.
               form()?.scrollIntoView({ behavior: "smooth", block: "start" });
               keyInput.focus({ preventScroll: true });

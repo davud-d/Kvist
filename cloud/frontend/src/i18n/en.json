@@ -322,6 +322,8 @@
     "cancelYes": "Yes, cancel",
     "cancelKeep": "Keep it",
     "keyTitle": "Model key",
+    "needKey": "Add a model key first: a task cannot start without one.",
+    "toWorkspace": "Next: the workspace",
     "keyNone": "No key saved.",
     "removeKey": "Remove the key",
     "langTitle": "Language",

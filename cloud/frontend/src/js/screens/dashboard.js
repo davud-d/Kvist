@@ -8,6 +8,7 @@ import { exportButton } from "../exporter.js";
 import { dateTime, hoursMinutes, percentLeft, shortDate } from "../format.js";
 import { locale, t } from "../i18n.js";
 import { emptyBox, errorBox, liveRegion, machinePill, taskPill } from "../ui.js";
+import { workspaceLink } from "../workspace.js";
 
 function disputeDialog(row, onSent) {
   modal((close) => {
@@ -132,16 +133,16 @@ function machineCard(machines, own, reload) {
       : h("p.dim", {}, own ? t("dashboard.noRemoteMachine") : t("dashboard.noMachine")));
 }
 
-function tasksCard(tasks) {
+function tasksCard(tasks, navigate) {
   return h("section.card", { "aria-labelledby": "tasks-title" },
     h("div.spread", {}, h("h2.h3", { id: "tasks-title" }, t("dashboard.tasksTitle")),
-      h("a.chip", { href: "/pixel/" }, t("nav.newTask"))),
+      workspaceLink("chip", t("nav.newTask"), navigate)),
     tasks.length
       ? h("ul.list", {}, tasks.slice(0, 20).map((task) => h("li", {},
           h("div.spread", {}, h("a.title", { href: `/tasks/${task.id}`, "data-link": "" }, task.goal.split("\n")[0]),
             taskPill(task.status)),
           h("p.meta", {}, `${dateTime(task.created_at, locale())} · ${hoursMinutes(task.used_seconds, t)}`))))
-      : emptyBox(t("dashboard.noTasks"), h("a.btn", { href: "/pixel/" }, t("dashboard.firstTask"))));
+      : emptyBox(t("dashboard.noTasks"), workspaceLink("btn", t("dashboard.firstTask"), navigate)));
 }
 
 // Under a minute the shown value is 0, and "−0" would read as a glitch.
@@ -172,7 +173,7 @@ function feedCard(feed, refresh) {
       : h("p.dim", {}, t("dashboard.feedEmpty")));
 }
 
-export async function dashboardScreen(root) {
+export async function dashboardScreen(root, { navigate }) {
   const announce = liveRegion();
   const load = async () => {
     const [ledgerView, config, machines, tasks, key] = await Promise.all([
@@ -193,7 +194,7 @@ export async function dashboardScreen(root) {
         : null,
       view.own_machine ? remoteCard(view, machines, reload) : hoursCard(view, config, reload, announce),
       machineCard(machines, view.own_machine, reload),
-      tasksCard(tasks),
+      tasksCard(tasks, navigate),
       feedCard(ledgerView.feed, reload),
       h("section.card", {}, h("h2.h3", {}, t("dashboard.keyTitle")),
         h("p.row", {}, key.set

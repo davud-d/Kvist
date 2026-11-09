@@ -7,12 +7,34 @@ import { fill, h } from "../dom.js";
 import { t } from "../i18n.js";
 import { openModal } from "./modal.js";
 
+const DRAFT_KEY = "kvist.keyDraft";
+
+// What was picked survives a reload; the key itself never does (it is saved the moment it is pasted).
+function readDraft() {
+  try {
+    return JSON.parse(sessionStorage.getItem(DRAFT_KEY)) ?? {};
+  } catch {
+    // Storage blocked or the entry is not JSON: start without a draft.
+    return {};
+  }
+}
+
 export function openKeyDialog() {
   const saved = () => (account.key?.provider === "chatgpt" ? account.key : null);
-  const choice = { provider: account.key?.set ? account.key.provider : "deepseek" };
+  const draft = account.key?.set ? {} : readDraft();
+  const remember = () => {
+    try {
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ provider: choice.provider, base_url: base.value.trim(), model: model.value.trim() }));
+    } catch {
+      // Storage blocked: the draft is only a convenience.
+    }
+  };
+  const choice = { provider: account.key?.set ? account.key.provider : draft.provider || "deepseek" };
   const key = h("input", { class: "field", type: "password", autocomplete: "off", spellcheck: "false", placeholder: "sk-…" });
-  const base = h("input", { class: "field", type: "url", placeholder: "https://…", spellcheck: "false", value: account.key?.base_url ?? "" });
-  const model = h("input", { class: "field", type: "text", placeholder: t("model name"), spellcheck: "false", value: account.key?.model ?? "" });
+  const base = h("input", { class: "field", type: "url", placeholder: "https://…", spellcheck: "false", value: account.key?.base_url ?? draft.base_url ?? "" });
+  const model = h("input", { class: "field", type: "text", placeholder: t("model name"), spellcheck: "false", value: account.key?.model ?? draft.model ?? "" });
+  base.addEventListener("input", () => remember());
+  model.addEventListener("input", () => remember());
   const status = h("p", { class: "dim", "aria-live": "polite" });
   const providers = h("div", { class: "segment" });
   const extra = h("div", { class: "field-stack" });
@@ -54,7 +76,7 @@ export function openKeyDialog() {
 
   const paint = () => {
     const list = account.providers.length ? account.providers : [{ id: "deepseek", label: "DeepSeek" }, { id: "openai", label: "OpenAI" }, { id: "anthropic", label: "Anthropic" }, { id: "other", label: "…", needs_base_url: true, needs_model: true }];
-    fill(providers, list.map((item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === choice.provider ? " on" : ""}`, type: "button", onclick: () => { choice.provider = item.id; paint(); } }, item.id === "other" ? t("other") : item.label)));
+    fill(providers, list.map((item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === choice.provider ? " on" : ""}`, type: "button", onclick: () => { choice.provider = item.id; remember(); paint(); } }, item.id === "other" ? t("other") : item.label)));
     const current = list.find((item) => item.id === choice.provider);
     fill(link, current?.keys_page ? h("a", { href: current.keys_page, target: "_blank", rel: "noopener" }, `${t("get a key")} ↗`) : null);
     // A sign-in has no key to paste and nothing to save: its own button does the work.

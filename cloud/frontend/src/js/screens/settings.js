@@ -7,6 +7,7 @@ import { locale, rememberLocale, setLocale, t } from "../i18n.js";
 import { keyWidget } from "../keywidget.js";
 import { resetMachineDialog } from "../machinereset.js";
 import { errorBox } from "../ui.js";
+import { workspaceLink } from "../workspace.js";
 
 const PRICES = { start: 15, pro: 39, max: 99 };
 
@@ -56,7 +57,13 @@ export async function settingsScreen(root, { me, navigate }) {
   };
   drawPlan(view);
 
-  const keyBox = h("div.stack", {}, keyWidget({ providers, saved, onValid: () => {} }),
+  // Sent here by a button that needs a key: say so, and once the key is good, offer the way back.
+  const needKey = new URLSearchParams(location.search).get("need") === "key" && !saved.set;
+  const onward = h("p", { hidden: true }, workspaceLink("btn", t("settings.toWorkspace"), navigate));
+  const keyBox = h("div.stack", {},
+    needKey ? h("div.banner.warn", { role: "status" }, h("p", {}, t("settings.needKey"))) : null,
+    keyWidget({ providers, saved, onValid: (valid) => { if (needKey) onward.hidden = !valid; } }),
+    onward,
     saved.set ? h("p", {}, h("button.linkbtn", { type: "button",
       text: saved.provider === "chatgpt" ? t("chatgpt.disconnect") : t("settings.removeKey"), onclick: async () => {
       await api(saved.provider === "chatgpt" ? "/api/chatgpt" : "/api/model-key", { method: "DELETE" });

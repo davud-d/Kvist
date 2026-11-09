@@ -8,6 +8,7 @@ import { hoursMinutes } from "../format.js";
 import { t } from "../i18n.js";
 import { diff, groupNode, markdown } from "../render.js";
 import { errorBox, liveRegion, taskPill } from "../ui.js";
+import { workspaceLink } from "../workspace.js";
 
 const FINISHED = new Set(["done", "cancelled", "failed"]);
 const SHOWS_RESULT = new Set(["done", "cancelled", "failed", "paused"]);
@@ -111,7 +112,7 @@ export async function taskScreen(root, { params, navigate }) {
     if (status === "paused") buttons.push(h("button.btn", { type: "button", onclick: act("resume"), text: t("task.resume") }));
     if (!FINISHED.has(status)) buttons.push(h("button.btn.ghost", { type: "button", onclick: confirmStop, text: t("task.stop") }));
     if (FINISHED.has(status)) {
-      buttons.push(h("a.btn", { href: "/pixel/", text: t("task.newTask") }));
+      buttons.push(workspaceLink("btn", t("task.newTask"), navigate));
     }
     replace(controls, buttons);
   };
