@@ -196,11 +196,16 @@ export function reduce(agent, ev, { replay = false } = {}) {
   switch (ev.type) {
     case "hello":
       agent.provider = ev.provider ?? agent.provider;
-      agent.models = ev.models ?? agent.models;
+      if (ev.models && Object.keys(ev.models).length) agent.models = ev.models;
       agent.role = ev.role ?? agent.role;
       agent.effort = ev.effort ?? agent.effort;
       agent.session = ev.session ?? agent.session;
       agent.state = "idle";
+      return;
+    case "core_info":
+      agent.provider = ev.provider || agent.provider;
+      if (ev.models && Object.values(ev.models).some(Boolean)) agent.models = ev.models;
+      if (ev.role && ev.role !== "auto") agent.role = ev.role;
       return;
     case "manifest":
       agent.manifest = ev;

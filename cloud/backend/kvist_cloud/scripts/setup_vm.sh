@@ -171,6 +171,7 @@ packages:
   - nodejs
   - npm
   - bubblewrap
+  - qemu-guest-agent
 write_files:
   - path: /etc/systemd/system/kvist-runner.service
     content: |

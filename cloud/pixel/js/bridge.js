@@ -74,6 +74,12 @@ function handle(agent, taskId, entry, data) {
       if (data.seq <= entry.lastSeq) return;
       entry.lastSeq = data.seq;
     }
+    // The core's own hello is plumbing for the feed, but it is the only place that names the models it really uses.
+    if (data.event.type === "hello" && entry.announced) {
+      const { provider, models, role } = data.event;
+      emit(agent, { type: "core_info", provider, models, role });
+      return;
+    }
     if (isPlumbing(data.event, entry.announced)) return;
     emit(agent, SESSION_EVENTS.has(data.event.type) ? { ...data.event, session: String(taskId) } : data.event);
   } else if (data.type === "task") {
