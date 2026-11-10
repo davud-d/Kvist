@@ -234,6 +234,8 @@ class EventStreamUI:
                 cache_read_tokens=None if cache_read is None else max(0, int(cache_read)),
                 cache_write_tokens=None if cache_write is None else max(0, int(cache_write)),
                 usage_source="estimated" if usage.get("usage_source") == "estimated" else "provider",
+                cost_usd=usage.get("cost_usd"),
+                cost_approx=bool(usage.get("cost_approx", False)),
             )
         )
 

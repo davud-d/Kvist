@@ -57,3 +57,39 @@ def lookup_price(provider: str, model: str) -> dict[str, float | None] | None:
         return _row(_OPENROUTER_VENDORS[vendor], name) if vendor in _OPENROUTER_VENDORS and name else None
     table_provider = _TABLE_PROVIDER.get(provider)
     return _row(table_provider, model) if table_provider else None
+
+
+def call_cost(
+    provider: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int | None,
+    cache_write_tokens: int | None,
+    estimated: bool,
+) -> tuple[float | None, bool]:
+    """(cost in USD, approximate) of one model call; (None, False) when the model has no price.
+
+    ``input_tokens`` includes the cached parts, so they are billed at their own rate and
+    only the rest at the input rate. An unreported cache count counts as 0. A cache price
+    the table lacks is replaced by the input price, an upper bound, and the result is
+    flagged approximate; so is any call whose token counts were estimated locally.
+    """
+    price = lookup_price(provider, model)
+    if price is None:
+        return None, False
+    read, write = cache_read_tokens or 0, cache_write_tokens or 0
+    approximate = estimated
+    rates = {}
+    for name, tokens in (("cache_read", read), ("cache_write", write)):
+        rate = price[name]
+        if rate is None:
+            rate = price["input"]
+            approximate = approximate or tokens > 0
+        rates[name] = rate
+    uncached = max(0, input_tokens - read - write)
+    dollars = (
+        uncached * price["input"] + read * rates["cache_read"]
+        + write * rates["cache_write"] + output_tokens * price["output"]
+    )
+    return dollars / 1_000_000, approximate

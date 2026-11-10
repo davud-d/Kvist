@@ -321,6 +321,9 @@ class SessionJournal:
         # counts must not journal a zero that reads as "nothing was cached".
         self._cache_read_tokens: int | None = None
         self._cache_write_tokens: int | None = None
+        # Same rule for money: None until a call carries a price, never a 0 for "all unpriced".
+        self._cost_usd: float | None = None
+        self._cost_approx = False
         self._model = ""
         self._context_tokens = 0
         self._context_limit = 0
@@ -342,6 +345,7 @@ class SessionJournal:
             self._reasoning = {}
             self._input_tokens = self._output_tokens = 0
             self._cache_read_tokens = self._cache_write_tokens = None
+            self._cost_usd, self._cost_approx = None, False
             self._context_tokens = self._context_limit = 0
             self._pending_user = {"type": "user", "text": text}
             if resumed:
@@ -390,6 +394,9 @@ class SessionJournal:
                 summary["cache_read_tokens"] = self._cache_read_tokens
             if self._cache_write_tokens is not None:
                 summary["cache_write_tokens"] = self._cache_write_tokens
+            if self._cost_usd is not None:
+                summary["cost_usd"] = self._cost_usd
+                summary["cost_approx"] = self._cost_approx
             self._append(summary)
         if self._dropped:
             self._append({"type": "journal_notice", "omitted_events": self._dropped})
@@ -426,6 +433,12 @@ class SessionJournal:
             self._cache_read_tokens = (self._cache_read_tokens or 0) + payload["cache_read_tokens"]
         if "cache_write_tokens" in payload:
             self._cache_write_tokens = (self._cache_write_tokens or 0) + payload["cache_write_tokens"]
+        if "cost_usd" in payload:
+            self._cost_usd = (self._cost_usd or 0.0) + payload["cost_usd"]
+            self._cost_approx = self._cost_approx or bool(payload.get("cost_approx"))
+        else:
+            # A call without a price makes the total a lower bound.
+            self._cost_approx = True
         self._model = payload["model"] or self._model
         self._context_tokens = payload.get("context_tokens", 0) or self._context_tokens
         self._context_limit = payload.get("context_limit", 0) or self._context_limit

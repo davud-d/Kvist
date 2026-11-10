@@ -67,6 +67,7 @@ from kernel.agent.native_tools import (
     decode_arguments,
     native_role_prompt,
 )
+from kernel.llm.pricing import call_cost
 from kernel.llm.reasoning_effort import (
     is_reasoning_error,
     merge_reasoning_kwargs,
@@ -1183,6 +1184,8 @@ def _emit_usage(
     was counted locally. It defaults to "estimated": a call site that forgets to
     say understates its accuracy instead of claiming a provider count it lacks.
     ``cache_*_tokens`` are parts of ``input_tokens`` (None: not reported).
+    ``cost_usd`` is priced per call here, where the model and provider are known;
+    it is left out when the model has no price (see ``pricing.call_cost``).
     """
     normalized_input = max(0, int(input_tokens))
     if kind in _CONTEXT_USAGE_KINDS:
@@ -1196,9 +1199,15 @@ def _emit_usage(
         for key, value in (("cache_read_tokens", cache_read_tokens), ("cache_write_tokens", cache_write_tokens))
         if value is not None
     }
+    cost, cost_approx = call_cost(
+        str(getattr(getattr(self, "config", None), "provider", "")), str(model), normalized_input,
+        max(0, int(output_tokens)), cache.get("cache_read_tokens"), cache.get("cache_write_tokens"),
+        usage_source == "estimated",
+    )
     callback(
         {
             **cache,
+            **({} if cost is None else {"cost_usd": cost, "cost_approx": cost_approx}),
             "usage_source": usage_source,
             "input_tokens": normalized_input,
             "output_tokens": max(0, int(output_tokens)),

@@ -773,3 +773,28 @@ def test_manual_provider_reasoning_rejection_is_debug_only():
 
     assert warnings == []
     assert debug
+
+
+_PRICE_FIXTURE = {
+    "claude-sonnet-5": {"provider": "anthropic", "input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5},
+}
+
+
+def test_emit_usage_prices_each_call_with_the_agents_provider(agent_factory, monkeypatch):
+    from kernel.llm import pricing
+
+    monkeypatch.setattr(pricing, "_table", lambda: _PRICE_FIXTURE)
+    agent = agent_factory(provider="anthropic")
+    agent._ui = _UsageCapturingUI()
+
+    agent_model._emit_usage(
+        agent, model="claude-sonnet-5", input_tokens=1000, output_tokens=50, kind="step",
+        cache_read_tokens=600, cache_write_tokens=100, usage_source="provider",
+    )
+    priced = agent._ui.usages[-1]
+    agent_model._emit_usage(agent, model="claude-nope", input_tokens=1000, output_tokens=50, kind="step")
+    unpriced = agent._ui.usages[-1]
+
+    assert priced["cost_usd"] == pytest.approx(0.00147)
+    assert priced["cost_approx"] is False
+    assert "cost_usd" not in unpriced and "cost_approx" not in unpriced

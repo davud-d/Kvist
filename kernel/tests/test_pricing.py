@@ -77,3 +77,50 @@ def test_bundled_table_covers_the_models_kvist_offers(monkeypatch):
 def test_pyproject_ships_the_price_table():
     pyproject = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert "model_prices.json" in pyproject["tool"]["setuptools"]["package-data"]["kernel.llm"]
+
+
+def test_call_cost_bills_cached_parts_at_their_own_rates():
+    # 300 uncached * 2 + 600 read * 0.2 + 100 written * 2.5 + 50 out * 10 = 1470 micro-dollars
+    cost, approximate = pricing.call_cost("anthropic", "claude-sonnet-5", 1000, 50, 600, 100, False)
+
+    assert cost == pytest.approx(0.00147)
+    assert approximate is False
+
+
+def test_call_cost_without_cache_data_treats_it_as_zero():
+    cost, approximate = pricing.call_cost("anthropic", "claude-sonnet-5", 1000, 50, None, None, False)
+
+    assert cost == pytest.approx((1000 * 2.0 + 50 * 10.0) / 1e6)
+    assert approximate is False
+
+
+def test_call_cost_uses_the_input_price_when_the_cache_price_is_missing():
+    # gpt-5 states no cache_write price: 100 written tokens are billed as input, an upper bound.
+    cost, approximate = pricing.call_cost("openai", "gpt-5", 1000, 10, 400, 100, False)
+
+    assert cost == pytest.approx((500 * 1.25 + 400 * 0.125 + 100 * 1.25 + 10 * 10.0) / 1e6)
+    assert approximate is True
+
+
+def test_call_cost_stays_exact_when_a_missing_cache_price_is_not_needed():
+    _, approximate = pricing.call_cost("openai", "gpt-5", 1000, 10, 400, None, False)
+
+    assert approximate is False
+
+
+def test_call_cost_keeps_a_stated_zero_cache_write_price():
+    cost, approximate = pricing.call_cost("deepseek", "deepseek-flash", 1000, 0, 0, 1000, False)
+
+    assert cost == 0.0
+    assert approximate is False
+
+
+def test_call_cost_of_estimated_counts_is_approximate():
+    _, approximate = pricing.call_cost("anthropic", "claude-sonnet-5", 1000, 50, None, None, True)
+
+    assert approximate is True
+
+
+def test_call_cost_is_none_for_a_model_outside_the_table_and_for_a_subscription():
+    assert pricing.call_cost("anthropic", "claude-nope", 1000, 50, None, None, False) == (None, False)
+    assert pricing.call_cost("chatgpt", "claude-sonnet-5", 1000, 50, None, None, False) == (None, False)

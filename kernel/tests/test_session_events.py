@@ -823,3 +823,63 @@ def test_history_op_cli_round_trip_in_subprocess(agent_factory, monkeypatch):
     assert older["events"][-1]["seq"] < page["events"][0]["seq"]
     assert "session_history" not in cli("--session-op", "list")["session_items"][0]
     assert cli("--session-op", "history", "--session-name", "ghost")["ok"] is False
+
+
+def test_turn_cost_sums_exact_calls_and_stays_exact(tmp_path):
+    usage = _turn_usage(
+        tmp_path,
+        [
+            {"input_tokens": 100, "output_tokens": 10, "cost_usd": 0.001, "cost_approx": False},
+            {"input_tokens": 100, "output_tokens": 10, "cost_usd": 0.002, "cost_approx": False},
+        ],
+    )
+
+    assert usage["cost_usd"] == pytest.approx(0.003)
+    assert usage["cost_approx"] is False
+
+
+def test_turn_cost_is_approximate_when_one_call_was(tmp_path):
+    usage = _turn_usage(
+        tmp_path,
+        [
+            {"input_tokens": 100, "output_tokens": 10, "cost_usd": 0.001, "cost_approx": False},
+            {"input_tokens": 100, "output_tokens": 10, "cost_usd": 0.002, "cost_approx": True},
+        ],
+    )
+
+    assert usage["cost_usd"] == pytest.approx(0.003)
+    assert usage["cost_approx"] is True
+
+
+def test_turn_cost_sums_two_models_and_is_approximate_when_one_call_had_no_price(tmp_path):
+    usage = _turn_usage(
+        tmp_path,
+        [
+            {"model": "claude-sonnet-5", "input_tokens": 100, "output_tokens": 10, "cost_usd": 0.001},
+            {"model": "deepseek-flash", "input_tokens": 100, "output_tokens": 10, "cost_usd": 0.0002},
+            {"model": "unknown-model", "input_tokens": 100, "output_tokens": 10},
+        ],
+    )
+
+    assert usage["cost_usd"] == pytest.approx(0.0012)
+    assert usage["cost_approx"] is True
+
+
+def test_turn_without_any_priced_call_has_no_cost_rather_than_zero(tmp_path):
+    usage = _turn_usage(tmp_path, [{"input_tokens": 100, "output_tokens": 10}])
+
+    assert "cost_usd" not in usage and "cost_approx" not in usage
+
+
+def test_cost_does_not_leak_into_the_next_turn(tmp_path):
+    path = tmp_path / ".kvist" / "sessions" / "u.events.jsonl"
+    journal = SessionJournal(tmp_path, lambda: path, print)
+    ui = session_events.JournalingUI(_Quiet(), journal)
+    for call in ({"cost_usd": 0.5, "cost_approx": True}, {}):
+        journal.begin_turn("again")
+        ui.print_final("done", [])
+        ui.print_usage({"input_tokens": 100, "output_tokens": 1, "model": "m", "kind": "step", **call})
+        journal.end_turn()
+
+    usage = [e["event"] for e in session_events.read_history(path, tmp_path)["events"] if e["event"]["type"] == "usage"]
+    assert ["cost_usd" in u for u in usage] == [True, False]

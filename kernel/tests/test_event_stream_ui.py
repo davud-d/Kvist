@@ -502,3 +502,14 @@ def test_loop_reasoning_is_redacted():
     ui.set_thinking("key sk-abcdefghijklmnopqrstuvwxyz0123456789")
     _, chunk = ch.drain()
     assert "sk-abcdefghijklmnopqrstuvwxyz0123456789" not in chunk.text
+
+
+def test_print_usage_carries_cost_only_when_the_call_was_priced():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.print_usage({"input_tokens": 5, "output_tokens": 1, "cost_usd": 0.002, "cost_approx": True})
+    ui.print_usage({"input_tokens": 5, "output_tokens": 1})
+    priced, unpriced = (event.to_dict() for event in ch.drain())
+
+    assert (priced["cost_usd"], priced["cost_approx"]) == (0.002, True)
+    assert "cost_usd" not in unpriced and "cost_approx" not in unpriced

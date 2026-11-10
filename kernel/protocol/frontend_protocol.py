@@ -524,6 +524,8 @@ class UsageEvent:
     cache_read_tokens: int | None = None
     cache_write_tokens: int | None = None
     usage_source: UsageSource = "provider"
+    cost_usd: float | None = None
+    cost_approx: bool = False
     type: ClassVar[str] = "usage"
 
     def to_dict(self) -> dict:
@@ -542,6 +544,9 @@ class UsageEvent:
             payload["cache_read_tokens"] = self.cache_read_tokens
         if self.cache_write_tokens is not None:
             payload["cache_write_tokens"] = self.cache_write_tokens
+        if self.cost_usd is not None:
+            payload["cost_usd"] = self.cost_usd
+            payload["cost_approx"] = self.cost_approx
         return payload
 
 
