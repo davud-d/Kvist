@@ -72,9 +72,10 @@ def _usage(response: Any) -> NS | None:
     if usage is None:
         return None
     details = getattr(usage, "input_tokens_details", None)
+    # No details object means the cache count is unknown, not zero: None keeps it out of the cost maths.
     return NS(prompt_tokens=usage.input_tokens, completion_tokens=usage.output_tokens,
               total_tokens=usage.total_tokens,
-              prompt_tokens_details=NS(cached_tokens=getattr(details, "cached_tokens", 0)),
+              prompt_tokens_details=NS(cached_tokens=getattr(details, "cached_tokens", None)),
               completion_tokens_details=getattr(usage, "output_tokens_details", None))
 
 

@@ -287,6 +287,39 @@ def test_cached_and_reasoning_usage_survives_adapter(monkeypatch, streaming):
     assert usage.total_tokens == 2168
 
 
+def _turn_from_responses_usage(monkeypatch, usage):
+    from kernel.agent import agent_model
+
+    fake_responses(monkeypatch, [NS(type="response.completed", response=NS(usage=usage))])
+    response = transport.ChatGPTClient().create(model="test", messages=[])
+    return agent_model._native_turn_from_message(response.choices[0].message, response.usage)
+
+
+def test_cached_tokens_become_cache_read_with_provider_source(monkeypatch):
+    turn = _turn_from_responses_usage(monkeypatch, NS(
+        input_tokens=2048, output_tokens=120, total_tokens=2168, input_tokens_details=NS(cached_tokens=1024)))
+    assert (turn.input_tokens, turn.cache_read_tokens, turn.cache_write_tokens) == (2048, 1024, None)
+    assert turn.usage_source == "provider"
+
+
+def test_missing_input_tokens_details_leaves_cache_unknown(monkeypatch):
+    turn = _turn_from_responses_usage(monkeypatch, NS(input_tokens=10, output_tokens=20, total_tokens=30))
+    assert (turn.input_tokens, turn.cache_read_tokens, turn.cache_write_tokens) == (10, None, None)
+    assert turn.usage_source == "provider"
+
+
+def test_zero_cached_tokens_is_a_real_zero(monkeypatch):
+    turn = _turn_from_responses_usage(monkeypatch, NS(
+        input_tokens=10, output_tokens=20, total_tokens=30, input_tokens_details=NS(cached_tokens=0)))
+    assert turn.cache_read_tokens == 0
+
+
+def test_cached_tokens_above_input_tokens_are_dropped(monkeypatch):
+    turn = _turn_from_responses_usage(monkeypatch, NS(
+        input_tokens=10, output_tokens=20, total_tokens=30, input_tokens_details=NS(cached_tokens=50)))
+    assert (turn.cache_read_tokens, turn.cache_write_tokens) == (None, None)
+
+
 @pytest.mark.parametrize("terminal", [None, NS(type="response.incomplete", response=NS(error=None)),
     NS(type="response.failed", response=NS(error=NS(code="subscription_sharing_usage_limit_exceeded")))])
 def test_partial_answer_is_not_reported_as_success(monkeypatch, terminal):
