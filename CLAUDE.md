@@ -51,6 +51,7 @@ python3 -m venv .venv && .venv/bin/python -m pip install -r requirements-dev.txt
 
 cd frontends/tui/ink && npm install && npm run build && npm test && npm run typecheck
 cd frontends/ide/vscode && npm test && npm run typecheck
+cd frontends/gui/electron && npm test
 cd frontends/gui/electron-legacy && npm test
 cd frontends/gui/tauri && node --test "tests/*.test.mjs" && (cd src-tauri && cargo test)
 ```

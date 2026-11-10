@@ -1,0 +1,255 @@
+"use strict"
+
+const { EventEmitter } = require("node:events")
+const { spawn } = require("node:child_process")
+
+const { PROTOCOL_VERSION } = require("./protocol-state")
+
+class NdjsonDecoder {
+  constructor(onValue, onError) {
+    this.buffer = ""
+    this.onValue = onValue
+    this.onError = onError
+  }
+
+  push(chunk) {
+    this.buffer += chunk.toString("utf8")
+    const lines = this.buffer.split("\n")
+    this.buffer = lines.pop() ?? ""
+    for (const rawLine of lines) {
+      this.decode(rawLine)
+    }
+  }
+
+  end() {
+    if (this.buffer.trim()) {
+      this.decode(this.buffer)
+    }
+    this.buffer = ""
+  }
+
+  decode(rawLine) {
+    const line = rawLine.trim()
+    if (!line) return
+    try {
+      this.onValue(JSON.parse(line))
+    } catch (error) {
+      this.onError(new Error(`Invalid NDJSON from Kvist: ${error.message}`))
+    }
+  }
+}
+
+function redactDiagnostic(value) {
+  return String(value)
+    .replace(/\b(sk-(?:proj-)?[A-Za-z0-9_-]{16,})\b/g, "[REDACTED]")
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s]+/gi, "$1[REDACTED]")
+    .replace(/((?:api[_-]?key|token|secret)\s*[=:]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+    .slice(-6000)
+}
+
+function normalizeRunOptions(options = {}) {
+  const provider = String(options.provider || "").trim()
+  const role = String(options.role || "auto").trim()
+  const approvalMode = String(options.approvalMode || "ask").trim()
+  const models = {
+    fast: String(options.models?.fast || "").trim(),
+    smart: String(options.models?.smart || "").trim(),
+  }
+  const modelValues = Object.values(models)
+  if (modelValues.some(Boolean) && !modelValues.every(Boolean)) {
+    throw new Error("Set both model roles, or leave both empty.")
+  }
+  if (!new Set(["auto", "coder", "reader", "devops", "chat", "universal"]).has(role)) {
+    throw new Error("Unsupported Kvist role.")
+  }
+  if (!new Set(["ask", "deny"]).has(approvalMode)) {
+    throw new Error("Unsupported approval mode.")
+  }
+  return { provider, role, approvalMode, models }
+}
+
+class KvistProcess extends EventEmitter {
+  constructor({ workspace, command, prefixArgs = [], spawnImpl = spawn, env = process.env }) {
+    super()
+    this.workspace = workspace
+    this.command = command
+    this.prefixArgs = prefixArgs
+    this.spawnImpl = spawnImpl
+    this.env = env
+    this.child = null
+    this.handshakeComplete = false
+    this.pendingRequests = new Map()
+    this.stopping = false
+  }
+
+  start(goal, options = {}) {
+    if (this.child) throw new Error("Kvist is already running.")
+    const normalizedGoal = String(goal).replace(/\r?\n/g, " ").trim()
+    if (!normalizedGoal) throw new Error("Task cannot be empty.")
+    this._launch(normalizeRunOptions(options), { goal: normalizedGoal })
+  }
+
+  resume(options = {}) {
+    if (this.child) throw new Error("Kvist is already running.")
+    this._launch(normalizeRunOptions(options), { resume: true })
+  }
+
+  _launch(runOptions, { goal = "", resume = false } = {}) {
+    const args = [
+      ...this.prefixArgs,
+      "--workspace",
+      this.workspace,
+      "--frontend",
+      "stdio",
+    ]
+    if (resume) args.push("--resume")
+    if (runOptions.provider) args.push("--provider", runOptions.provider)
+    if (runOptions.models.fast) {
+      args.push(
+        "--fast-model", runOptions.models.fast,
+        "--smart-model", runOptions.models.smart,
+      )
+    }
+    args.push("--role", runOptions.role, "--approval-mode", runOptions.approvalMode)
+    const child = this.spawnImpl(this.command, args, {
+      cwd: this.workspace,
+      env: this.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    })
+    this.child = child
+
+    const decoder = new NdjsonDecoder(
+      (event) => this.handleEvent(event),
+      (error) => this.handleProtocolError(error),
+    )
+    child.stdout.on("data", (chunk) => decoder.push(chunk))
+    child.stdout.on("end", () => decoder.end())
+    child.stderr.on("data", (chunk) => {
+      const diagnostic = redactDiagnostic(chunk.toString("utf8"))
+      if (diagnostic.trim()) this.emit("diagnostic", diagnostic)
+    })
+    child.on("error", (error) => this.emit("process-error", error))
+    child.on("exit", (code, signal) => {
+      this.child = null
+      this.pendingRequests.clear()
+      this.emit("exit", { code, signal, expected: this.stopping })
+    })
+
+    if (resume) child.stdin.end()
+    else child.stdin.write(goal + "\n")
+  }
+
+  handleEvent(event) {
+    if (!event || typeof event !== "object" || typeof event.type !== "string") {
+      this.handleProtocolError(new Error("Kvist emitted a non-event JSON value."))
+      return
+    }
+
+    if (!this.handshakeComplete) {
+      if (event.type !== "hello") {
+        this.handleProtocolError(new Error("The first Kvist event was not hello."))
+        return
+      }
+      if (event.protocol_version !== PROTOCOL_VERSION) {
+        this.handleProtocolError(
+          new Error(`Unsupported Kvist protocol ${event.protocol_version}; expected ${PROTOCOL_VERSION}.`),
+        )
+        return
+      }
+      this.handshakeComplete = true
+    }
+
+    if (event.type === "input_request" && typeof event.request_id === "string") {
+      this.pendingRequests.set(event.request_id, event.kind)
+    }
+    this.emit("event", event)
+  }
+
+  handleProtocolError(error) {
+    this.emit("protocol-error", error)
+    void this.stop()
+  }
+
+  respond(payload) {
+    if (!this.child || !this.child.stdin.writable) {
+      throw new Error("Kvist is not accepting input.")
+    }
+    if (!payload || typeof payload.request_id !== "string") {
+      throw new TypeError("A request_id is required.")
+    }
+
+    const kind = this.pendingRequests.get(payload.request_id)
+    if (!kind) throw new Error("The input request is no longer pending.")
+
+    let response
+    if (kind === "confirm") {
+      response = { request_id: payload.request_id, approved: payload.approved === true }
+      // "Always allow" saves the request's remember_pattern to the project's permissions.
+      if (payload.approved === true && payload.remember === true) response.remember = true
+    } else {
+      const value = payload.value
+      if (value !== null && typeof value !== "string") {
+        throw new TypeError("Input response value must be a string or null.")
+      }
+      response = { request_id: payload.request_id, value }
+    }
+
+    this.pendingRequests.delete(payload.request_id)
+    this.child.stdin.write(JSON.stringify(response) + "\n")
+  }
+
+  // Control messages the core reads beside input responses: "pause" stops at
+  // the next safe point and keeps the task; "cancel" stops everything the task
+  // owns; "helper_stop" stops one helper agent; "takeover" asks a core on a server to let this
+  // frontend write.
+  control(type, extra = {}) {
+    if (!this.child || !this.child.stdin.writable) {
+      throw new Error("Kvist is not running.")
+    }
+    if (!["pause", "cancel", "helper_stop", "takeover"].includes(type)) {
+      throw new TypeError("Unknown control message.")
+    }
+    this.child.stdin.write(JSON.stringify({ ...extra, type }) + "\n")
+  }
+
+  failClosedPending() {
+    if (!this.child || !this.child.stdin.writable) return
+    for (const [requestId, kind] of this.pendingRequests) {
+      const response = kind === "confirm"
+        ? { request_id: requestId, approved: false }
+        : { request_id: requestId, value: null }
+      this.child.stdin.write(JSON.stringify(response) + "\n")
+    }
+    this.pendingRequests.clear()
+  }
+
+  stop() {
+    const child = this.child
+    if (!child) return Promise.resolve()
+    this.stopping = true
+    this.failClosedPending()
+    child.stdin.end()
+
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        resolve()
+      }
+      child.once("exit", finish)
+      const terminateTimer = setTimeout(() => {
+        if (this.child === child) child.kill("SIGTERM")
+      }, 500)
+      const killTimer = setTimeout(() => {
+        if (this.child === child) child.kill("SIGKILL")
+        finish()
+      }, 2500)
+      terminateTimer.unref()
+      killTimer.unref()
+    })
+  }
+}
+
+module.exports = { KvistProcess, NdjsonDecoder, normalizeRunOptions, redactDiagnostic }

@@ -1,0 +1,231 @@
+"use strict"
+
+const assert = require("node:assert/strict")
+const { EventEmitter, once } = require("node:events")
+const { PassThrough } = require("node:stream")
+const test = require("node:test")
+
+const {
+  KvistProcess,
+  NdjsonDecoder,
+  normalizeRunOptions,
+  redactDiagnostic,
+} = require("../src/kvist-process")
+
+function fakeChild() {
+  const child = new EventEmitter()
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  child.stdin = new PassThrough()
+  child.kill = (signal) => {
+    queueMicrotask(() => child.emit("exit", null, signal))
+    return true
+  }
+  child.stdin.on("finish", () => queueMicrotask(() => child.emit("exit", 0, null)))
+  return child
+}
+
+test("NDJSON decoder handles split records and reports malformed input", () => {
+  const values = []
+  const errors = []
+  const decoder = new NdjsonDecoder((value) => values.push(value), (error) => errors.push(error))
+
+  decoder.push('{"type":"hel')
+  decoder.push('lo","protocol_version":1}\nnot-json\n')
+
+  assert.deepEqual(values, [{ type: "hello", protocol_version: 1 }])
+  assert.equal(errors.length, 1)
+})
+
+test("starts Kvist with the required stdio frontend arguments", () => {
+  const child = fakeChild()
+  let invocation
+  const processRunner = new KvistProcess({
+    workspace: "/tmp/project",
+    command: "kvist",
+    spawnImpl: (command, args, options) => {
+      invocation = { command, args, options }
+      return child
+    },
+  })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+
+  processRunner.start("Fix tests")
+
+  assert.equal(invocation.command, "kvist")
+  assert.deepEqual(invocation.args, [
+    "--workspace", "/tmp/project",
+    "--frontend", "stdio",
+    "--role", "auto",
+    "--approval-mode", "ask",
+  ])
+  assert.equal(invocation.options.cwd, "/tmp/project")
+  assert.equal(stdin, "Fix tests\n")
+})
+
+test("passes provider, model, role, and fail-closed approval overrides", () => {
+  const child = fakeChild()
+  let args
+  const processRunner = new KvistProcess({
+    workspace: "/tmp/project",
+    command: "kvist",
+    spawnImpl: (_command, childArgs) => {
+      args = childArgs
+      return child
+    },
+  })
+
+  processRunner.start("Inspect project", {
+    provider: "omniroute",
+    role: "devops",
+    approvalMode: "deny",
+    models: {
+      fast: "ds-web/deepseek-v4-flash",
+      smart: "ds-web/deepseek-v4-pro",
+    },
+  })
+
+  assert.deepEqual(args.slice(-10), [
+    "--provider", "omniroute",
+    "--fast-model", "ds-web/deepseek-v4-flash",
+    "--smart-model", "ds-web/deepseek-v4-pro",
+    "--role", "devops",
+    "--approval-mode", "deny",
+  ])
+})
+
+test("requires either zero or both model overrides", () => {
+  assert.throws(
+    () => normalizeRunOptions({ models: { fast: "one" } }),
+    /both model roles/,
+  )
+})
+
+test("preserves correlation and never echoes a secret response", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({
+    workspace: "/tmp/project",
+    command: "kvist",
+    spawnImpl: () => child,
+  })
+  let stdin = ""
+  const diagnostics = []
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.on("diagnostic", (value) => diagnostics.push(value))
+  processRunner.start("Configure provider")
+  child.stdout.write('{"type":"hello","protocol_version":1}\n')
+  child.stdout.write('{"type":"input_request","request_id":"secret-7","kind":"secret"}\n')
+
+  processRunner.respond({ request_id: "secret-7", value: "private-value" })
+
+  const lines = stdin.trim().split("\n")
+  assert.deepEqual(JSON.parse(lines[1]), { request_id: "secret-7", value: "private-value" })
+  assert.deepEqual(diagnostics, [])
+})
+
+test("shutdown denies pending confirmations", async () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({
+    workspace: "/tmp/project",
+    command: "kvist",
+    spawnImpl: () => child,
+  })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Delete generated files")
+  child.stdout.write('{"type":"hello","protocol_version":1}\n')
+  child.stdout.write('{"type":"input_request","request_id":"danger-1","kind":"confirm"}\n')
+
+  await processRunner.stop()
+
+  const lines = stdin.trim().split("\n")
+  assert.deepEqual(JSON.parse(lines[1]), { request_id: "danger-1", approved: false })
+})
+
+test("protocol mismatch is surfaced and stops the process", async () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({
+    workspace: "/tmp/project",
+    command: "kvist",
+    spawnImpl: () => child,
+  })
+  processRunner.start("Inspect project")
+  const errorPromise = once(processRunner, "protocol-error")
+
+  child.stdout.write('{"type":"hello","protocol_version":2}\n')
+
+  const [error] = await errorPromise
+  assert.match(error.message, /expected 1/)
+})
+
+test("diagnostics redact common API key forms", () => {
+  const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz"
+  assert.equal(redactDiagnostic(`api_key=${secret}`), "api_key=[REDACTED]")
+  assert.equal(redactDiagnostic(`Authorization: Bearer ${secret}`), "Authorization: Bearer [REDACTED]")
+})
+
+test("taking over a core on a server is a control line too", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Fix tests")
+
+  processRunner.control("takeover")
+
+  // The first line is the goal as plain text.
+  assert.deepEqual(JSON.parse(stdin.trim().split("\n").at(-1)), { type: "takeover" })
+})
+
+test("pause, stop-all and helper stop are control lines on the core's stdin", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Fix tests")
+
+  processRunner.control("pause")
+  processRunner.control("cancel")
+  processRunner.control("helper_stop", { agent_id: "h1" })
+
+  const lines = stdin.trim().split("\n").slice(1).map((line) => JSON.parse(line))
+  assert.deepEqual(lines, [{ type: "pause" }, { type: "cancel" }, { agent_id: "h1", type: "helper_stop" }])
+  assert.throws(() => processRunner.control("shutdown"), /Unknown control message/)
+})
+
+test("a control line cannot override its type through the extra fields", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Fix tests")
+
+  processRunner.control("helper_stop", { agent_id: "h2", type: "cancel" })
+
+  assert.equal(JSON.parse(stdin.trim().split("\n").at(-1)).type, "helper_stop")
+})
+
+test("the reader role is accepted", () => {
+  assert.equal(normalizeRunOptions({ role: "reader" }).role, "reader")
+})
+
+test("an approval may ask to remember its pattern, a denial never does", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Run it")
+  child.stdout.write('{"type":"hello","protocol_version":1}\n')
+  for (const id of ["a", "b", "c"]) {
+    child.stdout.write(`{"type":"input_request","request_id":"${id}","kind":"confirm","remember_pattern":"python3 *"}\n`)
+  }
+  processRunner.respond({ request_id: "a", approved: true, remember: true })
+  processRunner.respond({ request_id: "b", approved: true })
+  processRunner.respond({ request_id: "c", approved: false, remember: true })
+
+  const [a, b, c] = stdin.trim().split("\n").slice(1).map((line) => JSON.parse(line))
+  assert.deepEqual(a, { request_id: "a", approved: true, remember: true })
+  assert.deepEqual(b, { request_id: "b", approved: true })
+  assert.deepEqual(c, { request_id: "c", approved: false })
+})

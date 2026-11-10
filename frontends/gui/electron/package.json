@@ -1,0 +1,73 @@
+{
+  "name": "kvist-desktop",
+  "version": "2.0.0",
+  "private": true,
+  "workspaces": [],
+  "description": "Kvist desktop app: a thread-based coding workspace on top of the Kvist stdio protocol",
+  "license": "MIT",
+  "homepage": "https://github.com/davud-d/Kvist",
+  "author": {
+    "name": "Davud",
+    "email": "noreply@users.noreply.github.com"
+  },
+  "desktopName": "kvist",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "build:core": "node scripts/build-core.js",
+    "dist:app": "electron-builder",
+    "dist": "npm run build:core && npm run dist:app"
+  },
+  "dependencies": {
+    "marked": "^18.0.9",
+    "sanitize-html": "^2.17.6"
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.davud.kvist.desktop",
+    "productName": "Kvist",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "files": [
+      "renderer/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "kvist",
+          "kvist.exe"
+        ]
+      }
+    ],
+    "linux": {
+      "category": "Development",
+      "maintainer": "Davud <noreply@users.noreply.github.com>",
+      "syncDesktopName": true,
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis"
+    }
+  }
+}
