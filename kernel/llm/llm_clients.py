@@ -10,6 +10,7 @@ lists below are only offline fallbacks used when discovery is unavailable.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
@@ -1509,6 +1510,14 @@ def _with_prompt_cache(
     return cached_system, [*messages[:-1], {**last, "content": blocks}]
 
 
+def _replays_tool_use(messages: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(message["content"], list)
+        and any(block.get("type") == "tool_use" for block in message["content"])
+        for message in messages
+    )
+
+
 class _AnthropicCompletionsNamespace:
     """Translate OpenAI-style ``chat.completions.create(**kwargs)`` to Anthropic Messages API."""
 
@@ -1531,16 +1540,18 @@ class _AnthropicCompletionsNamespace:
             raise RuntimeError("Anthropic provider requires a non-empty messages list.")
 
         # ── Extract system prompt ─────────────────────────────────
+        from kernel.llm.anthropic_wire import history_to_anthropic
+
         system = None
-        user_messages: list[dict[str, Any]] = []
+        chat_items: list[dict[str, Any]] = []
         for item in messages:
-            if isinstance(item, dict):
-                role = str(item.get("role", "")).casefold()
-                if role == "system":
-                    system = str(item.get("content", ""))
-                else:
-                    from kernel.vision.vision import anthropic_content
-                    user_messages.append({"role": role, "content": anthropic_content(item.get("content", ""))})
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role", "")).casefold() == "system":
+                system = str(item.get("content", ""))
+            else:
+                chat_items.append(item)
+        user_messages = history_to_anthropic(chat_items)
 
         if not user_messages:
             # If all messages were system, create a minimal user message
@@ -1555,10 +1566,22 @@ class _AnthropicCompletionsNamespace:
         }
         # Gateways that speak the Anthropic protocol may reject cache_control,
         # so only Anthropic's own endpoint gets breakpoints.
-        if _is_anthropic_direct(self._owner._base_url):
+        direct = _is_anthropic_direct(self._owner._base_url)
+        if direct:
             system, request_kwargs["messages"] = _with_prompt_cache(system, user_messages)
         if system:
             request_kwargs["system"] = system
+
+        tools = kwargs.get("tools")
+        if tools:
+            from kernel.llm.anthropic_wire import tools_to_anthropic
+
+            request_kwargs["tools"] = tools_to_anthropic(tools)
+            if direct:
+                # Third breakpoint (system, last tool, last message: three of the
+                # four allowed). Tools render before the system prompt, so this
+                # one covers the tool list alone and survives a system change.
+                request_kwargs["tools"][-1]["cache_control"] = _CACHE_BREAKPOINT
 
         effort = kwargs.get("reasoning_effort")
         if effort:
@@ -1583,6 +1606,19 @@ class _AnthropicCompletionsNamespace:
                 request_kwargs["temperature"] = float(kwargs["temperature"])
             if "top_p" in kwargs:
                 request_kwargs["top_p"] = float(kwargs["top_p"])
+        if tools:
+            from kernel.llm.anthropic_wire import tool_choice_to_anthropic
+
+            if "thinking" in request_kwargs and _replays_tool_use(request_kwargs["messages"]):
+                # With thinking on, Anthropic wants the signed thinking block of
+                # every replayed tool_use turn; the history keeps only the text,
+                # so those steps run without it instead of failing with a 400.
+                del request_kwargs["thinking"]
+            choice = tool_choice_to_anthropic(
+                kwargs.get("tool_choice"), thinking="thinking" in request_kwargs
+            )
+            if choice is not None:
+                request_kwargs["tool_choice"] = choice
         if "stop" in kwargs and kwargs["stop"]:
             request_kwargs["stop_sequences"] = (
                 [kwargs["stop"]] if isinstance(kwargs["stop"], str) else list(kwargs["stop"])
@@ -1608,6 +1644,7 @@ class _AnthropicCompletionsNamespace:
         """
         start_usage: Any = None
         output_tokens: Any = None
+        tool_args: dict[int, bool] = {}
         try:
             with client.messages.stream(**request_kwargs) as stream:
                 for event in stream:
@@ -1619,7 +1656,7 @@ class _AnthropicCompletionsNamespace:
                         delta_output = getattr(getattr(event, "usage", None), "output_tokens", None)
                         if delta_output is not None:
                             output_tokens = delta_output
-                    chunk = self._owner._normalize_stream_chunk(event)
+                    chunk = self._owner._normalize_stream_chunk(event, tool_args)
                     if chunk is not None:
                         yield chunk
         except Exception as error:
@@ -1636,6 +1673,20 @@ class _AnthropicCompletionsNamespace:
                     output_tokens,
                 ),
             )
+
+
+def _finish_reason(stop_reason: Any) -> Any:
+    return "tool_calls" if stop_reason == "tool_use" else stop_reason
+
+
+def _tool_call_chunk(index: int, *, id: str | None, name: str | None, arguments: str) -> Any:
+    """One OpenAI-style streamed tool-call fragment; only the first carries id and name."""
+    from types import SimpleNamespace
+
+    piece = SimpleNamespace(
+        index=index, id=id, function=SimpleNamespace(name=name, arguments=arguments)
+    )
+    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[piece]))])
 
 
 def _anthropic_usage_counts(input_tokens: Any, cache_read: Any, cache_write: Any, output_tokens: Any) -> Any:
@@ -1706,16 +1757,24 @@ class AnthropicCompatibleClient:
         """Convert Anthropic response to an object that looks like an OpenAI completion."""
         from types import SimpleNamespace
         text = ""
-        if hasattr(response, "content") and response.content:
-            for block in response.content:
-                if hasattr(block, "text"):
-                    text += block.text
+        tool_calls: list[Any] = []
+        for block in getattr(response, "content", None) or []:
+            if getattr(block, "type", None) == "tool_use":
+                tool_calls.append(
+                    SimpleNamespace(
+                        id=block.id,
+                        type="function",
+                        function=SimpleNamespace(name=block.name, arguments=json.dumps(block.input)),
+                    )
+                )
+            elif hasattr(block, "text"):
+                text += block.text
         usage = getattr(response, "usage", None)
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=text),
-                    finish_reason=getattr(response, "stop_reason", None),
+                    message=SimpleNamespace(content=text, tool_calls=tool_calls or None),
+                    finish_reason=_finish_reason(getattr(response, "stop_reason", None)),
                 )
             ],
             usage=None
@@ -1728,12 +1787,32 @@ class AnthropicCompatibleClient:
             ),
         )
 
-    def _normalize_stream_chunk(self, event) -> Any | None:
-        """Convert an Anthropic streaming event to an OpenAI-like chunk, or None."""
+    def _normalize_stream_chunk(self, event, tool_args: dict[int, bool]) -> Any | None:
+        """Convert an Anthropic streaming event to an OpenAI-like chunk, or None.
+
+        ``tool_args`` maps each open tool_use block to whether any argument
+        text has arrived for it; it is the caller's, one per stream.
+        """
         from types import SimpleNamespace
         event_type = getattr(event, "type", None)
-        if event_type == "content_block_delta":
+        if event_type == "content_block_start":
+            block = getattr(event, "content_block", None)
+            if getattr(block, "type", None) == "tool_use":
+                tool_args[event.index] = False
+                return _tool_call_chunk(event.index, id=block.id, name=block.name, arguments="")
+        elif event_type == "content_block_stop":
+            # A tool with no parameters streams no JSON at all; its arguments
+            # are the empty object, which the consumer cannot tell from a lost
+            # stream unless it is said here.
+            if tool_args.pop(getattr(event, "index", None), True) is False:
+                return _tool_call_chunk(event.index, id=None, name=None, arguments="{}")
+        elif event_type == "content_block_delta":
             delta = getattr(event, "delta", None)
+            if getattr(delta, "type", None) == "input_json_delta":
+                if not delta.partial_json:
+                    return None
+                tool_args[event.index] = True
+                return _tool_call_chunk(event.index, id=None, name=None, arguments=delta.partial_json)
             if delta and getattr(delta, "text", None):
                 return SimpleNamespace(
                     choices=[
@@ -1757,11 +1836,14 @@ class AnthropicCompatibleClient:
                 )
         elif event_type == "message_delta":
             # The final event with stop_reason — send an empty delta with finish_reason
+            stop_reason = getattr(getattr(event, "delta", None), "stop_reason", None) or getattr(
+                event, "stop_reason", None
+            )
             return SimpleNamespace(
                 choices=[
                     SimpleNamespace(
                         delta=SimpleNamespace(content=None),
-                        finish_reason=getattr(event, "stop_reason", None),
+                        finish_reason=_finish_reason(stop_reason),
                     )
                 ]
             )
