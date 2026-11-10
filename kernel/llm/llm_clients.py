@@ -1470,6 +1470,16 @@ _ANTHROPIC_DIRECT_HOST = "api.anthropic.com"
 _CACHE_BREAKPOINT = {"type": "ephemeral"}
 
 
+def _is_anthropic_direct(base_url: str) -> bool:
+    """True for Anthropic's own endpoint, whatever the port, path or trailing slash.
+
+    A bare ``api.anthropic.com`` has no scheme, so urlparse would file it under
+    the path and report no host; the prefix makes it a netloc.
+    """
+    target = base_url if "//" in base_url else f"//{base_url}"
+    return urlparse(target).hostname == _ANTHROPIC_DIRECT_HOST
+
+
 def _with_prompt_cache(
     system: str | None, messages: list[dict[str, Any]]
 ) -> tuple[Any, list[dict[str, Any]]]:
@@ -1545,7 +1555,7 @@ class _AnthropicCompletionsNamespace:
         }
         # Gateways that speak the Anthropic protocol may reject cache_control,
         # so only Anthropic's own endpoint gets breakpoints.
-        if urlparse(self._owner._base_url).hostname == _ANTHROPIC_DIRECT_HOST:
+        if _is_anthropic_direct(self._owner._base_url):
             system, request_kwargs["messages"] = _with_prompt_cache(system, user_messages)
         if system:
             request_kwargs["system"] = system

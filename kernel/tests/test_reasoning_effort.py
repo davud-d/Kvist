@@ -311,6 +311,44 @@ def test_anthropic_direct_caches_end_of_a_growing_conversation_without_mutating_
     assert "cache_control" not in history_block
 
 
+def _cache_marks(record: dict) -> int:
+    """Every cache_control in the request, wherever it sits."""
+    return str(record).count("'cache_control'")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        None,
+        "https://api.anthropic.com",
+        "https://api.anthropic.com/",
+        "https://api.anthropic.com:443/",
+        "https://api.anthropic.com/v1/",
+        "api.anthropic.com",
+    ],
+)
+def test_anthropic_direct_marks_sit_on_system_and_last_block_for_any_spelling_of_the_host(base_url):
+    client = AnthropicCompatibleClient(api_key="test-key", base_url=base_url)
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+
+    client.chat.completions.create(
+        model="claude-sonnet-5-5",
+        messages=[
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+            {"role": "user", "content": [{"type": "text", "text": "c1"}, {"type": "text", "text": "c2"}]},
+        ],
+    )
+
+    assert record["system"][-1]["cache_control"] == {"type": "ephemeral"}
+    last_blocks = record["messages"][-1]["content"]
+    assert "cache_control" not in last_blocks[0]
+    assert last_blocks[-1]["cache_control"] == {"type": "ephemeral"}
+    assert _cache_marks(record) == 2
+
+
 def test_anthropic_gateway_endpoint_gets_no_cache_breakpoints():
     client = AnthropicCompatibleClient(api_key="test-key", base_url="https://gateway.example.com")
     record: dict = {}
