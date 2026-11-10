@@ -156,5 +156,6 @@ kvist_web = [
 "kernel.prompts.styles.agents" = ["*.txt"]
 "kernel.prompts.styles.chat" = ["*.txt"]
 "kernel.themes" = ["*.json"]
+"kernel.llm" = ["model_prices.json"]
 "frontends.tui.classic.assets" = ["*.png"]
 "frontends.tui.ink.dist-ui" = ["*.mjs", "*.mp4"]
