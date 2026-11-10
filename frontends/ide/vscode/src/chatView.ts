@@ -226,8 +226,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
     // OpenRouter, OmniRoute): offers the provider's live /v1/models catalog for the key the
     // person just typed, same as the terminal's own picker, before that key is ever saved.
     private async listModels(provider: string, apiKey: string): Promise<void> {
-        const result = await this.runConfigOp<{ ok: boolean; error?: string; models?: string[] }>('list-models', { provider, api_key: apiKey });
-        this.post({ type: 'modelList', provider, ok: result.ok, models: result.models ?? [], error: result.error });
+        const result = await this.runConfigOp<{ ok: boolean; error?: string; models?: string[]; coefficients?: Record<string, string> }>('list-models', { provider, api_key: apiKey });
+        this.post({ type: 'modelList', provider, ok: result.ok, models: result.models ?? [], coefficients: result.coefficients ?? {}, error: result.error });
     }
 
     // AnyModel is Kvist's own shipped default; the first-run screen offers to pop its signup

@@ -24,6 +24,8 @@ export interface ModelListState {
   provider: string
   busy: boolean
   options: string[]
+  // The price multiplier AnyModel shows after a model's id ("x0"); empty for other providers.
+  coefficients: Record<string, string>
   error: string
 }
 
@@ -140,7 +142,7 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
               </button>
             </div>
             <datalist id="first-run-model-options">
-              {(models?.options ?? []).map((id) => <option key={id} value={id} />)}
+              {(models?.options ?? []).map((id) => <option key={id} value={id} label={models?.coefficients[id]} />)}
             </datalist>
             {models && !models.busy && models.options.length > 0 ? (
               <div class="row-hint first-run-model-hint">{models.options.length} models loaded — start typing to filter.</div>

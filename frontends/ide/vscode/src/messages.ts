@@ -46,7 +46,7 @@ export type ToWebview =
     | { type: 'history'; name: string; events: JournalEvent[]; hasMore: boolean }
     | { type: 'needsSetup'; providers: ProviderInfo[] }
     | { type: 'setupResult'; ok: boolean; error?: string }
-    | { type: 'modelList'; provider: string; ok: boolean; models: string[]; error?: string }
+    | { type: 'modelList'; provider: string; ok: boolean; models: string[]; coefficients: Record<string, string>; error?: string }
     | { type: 'registrationOpened'; provider: string; opened: boolean; url: string | null }
     | { type: 'showSettings' };
 

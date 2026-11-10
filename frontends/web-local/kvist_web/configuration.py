@@ -118,7 +118,9 @@ def model_catalog(payload: dict) -> dict:
         # Provider errors can contain request bodies; don't send raw exceptions
         # containing freshly entered credentials back to the browser.
         raise ValueError("Could not load models. Check the API key, provider address and connection.")
-    return {"models": models}
+    coefficients = llm.model_coefficient_labels(entry["id"], credentials)
+    # Clients that predate the multiplier read `models` alone; the key is left out when empty.
+    return {"models": models, **({"coefficients": coefficients} if coefficients else {})}
 
 
 def save_configuration(payload: dict) -> dict:

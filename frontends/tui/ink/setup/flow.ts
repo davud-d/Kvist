@@ -144,7 +144,8 @@ export interface SetupState {
   key: string
   cursor: number
   registration: RegistrationReply | null
-  models: { status: "loading" | "ready" | "failed"; all: string[] }
+  // `labels` holds the price multiplier AnyModel shows after a model's id ("x0"); empty for other providers.
+  models: { status: "loading" | "ready" | "failed"; all: string[]; labels: Record<string, string> }
   filter: string
   filterCursor: number
   modelIndex: number
@@ -186,7 +187,7 @@ export function initialState(workspace = "", home = "", drives = false, scope: "
     key: "",
     cursor: 0,
     registration: null,
-    models: { status: "loading", all: [] },
+    models: { status: "loading", all: [], labels: {} },
     filter: "",
     filterCursor: 0,
     modelIndex: 0,
@@ -290,7 +291,7 @@ function submitKey(state: SetupState, strings: { keyEmpty: string }): Update {
   }
   if (provider.requires_manual_models) {
     return {
-      state: { ...state, step: "models", error: "", models: { status: "loading", all: [] }, filter: "", filterCursor: 0, modelIndex: 0 },
+      state: { ...state, step: "models", error: "", models: { status: "loading", all: [], labels: {} }, filter: "", filterCursor: 0, modelIndex: 0 },
       effect: { type: "listModels", provider: provider.id, key: state.key.trim() },
     }
   }
@@ -625,9 +626,9 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
         : { state: { ...state, catalog: "failed", error: action.reply.error } }
     case "models": {
       if (state.step !== "models") return { state }
-      if (!action.reply.ok) return { state: { ...state, models: { status: "failed", all: [] }, error: action.reply.error, errorKind: "connect" } }
+      if (!action.reply.ok) return { state: { ...state, models: { status: "failed", all: [], labels: {} }, error: action.reply.error, errorKind: "connect" } }
       const all = action.reply.models
-      return { state: { ...state, models: { status: all.length ? "ready" : "failed", all }, error: "" } }
+      return { state: { ...state, models: { status: all.length ? "ready" : "failed", all, labels: action.reply.coefficients ?? {} }, error: "" } }
     }
     case "connected":
       // An answer that arrives after the person pressed Esc is not theirs any more.

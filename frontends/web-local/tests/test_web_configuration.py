@@ -59,6 +59,13 @@ def test_setup_uses_existing_storage_and_returns_presence_only(monkeypatch):
     assert user_config.load_user_config()['anymodel_api_key'] == 'test-only-secret'
 
 
+def test_model_catalog_sends_the_multipliers_beside_the_unchanged_id_list(monkeypatch):
+    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', lambda *a, **k: {})
+    monkeypatch.setattr(service.llm, 'fetch_available_models', lambda *a, **k: (['am/free', 'am/paid'], None))
+    monkeypatch.setattr(service.llm, 'model_coefficient_labels', lambda provider, credentials: {'am/free': 'x0'})
+    assert service.model_catalog(payload()) == {'models': ['am/free', 'am/paid'], 'coefficients': {'am/free': 'x0'}}
+
+
 def test_model_catalog_is_read_only_and_does_not_echo_provider_errors(monkeypatch):
     # A typed AnyModel key is checked before the catalog (the first run tells a refused key apart).
     monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', lambda *a, **k: {})

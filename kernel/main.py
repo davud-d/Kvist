@@ -608,7 +608,10 @@ def _run_list_models_op(raw: object) -> dict:
     required = required_secret_keys_for_provider(normalized, [])
     credentials = {key: api_key for key in required}
     models, error = fetch_available_models(normalized, credentials, force_refresh=True)
-    return {"ok": True, "provider": normalized, "models": sorted(models), "error": error}
+    # `models` stays a plain id list for frontends that predate the multiplier; they
+    # look each id up in `coefficients` ({} for providers that do not price this way).
+    coefficients = {} if error else model_coefficient_labels(normalized, credentials)
+    return {"ok": True, "provider": normalized, "models": sorted(models), "coefficients": coefficients, "error": error}
 
 
 def _run_open_registration_op(raw: object) -> dict:
@@ -743,6 +746,7 @@ from kernel.llm.llm_clients import (
     provider_supports_streaming,
     SUPPORTED_LLM_PROVIDERS,
     fetch_available_models,
+    model_coefficient_labels,
     normalize_provider,
     provider_label,
     required_secret_keys_for_provider,
@@ -3009,7 +3013,9 @@ def _model_picker_options(provider: str) -> tuple[list[dict[str, str]], bool]:
         required_keys = required_secret_keys_for_provider(provider, [])
         credentials = load_available_credentials(required_keys)
         available_models, _error = fetch_available_models(provider, credentials)
-        options = get_model_options(provider, available_models)
+        options = get_model_options(
+            provider, available_models, model_coefficient_labels(provider, credentials)
+        )
         if options:
             return options, True
     except Exception:

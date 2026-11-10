@@ -648,9 +648,12 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       lines.push(field.line)
       const note = state.models.status === "failed" ? strings.modelsCatalogFailed : matches.length === 0 && state.filter ? strings.modelsNone : ""
       if (note) lines.push(text(truncate(note, width), "dim"))
-      matches.slice(first, first + listRows).forEach((id, offset) => {
+      const shown = matches.slice(first, first + listRows)
+      // The id column is only as wide as the longest id on screen, so the multiplier after it has room.
+      const idWidth = Math.min(width - 10, Math.max(0, ...shown.map((id) => id.length)))
+      shown.forEach((id, offset) => {
         const index = first + offset
-        lines.push(optionRow(index, index === state.modelIndex, id, "", "", width, width - 2, false))
+        lines.push(optionRow(index, index === state.modelIndex, id, "", state.models.labels[id] ?? "", width, idWidth, false))
       })
       lines.push(...failureLines(state, strings, width))
       lines.push(blank(), buttons(button(strings.continue, "primary", "primary"), button(strings.back, "back", "secondary")))

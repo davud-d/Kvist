@@ -848,6 +848,27 @@ def test_get_model_options_from_live_catalog_overrides_static():
     assert fallback == llm_clients.get_model_options("openai")
 
 
+def test_get_model_options_puts_the_multiplier_after_the_name_but_keeps_the_value_bare():
+    options = llm_clients.get_model_options("anymodel", ["am/free", "am/paid", "am/unpriced"], {"am/free": "x0", "am/paid": "x1/3"})
+    assert [(item["value"], item["label"]) for item in options] == [
+        ("am/free", "am/free  x0"),
+        ("am/paid", "am/paid  x1/3"),
+        ("am/unpriced", "am/unpriced"),
+    ]
+
+
+def test_model_coefficient_labels_belong_to_anymodel_only(monkeypatch):
+    asked: list[str] = []
+    monkeypatch.setattr(llm_clients, "coefficient_labels", lambda key: asked.append(key) or {"am/free": "x0"})
+
+    assert llm_clients.model_coefficient_labels("anymodel", {"anymodel_api_key": " test-key "}) == {"am/free": "x0"}
+    assert asked == ["test-key"]
+    # No key means nothing to ask with, and other providers have no multiplier at all.
+    assert llm_clients.model_coefficient_labels("anymodel", {}) == {}
+    assert llm_clients.model_coefficient_labels("openai", {"openai_api_key": "test-key"}) == {}
+    assert asked == ["test-key"]
+
+
 # ── catalog coherence ───────────────────────────────────────────────────────
 
 def test_no_alias_resolves_to_a_deprecated_or_unlisted_model():

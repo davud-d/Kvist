@@ -285,6 +285,7 @@ internal class KvistChatHost(
             addProperty("provider", provider)
             addProperty("ok", result.booleanField("ok") == true)
             add("models", jsonArray(result.stringList("models")))
+            add("coefficients", result.get("coefficients") as? JsonObject ?: JsonObject())
             result.stringField("error")?.let { addProperty("error", it) }
         })
     }

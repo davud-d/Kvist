@@ -214,6 +214,19 @@ test("a provider without default models picks one from the live catalog or types
   assert.deepEqual(send(custom, key("enter")).effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "my/model" })
 })
 
+test("the model list shows AnyModel's multiplier after each id, and the id that is connected stays bare", () => {
+  let state = send(send(ready(), key("enter")).state, key("enter")).state
+  state = typed(state, "sk-any")
+  const coefficients = { "a/one": "x0", "b/two": "x1/3" }
+  state = send(send(state, key("enter")).state, { type: "models", reply: { ok: true, provider: "anymodel", models: ["a/one", "b/two", "c/none"], coefficients } }).state
+  const shown = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.match(shown, /a\/one\s+x0/)
+  assert.match(shown, /b\/two\s+x1\/3/)
+  // A model the catalog did not price carries no multiplier, and the filter still matches ids only.
+  assert.doesNotMatch(shown, /c\/none\s+x/)
+  assert.deepEqual(send(send(state, key("down")).state, key("enter")).effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "b/two" })
+})
+
 test("an OAuth provider connects without asking for a key", () => {
   const state = send(send(ready(), key("enter")).state, key("down")).state
   const chosen = send(state, key("enter"))

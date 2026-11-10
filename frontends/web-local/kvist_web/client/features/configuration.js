@@ -102,7 +102,7 @@ export async function showModel() {
             note.hidden = false;
             try {
                 const { models } = await api.modelCatalog(serverId, payload());
-                if (root.isConnected && generation === catalogGeneration) showModels(models.map(value => ({ value })), models.length ? `${models.length} models available.` : 'The provider returned no model list. Enter the model ID.');
+                if (root.isConnected && generation === catalogGeneration) showModels(models, models.length ? `${models.length} models available.` : 'The provider returned no model list. Enter the model ID.');
             } catch (error) { if (root.isConnected && generation === catalogGeneration) showModels(builtIn(), `${error.message} You can also enter the model ID.`); }
             finally { button.disabled = false; }
         };

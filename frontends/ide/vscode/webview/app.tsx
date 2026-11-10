@@ -58,7 +58,7 @@ export function App() {
   const [needsSetup, setNeedsSetup] = useState<ProviderInfo[] | null>(null)
   const [setupBusy, setSetupBusy] = useState(false)
   const [setupError, setSetupError] = useState("")
-  const [modelList, setModelList] = useState<ModelListState>({ provider: "", busy: false, options: [], error: "" })
+  const [modelList, setModelList] = useState<ModelListState>({ provider: "", busy: false, options: [], coefficients: {}, error: "" })
   const [registration, setRegistration] = useState<RegistrationState | null>(null)
   // When each shell command started, by step: the light around it begins after a couple of seconds.
   const shellStarts = useRef(new Map<number, number>())
@@ -94,7 +94,7 @@ export function App() {
   }
 
   function listModels(provider: string, apiKey: string): void {
-    setModelList({ provider, busy: true, options: [], error: "" })
+    setModelList({ provider, busy: true, options: [], coefficients: {}, error: "" })
     post({ type: "listModels", provider, apiKey })
   }
 
@@ -168,7 +168,7 @@ export function App() {
           setSetupError("")
           return setNeedsSetup(null)
         case "modelList":
-          return setModelList({ provider: message.provider, busy: false, options: message.models, error: message.ok ? message.error ?? "" : message.error || "Could not load models." })
+          return setModelList({ provider: message.provider, busy: false, options: message.models, coefficients: message.coefficients, error: message.ok ? message.error ?? "" : message.error || "Could not load models." })
         case "registrationOpened":
           return setRegistration({ provider: message.provider, opened: message.opened, url: message.url })
       }

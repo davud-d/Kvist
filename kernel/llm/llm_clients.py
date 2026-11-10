@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 from kernel.context.language_utils import choose_localized_text
 from kernel.llm.provider_registry import ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS
+from kernel.providers.anymodel_pricing import coefficient_labels
 from openai import OpenAI
 from kernel.sandbox.redaction import redact_text
 
@@ -935,6 +936,19 @@ def fetch_available_models(
     )
 
 
+def model_coefficient_labels(provider: str, credentials: dict[str, str]) -> dict[str, str]:
+    """``{model_id: "x1.5"}``: the price multiplier a picker shows next to a model's name.
+
+    Only AnyModel prices its catalog this way; every other provider gets ``{}``.
+    """
+    if normalize_provider(provider) != ANYMODEL_PROVIDER:
+        return {}
+    api_key = str(credentials.get(MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]["api_key_key"]) or "").strip()
+    if not api_key:
+        return {}
+    return coefficient_labels(api_key)
+
+
 def resolve_accessible_models(
     provider: str,
     requested_models: dict[str, str],
@@ -1187,18 +1201,22 @@ def validate_model_selection(
 def get_model_options(
     provider: str,
     available_models: list[str] | set[str] | None = None,
+    coefficients: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """Return selectable model options for the given provider.
 
     Pass ``available_models`` (from :func:`fetch_available_models`) to build
     the list from the provider's live /v1/models catalog; when it is empty or
-    omitted, the static curated hints are used instead.
+    omitted, the static curated hints are used instead. ``coefficients``
+    (from :func:`model_coefficient_labels`) puts each model's price multiplier
+    after its name in the label; the value stays the bare id.
     """
     if available_models is not None:
         live_ids = sorted({str(item).strip() for item in available_models if str(item).strip()})
         if live_ids:
+            labels = coefficients or {}
             return [
-                {"value": item, "label": item, "description": ""}
+                {"value": item, "label": f"{item}  {labels[item]}" if item in labels else item, "description": ""}
                 for item in live_ids
             ]
     normalized_provider = normalize_provider(provider)

@@ -64,7 +64,7 @@ const line = (cls, text) => { const node = document.createElement('p'); node.cla
 async function catalog(info, p) {
     const key = `${currentServer()}\u0000${p.id}`;
     if (!catalogs.has(key))
-        catalogs.set(key, api.modelCatalog(currentServer(), { provider: p.id, base_url: '', models: p.defaults, effort: info.effort, credentials: {} }).then(result => result.models.map(value => ({ value }))));
+        catalogs.set(key, api.modelCatalog(currentServer(), { provider: p.id, base_url: '', models: p.defaults, effort: info.effort, credentials: {} }).then(result => result.models));
     try {
         return await catalogs.get(key);
     }
