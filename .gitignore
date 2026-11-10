@@ -98,6 +98,9 @@ frontends/ide/jetbrains/bin/linux/*
 frontends/ide/jetbrains/bin/win/*
 project/
 kernel.xml
+cloud/.cloud-data/
+cloud/.lighthouse/
+frontends/ide/jetbrains/bin/
 kernel.txt
 logs.xml
 AGENTS.md
