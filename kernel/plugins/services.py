@@ -1589,6 +1589,7 @@ def _request_kwargs(agent: Any, model: str, messages: list[dict[str, Any]], max_
 
 def _complete(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens: int, *, owner: str) -> tuple[str, dict[str, int]]:
     from kernel.agent.agent_model import (
+        _cache_token_counts,
         _create_completion_with_reasoning_fallback,
         _emit_usage,
         _should_retry_model_error,
@@ -1611,10 +1612,16 @@ def _complete(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens
             time.sleep(agent.config.retry_base_delay * (2 ** attempt))
     text = safe_extract_completion_content(reply) or ""
     usage = getattr(reply, "usage", None)
-    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) or sum(agent._count_tokens(m["content"]) for m in messages)
-    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0) or agent._count_tokens(text)
+    provider_input = int(getattr(usage, "prompt_tokens", 0) or 0)
+    provider_output = int(getattr(usage, "completion_tokens", 0) or 0)
+    input_tokens = provider_input or sum(agent._count_tokens(m["content"]) for m in messages)
+    output_tokens = provider_output or agent._count_tokens(text)
+    # The provider's cache counts only mean something next to its own prompt total.
+    cache_read, cache_write = _cache_token_counts(usage, provider_input) if provider_input else (None, None)
     _emit_usage(agent, model=model, input_tokens=input_tokens, output_tokens=output_tokens,
-                kind=f"skill:{owner}", duration_seconds=time.monotonic() - started)
+                kind=f"skill:{owner}", duration_seconds=time.monotonic() - started,
+                cache_read_tokens=cache_read, cache_write_tokens=cache_write,
+                usage_source="provider" if provider_input and provider_output else "estimated")
     return text, {"input_tokens": input_tokens, "output_tokens": output_tokens}
 
 
@@ -1647,4 +1654,4 @@ def _stream(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens: 
     output = "".join(produced)
     _emit_usage(agent, model=model, input_tokens=sum(agent._count_tokens(m["content"]) for m in messages),
                 output_tokens=agent._count_tokens(output), kind=f"skill:{owner}",
-                duration_seconds=time.monotonic() - started)
+                duration_seconds=time.monotonic() - started, usage_source="estimated")

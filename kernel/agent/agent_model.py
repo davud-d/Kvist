@@ -57,6 +57,7 @@ from kernel.agent import image_generation
 from kernel.plan import plan_mode
 from kernel.agent.agent_state import RunCancelled
 from kernel.agent.cancellable_call import call_cancellable, iterate_cancellable
+from kernel.protocol.frontend_protocol import UsageSource
 from kernel.protocol.parser import speakable_prefix
 from kernel.agent.native_tools import (
     NativeToolsRejected,
@@ -733,6 +734,9 @@ def call_native_action_model(
             output_tokens=turn.output_tokens if turn.output_tokens is not None else self._count_tokens(output_text),
             kind="step",
             duration_seconds=self._last_model_duration,
+            cache_read_tokens=turn.cache_read_tokens,
+            cache_write_tokens=turn.cache_write_tokens,
+            usage_source=turn.usage_source,
         )
         return turn
     self._retries_exhausted = True
@@ -825,6 +829,11 @@ def _cache_token_counts(usage: Any, input_tokens: int | None) -> tuple[int | Non
     return read, write
 
 
+def _usage_source_of(*counts: int | None) -> UsageSource:
+    """"provider" only when every count came from the provider's usage block."""
+    return "estimated" if any(count is None for count in counts) else "provider"
+
+
 def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
     reasoning = getattr(message, "reasoning_content", None)
     calls = [
@@ -832,6 +841,7 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         for call in (getattr(message, "tool_calls", None) or [])
     ]
     input_tokens = _usage_token_count(usage, "prompt_tokens")
+    output_tokens = _usage_token_count(usage, "completion_tokens")
     cache_read, cache_write = _cache_token_counts(usage, input_tokens)
     return NativeTurn(
         content=getattr(message, "content", None) or "",
@@ -839,9 +849,10 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         echo_reasoning=isinstance(reasoning, str) and bool(reasoning),
         tool_calls=calls,
         input_tokens=input_tokens,
-        output_tokens=_usage_token_count(usage, "completion_tokens"),
+        output_tokens=output_tokens,
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
+        usage_source=_usage_source_of(input_tokens, output_tokens),
     )
 
 
@@ -962,6 +973,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
         output_tokens=output_tokens,
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
+        usage_source=_usage_source_of(input_tokens, output_tokens),
         tool_calls=[
             ToolCall(call_id=entry["id"], name=entry["name"], arguments=entry["arguments"] or "{}")
             for _index, entry in sorted(calls.items())
@@ -1148,6 +1160,9 @@ def _emit_usage(
     output_tokens: int,
     kind: str,
     duration_seconds: float = 0.0,
+    cache_read_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    usage_source: UsageSource = "estimated",
 ) -> None:
     """Report one model call's token usage to UIs exposing ``print_usage``.
 
@@ -1163,6 +1178,11 @@ def _emit_usage(
     conversation — the size of this one prompt. Both ``context_*`` values come
     from ``context_meter.context_usage`` and are always current, so a UI
     assigns them as they are.
+
+    ``usage_source`` says whether the counts are the provider's or at least one
+    was counted locally. It defaults to "estimated": a call site that forgets to
+    say understates its accuracy instead of claiming a provider count it lacks.
+    ``cache_*_tokens`` are parts of ``input_tokens`` (None: not reported).
     """
     normalized_input = max(0, int(input_tokens))
     if kind in _CONTEXT_USAGE_KINDS:
@@ -1171,8 +1191,15 @@ def _emit_usage(
     if callback is None:
         return
     context = context_usage(self)
+    cache = {
+        key: max(0, int(value))
+        for key, value in (("cache_read_tokens", cache_read_tokens), ("cache_write_tokens", cache_write_tokens))
+        if value is not None
+    }
     callback(
         {
+            **cache,
+            "usage_source": usage_source,
             "input_tokens": normalized_input,
             "output_tokens": max(0, int(output_tokens)),
             "context_tokens": context.used,
@@ -1282,6 +1309,7 @@ def call_model(
                     output_tokens=self._count_tokens(content),
                     kind=usage_kind,
                     duration_seconds=total_duration,
+                    usage_source="estimated",
                 )
                 # ── log successful API request ───────────────────
                 self._perf_logger.log_api_request(

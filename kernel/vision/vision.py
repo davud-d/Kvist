@@ -147,9 +147,11 @@ def describe_images(agent, images: list[dict], question: str = "") -> str:
     usage = getattr(reply, "usage", None)
     if usage is not None:
         from kernel.agent.agent_model import _emit_usage
-        _emit_usage(agent, model=model, input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-                    output_tokens=getattr(usage, "completion_tokens", 0) or 0,
-                    kind="vision", duration_seconds=time.monotonic() - started)
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+        _emit_usage(agent, model=model, input_tokens=prompt_tokens, output_tokens=completion_tokens,
+                    kind="vision", duration_seconds=time.monotonic() - started,
+                    usage_source="provider" if prompt_tokens and completion_tokens else "estimated")
     if agent._cancel_event.is_set():
         raise InterruptedError("Image analysis cancelled")
     text = reply.choices[0].message.content

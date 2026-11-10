@@ -320,6 +320,7 @@ def _render_report(self, context: str) -> str:
             input_tokens=self._count_tokens(system_prompt) + self._count_tokens(context),
             output_tokens=self._count_tokens(raw),
             kind="report",
+            usage_source="estimated",
         )
         return raw
 
@@ -379,6 +380,7 @@ def _render_report(self, context: str) -> str:
         output_tokens=self._count_tokens("".join(chunks))
         + self._count_tokens("".join(reasoning_chunks)),
         kind="report",
+        usage_source="estimated",
     )
 
     return "".join(chunks)

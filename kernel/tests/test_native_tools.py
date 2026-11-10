@@ -477,6 +477,52 @@ def test_invalid_cache_counts_are_unknown_not_zero(value):
     assert turn.cache_read_tokens is None
 
 
+def _native_usage_records(agent_factory, usage) -> list[dict]:
+    response = _response("Done")
+    response.usage = usage
+    agent = _native_agent(agent_factory, [response])
+    agent._count_tokens = len  # deterministic local estimate
+    records: list[dict] = []
+    agent._ui.print_usage = records.append
+    agent_model.call_native_action_model(
+        agent, [{"role": "user", "content": "task"}], tools_for_role(agent_model._load_role_prompt("coder"))
+    )
+    return records
+
+
+def test_native_usage_with_both_counts_from_the_provider_is_marked_provider(agent_factory):
+    usage = SimpleNamespace(
+        prompt_tokens=2006, completion_tokens=30, prompt_tokens_details=SimpleNamespace(cached_tokens=1920)
+    )
+    (record,) = _native_usage_records(agent_factory, usage)
+
+    assert record["usage_source"] == "provider"
+    assert (record["input_tokens"], record["cache_read_tokens"]) == (2006, 1920)
+    assert "cache_write_tokens" not in record  # unreported, not zero
+    assert record["input_tokens"] >= record["cache_read_tokens"]
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        None,
+        {"prompt_tokens": 100},  # output missing: only one of the two is estimated
+        {"completion_tokens": 7},  # input missing
+    ],
+)
+def test_native_usage_is_estimated_when_either_count_is_local(agent_factory, usage):
+    (record,) = _native_usage_records(agent_factory, usage)
+
+    assert record["usage_source"] == "estimated"
+
+
+def test_native_usage_keeps_a_provider_count_next_to_an_estimated_one(agent_factory):
+    (record,) = _native_usage_records(agent_factory, {"prompt_tokens": 100})
+
+    assert record["input_tokens"] == 100
+    assert record["output_tokens"] == len("Done")
+
+
 class _FlakyProbeClient:
     """Fails the first probe with ``error``, then answers it with a ping call."""
 

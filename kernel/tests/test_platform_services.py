@@ -463,3 +463,48 @@ def test_runtime_directory_ignores_precreated_xdg_symlink(tmp_path, monkeypatch)
     root = ResourceManager(tmp_path).runtime_dir()
     assert root.parent == tmp_path
     assert not list(victim.iterdir())
+
+
+# --- usage reported by skill model calls -------------------------------------
+
+
+def _skill_usage(agent_factory, monkeypatch, usage) -> dict:
+    from types import SimpleNamespace
+
+    from kernel.agent import agent_model
+    from kernel.plugins import services
+
+    agent = agent_factory()
+    records: list[dict] = []
+    agent._ui.print_usage = records.append
+    agent._count_tokens = len  # deterministic local estimate
+    reply = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="answer"), finish_reason="stop")], usage=usage
+    )
+    monkeypatch.setattr(agent_model, "_create_completion_with_reasoning_fallback", lambda _agent, _kwargs: reply)
+    monkeypatch.setattr(agent_model, "_throttle_request_rate", lambda _agent: None)
+    monkeypatch.setattr(services, "_request_kwargs", lambda *_args: {})
+
+    services._complete(agent, "m", [{"role": "user", "content": "question"}], 100, owner="demo")
+    return records[-1]
+
+
+def test_skill_call_reports_provider_usage_with_its_cache_counts(agent_factory, monkeypatch):
+    from types import SimpleNamespace
+
+    usage = SimpleNamespace(
+        prompt_tokens=800, completion_tokens=40, prompt_tokens_details=SimpleNamespace(cached_tokens=640)
+    )
+    record = _skill_usage(agent_factory, monkeypatch, usage)
+
+    assert record["usage_source"] == "provider"
+    assert (record["input_tokens"], record["cache_read_tokens"]) == (800, 640)
+    assert record["input_tokens"] >= record["cache_read_tokens"]
+
+
+def test_skill_call_without_provider_usage_is_estimated_and_has_no_cache_counts(agent_factory, monkeypatch):
+    record = _skill_usage(agent_factory, monkeypatch, None)
+
+    assert record["usage_source"] == "estimated"
+    assert record["input_tokens"] == len("question")
+    assert "cache_read_tokens" not in record

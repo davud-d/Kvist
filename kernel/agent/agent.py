@@ -1555,6 +1555,7 @@ class LocalAgent:
             ),
             output_tokens=self._count_tokens(content) + self._count_tokens(reasoning),
             kind="chat",
+            usage_source="estimated",
         )
 
     def _chat_end_session(self, wire_history: list, model: str, tag_reply: str, history_before: list) -> str:

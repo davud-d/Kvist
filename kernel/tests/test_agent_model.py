@@ -341,6 +341,24 @@ def test_usage_reports_context_only_for_conversation_calls(agent_factory):
         assert usage["context_tokens"] == 9120
 
 
+def test_emit_usage_reports_estimated_unless_the_caller_vouches_for_the_provider(agent_factory):
+    agent = agent_factory()
+    agent._ui = _UsageCapturingUI()
+
+    plain = _emit(agent, kind="chat")
+    assert plain["usage_source"] == "estimated"
+    assert "cache_read_tokens" not in plain and "cache_write_tokens" not in plain
+
+    agent_model._emit_usage(
+        agent, model="m", input_tokens=500, output_tokens=5, kind="step",
+        cache_read_tokens=400, cache_write_tokens=0, usage_source="provider",
+    )
+    cached = agent._ui.usages[-1]
+    assert cached["usage_source"] == "provider"
+    assert (cached["cache_read_tokens"], cached["cache_write_tokens"]) == (400, 0)
+    assert cached["input_tokens"] >= cached["cache_read_tokens"] + cached["cache_write_tokens"]
+
+
 def test_usage_carries_the_limit_the_prompt_is_trimmed_to(agent_factory):
     agent = agent_factory(max_context_tokens=120000)
     agent._ui = _UsageCapturingUI()
