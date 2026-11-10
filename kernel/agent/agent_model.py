@@ -804,19 +804,44 @@ def _usage_token_count(usage: Any, key: str) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
+def _cache_token_counts(usage: Any, input_tokens: int | None) -> tuple[int | None, int | None]:
+    """(cache_read, cache_write) from a provider usage block; None when unreported.
+
+    ``prompt_tokens`` already includes the cached parts, so it is left alone.
+    OpenAI-style gateways nest the counts in ``prompt_tokens_details``; DeepSeek
+    sends ``prompt_cache_hit_tokens``; the Anthropic adapter sets
+    ``cache_write_tokens``. Counts that exceed the prompt they are a part of
+    cannot be right, so they are dropped rather than passed on.
+    """
+    details = usage.get("prompt_tokens_details") if isinstance(usage, dict) else getattr(usage, "prompt_tokens_details", None)
+    read = _usage_token_count(details, "cached_tokens")
+    if read is None:
+        read = _usage_token_count(usage, "prompt_cache_hit_tokens")
+    write = _usage_token_count(details, "cache_write_tokens")
+    if write is None:
+        write = _usage_token_count(usage, "cache_write_tokens")
+    if input_tokens is not None and (read or 0) + (write or 0) > input_tokens:
+        return None, None
+    return read, write
+
+
 def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
     reasoning = getattr(message, "reasoning_content", None)
     calls = [
         ToolCall(call_id=call.id, name=call.function.name, arguments=call.function.arguments or "{}")
         for call in (getattr(message, "tool_calls", None) or [])
     ]
+    input_tokens = _usage_token_count(usage, "prompt_tokens")
+    cache_read, cache_write = _cache_token_counts(usage, input_tokens)
     return NativeTurn(
         content=getattr(message, "content", None) or "",
         reasoning=reasoning or safe_extract_reasoning_delta(message),
         echo_reasoning=isinstance(reasoning, str) and bool(reasoning),
         tool_calls=calls,
-        input_tokens=_usage_token_count(usage, "prompt_tokens"),
+        input_tokens=input_tokens,
         output_tokens=_usage_token_count(usage, "completion_tokens"),
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
     )
 
 
@@ -844,6 +869,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     echo_reasoning = False
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read: int | None = None
+    cache_write: int | None = None
     calls: dict[int, dict[str, str]] = {}
     first_output: float | None = None
     last_push = 0.0
@@ -864,6 +891,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             completion_count = _usage_token_count(usage, "completion_tokens")
             if prompt_count is not None:
                 input_tokens = prompt_count
+                cache_read, cache_write = _cache_token_counts(usage, prompt_count)
             if completion_count is not None:
                 output_tokens = completion_count
             delta = safe_extract_stream_delta(chunk)
@@ -932,6 +960,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
         echo_reasoning=echo_reasoning,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_read_tokens=cache_read,
+        cache_write_tokens=cache_write,
         tool_calls=[
             ToolCall(call_id=entry["id"], name=entry["name"], arguments=entry["arguments"] or "{}")
             for _index, entry in sorted(calls.items())

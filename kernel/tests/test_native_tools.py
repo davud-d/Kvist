@@ -405,6 +405,78 @@ def test_invalid_provider_usage_falls_back_to_local_count(value):
     assert turn.output_tokens == 0  # a reported zero is valid, not missing usage
 
 
+# Provider usage blocks as recorded fixtures: (usage, input, cache_read, cache_write).
+_CACHE_USAGE_FIXTURES = {
+    "openai": (
+        SimpleNamespace(
+            prompt_tokens=2006, completion_tokens=30, prompt_tokens_details=SimpleNamespace(cached_tokens=1920)
+        ),
+        2006, 1920, None,
+    ),
+    "openai-dict": (
+        {"prompt_tokens": 2006, "completion_tokens": 30, "prompt_tokens_details": {"cached_tokens": 1920}},
+        2006, 1920, None,
+    ),
+    "deepseek": (
+        {"prompt_tokens": 1500, "completion_tokens": 30, "prompt_cache_hit_tokens": 1280, "prompt_cache_miss_tokens": 220},
+        1500, 1280, None,
+    ),
+    "anthropic-adapter": (
+        SimpleNamespace(
+            prompt_tokens=360, completion_tokens=20,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=300), cache_write_tokens=50,
+        ),
+        360, 300, 50,
+    ),
+    "gateway-cache-write": (
+        {"prompt_tokens": 900, "completion_tokens": 5,
+         "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 600}},
+        900, 0, 600,
+    ),
+    "no-cache-fields": ({"prompt_tokens": 100, "completion_tokens": 5}, 100, None, None),
+    "cache-exceeds-prompt": (
+        {"prompt_tokens": 100, "completion_tokens": 5, "prompt_tokens_details": {"cached_tokens": 400}},
+        100, None, None,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_CACHE_USAGE_FIXTURES))
+def test_native_turn_reads_cache_counts_from_each_provider_shape(name):
+    usage, input_tokens, cache_read, cache_write = _CACHE_USAGE_FIXTURES[name]
+    turn = agent_model._native_turn_from_message(_response("Done").choices[0].message, usage)
+
+    assert (turn.input_tokens, turn.cache_read_tokens, turn.cache_write_tokens) == (
+        input_tokens, cache_read, cache_write,
+    )
+    # prompt_tokens already includes the cache, so it is never adjusted.
+    assert turn.input_tokens >= (turn.cache_read_tokens or 0) + (turn.cache_write_tokens or 0)
+
+
+@pytest.mark.parametrize("name", sorted(_CACHE_USAGE_FIXTURES))
+def test_streamed_native_turn_reads_the_same_cache_counts(agent_factory, name):
+    usage, input_tokens, cache_read, cache_write = _CACHE_USAGE_FIXTURES[name]
+    agent = _native_agent(agent_factory, [])
+    stream = iter([
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Done", tool_calls=None))]),
+        SimpleNamespace(choices=[], usage=usage),
+    ])
+
+    turn = agent_model._native_turn_from_stream(agent, stream, time.monotonic())
+
+    assert (turn.input_tokens, turn.cache_read_tokens, turn.cache_write_tokens) == (
+        input_tokens, cache_read, cache_write,
+    )
+
+
+@pytest.mark.parametrize("value", [None, -1, True, "5", 1.5])
+def test_invalid_cache_counts_are_unknown_not_zero(value):
+    usage = {"prompt_tokens": 100, "completion_tokens": 5, "prompt_tokens_details": {"cached_tokens": value}}
+    turn = agent_model._native_turn_from_message(_response("Done").choices[0].message, usage)
+
+    assert turn.cache_read_tokens is None
+
+
 class _FlakyProbeClient:
     """Fails the first probe with ``error``, then answers it with a ping call."""
 
