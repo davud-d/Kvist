@@ -470,6 +470,135 @@ def test_anthropic_normalize_model_name():
     assert llm_clients.normalize_model_name("anthropic", "  claude-sonnet-4-6  ") == "claude-sonnet-4-6"
 
 
+# ── Anthropic usage normalization ────────────────────────────────────────────
+
+
+def _anthropic_client(*, response=None, events=()):
+    """An AnthropicCompatibleClient whose SDK client replays recorded payloads."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    client = llm_clients.AnthropicCompatibleClient(api_key="test-key")
+
+    @contextmanager
+    def stream(**_kwargs):
+        yield iter(events)
+
+    client._client = SimpleNamespace(
+        messages=SimpleNamespace(create=lambda **_kwargs: response, stream=stream)
+    )
+    return client
+
+
+def _anthropic_usage(**counts):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        **{
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_read_input_tokens": None,
+            "cache_creation_input_tokens": None,
+            **counts,
+        }
+    )
+
+
+def _anthropic_message(usage):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(content=[SimpleNamespace(text="ok")], stop_reason="end_turn", usage=usage)
+
+
+def _anthropic_events(start_usage, delta_outputs):
+    from types import SimpleNamespace
+
+    events = [SimpleNamespace(type="message_start", message=SimpleNamespace(usage=start_usage))]
+    events.append(
+        SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(text="ok", thinking=None))
+    )
+    events += [
+        SimpleNamespace(type="message_delta", stop_reason="end_turn", usage=SimpleNamespace(output_tokens=out))
+        for out in delta_outputs
+    ]
+    return events
+
+
+def _ask(client, **kwargs):
+    return client.chat.completions.create(
+        model="claude-sonnet-4-6", messages=[{"role": "user", "content": "hi"}], **kwargs
+    )
+
+
+def test_anthropic_response_usage_includes_the_cached_parts_in_the_prompt():
+    usage = _anthropic_usage(
+        input_tokens=10, output_tokens=20, cache_read_input_tokens=300, cache_creation_input_tokens=50
+    )
+    reply = _ask(_anthropic_client(response=_anthropic_message(usage)))
+
+    assert reply.usage.prompt_tokens == 360
+    assert reply.usage.completion_tokens == 20
+    assert reply.usage.prompt_tokens_details.cached_tokens == 300
+    assert reply.usage.cache_write_tokens == 50
+
+
+def test_anthropic_response_without_cache_counters_keeps_plain_input():
+    reply = _ask(_anthropic_client(response=_anthropic_message(_anthropic_usage(input_tokens=42, output_tokens=7))))
+
+    assert reply.usage.prompt_tokens == 42
+    assert reply.usage.prompt_tokens_details.cached_tokens == 0
+    assert reply.usage.cache_write_tokens == 0
+
+
+def test_anthropic_response_without_usage_leaves_it_to_a_local_estimate():
+    assert _ask(_anthropic_client(response=_anthropic_message(None))).usage is None
+
+
+def test_anthropic_stream_takes_input_from_start_and_output_from_the_last_delta():
+    start = _anthropic_usage(
+        input_tokens=10, output_tokens=1, cache_read_input_tokens=300, cache_creation_input_tokens=50
+    )
+    # message_delta restates the running total: 5, then 12, then 20 is 20, not 37.
+    client = _anthropic_client(events=_anthropic_events(start, [5, 12, 20]))
+
+    chunks = list(_ask(client, stream=True))
+
+    text = "".join(c.choices[0].delta.content or "" for c in chunks if c.choices and hasattr(c.choices[0], "delta"))
+    assert text == "ok"
+    final = chunks[-1]
+    assert final.choices == []
+    assert final.usage.prompt_tokens == 360
+    assert final.usage.completion_tokens == 20
+    assert final.usage.prompt_tokens_details.cached_tokens == 300
+    assert final.usage.cache_write_tokens == 50
+    assert sum(1 for c in chunks if getattr(c, "usage", None) is not None) == 1
+
+
+def test_anthropic_stream_without_message_start_reports_no_usage():
+    from types import SimpleNamespace
+
+    events = [SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(text="ok", thinking=None))]
+    chunks = list(_ask(_anthropic_client(events=events), stream=True))
+
+    assert all(getattr(c, "usage", None) is None for c in chunks)
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        {"input_tokens": 0, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 0},
+        {"input_tokens": 5, "cache_read_input_tokens": None, "cache_creation_input_tokens": 700},
+        {"input_tokens": 12, "cache_read_input_tokens": 300, "cache_creation_input_tokens": 50},
+        {"input_tokens": None, "cache_read_input_tokens": None, "cache_creation_input_tokens": None},
+    ],
+)
+def test_anthropic_prompt_tokens_never_fall_below_the_cache_counts(counts):
+    usage = _anthropic_client(response=_anthropic_message(_anthropic_usage(output_tokens=3, **counts)))
+    usage = _ask(usage).usage
+
+    assert usage.prompt_tokens >= usage.prompt_tokens_details.cached_tokens + usage.cache_write_tokens
+
+
 # ── DeepSeek provider tests ──────────────────────────────────────────────────
 
 

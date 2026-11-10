@@ -1589,15 +1589,65 @@ class _AnthropicCompletionsNamespace:
             raise self._owner._map_error(error) from error
 
     def _stream_response(self, client, request_kwargs: dict[str, Any]):
-        """Stream Anthropic events, yielding OpenAI-compatible chunk objects."""
+        """Stream Anthropic events, yielding OpenAI-compatible chunk objects.
+
+        Usage is split across two events: message_start carries the input and
+        cache counters, message_delta the output count, which is cumulative
+        (each event restates the total so far), so it is assigned, never added.
+        It goes out as a final choices-less chunk, the shape OpenAI streams use.
+        """
+        start_usage: Any = None
+        output_tokens: Any = None
         try:
             with client.messages.stream(**request_kwargs) as stream:
                 for event in stream:
+                    event_type = getattr(event, "type", None)
+                    if event_type == "message_start":
+                        start_usage = getattr(getattr(event, "message", None), "usage", None)
+                        output_tokens = getattr(start_usage, "output_tokens", None)
+                    elif event_type == "message_delta":
+                        delta_output = getattr(getattr(event, "usage", None), "output_tokens", None)
+                        if delta_output is not None:
+                            output_tokens = delta_output
                     chunk = self._owner._normalize_stream_chunk(event)
                     if chunk is not None:
                         yield chunk
         except Exception as error:
             raise self._owner._map_error(error) from error
+        if start_usage is not None:
+            from types import SimpleNamespace
+
+            yield SimpleNamespace(
+                choices=[],
+                usage=_anthropic_usage_counts(
+                    getattr(start_usage, "input_tokens", None),
+                    getattr(start_usage, "cache_read_input_tokens", None),
+                    getattr(start_usage, "cache_creation_input_tokens", None),
+                    output_tokens,
+                ),
+            )
+
+
+def _anthropic_usage_counts(input_tokens: Any, cache_read: Any, cache_write: Any, output_tokens: Any) -> Any:
+    """OpenAI-shaped usage from Anthropic's counters.
+
+    Anthropic reports ``input_tokens`` *without* the cached parts, OpenAI's
+    ``prompt_tokens`` includes them: add both cache counters so the total is the
+    whole prompt and ``prompt_tokens >= cached + written`` holds. A missing
+    counter is 0 (the SDK sends None for cache fields on models without caching).
+    """
+    from types import SimpleNamespace
+
+    def count(value: Any) -> int:
+        return value if type(value) is int and value >= 0 else 0
+
+    read, write = count(cache_read), count(cache_write)
+    return SimpleNamespace(
+        prompt_tokens=count(input_tokens) + read + write,
+        completion_tokens=count(output_tokens),
+        prompt_tokens_details=SimpleNamespace(cached_tokens=read),
+        cache_write_tokens=write,
+    )
 
 
 class AnthropicCompatibleClient:
@@ -1650,13 +1700,22 @@ class AnthropicCompatibleClient:
             for block in response.content:
                 if hasattr(block, "text"):
                     text += block.text
+        usage = getattr(response, "usage", None)
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(content=text),
                     finish_reason=getattr(response, "stop_reason", None),
                 )
-            ]
+            ],
+            usage=None
+            if usage is None
+            else _anthropic_usage_counts(
+                getattr(usage, "input_tokens", None),
+                getattr(usage, "cache_read_input_tokens", None),
+                getattr(usage, "cache_creation_input_tokens", None),
+                getattr(usage, "output_tokens", None),
+            ),
         )
 
     def _normalize_stream_chunk(self, event) -> Any | None:
