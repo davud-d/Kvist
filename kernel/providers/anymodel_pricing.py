@@ -6,6 +6,10 @@ model (in addition to the plain ``id`` every OpenAI-compatible catalog has).
 This is the only price source this codebase has today — there is no local
 ``/app/model-catalog`` with a coefficient already baked in — so the formula
 here is not combined with any other pricing table.
+
+The field comes in two shapes: a single number (one multiplier for every token)
+and ``{"input": n, "output": m}`` (the catalog's current shape). Both parse to
+:class:`ModelCoefficient`, so a caller never branches on the wire format.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 from typing import Any
 
@@ -30,7 +35,15 @@ _MAX_RESPONSE_BYTES = 4 * 1024 * 1024  # generous for a model catalog response
 # in memory for a while (10-15 minute window from the task spec).
 _COEFFICIENT_CACHE_TTL_SECONDS = 720.0
 
-_COEFFICIENT_CACHE: dict[str, tuple[float, dict[str, float]]] = {}
+_COEFFICIENT_CACHE: dict[str, tuple[float, dict[str, ModelCoefficient]]] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCoefficient:
+    """What one input token and one output token of a model cost, in AnyModel's units."""
+
+    input: float
+    output: float
 
 
 class AnyModelPricingError(RuntimeError):
@@ -103,8 +116,20 @@ def _fetch_raw_catalog(api_key: str, base_url: str) -> Any:
         raise AnyModelUnavailableError("AnyModel response was not valid JSON") from error
 
 
-def _parse_coefficients(payload: Any) -> dict[str, float]:
-    coefficients: dict[str, float] = {}
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _parse_coefficient(raw: object) -> ModelCoefficient | None:
+    if _is_number(raw):
+        return ModelCoefficient(float(raw), float(raw))
+    if isinstance(raw, dict) and _is_number(raw.get("input")) and _is_number(raw.get("output")):
+        return ModelCoefficient(float(raw["input"]), float(raw["output"]))
+    return None
+
+
+def _parse_coefficients(payload: Any) -> dict[str, ModelCoefficient]:
+    coefficients: dict[str, ModelCoefficient] = {}
     if not isinstance(payload, dict):
         return coefficients
     for item in payload.get("data") or []:
@@ -116,9 +141,9 @@ def _parse_coefficients(payload: Any) -> dict[str, float]:
         billing = item.get("billing")
         if not isinstance(billing, dict):
             continue
-        coefficient = billing.get("coefficient")
-        if isinstance(coefficient, (int, float)) and not isinstance(coefficient, bool):
-            coefficients[model_id] = float(coefficient)
+        coefficient = _parse_coefficient(billing.get("coefficient"))
+        if coefficient is not None:
+            coefficients[model_id] = coefficient
     return coefficients
 
 
@@ -127,7 +152,7 @@ def fetch_model_coefficients(
     *,
     base_url: str = ANYMODEL_MODELS_URL,
     force_refresh: bool = False,
-) -> dict[str, float]:
+) -> dict[str, ModelCoefficient]:
     """Return ``{model_id: billing.coefficient}`` for AnyModel's catalog.
 
     Cached in memory for ``_COEFFICIENT_CACHE_TTL_SECONDS`` so a run with
@@ -153,16 +178,40 @@ def get_model_coefficient(
     *,
     base_url: str = ANYMODEL_MODELS_URL,
     force_refresh: bool = False,
-) -> float | None:
+) -> ModelCoefficient | None:
     """Return the billing coefficient for one model id, or ``None`` if unknown."""
     coefficients = fetch_model_coefficients(api_key, base_url=base_url, force_refresh=force_refresh)
     return coefficients.get(model_id)
 
 
-def compute_step_cost(input_tokens: int, output_tokens: int, coefficient: float) -> float:
-    """Cost of one step: ``(input_tokens + output_tokens) * coefficient``.
+def compute_step_cost(input_tokens: int, output_tokens: int, coefficient: ModelCoefficient) -> float:
+    """Cost of one step: input and output tokens, each times its own coefficient.
 
     Pure arithmetic, no network — callers fetch the coefficient once (cached
     by :func:`fetch_model_coefficients`) and reuse it across a run's steps.
     """
-    return (input_tokens + output_tokens) * coefficient
+    return input_tokens * coefficient.input + output_tokens * coefficient.output
+
+
+def format_coefficient(coefficient: ModelCoefficient) -> str:
+    """The multiplier as a model picker shows it next to the name: ``x0``, ``x1.5``, ``x1/3``.
+
+    One number when input and output cost the same, ``input/output`` when they differ.
+    """
+    if coefficient.input == coefficient.output:
+        return f"x{coefficient.input:g}"
+    return f"x{coefficient.input:g}/{coefficient.output:g}"
+
+
+def coefficient_labels(api_key: str) -> dict[str, str]:
+    """``{model_id: "x1.5"}`` for a model picker; empty when the catalog cannot be read.
+
+    A picker gets its model list from its own request, which reports a bad key or
+    an outage itself. A pricing failure here must not blank that list, it only
+    leaves the names without their multiplier.
+    """
+    try:
+        coefficients = fetch_model_coefficients(api_key)
+    except AnyModelPricingError:
+        return {}
+    return {model_id: format_coefficient(item) for model_id, item in coefficients.items()}

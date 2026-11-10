@@ -37,9 +37,16 @@ def _catalog_payload():
         "data": [
             {"id": "cc/claude-opus-4-8", "billing": {"coefficient": 1.5}},
             {"id": "cc/claude-sonnet-5", "billing": {"coefficient": 0.8}},
+            {"id": "am/free-model", "billing": {"unit": "token", "coefficient": {"input": 0, "output": 0}}},
+            {"id": "am/split-model", "billing": {"unit": "token", "coefficient": {"input": 1, "output": 3}}},
             {"id": "cc/no-billing-field"},
+            {"id": "cc/half-a-pair", "billing": {"coefficient": {"input": 1}}},
+            {"id": "cc/flag-not-number", "billing": {"coefficient": True}},
         ]
     }
+
+
+_OPUS = anymodel_pricing.ModelCoefficient(1.5, 1.5)
 
 
 def test_fetch_model_coefficients_parses_billing_coefficient(monkeypatch):
@@ -53,7 +60,14 @@ def test_fetch_model_coefficients_parses_billing_coefficient(monkeypatch):
 
     coefficients = anymodel_pricing.fetch_model_coefficients("test-key")
 
-    assert coefficients == {"cc/claude-opus-4-8": 1.5, "cc/claude-sonnet-5": 0.8}
+    # A bare number applies to input and output alike; the catalog's current
+    # {"input", "output"} shape keeps them apart; anything else is not priced.
+    assert coefficients == {
+        "cc/claude-opus-4-8": _OPUS,
+        "cc/claude-sonnet-5": anymodel_pricing.ModelCoefficient(0.8, 0.8),
+        "am/free-model": anymodel_pricing.ModelCoefficient(0, 0),
+        "am/split-model": anymodel_pricing.ModelCoefficient(1, 3),
+    }
     assert len(calls) == 1
 
 
@@ -95,7 +109,7 @@ def test_get_model_coefficient_returns_none_for_unknown_model(monkeypatch):
     )
 
     assert anymodel_pricing.get_model_coefficient("test-key", "does-not-exist") is None
-    assert anymodel_pricing.get_model_coefficient("test-key", "cc/claude-opus-4-8") == 1.5
+    assert anymodel_pricing.get_model_coefficient("test-key", "cc/claude-opus-4-8") == _OPUS
 
 
 def test_401_raises_auth_error(monkeypatch):
@@ -143,13 +157,55 @@ def test_failed_fetch_is_not_cached(monkeypatch):
         anymodel_pricing.fetch_model_coefficients("test-key")
 
     coefficients = anymodel_pricing.fetch_model_coefficients("test-key")
-    assert coefficients["cc/claude-opus-4-8"] == 1.5
+    assert coefficients["cc/claude-opus-4-8"] == _OPUS
     assert attempts["count"] == 2
 
 
 def test_compute_step_cost_is_pure_arithmetic():
-    assert anymodel_pricing.compute_step_cost(100, 50, 2.0) == 300.0
-    assert anymodel_pricing.compute_step_cost(0, 0, 5.0) == 0.0
+    flat = anymodel_pricing.ModelCoefficient(2.0, 2.0)
+    assert anymodel_pricing.compute_step_cost(100, 50, flat) == 300.0
+    assert anymodel_pricing.compute_step_cost(0, 0, anymodel_pricing.ModelCoefficient(5.0, 5.0)) == 0.0
+
+
+def test_compute_step_cost_prices_input_and_output_separately():
+    assert anymodel_pricing.compute_step_cost(100, 50, anymodel_pricing.ModelCoefficient(1, 3)) == 250.0
+
+
+@pytest.mark.parametrize(
+    ("coefficient", "label"),
+    [
+        (anymodel_pricing.ModelCoefficient(0, 0), "x0"),
+        (anymodel_pricing.ModelCoefficient(1.5, 1.5), "x1.5"),
+        (anymodel_pricing.ModelCoefficient(2.0, 2.0), "x2"),
+        (anymodel_pricing.ModelCoefficient(1, 3), "x1/3"),
+    ],
+)
+def test_format_coefficient(coefficient, label):
+    assert anymodel_pricing.format_coefficient(coefficient) == label
+
+
+def test_coefficient_labels_name_every_priced_model(monkeypatch):
+    monkeypatch.setattr(
+        anymodel_pricing._catalog_opener,
+        "open",
+        lambda request, timeout=None: _FakeResponse(_catalog_payload()),
+    )
+
+    assert anymodel_pricing.coefficient_labels("test-key") == {
+        "cc/claude-opus-4-8": "x1.5",
+        "cc/claude-sonnet-5": "x0.8",
+        "am/free-model": "x0",
+        "am/split-model": "x1/3",
+    }
+
+
+def test_coefficient_labels_are_empty_when_the_catalog_is_unreachable(monkeypatch):
+    def fake_urlopen(request, timeout=None):
+        raise urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
+
+    assert anymodel_pricing.coefficient_labels("test-key") == {}
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "http://example.com/models",
