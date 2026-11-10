@@ -723,6 +723,67 @@ def test_token_usage_is_folded_into_one_event_per_turn(tmp_path):
     assert (usage[0]["input_tokens"], usage[0]["output_tokens"]) == (150, 15)
 
 
+def _turn_usage(tmp_path, calls: list[dict]) -> dict:
+    path = tmp_path / ".kvist" / "sessions" / "u.events.jsonl"
+    journal = SessionJournal(tmp_path, lambda: path, print)
+    ui = session_events.JournalingUI(_Quiet(), journal)
+
+    journal.begin_turn("count")
+    ui.print_final("counted", [])
+    for call in calls:
+        ui.print_usage({"model": "m", "kind": "step", **call})
+    journal.end_turn()
+
+    (usage,) = [e["event"] for e in session_events.read_history(path, tmp_path)["events"] if e["event"]["type"] == "usage"]
+    return usage
+
+
+def test_turn_usage_sums_cache_counts_next_to_input_and_output(tmp_path):
+    usage = _turn_usage(
+        tmp_path,
+        [
+            {"input_tokens": 100, "output_tokens": 10, "cache_read_tokens": 0, "cache_write_tokens": 80},
+            {"input_tokens": 120, "output_tokens": 5, "cache_read_tokens": 90, "cache_write_tokens": 20},
+        ],
+    )
+
+    assert (usage["cache_read_tokens"], usage["cache_write_tokens"]) == (90, 100)
+    assert usage["input_tokens"] >= usage["cache_read_tokens"] + usage["cache_write_tokens"]
+
+
+def test_turn_usage_without_any_cache_report_has_no_cache_keys(tmp_path):
+    usage = _turn_usage(tmp_path, [{"input_tokens": 100, "output_tokens": 10}])
+
+    assert "cache_read_tokens" not in usage and "cache_write_tokens" not in usage
+
+
+def test_turn_usage_counts_only_the_calls_that_reported_cache(tmp_path):
+    usage = _turn_usage(
+        tmp_path,
+        [
+            {"input_tokens": 100, "output_tokens": 10, "cache_read_tokens": 60},
+            {"input_tokens": 50, "output_tokens": 5},
+        ],
+    )
+
+    assert usage["cache_read_tokens"] == 60
+    assert "cache_write_tokens" not in usage
+
+
+def test_cache_counts_do_not_leak_into_the_next_turn(tmp_path):
+    path = tmp_path / ".kvist" / "sessions" / "u.events.jsonl"
+    journal = SessionJournal(tmp_path, lambda: path, print)
+    ui = session_events.JournalingUI(_Quiet(), journal)
+    for call in ({"cache_read_tokens": 60}, {}):
+        journal.begin_turn("again")
+        ui.print_final("done", [])
+        ui.print_usage({"input_tokens": 100, "output_tokens": 1, "model": "m", "kind": "step", **call})
+        journal.end_turn()
+
+    usage = [e["event"] for e in session_events.read_history(path, tmp_path)["events"] if e["event"]["type"] == "usage"]
+    assert ["cache_read_tokens" in u for u in usage] == [True, False]
+
+
 def test_journaling_ui_passes_capabilities_and_settings_through(tmp_path):
     class Real(_Quiet):
         verbose = False

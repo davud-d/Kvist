@@ -317,6 +317,10 @@ class SessionJournal:
         self._reasoning: dict[str, str] = {}
         self._input_tokens = 0
         self._output_tokens = 0
+        # None until a call reports them: a turn that never learned its cache
+        # counts must not journal a zero that reads as "nothing was cached".
+        self._cache_read_tokens: int | None = None
+        self._cache_write_tokens: int | None = None
         self._model = ""
         self._context_tokens = 0
         self._context_limit = 0
@@ -337,6 +341,7 @@ class SessionJournal:
             self._stopped = False
             self._reasoning = {}
             self._input_tokens = self._output_tokens = 0
+            self._cache_read_tokens = self._cache_write_tokens = None
             self._context_tokens = self._context_limit = 0
             self._pending_user = {"type": "user", "text": text}
             if resumed:
@@ -371,18 +376,21 @@ class SessionJournal:
     def _write_turn_summary(self) -> None:
         self._flush_reasoning()
         if self._input_tokens or self._output_tokens:
-            self._append(
-                {
-                    "type": "usage",
-                    "input_tokens": self._input_tokens,
-                    "output_tokens": self._output_tokens,
-                    "model": self._model,
-                    "kind": "turn",
-                    "step": 0,
-                    "context_tokens": self._context_tokens,
-                    "context_limit": self._context_limit,
-                }
-            )
+            summary: dict[str, Any] = {
+                "type": "usage",
+                "input_tokens": self._input_tokens,
+                "output_tokens": self._output_tokens,
+                "model": self._model,
+                "kind": "turn",
+                "step": 0,
+                "context_tokens": self._context_tokens,
+                "context_limit": self._context_limit,
+            }
+            if self._cache_read_tokens is not None:
+                summary["cache_read_tokens"] = self._cache_read_tokens
+            if self._cache_write_tokens is not None:
+                summary["cache_write_tokens"] = self._cache_write_tokens
+            self._append(summary)
         if self._dropped:
             self._append({"type": "journal_notice", "omitted_events": self._dropped})
         end: dict[str, Any] = {"type": "turn_end"}
@@ -414,6 +422,10 @@ class SessionJournal:
     def _add_usage(self, payload: dict[str, Any]) -> None:
         self._input_tokens += payload["input_tokens"]
         self._output_tokens += payload["output_tokens"]
+        if "cache_read_tokens" in payload:
+            self._cache_read_tokens = (self._cache_read_tokens or 0) + payload["cache_read_tokens"]
+        if "cache_write_tokens" in payload:
+            self._cache_write_tokens = (self._cache_write_tokens or 0) + payload["cache_write_tokens"]
         self._model = payload["model"] or self._model
         self._context_tokens = payload.get("context_tokens", 0) or self._context_tokens
         self._context_limit = payload.get("context_limit", 0) or self._context_limit
