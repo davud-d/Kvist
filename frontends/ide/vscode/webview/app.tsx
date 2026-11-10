@@ -1,5 +1,5 @@
-import workspaceMark from "../../../gui/electron/renderer/kvist-mark.svg"
-import { readImages, imageGoal, MAX_IMAGES, type ImageAttachment } from "../../../gui/electron/renderer/image-attachments.js"
+import workspaceMark from "../../../gui/electron-legacy/renderer/kvist-mark.svg"
+import { readImages, imageGoal, MAX_IMAGES, type ImageAttachment } from "../../../gui/electron-legacy/renderer/image-attachments.js"
 import { FolderOpen, History } from "lucide-preact"
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 

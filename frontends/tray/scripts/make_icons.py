@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT.parent / "gui" / "electron" / "build" / "icon.png"
+SOURCE = ROOT.parent / "gui" / "electron-legacy" / "build" / "icon.png"
 SIZE = 64
 DOTS = {"idle": None, "running": (255, 179, 0, 255), "done": (46, 204, 113, 255)}
 

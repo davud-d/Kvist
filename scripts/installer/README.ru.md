@@ -11,7 +11,7 @@
 | `install_jetbrains.py` | Находит все установленные IDE JetBrains и распаковывает плагин **Kvist** в папку `plugins/` каждой из них. |
 | `install_vscode.py` | Находит команды запуска VS Code, VS Code Insiders и VSCodium и ставит `.vsix` Kvist в каждый редактор. |
 | `install_app.py` | Ставит пиксельное настольное приложение (`frontends/gui/tauri`): собирает через cargo (готовый бинарник из релиза скачивают `install.sh` / `install.ps1`) и добавляет в меню приложений: запись `.desktop` и иконка hicolor в Linux, `Kvist Pixel.app` в `~/Applications` в macOS, ярлыки в меню «Пуск» и на рабочем столе в Windows. Ждёт `install_rust.py`, если выбраны оба. |
-| `install_gui.py` | Ставит Electron-GUI как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux, копия `Kvist.app` в `~/Applications` в macOS. |
+| `install_gui.py` | Legacy, `install.py` его не предлагает; запускается напрямую. Ставит старый Electron-GUI (`frontends/gui/electron-legacy`) как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux, копия `Kvist.app` в `~/Applications` в macOS. |
 | `install_zed.py` | Регистрирует установленный `kvist-core` как внешний ACP-агент Zed: одна запись `agent_servers` в файле настроек Zed, комментарии и всё остальное не трогаются. |
 | `install_kvide.py` | Добавляет генератор сообщений коммита Kvist в редактор kvide: копирует адаптер (`frontends/kvide/`) рядом с `kvist-core` и пишет пользовательский `generators.toml` kvide, так что обычный `kvide` показывает кнопку. Чужой пользовательский файл не перезаписывается и не удаляется. |
 | `jsonc_settings.py` | Точечный редактор одной записи JSONC-документа. Чистая работа с текстом; единственный вызывающий — `install_zed.py`. |
@@ -22,7 +22,7 @@
 ```bash
 python scripts/installer/install.py                      # выбрать стрелками
 python scripts/installer/install.py --all                # всё, без вопросов
-python scripts/installer/install.py --cli --gui          # названные компоненты, без вопросов
+python scripts/installer/install.py --cli --app          # названные компоненты, без вопросов
 
 python scripts/installer/install_rust.py                 # Rust и компилятор C для Kvist Glass
 python scripts/installer/install_cli.py                  # или по одному напрямую
@@ -164,5 +164,5 @@ for s in 16 24 32 48 64 128 256 512; do rsvg-convert -w $s -h $s icon.svg -o ico
 magick icon-256.png -define icon:auto-resize=256,128,64,48,32,16 kvist.ico
 ```
 
-Копии этих файлов для сборки GUI лежат в `frontends/gui/electron/build/` и подключены в
-`frontends/gui/electron/package.json` (`build.linux.icon`, `build.win.icon`).
+Копии этих файлов для сборки GUI лежат в `frontends/gui/electron-legacy/build/` и подключены в
+`frontends/gui/electron-legacy/package.json` (`build.linux.icon`, `build.win.icon`).

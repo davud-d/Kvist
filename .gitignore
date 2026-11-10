@@ -67,8 +67,8 @@ frontends/ide/jetbrains/bin/win/kvist.exe
 
 # Node / Electron GUI (installed deps and bundled build output)
 node_modules/
-frontends/gui/electron/resources/bin/
-frontends/gui/electron/.build/
+frontends/gui/electron-legacy/resources/bin/
+frontends/gui/electron-legacy/.build/
 
 # JetBrains plugin's private core build (kept apart from the CLI's dist/)
 frontends/ide/jetbrains/.build/

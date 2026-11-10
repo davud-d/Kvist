@@ -164,8 +164,10 @@ interrupted task stays in the session, so `/resume` or a new message picks it up
 - **Voice.** An orb you talk to: say "Kvist" and it listens, short spoken
   answers (`/tui voice`, kitty or Ghostty;
   [`frontends/voice`](frontends/voice/README.md)).
-- **Electron app.** `scripts/installer/install_gui.py`, or
-  [`frontends/gui/electron`](frontends/gui/electron/README.md).
+- **Kvist Pixel.** `scripts/installer/install_app.py`
+  ([`frontends/gui/tauri`](frontends/gui/tauri/README.md)). The old Electron app is legacy:
+  `scripts/installer/install_gui.py`, kept out of the main installer, or
+  [`frontends/gui/electron-legacy`](frontends/gui/electron-legacy/README.md).
 - **Browser.** `kvist-web` opens `http://127.0.0.1:9671` and guides you through
   connecting a model ([details](frontends/web-local/README.md)).
 - **VS Code and JetBrains.** A chat panel that starts Kvist for the open
@@ -267,12 +269,12 @@ Kvist treats their content as data that cannot change its safety rules.
 (cd frontends/tui/ink && npm install && npm test)
 (cd frontends/tui/opencode && bun install && bun test)
 (cd frontends/ide/vscode && npm install && npm test)
-(cd frontends/gui/electron && npm ci && npm test)
+(cd frontends/gui/electron-legacy && npm ci && npm test)
 ```
 
 ```text
 kernel/            the Python core (python -m kernel)
-frontends/         tui/classic, tui/ink, tui/opencode, gui/electron, ide/vscode, ide/jetbrains, zed, web-local, tray
+frontends/         tui/classic, tui/ink, tui/opencode, gui/electron-legacy, ide/vscode, ide/jetbrains, zed, web-local, tray
 scripts/           installers and release scripts
 docs/              protocol, skills, configuration, media
 site/              kvist.site landing page

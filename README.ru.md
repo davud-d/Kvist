@@ -166,8 +166,10 @@ kvist
 - **Голос.** Шар, с которым разговариваешь: скажи «Kvist», и она слушает,
   отвечает коротко вслух (`/tui voice`, kitty или Ghostty;
   [`frontends/voice`](frontends/voice/README.ru.md)).
-- **Приложение Electron.** `scripts/installer/install_gui.py` или
-  [`frontends/gui/electron`](frontends/gui/electron/README.md).
+- **Kvist Pixel.** `scripts/installer/install_app.py`
+  ([`frontends/gui/tauri`](frontends/gui/tauri/README.ru.md)). Старое приложение Electron — legacy:
+  `scripts/installer/install_gui.py`, в главный установщик не входит, или
+  [`frontends/gui/electron-legacy`](frontends/gui/electron-legacy/README.md).
 - **Браузер.** `kvist-web` открывает `http://127.0.0.1:9671` и помогает подключить
   модель ([подробности](frontends/web-local/README.md)).
 - **VS Code и JetBrains.** Чат-панель, которая запускает Kvist для открытого
@@ -270,12 +272,12 @@ devops) и `KVIST-CHAT.md`. Один раз опишите там команды
 (cd frontends/tui/ink && npm install && npm test)
 (cd frontends/tui/opencode && bun install && bun test)
 (cd frontends/ide/vscode && npm install && npm test)
-(cd frontends/gui/electron && npm ci && npm test)
+(cd frontends/gui/electron-legacy && npm ci && npm test)
 ```
 
 ```text
 kernel/            Python-ядро (python -m kernel)
-frontends/         tui/classic, tui/ink, tui/opencode, gui/electron, ide/vscode, ide/jetbrains, zed, web-local, tray
+frontends/         tui/classic, tui/ink, tui/opencode, gui/electron-legacy, ide/vscode, ide/jetbrains, zed, web-local, tray
 scripts/           установщики и скрипты релиза
 docs/              протокол, скиллы, конфигурация, медиа
 site/              лендинг kvist.site

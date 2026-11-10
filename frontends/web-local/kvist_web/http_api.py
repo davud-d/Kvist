@@ -259,7 +259,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
         root = client_root().resolve()
         if name == "utils/image-attachments.js" and not (root / name).exists():
             import kernel
-            root = Path(kernel.__file__).resolve().parent.parent / "frontends/gui/electron/renderer"
+            root = Path(kernel.__file__).resolve().parent.parent / "frontends/gui/electron-legacy/renderer"
             name = "image-attachments.js"
         try:
             target = (root / unquote(name)).resolve(strict=True)

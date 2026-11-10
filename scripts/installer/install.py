@@ -3,13 +3,13 @@
 """Pick what to install and watch it happen.
 
 This is the front door: it offers the installers (`install_rust.py`,
-`install_cli.py`, `install_web.py`, `install_jetbrains.py`, `install_vscode.py`, `install_gui.py`,
+`install_cli.py`, `install_web.py`, `install_jetbrains.py`, `install_vscode.py`, `install_app.py`,
 `install_zed.py`, `install_kvide.py`) as an arrow-key list, all selected by default, and runs the
 ones you keep.
 
     python scripts/installer/install.py             # pick with the arrow keys
     python scripts/installer/install.py --all       # everything, no questions
-    python scripts/installer/install.py --cli --gui # named components, no questions
+    python scripts/installer/install.py --cli --app # named components, no questions
 
 Quietly, the chosen installers run at once as background processes and a live
 panel shows what each one is doing; each writes its own log, and a failed one
@@ -73,7 +73,6 @@ COMPONENTS = (
     Component("web", "Web control center — `kvist-web`", "install_web.py", after=("cli",)),
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),
     Component("vscode", "VS Code extension", "install_vscode.py"),
-    Component("gui", "GUI application", "install_gui.py"),
     # Compiles the pixel desktop app with cargo, so it waits for Rust, and adds it to the application menu.
     Component("app", "Desktop app — builds Kvist Pixel and adds it to the application menu", "install_app.py", after=("rust",)),
     Component("zed", "Zed agent registration", "install_zed.py", after=("cli",)),

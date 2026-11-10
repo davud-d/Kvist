@@ -13,7 +13,7 @@ macOS: copies the built Kvist.app into ~/Applications, where Launchpad and
 Spotlight find it. The app is not signed or notarized, so a copy downloaded with a
 browser needs "Open" from its context menu the first time.
 
-It reuses an already-built GUI from frontends/gui/electron/dist when possible; pass --build to
+It reuses an already-built GUI from frontends/gui/electron-legacy/dist when possible; pass --build to
 produce one first (needs Node.js + npm).
 
     python scripts/installer/install_gui.py
@@ -160,7 +160,7 @@ def _find_linux_payload() -> tuple[str, Path]:
     if unpacked.is_dir():
         return "dir", unpacked
     raise SystemExit(
-        "error: no built Linux GUI found in frontends/gui/electron/dist (expected an .AppImage or "
+        "error: no built Linux GUI found in frontends/gui/electron-legacy/dist (expected an .AppImage or "
         "linux-unpacked/). Re-run with --build."
     )
 
@@ -295,7 +295,7 @@ def _find_macos_payload() -> Path:
         if apps:
             return apps[0]
     raise SystemExit(
-        "error: no built macOS GUI found in frontends/gui/electron/dist (expected mac-arm64/*.app "
+        "error: no built macOS GUI found in frontends/gui/electron-legacy/dist (expected mac-arm64/*.app "
         "or mac/*.app). Re-run with --build."
     )
 
@@ -354,7 +354,7 @@ def _find_windows_payload() -> tuple[str, Path]:
     if unpacked.is_dir():
         return "dir", unpacked
     raise SystemExit(
-        "error: no built Windows GUI found in frontends/gui/electron/dist (expected a *Setup*.exe or "
+        "error: no built Windows GUI found in frontends/gui/electron-legacy/dist (expected a *Setup*.exe or "
         "win-unpacked/). Re-run with --build."
     )
 

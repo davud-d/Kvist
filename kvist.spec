@@ -124,7 +124,7 @@ a = Analysis(
         ('kernel/skills_bundled', 'kernel/skills_bundled'),
         ('frontends/tui/classic/assets', 'assets'),
         ('frontends/web-local/kvist_web/client', 'kvist_web/client'),
-        ('frontends/gui/electron/renderer/image-attachments.js', 'kvist_web/client/utils'),
+        ('frontends/gui/electron-legacy/renderer/image-attachments.js', 'kvist_web/client/utils'),
         # version.py's pyproject.toml fallback (no installed distribution
         # metadata exists inside a frozen build either).
         ('pyproject.toml', '.'),

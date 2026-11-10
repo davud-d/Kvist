@@ -12,7 +12,7 @@ kitty graphics), Kvist falls back to another and says why.
 | Classic Legacy | `--frontend terminal` | the prompt_toolkit terminal; the fallback |
 | OpenCode style | `--frontend opencode` | OpenCode's terminal interface on Kvist; needs Bun |
 | Voice | `--frontend voice` | an orb you talk to; wake word "Kvist"; kitty or Ghostty |
-| Electron app | `scripts/installer/install_gui.py` | desktop app |
+| Kvist Pixel | `scripts/installer/install_app.py` | desktop app (the old Electron app is legacy: `install_gui.py`, not in the main installer) |
 | Browser | `kvist-web` | opens `http://127.0.0.1:9671`, guides provider setup |
 | VS Code, JetBrains | plugins from the release | chat panel for the open project, commit messages in source control |
 | Zed | `scripts/installer/install_zed.py` | registered as an external ACP agent (`kvist --acp`); no inline completion, no pause |
