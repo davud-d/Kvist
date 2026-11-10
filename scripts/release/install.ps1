@@ -121,12 +121,14 @@ function Add-ToUserPath([string]$Dir) {
     return $true
 }
 
-function Install-JetBrains([string]$Zip) {
+function Find-JetBrainsIdes {
     $root = Join-Path $env:APPDATA "JetBrains"
-    $ides = @()
-    if (Test-Path -LiteralPath $root) {
-        $ides = Get-ChildItem -LiteralPath $root -Directory | Where-Object { $_.Name -match "^($JetBrainsProducts)\d" }
-    }
+    if (-not (Test-Path -LiteralPath $root)) { return @() }
+    return @(Get-ChildItem -LiteralPath $root -Directory | Where-Object { $_.Name -match "^($JetBrainsProducts)\d" })
+}
+
+function Install-JetBrains([string]$Zip) {
+    $ides = Find-JetBrainsIdes
     if (-not $ides) {
         Write-Step "No JetBrains IDE found, skipping the plugin"
         return
@@ -187,8 +189,9 @@ function Install-VsCode([string]$Vsix) {
 try {
     # Fetched before anything is installed, so a missing asset leaves the machine untouched.
     $binary = Get-Asset $BinaryAsset
-    $jetBrainsZip = Get-Asset $JetBrainsAsset
-    $vsix = Get-Asset $VsCodeAsset
+    # An IDE plugin is fetched only when there is an IDE to take it.
+    $jetBrainsZip = if (Find-JetBrainsIdes) { Get-Asset $JetBrainsAsset }
+    $vsix = if (Find-VsCodeEditors) { Get-Asset $VsCodeAsset }
     $appBinary = Get-OptionalAsset $AppAsset
 
     Install-Cli $binary

@@ -538,7 +538,10 @@ function tailPath(path: string, home: string, width: number): string {
 
 function build(input: SceneInput, width: number, listRows: number): Built {
   const { state, strings } = input
-  const needsModel = state.provider?.requires_manual_models === true
+  // Nothing is chosen yet on the provider screen, so count for the highlighted row: it is the path
+  // Enter takes, and the total must not jump between this screen and the next.
+  const subject = state.step === "provider" ? offeredProviders(state)[state.providerIndex] : state.provider
+  const needsModel = subject?.requires_manual_models === true
   // Provider, key, (model), interface; a provider-only setup has no interface.
   const steps = (needsModel ? 4 : 3) - (state.scope === "provider" ? 1 : 0)
   const hintMouse = strings.hintMouse

@@ -255,12 +255,24 @@ def test_the_path_line_is_added_once(tmp_path):
 
 
 def test_a_missing_asset_stops_a_selected_install_before_anything_is_written(tmp_path):
+    # An editor is on PATH, so the extension is wanted and its absence from the release is an error.
     result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "vscode"),
-                        drop=("kvist-vscode.vsix",))
+                        drop=("kvist-vscode.vsix",), stub_tools=("code",))
 
     assert result.returncode != 0
     assert "kvist-vscode.vsix not found" in result.stderr
     assert not (home / ".local").exists()
+
+
+def test_editor_plugins_are_not_fetched_where_no_editor_could_take_them(tmp_path):
+    # Both assets are missing from the release: a fetch would stop the run, so success proves none was tried.
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "jetbrains,vscode"),
+                        drop=("kvist-jetbrains.zip", "kvist-vscode.vsix"))
+
+    assert result.returncode == 0, result.stderr
+    assert "No JetBrains IDE found" in result.stdout
+    assert "No VS Code, Insiders or VSCodium found" in result.stdout
+    assert "unzip not found" not in result.stderr
 
 
 def test_node_is_installed_beside_the_binary_from_the_one_the_bootstrap_prepared(tmp_path):

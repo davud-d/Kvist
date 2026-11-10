@@ -235,6 +235,9 @@ def _apply(home: Path | None, command: str | None, reload: Callable[[str], None]
     if sys.platform == "win32":
         return []
     home = home or Path.home()
+    # Nothing to edit: do not create ~/.kvist/tray_bar.lock on every launch of a machine with no bar.
+    if _waybar_files(home) is None and _polybar_file(home) is None:
+        return []
     command = command if command is not None else bar_command()
     changed: list[str] = []
     with _locked(home) as _:

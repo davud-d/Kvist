@@ -212,7 +212,12 @@ curl_download() {
 	local dest="$1" url="$2" label="$3" pid size
 	local -a options=(-fSL --connect-timeout 20 --retry 2 --speed-limit 5000 --speed-time 30)
 	if [[ "$EVENTS" != 1 ]]; then
-		curl "${options[@]}" --progress-bar -o "$dest" "$url"
+		# The bar redraws itself with carriage returns; in a log or a pipe that is hundreds of lines.
+		if [[ -t 2 ]]; then
+			curl "${options[@]}" --progress-bar -o "$dest" "$url"
+		else
+			curl "${options[@]}" --silent --show-error -o "$dest" "$url"
+		fi
 		return
 	fi
 	curl "${options[@]}" --silent --show-error -o "$dest" "$url" &
@@ -655,15 +660,27 @@ jetbrains_plugins_dir() {
 	fi
 }
 
+# The plugin is fetched only when something here can take it: a download for a machine with no IDE
+# (or no unzip) is wasted, and on a server it is most of what the install does.
+jetbrains_receivable() {
+	command -v unzip >/dev/null 2>&1 && [[ -n "$(jetbrains_config_dirs)" ]]
+}
+
 install_jetbrains() {
 	local zip="$1" ide plugins staging
-	local found=0
+	local -a ides=()
+	while IFS= read -r ide; do
+		ides+=("$ide")
+	done < <(jetbrains_config_dirs)
+	if [[ ${#ides[@]} -eq 0 ]]; then
+		step "No JetBrains IDE found, skipping the plugin"
+		return
+	fi
 	command -v unzip >/dev/null 2>&1 || {
 		warn "unzip not found, skipping the JetBrains plugin"
 		return
 	}
-	while IFS= read -r ide; do
-		found=1
+	for ide in "${ides[@]}"; do
 		plugins="$(jetbrains_plugins_dir "$ide")"
 		mkdir -p "$plugins"
 		staging="$(mktemp -d "$plugins/.kvist-install.XXXXXX")"
@@ -675,8 +692,7 @@ install_jetbrains() {
 			warn "could not unpack the plugin into $ide"
 		fi
 		rm -rf "$staging"
-	done < <(jetbrains_config_dirs)
-	[[ "$found" == 1 ]] || step "No JetBrains IDE found, skipping the plugin"
+	done
 }
 
 # Prints the command-line launcher of one editor: `$1` on PATH, else the one inside its
@@ -698,10 +714,21 @@ editor_command() {
 	return 1
 }
 
+VSCODE_EDITORS=("code|Visual Studio Code" "code-insiders|Visual Studio Code - Insiders" "codium|VSCodium")
+
+# Like the JetBrains one: no editor, no download.
+vscode_receivable() {
+	local pair
+	for pair in "${VSCODE_EDITORS[@]}"; do
+		editor_command "${pair%%|*}" "${pair##*|}" >/dev/null && return 0
+	done
+	return 1
+}
+
 install_vscode() {
 	local vsix="$1" pair cli editor
 	local found=0
-	for pair in "code|Visual Studio Code" "code-insiders|Visual Studio Code - Insiders" "codium|VSCodium"; do
+	for pair in "${VSCODE_EDITORS[@]}"; do
 		cli="${pair%%|*}"
 		editor="$(editor_command "$cli" "${pair##*|}")" || continue
 		found=1
@@ -989,7 +1016,7 @@ print_plan() {
 			jetbrains_targets+=("$plugins/$JETBRAINS_FOLDER")
 		done < <(jetbrains_config_dirs)
 	fi
-	for pair in "code|Visual Studio Code" "code-insiders|Visual Studio Code - Insiders" "codium|VSCodium"; do
+	for pair in "${VSCODE_EDITORS[@]}"; do
 		cli="${pair%%|*}"
 		editor="$(editor_command "$cli" "${pair##*|}")" || continue
 		vscode_targets+=("$editor --install-extension $VSCODE_ASSET --force")
@@ -1149,13 +1176,17 @@ if wanted app; then
 fi
 if wanted jetbrains; then
 	emit component id jetbrains status start
-	fetch "$JETBRAINS_ASSET"
-	jetbrains_zip="$FETCHED"
+	if jetbrains_receivable; then
+		fetch "$JETBRAINS_ASSET"
+		jetbrains_zip="$FETCHED"
+	fi
 fi
 if wanted vscode; then
 	emit component id vscode status start
-	fetch "$VSCODE_ASSET"
-	vsix="$FETCHED"
+	if vscode_receivable; then
+		fetch "$VSCODE_ASSET"
+		vsix="$FETCHED"
+	fi
 fi
 
 # One component: announces it, runs it, reports it. A failure inside a component is a warning

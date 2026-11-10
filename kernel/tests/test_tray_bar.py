@@ -121,6 +121,12 @@ def test_uninstall_restores_the_original_content(home):
     assert tray_bar.uninstall(home, reload=lambda name: None) == []
 
 
+def test_a_home_without_a_bar_is_not_touched(tmp_path):
+    # A launch on a machine with no Waybar/Polybar must not leave a lock file behind in ~/.kvist.
+    assert install(tmp_path) == []
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_unsupported_waybar_layouts_are_left_alone(home):
     config = home / ".config/waybar/config"
     config.write_text('[{"modules-left": ["a"]}, {"modules-left": ["b"]}]', encoding="utf-8")

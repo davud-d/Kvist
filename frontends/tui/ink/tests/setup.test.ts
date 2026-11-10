@@ -888,3 +888,15 @@ test("without colour the pointer is underlined and a held button changes again",
   assert.equal(over.map(plain).filter((row) => row.includes("│ >")).length, 1)
   assert.equal(underlined(over).length, 1)
 })
+
+test("the step total on the provider screen is the one the key screen shows", () => {
+  const total = (state: SetupState) =>
+    plain(renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.join("\n")).match(/Step \d of (\d)/)?.[1]
+  const atProvider = send(ready(), key("enter")).state
+  // AnyModel has no built-in models (a model step follows); OpenAI has (it does not).
+  const openai = send(send(atProvider, key("down")).state, key("down")).state
+  for (const [onProvider, expected] of [[atProvider, "4"], [openai, "3"]] as const) {
+    assert.equal(total(onProvider), expected)
+    assert.equal(total(send(onProvider, key("enter")).state), expected)
+  }
+})
