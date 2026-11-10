@@ -546,7 +546,7 @@ def test_a_probe_lost_to_the_network_is_asked_again_next_run(agent_factory, erro
     agent = agent_factory(max_steps=1)
     agent.client = _FlakyProbeClient(error)
 
-    assert agent_model.native_tools_supported(agent, "m") is False
+    assert agent_model.native_tools_supported(agent, "m") is None
     assert not agent_model._NATIVE_TOOL_SUPPORT
     assert agent_model.native_tools_supported(agent, "m") is True
     assert len(agent.client.requests) == 2

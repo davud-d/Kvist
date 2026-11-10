@@ -568,8 +568,11 @@ _PROBE_TOOL: dict[str, Any] = {
 }
 
 
-def native_tools_supported(self, model: str) -> bool:
+def native_tools_supported(self, model: str) -> bool | None:
     """Whether this provider and model call tools natively, probed once per process.
+
+    None when the probe got no answer from the provider (a timeout, the network,
+    a rate limit, an outage): the caller uses the text protocol for now and asks again.
 
     ``AGENT_NATIVE_TOOLS=0`` keeps every run on the text protocol (<tool_call> blocks).
     """
@@ -586,7 +589,7 @@ def native_tools_supported(self, model: str) -> bool:
         _NATIVE_TOOL_SUPPORT[key] = verdict
     outcome = {True: "supported", False: "not supported", None: "probe failed, asking again next run"}[verdict]
     self._ui.debug_print(f"[native tools] {self.config.provider}/{model}: {outcome}")
-    return bool(verdict)
+    return verdict
 
 
 def forget_native_tools(self, model: str) -> None:
@@ -610,6 +613,11 @@ def _probe_native_tools(self, model: str) -> bool | None:
     without it, so it is not penalized for a parameter this probe does not
     need. A wrapper client that drops ``tools`` entirely still fails the same
     way.
+
+    The request carries no reasoning controls: the probe asks whether the
+    channel works, and the answer must not depend on the run's effort (Anthropic
+    turns a forced ``tool_choice`` into ``auto`` while thinking is on, and a
+    model that then answers in prose would be written off as "no native tools").
     """
     request: dict[str, Any] = {
         "model": model,
@@ -618,7 +626,6 @@ def _probe_native_tools(self, model: str) -> bool | None:
         "tool_choice": {"type": "function", "function": {"name": "ping"}},
         "timeout": self.config.api_timeout,
     }
-    merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
     try:
         response = _create_completion_with_reasoning_fallback(self, request)
     except Exception as error:

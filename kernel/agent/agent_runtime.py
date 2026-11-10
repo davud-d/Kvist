@@ -502,7 +502,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 break
 
             if self._state.native_tools is None:
-                self._state.native_tools = _native_tools_for_run(self)
+                _decide_native_tools(self)
             self._current_step = step
             loop_pre = time.monotonic()
             turn: NativeTurn | None = None
@@ -765,10 +765,30 @@ def _handle_model_error(self, step: int, error: Exception, loop_pre: float) -> s
     return None
 
 
-def _native_tools_for_run(self) -> bool:
+_PROBE_ATTEMPTS = 3
+
+
+def _decide_native_tools(self) -> None:
+    """Pick the channel for this step, or leave it undecided when the probe got no answer.
+
+    An undecided run speaks the text protocol this step and asks again on the
+    next; after ``_PROBE_ATTEMPTS`` unanswered probes it stays on text. A
+    switch to native mid-run loses nothing: the conversation is built from the
+    runtime prompt, which carries the results of the steps run on text.
+    """
     from kernel.agent.agent_model import native_tools_supported, resolve_action_model
 
-    return native_tools_supported(self, resolve_action_model(self))
+    state = self._state
+    verdict = native_tools_supported(self, resolve_action_model(self))
+    if verdict is not None:
+        state.native_tools = verdict
+        return
+    state.native_probe_failures += 1
+    if state.native_probe_failures >= _PROBE_ATTEMPTS:
+        state.native_tools = False
+        self._ui.debug_print(
+            f"[native tools] {_PROBE_ATTEMPTS} probes without an answer; the rest of this run uses the text protocol"
+        )
 
 
 def _leave_native_tools(self, error: Exception) -> None:

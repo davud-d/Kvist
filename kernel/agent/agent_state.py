@@ -214,6 +214,9 @@ class RunState:
     # The conversation is not checkpointed; a resumed run starts a new one from
     # the runtime prompt, which already carries the recent results.
     native_tools: bool | None = None
+    # Probes of this run that got no answer; the run asks again on its next step
+    # until the count reaches the limit in agent_runtime, then stays on text.
+    native_probe_failures: int = 0
     native_messages: list[dict[str, Any]] = field(default_factory=list)
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
