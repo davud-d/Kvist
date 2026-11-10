@@ -36,6 +36,30 @@ def test_live_start_stop_events():
     assert [type(e) for e in drained] == [LiveStartEvent, LiveStopEvent]
 
 
+def test_print_usage_carries_cache_counts_and_source():
+    ch = FrontendChannel()
+    EventStreamUI(ch).print_usage(
+        {
+            "input_tokens": 1000,
+            "output_tokens": 20,
+            "cache_read_tokens": 700,
+            "cache_write_tokens": 100,
+            "usage_source": "estimated",
+        }
+    )
+    payload = ch.drain()[0].to_dict()
+    assert (payload["cache_read_tokens"], payload["cache_write_tokens"]) == (700, 100)
+    assert payload["usage_source"] == "estimated"
+
+
+def test_print_usage_without_cache_info_stays_the_old_shape():
+    ch = FrontendChannel()
+    EventStreamUI(ch).print_usage({"input_tokens": 5, "output_tokens": 1})
+    payload = ch.drain()[0].to_dict()
+    assert "cache_read_tokens" not in payload and "cache_write_tokens" not in payload
+    assert payload["usage_source"] == "provider"
+
+
 def test_update_live_emits_status():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)

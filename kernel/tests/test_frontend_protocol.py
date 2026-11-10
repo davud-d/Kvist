@@ -338,6 +338,20 @@ def test_usage_event_defaults_context_to_zero():
     assert payload["context_limit"] == 0
 
 
+def test_usage_event_cache_fields_are_optional_and_additive():
+    plain = UsageEvent(input_tokens=10, output_tokens=2).to_dict()
+    assert "cache_read_tokens" not in plain and "cache_write_tokens" not in plain
+    assert plain["usage_source"] == "provider"
+
+    cached = UsageEvent(
+        input_tokens=1000, output_tokens=2, cache_read_tokens=800, cache_write_tokens=0, usage_source="estimated"
+    ).to_dict()
+    assert cached["cache_read_tokens"] == 800
+    assert cached["cache_write_tokens"] == 0  # a reported zero is not "unknown"
+    assert cached["usage_source"] == "estimated"
+    assert cached["input_tokens"] >= cached["cache_read_tokens"] + cached["cache_write_tokens"]
+
+
 def test_v2_call_fields_are_additive():
     from kernel.protocol.frontend_protocol import ActionOutputEvent, ActionResultEvent, FinalEvent, StepEvent
 

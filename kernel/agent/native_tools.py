@@ -17,6 +17,7 @@ from typing import Any, Callable
 from kernel.memory.schema import KINDS as MEMORY_KINDS
 from kernel.memory.schema import OPERATIONS as MEMORY_OPS
 from kernel.memory.schema import RELATIONS as MEMORY_RELATIONS
+from kernel.protocol.frontend_protocol import UsageSource
 from kernel.protocol.protocol import ToolCallRequest
 
 _STRING: dict[str, Any] = {"type": "string"}
@@ -441,6 +442,11 @@ class NativeTurn:
     # means the provider omitted usage, so the caller must estimate locally.
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # Parts of ``input_tokens`` served from / written to the prompt cache;
+    # None when the provider does not report them.
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    usage_source: UsageSource = "provider"
 
 
 def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:

@@ -6,7 +6,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 
 PROTOCOL_VERSION = 1
@@ -490,6 +490,11 @@ class ContextEvent:
         }
 
 
+# "provider": the counts come from the provider's own usage block.
+# "estimated": at least one of input/output was counted locally.
+UsageSource = Literal["provider", "estimated"]
+
+
 @dataclass(slots=True)
 class UsageEvent:
     """Token usage of one model call (real tiktoken counts, not estimates).
@@ -502,6 +507,11 @@ class UsageEvent:
     ``context_tokens`` and ``context_limit`` are the core's current answer from
     ``context_meter.context_usage``: the size of the last conversation prompt
     and the budget the core trims it to. A frontend assigns them as they are.
+
+    ``cache_read_tokens``/``cache_write_tokens`` are the parts of
+    ``input_tokens`` served from / written to the provider's prompt cache, so
+    ``input_tokens >= cache_read_tokens + cache_write_tokens``. None means the
+    provider did not report it; the keys are then left out of the payload.
     """
 
     input_tokens: int
@@ -511,10 +521,13 @@ class UsageEvent:
     step: int = 0
     context_tokens: int = 0
     context_limit: int = 0
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    usage_source: UsageSource = "provider"
     type: ClassVar[str] = "usage"
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "type": self.type,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -523,7 +536,13 @@ class UsageEvent:
             "step": self.step,
             "context_tokens": self.context_tokens,
             "context_limit": self.context_limit,
+            "usage_source": self.usage_source,
         }
+        if self.cache_read_tokens is not None:
+            payload["cache_read_tokens"] = self.cache_read_tokens
+        if self.cache_write_tokens is not None:
+            payload["cache_write_tokens"] = self.cache_write_tokens
+        return payload
 
 
 @dataclass(slots=True)

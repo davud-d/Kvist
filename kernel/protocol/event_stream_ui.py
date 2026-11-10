@@ -220,6 +220,8 @@ class EventStreamUI:
         self._channel.emit(DebugEvent(redact_text(message)))
 
     def print_usage(self, usage: dict) -> None:
+        cache_read = usage.get("cache_read_tokens")
+        cache_write = usage.get("cache_write_tokens")
         self._channel.emit(
             UsageEvent(
                 input_tokens=max(0, int(usage.get("input_tokens", 0))),
@@ -229,6 +231,9 @@ class EventStreamUI:
                 step=max(0, int(usage.get("step", 0))),
                 context_tokens=max(0, int(usage.get("context_tokens", 0))),
                 context_limit=max(0, int(usage.get("context_limit", 0))),
+                cache_read_tokens=None if cache_read is None else max(0, int(cache_read)),
+                cache_write_tokens=None if cache_write is None else max(0, int(cache_write)),
+                usage_source="estimated" if usage.get("usage_source") == "estimated" else "provider",
             )
         )
 
