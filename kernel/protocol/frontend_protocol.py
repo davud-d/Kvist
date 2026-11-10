@@ -848,6 +848,23 @@ class RouteEvent:
 
 
 @dataclass(slots=True)
+class ToolModeEvent:
+    """How the model's calls travel in this run: native tool calls or the text protocol.
+
+    Sent when the run picks its mode and again at every switch. ``reason`` is
+    ``probe_ok``, ``probe_no_tool_call``, ``probe_failed`` (the probe got no
+    answer; the run asks again), ``provider_rejected`` or ``forced_by_env``.
+    """
+
+    mode: str
+    reason: str
+    type: ClassVar[str] = "tool_mode"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "mode": self.mode, "reason": self.reason}
+
+
+@dataclass(slots=True)
 class SessionTitleEvent:
     """A session's title became known: generated in the background from its
     first completed turn, or set by hand with /rename (session_titler.py,

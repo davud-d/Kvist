@@ -776,10 +776,11 @@ def _decide_native_tools(self) -> None:
     switch to native mid-run loses nothing: the conversation is built from the
     runtime prompt, which carries the results of the steps run on text.
     """
-    from kernel.agent.agent_model import native_tools_supported, resolve_action_model
+    from kernel.agent.agent_model import native_tools_verdict, resolve_action_model
 
     state = self._state
-    verdict = native_tools_supported(self, resolve_action_model(self))
+    verdict, reason = native_tools_verdict(self, resolve_action_model(self))
+    _announce_tool_mode(self, bool(verdict), reason)
     if verdict is not None:
         state.native_tools = verdict
         return
@@ -789,6 +790,17 @@ def _decide_native_tools(self) -> None:
         self._ui.debug_print(
             f"[native tools] {_PROBE_ATTEMPTS} probes without an answer; the rest of this run uses the text protocol"
         )
+
+
+def _announce_tool_mode(self, native: bool, reason: str) -> None:
+    """Tell the frontend and the journal how calls travel, when that or its reason changed."""
+    announced = ("native" if native else "text", reason)
+    if self._state.tool_mode_sent == announced:
+        return
+    self._state.tool_mode_sent = announced
+    notify = getattr(self._ui, "print_tool_mode", None)
+    if notify is not None:
+        notify(*announced)
 
 
 def _leave_native_tools(self, error: Exception) -> None:
@@ -802,6 +814,7 @@ def _leave_native_tools(self, error: Exception) -> None:
     forget_native_tools(self, self._state.selected_action_model)
     self._state.native_tools = False
     self._state.native_messages = []
+    _announce_tool_mode(self, False, "provider_rejected")
     self._ui.print_error(
         "Провайдер отказался от вызова инструментов; этот прогон продолжается на текстовом протоколе."
         if self._state.response_language == "ru"

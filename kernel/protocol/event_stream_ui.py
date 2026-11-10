@@ -41,6 +41,7 @@ from kernel.protocol.frontend_protocol import (
     SandboxNoticeEvent,
     SessionEndedEvent,
     SessionTitleEvent,
+    ToolModeEvent,
     StatusEvent,
     StepEvent,
     StreamChunkEvent,
@@ -375,6 +376,9 @@ class EventStreamUI:
 
     def print_route(self, role: str, source: str) -> None:
         self._channel.emit(RouteEvent(str(role), str(source)))
+
+    def print_tool_mode(self, mode: str, reason: str) -> None:
+        self._channel.emit(ToolModeEvent(str(mode), str(reason)))
 
     def print_session_title(self, session: str, title: str) -> None:
         self._channel.emit(SessionTitleEvent(str(session), str(title)))

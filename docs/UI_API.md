@@ -195,6 +195,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `image_job` | `image_id:str, state:str, name:str, prompt:str, error:str` | a picture from `generate_image` is being drawn in the background (`state: "generating"`) or could not be made (`failed`, with `error`). The finished picture arrives as an `artifact` event with `skill: "image"`. The agent is not blocked meanwhile and is woken when the picture is ready. Live-only. |
 | `artifact` | `name:str, mime:str, path:str, caption:str, skill:str`; optional `preview:str` | a file or image a skill produced for the person; `path` is the absolute path of the saved copy under the workspace's `.kvist/artifacts/` (a frontend may show it as a link or read it; it never leaves the workspace), `preview` a small JPEG data URL (live only).  The built-in `generate_image` tool (AnyModel sessions) emits it with `skill: "image"`, `caption` the prompt and `path` the picture saved in the workspace; Glass shows it in the browser's card. Recorded in the journal without `preview`. |
 | `route` | `role:str, source:str` | the role the turn actually runs under, sent once per turn before the plan or reply. `role` is `coder`, `reader`, `devops` or `chat`. `source` is `explicit` (the caller passed the role), `direct` / `llm` / `keyword_fallback` / `default` (how the router decided) or `resume` (a bare "continue" after a stopped run inherited that run's role). |
+| `tool_mode` | `mode:str, reason:str` | how the model's calls travel in this run. `mode` is `native` (tool calls through the provider's tool channel) or `text` (the JSON text protocol). `reason` says why: `probe_ok` (the provider answered the start-up probe with a real tool call), `probe_no_tool_call` (it answered without one), `probe_failed` (the probe got no answer, a timeout, the network or an outage: the step runs on text and the run asks again on the next one, up to three times, then stays on text), `provider_rejected` (the provider refused tools, at the probe or in the middle of the run) or `forced_by_env` (`AGENT_NATIVE_TOOLS=0`). Sent once when the run picks its mode and again whenever the mode or the reason changes, so a run that starts on text after a lost probe and moves to native on its second step sends two. Recorded in the session journal; `protocol_version` stays 1 and a frontend that does not know the event ignores it. |
 | `plan` | `markdown:str` | the plan the model proposes for the person's decision (plan mode); short Markdown |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
 | `stream_start` | `stream_id:str` | a streaming response begins |
@@ -494,7 +495,7 @@ kvist --workspace WS --session-op history --session-name feature --history-limit
 - `events` are in order, oldest first; `event` is exactly a §8 event object.
   `seq` is unique and increasing within the session, `turn` numbers the user
   requests (1-based), `ts` is the wall-clock time it was recorded.
-- **Recorded** (already redacted): `route`, `plan`, `sandbox_notice`, `step`
+- **Recorded** (already redacted): `route`, `tool_mode`, `plan`, `sandbox_notice`, `step`
   (with the full `action_args`, so a `run_shell` step has its argv and a
   `write_file` step its content or `old_text`/`new_text`), `action_result`
   (output, exit code, path, `first_line`), thoughts as

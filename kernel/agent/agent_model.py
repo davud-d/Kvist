@@ -549,9 +549,9 @@ def call_action_model(self, prompt: str) -> str:
     return content
 
 
-# (provider, model) -> whether it answered the probe with a real tool call.
+# (provider, model) -> (whether it answered the probe with a real tool call, why).
 # Per process: a launch asks once, at its first task on that model.
-_NATIVE_TOOL_SUPPORT: dict[tuple[str, str], bool] = {}
+_NATIVE_TOOL_SUPPORT: dict[tuple[str, str], tuple[bool, str]] = {}
 
 _PROBE_TOOL: dict[str, Any] = {
     "type": "function",
@@ -569,34 +569,41 @@ _PROBE_TOOL: dict[str, Any] = {
 
 
 def native_tools_supported(self, model: str) -> bool | None:
-    """Whether this provider and model call tools natively, probed once per process.
+    """Whether this provider and model call tools natively; see ``native_tools_verdict``."""
+    return native_tools_verdict(self, model)[0]
 
-    None when the probe got no answer from the provider (a timeout, the network,
-    a rate limit, an outage): the caller uses the text protocol for now and asks again.
+
+def native_tools_verdict(self, model: str) -> tuple[bool | None, str]:
+    """(supported, reason) for this provider and model, probed once per process.
+
+    ``supported`` is None when the probe got no answer from the provider (a
+    timeout, the network, a rate limit, an outage): the caller uses the text
+    protocol for now and asks again. ``reason`` is one of ``forced_by_env``,
+    ``probe_ok``, ``probe_no_tool_call``, ``probe_failed``, ``provider_rejected``.
 
     ``AGENT_NATIVE_TOOLS=0`` keeps every run on the text protocol (<tool_call> blocks).
     """
     if os.environ.get("AGENT_NATIVE_TOOLS", "").strip() == "0":
-        return False
+        return False, "forced_by_env"
     key = (self.config.provider, model)
     if key in _NATIVE_TOOL_SUPPORT:
         return _NATIVE_TOOL_SUPPORT[key]
-    verdict = _probe_native_tools(self, model)
+    verdict, reason = _probe_native_tools(self, model)
     # Only the provider's own answer is remembered. A probe lost to a timeout
     # or the network says nothing about tool calling: this run uses the text
     # protocol and the next run asks again.
     if verdict is not None:
-        _NATIVE_TOOL_SUPPORT[key] = verdict
+        _NATIVE_TOOL_SUPPORT[key] = (verdict, reason)
     outcome = {True: "supported", False: "not supported", None: "probe failed, asking again next run"}[verdict]
     self._ui.debug_print(f"[native tools] {self.config.provider}/{model}: {outcome}")
-    return verdict
+    return verdict, reason
 
 
 def forget_native_tools(self, model: str) -> None:
-    _NATIVE_TOOL_SUPPORT[(self.config.provider, model)] = False
+    _NATIVE_TOOL_SUPPORT[(self.config.provider, model)] = (False, "provider_rejected")
 
 
-def _probe_native_tools(self, model: str) -> bool | None:
+def _probe_native_tools(self, model: str) -> tuple[bool | None, str]:
     """One tiny request that must come back as a well-formed call of ``ping``.
 
     None when the request never got the provider's answer (a timeout, the
@@ -639,21 +646,22 @@ def _probe_native_tools(self, model: str) -> bool | None:
     choices = getattr(response, "choices", None) or []
     message = getattr(choices[0], "message", None) if choices else None
     calls = getattr(message, "tool_calls", None) or []
+    no_call = (False, "probe_no_tool_call")
     if not calls:
-        return False
+        return no_call
     function = getattr(calls[0], "function", None)
     if getattr(function, "name", "") != "ping":
-        return False
+        return no_call
     try:
         arguments = decode_arguments(getattr(function, "arguments", ""))
     except json.JSONDecodeError:
-        return False
-    return isinstance(arguments, dict)
+        return no_call
+    return (True, "probe_ok") if isinstance(arguments, dict) else no_call
 
 
-def _failed_probe_verdict(self, error: Exception) -> bool | None:
+def _failed_probe_verdict(self, error: Exception) -> tuple[bool | None, str]:
     self._ui.debug_print(f"[native tools] probe request failed: {redact_text(str(error))}")
-    return None if _is_transient_error(error) else False
+    return (None, "probe_failed") if _is_transient_error(error) else (False, "provider_rejected")
 
 
 _TRANSIENT_ERROR_TYPES = (

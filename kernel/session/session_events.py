@@ -572,6 +572,11 @@ class JournalingUI:
         self._events.print_route(role, source)
         self._forward("print_route", role, source)
 
+    def print_tool_mode(self, mode: str, reason: str) -> None:
+        # Recorded: a replay shows how this session's calls travelled.
+        self._events.print_tool_mode(mode, reason)
+        self._forward("print_tool_mode", mode, reason)
+
     def print_session_title(self, session: str, title: str) -> None:
         # Fires from the background title-generation thread, strictly after
         # the turn that started it has already ended — never routed through
