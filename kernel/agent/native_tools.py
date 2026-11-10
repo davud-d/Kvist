@@ -447,6 +447,11 @@ class NativeTurn:
     cache_read_tokens: int | None = None
     cache_write_tokens: int | None = None
     usage_source: UsageSource = "provider"
+    # The reply ended on the output limit (finish_reason "length"). What that did to
+    # the last call is read from its arguments, or from ``last_call_open`` when the
+    # provider can say the call never closed even though its arguments parse.
+    cut_off: bool = False
+    last_call_open: bool = False
 
 
 def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:
@@ -519,7 +524,27 @@ def native_role_prompt(role_prompt: str, channel_section: str) -> str:
 
 def calls_from_turn(turn: NativeTurn) -> list[ToolCallRequest]:
     """The turn's calls as the v2 contract's call requests, one error per bad call."""
-    return [_call_request(call, number) for number, call in enumerate(turn.tool_calls, start=1)]
+    requests = [_call_request(call, number) for number, call in enumerate(turn.tool_calls, start=1)]
+    if turn.cut_off and requests and _last_call_cut(turn, requests[-1]):
+        last = requests[-1]
+        requests[-1] = ToolCallRequest(
+            last.call_id,
+            last.name,
+            None,
+            f"Tool call {len(requests)} was not run: {last.name} was cut off by the output limit. "
+            "Repeat it in smaller parts.",
+        )
+    return requests
+
+
+def _last_call_cut(turn: NativeTurn, last: ToolCallRequest) -> bool:
+    """Whether the output limit ended the turn inside its last call.
+
+    Earlier calls were closed before the limit hit. The last one is cut when the
+    provider says it never closed, or when its arguments are not a whole JSON
+    object (a cut that lands exactly after the closing brace is a whole call).
+    """
+    return turn.last_call_open or last.arguments is None
 
 
 def decode_arguments(raw: str) -> Any:

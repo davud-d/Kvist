@@ -782,7 +782,10 @@ def _request_whole_turn(self, request: dict[str, Any]) -> NativeTurn:
     response = call_cancellable(
         self._cancel_event, lambda: _create_completion_with_reasoning_fallback(self, request)
     )
-    turn = _native_turn_from_message(response.choices[0].message, getattr(response, "usage", None))
+    choice = response.choices[0]
+    turn = _native_turn_from_message(choice.message, getattr(response, "usage", None))
+    turn.cut_off = getattr(choice, "finish_reason", None) == "length"
+    turn.last_call_open = getattr(choice, "last_call_open", False) is True
     self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
     return turn
 
@@ -884,6 +887,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     cache_read: int | None = None
     cache_write: int | None = None
     calls: dict[int, dict[str, str]] = {}
+    cut_off = False
+    last_call_open = False
     first_output: float | None = None
     last_push = 0.0
     last_call_push = 0.0
@@ -906,6 +911,10 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 cache_read, cache_write = _cache_token_counts(usage, prompt_count)
             if completion_count is not None:
                 output_tokens = completion_count
+            choices = getattr(chunk, "choices", None)
+            if choices and getattr(choices[0], "finish_reason", None) == "length":
+                cut_off = True
+                last_call_open = getattr(choices[0], "last_call_open", False) is True
             delta = safe_extract_stream_delta(chunk)
             if delta is None:
                 continue
@@ -979,6 +988,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             ToolCall(call_id=entry["id"], name=entry["name"], arguments=entry["arguments"] or "{}")
             for _index, entry in sorted(calls.items())
         ],
+        cut_off=cut_off,
+        last_call_open=last_call_open,
     )
 
 

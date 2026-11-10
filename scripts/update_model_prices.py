@@ -5,6 +5,7 @@ Usage: python scripts/update_model_prices.py <litellm_prices.json>
 
 The script never touches the network. Output prices are USD per 1M tokens; a price the
 source does not state is written as null so the reader can tell "free" from "unknown".
+``max_output_tokens`` is the model's output ceiling, copied as is (null when unstated).
 """
 from __future__ import annotations
 
@@ -39,7 +40,13 @@ def convert(source: dict) -> dict:
         # Models without a token price (image, audio-per-second, rerank, ...) cannot be costed per token.
         if prices["input"] is None or prices["output"] is None:
             continue
-        models[key] = {"provider": entry.get("litellm_provider"), **prices}
+        cap = entry.get("max_output_tokens")
+        models[key] = {
+            "provider": entry.get("litellm_provider"),
+            **prices,
+            # A token count, not a price: null when the source does not state a usable one.
+            "max_output_tokens": cap if type(cap) is int and cap > 0 else None,
+        }
     return {"source": "litellm", "unit": "usd_per_1m_tokens", "models": models}
 
 

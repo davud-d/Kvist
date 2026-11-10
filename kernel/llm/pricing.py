@@ -36,13 +36,23 @@ def _table() -> dict[str, dict]:
     return json.loads(_TABLE_PATH.read_text(encoding="utf-8"))["models"]
 
 
-def _row(table_provider: str, model: str) -> dict | None:
+def _raw_row(table_provider: str, model: str) -> dict | None:
     """The table row for ``model`` under ``table_provider``; rows are keyed bare or "<provider>/<model>"."""
     for key in (model, f"{table_provider}/{model}"):
         row = _table().get(key)
         if row is not None and row["provider"] == table_provider:
-            return {name: row[name] for name in ("input", "output", "cache_read", "cache_write")}
+            return row
     return None
+
+
+def _find_row(provider: str, model: str) -> dict | None:
+    if provider in _UNPRICED:
+        return None
+    if provider == "openrouter":
+        vendor, _, name = model.partition("/")
+        return _raw_row(_OPENROUTER_VENDORS[vendor], name) if vendor in _OPENROUTER_VENDORS and name else None
+    table_provider = _TABLE_PROVIDER.get(provider)
+    return _raw_row(table_provider, model) if table_provider else None
 
 
 def lookup_price(provider: str, model: str) -> dict[str, float | None] | None:
@@ -50,13 +60,17 @@ def lookup_price(provider: str, model: str) -> dict[str, float | None] | None:
 
     A None *value* inside the dict means the table does not state that price.
     """
-    if provider in _UNPRICED:
+    row = _find_row(provider, model)
+    if row is None:
         return None
-    if provider == "openrouter":
-        vendor, _, name = model.partition("/")
-        return _row(_OPENROUTER_VENDORS[vendor], name) if vendor in _OPENROUTER_VENDORS and name else None
-    table_provider = _TABLE_PROVIDER.get(provider)
-    return _row(table_provider, model) if table_provider else None
+    return {name: row[name] for name in ("input", "output", "cache_read", "cache_write")}
+
+
+def lookup_max_output_tokens(provider: str, model: str) -> int | None:
+    """The most tokens the model can write in one reply, or None when the table does not say."""
+    row = _find_row(provider, model)
+    value = None if row is None else row.get("max_output_tokens")
+    return value if type(value) is int and value > 0 else None
 
 
 def call_cost(

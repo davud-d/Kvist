@@ -11,7 +11,8 @@ from kernel.llm import pricing
 _ROOT = Path(__file__).resolve().parents[2]
 
 _PRICES = {
-    "claude-sonnet-5": {"provider": "anthropic", "input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5},
+    "claude-sonnet-5": {"provider": "anthropic", "input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5,
+                        "max_output_tokens": 128000},
     "gpt-5": {"provider": "openai", "input": 1.25, "output": 10.0, "cache_read": 0.125, "cache_write": None},
     "deepseek-flash": {"provider": "deepseek", "input": 0.3, "output": 1.2, "cache_read": 0.006, "cache_write": 0.0},
     "groq/openai/gpt-oss-120b": {"provider": "groq", "input": 0.15, "output": 0.6, "cache_read": None, "cache_write": None},
@@ -65,6 +66,17 @@ def test_subscription_and_gateway_providers_are_never_priced(provider):
 def test_unknown_model_and_unknown_provider_are_none():
     assert pricing.lookup_price("anthropic", "claude-nope") is None
     assert pricing.lookup_price("nowhere", "claude-sonnet-5") is None
+
+
+def test_max_output_tokens_follows_the_same_routing_as_prices():
+    assert pricing.lookup_max_output_tokens("anthropic", "claude-sonnet-5") == 128000
+    assert pricing.lookup_max_output_tokens("openrouter", "anthropic/claude-sonnet-5") == 128000
+    assert pricing.lookup_max_output_tokens("anymodel", "claude-sonnet-5") is None
+
+
+def test_max_output_tokens_is_none_when_unstated_or_the_model_is_unknown():
+    assert pricing.lookup_max_output_tokens("openai", "gpt-5") is None
+    assert pricing.lookup_max_output_tokens("anthropic", "claude-nope") is None
 
 
 def test_bundled_table_covers_the_models_kvist_offers(monkeypatch):

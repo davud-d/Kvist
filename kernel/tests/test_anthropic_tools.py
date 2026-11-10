@@ -336,8 +336,11 @@ def test_stream_without_calls_yields_only_text_and_the_stop_reason():
     assert finish == "end_turn"
 
 
-@pytest.mark.parametrize("stop_reason,expected", [("tool_use", "tool_calls"), ("max_tokens", "max_tokens")])
-def test_finish_reason_translates_only_tool_use(stop_reason, expected):
+@pytest.mark.parametrize(
+    "stop_reason,expected",
+    [("tool_use", "tool_calls"), ("max_tokens", "length"), ("end_turn", "end_turn")],
+)
+def test_finish_reason_speaks_openai_for_tool_use_and_the_output_limit(stop_reason, expected):
     events = [_message_delta(stop_reason)]
 
     assert _collect(_ask(_client(events=events)[0], stream=True))[1] == expected

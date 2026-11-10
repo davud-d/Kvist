@@ -1471,6 +1471,42 @@ _ANTHROPIC_DIRECT_HOST = "api.anthropic.com"
 _CACHE_BREAKPOINT = {"type": "ephemeral"}
 
 
+# Used when the price table does not know the model's output ceiling.
+_FALLBACK_MAX_OUTPUT_TOKENS = 8192
+# The SDK refuses a non-streaming request that could run past ten minutes
+# (3600 s * max_tokens / 128000 > 600 s), so a larger ceiling needs a stream.
+_NONSTREAMING_MAX_TOKENS = 21_333
+# Legacy thinking must leave room for the answer after its budget.
+_THINKING_ANSWER_ROOM = 4096
+
+
+def _output_ceiling(model: str, *, stream: bool) -> int:
+    """The max_tokens to ask for when the caller names none: the most the model can write.
+
+    The agent states no limit of its own, and a low default cuts off the
+    arguments of a large write_file mid-way.
+    """
+    from kernel.llm.pricing import lookup_max_output_tokens
+
+    ceiling = lookup_max_output_tokens("anthropic", model) or _FALLBACK_MAX_OUTPUT_TOKENS
+    return ceiling if stream else _nonstreaming_cap(model, ceiling)
+
+
+def _nonstreaming_cap(model: str, tokens: int) -> int:
+    from anthropic._constants import MODEL_NONSTREAMING_TOKENS
+
+    return min(tokens, _NONSTREAMING_MAX_TOKENS, MODEL_NONSTREAMING_TOKENS.get(model, tokens))
+
+
+def _fit_nonstreaming(request_kwargs: dict[str, Any]) -> None:
+    """Bring max_tokens, and a legacy thinking budget under it, within what the SDK sends without a stream."""
+    capped = _nonstreaming_cap(request_kwargs["model"], request_kwargs["max_tokens"])
+    request_kwargs["max_tokens"] = capped
+    thinking = request_kwargs.get("thinking")
+    if thinking and thinking.get("type") == "enabled":
+        thinking["budget_tokens"] = min(int(thinking["budget_tokens"]), capped - _THINKING_ANSWER_ROOM)
+
+
 def _is_anthropic_direct(base_url: str) -> bool:
     """True for Anthropic's own endpoint, whatever the port, path or trailing slash.
 
@@ -1562,7 +1598,9 @@ class _AnthropicCompletionsNamespace:
         request_kwargs: dict[str, Any] = {
             "model": model,
             "messages": user_messages,
-            "max_tokens": kwargs.get("max_tokens") or kwargs.get("max_completion_tokens") or 4096,
+            "max_tokens": kwargs.get("max_tokens")
+            or kwargs.get("max_completion_tokens")
+            or _output_ceiling(model, stream=stream),
         }
         # Gateways that speak the Anthropic protocol may reject cache_control,
         # so only Anthropic's own endpoint gets breakpoints.
@@ -1600,7 +1638,7 @@ class _AnthropicCompletionsNamespace:
             if thinking and thinking.get("type") == "enabled":
                 budget = int(thinking["budget_tokens"])
                 if request_kwargs["max_tokens"] <= budget:
-                    request_kwargs["max_tokens"] = budget + 4096
+                    request_kwargs["max_tokens"] = budget + _THINKING_ANSWER_ROOM
         else:
             if "temperature" in kwargs:
                 request_kwargs["temperature"] = float(kwargs["temperature"])
@@ -1623,6 +1661,9 @@ class _AnthropicCompletionsNamespace:
             request_kwargs["stop_sequences"] = (
                 [kwargs["stop"]] if isinstance(kwargs["stop"], str) else list(kwargs["stop"])
             )
+
+        if not stream:
+            _fit_nonstreaming(request_kwargs)
 
         client = self._owner._create_client()
         try:
@@ -1676,7 +1717,8 @@ class _AnthropicCompletionsNamespace:
 
 
 def _finish_reason(stop_reason: Any) -> Any:
-    return "tool_calls" if stop_reason == "tool_use" else stop_reason
+    """Anthropic's stop_reason in OpenAI's words, so the core reads every provider alike."""
+    return {"tool_use": "tool_calls", "max_tokens": "length"}.get(stop_reason, stop_reason)
 
 
 def _tool_call_chunk(index: int, *, id: str | None, name: str | None, arguments: str) -> Any:
@@ -1770,11 +1812,21 @@ class AnthropicCompatibleClient:
             elif hasattr(block, "text"):
                 text += block.text
         usage = getattr(response, "usage", None)
+        stop_reason = getattr(response, "stop_reason", None)
+        blocks = getattr(response, "content", None) or []
+        # A reply cut by the limit while writing a call carries that call with
+        # whatever input had arrived, and the response cannot tell that from a
+        # whole one; Anthropic's advice is to treat a last tool_use block under
+        # max_tokens as unfinished.
+        last_call_open = (
+            stop_reason == "max_tokens" and bool(blocks) and getattr(blocks[-1], "type", None) == "tool_use"
+        )
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(content=text, tool_calls=tool_calls or None),
-                    finish_reason=_finish_reason(getattr(response, "stop_reason", None)),
+                    finish_reason=_finish_reason(stop_reason),
+                    last_call_open=last_call_open,
                 )
             ],
             usage=None
@@ -1844,6 +1896,8 @@ class AnthropicCompatibleClient:
                     SimpleNamespace(
                         delta=SimpleNamespace(content=None),
                         finish_reason=_finish_reason(stop_reason),
+                        # A block that never reached its stop event was cut mid-call.
+                        last_call_open=stop_reason == "max_tokens" and bool(tool_args),
                     )
                 ]
             )

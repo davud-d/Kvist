@@ -73,6 +73,7 @@ from kernel.agent.native_tools import (
     NativeTurn,
     assistant_message,
     calls_from_turn,
+    decode_arguments,
     opening_note,
     tool_definition,
     tool_message,
@@ -834,6 +835,7 @@ def _run_turn(
     """
     if turn is not None:
         self._state.native_messages.append(assistant_message(turn))
+        _warn_unparsed_history_arguments(self, turn)
     if any(call.name == end_session.ACTION for call in response.calls):
         # The tool speaks: words the model wrote beside it never reach the person.
         response = ModelResponse(text="", calls=response.calls)
@@ -855,6 +857,20 @@ def _run_turn(
     # costs a step: otherwise a model repeating a broken call never meets
     # the budget.
     return outcome, max(next_step, step + 1)
+
+
+def _warn_unparsed_history_arguments(self, turn: NativeTurn) -> None:
+    """Say that a call whose arguments never parsed is replayed as ``{}`` to providers that need an object."""
+    for call in turn.tool_calls:
+        try:
+            readable = isinstance(decode_arguments(call.arguments), dict)
+        except json.JSONDecodeError:
+            readable = False
+        if not readable:
+            self._ui.debug_print(
+                f"Warning: arguments of {call.name} ({call.call_id}) are not a JSON object; "
+                "the history keeps the raw text and the Anthropic wire replays them as {}"
+            )
 
 
 def _register_empty_response(self) -> _ActionOutcome:
