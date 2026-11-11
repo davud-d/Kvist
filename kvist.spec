@@ -104,6 +104,15 @@ _voice_datas = (
     if _voice_binaries else []
 )
 
+# The native session program (kernel/session-rs) serves `--session-op`; optional too: without
+# it the core serves those requests in Python. It keeps its checkout path, where the core
+# looks for it (kernel/session/native.py).
+_SESSION_EXE = 'kvist-session.exe' if sys.platform == 'win32' else 'kvist-session'
+_SESSION_BIN = os.path.join(SPECPATH, 'kernel', 'session-rs', 'target', 'release', _SESSION_EXE)
+_session_binaries = (
+    [(_SESSION_BIN, 'kernel/session-rs/target/release')] if os.path.isfile(_SESSION_BIN) else []
+)
+
 # The OpenCode-style interface compiled into one executable by `bun build --compile`
 # (frontends/tui/opencode/build.ts, run by install_cli.build_opencode); optional like the others.
 _OPENCODE_EXE = 'kvist-opencode.exe' if sys.platform == 'win32' else 'kvist-opencode'
@@ -115,7 +124,7 @@ _opencode_binaries = [(_OPENCODE_BIN, 'frontends/tui/opencode/dist')] if os.path
 a = Analysis(
     ['kernel/__main__.py'],
     pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR, os.path.join(SPECPATH, 'frontends', 'web-local')],
-    binaries=_glass_binaries + _voice_binaries + _opencode_binaries,
+    binaries=_glass_binaries + _voice_binaries + _session_binaries + _opencode_binaries,
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
         ('kernel/themes', 'kernel/themes'),

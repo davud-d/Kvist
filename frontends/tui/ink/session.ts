@@ -18,11 +18,13 @@ export interface SessionHistory {
   events: JournalEvent[]
 }
 
-// Session lifecycle is a one-shot mode of the core; the UI never touches .kvist/.
+// Session lifecycle is a one-shot mode of the core; the UI never touches .kvist/. The native
+// session program answers the same requests without starting the core, when the launcher named it.
 function runOp<T extends { ok: boolean; error?: string }>(command: CoreCommand, workspace: string, extra: string[], input?: string): Promise<T | { ok: false; error: string }> {
-  const args = [...command.prefixArgs, "--workspace", workspace, ...extra]
+  const program = command.session ?? command
+  const args = [...program.prefixArgs, "--workspace", workspace, ...extra]
   return new Promise((resolve) => {
-    const child = execFile(command.command, args, { cwd: workspace, timeout: 20_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
+    const child = execFile(program.command, args, { cwd: workspace, timeout: 20_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
       try {
         resolve(JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as T)
       } catch {

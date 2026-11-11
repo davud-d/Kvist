@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { SupportedOs, currentOs, defaultPosixShell, isMacos, isPosix, relativeBinarySegments } from './platform';
+import { SupportedOs, currentOs, defaultPosixShell, isMacos, isPosix, relativeBinarySegments, relativeSessionSegments } from './platform';
 
 test('Windows and Linux map as before', () => {
     assert.equal(currentOs('win32', 'x64'), SupportedOs.WINDOWS);
@@ -39,4 +39,11 @@ test('the fallback shell is zsh on a Mac and bash elsewhere', () => {
     assert.equal(isMacos(SupportedOs.LINUX), false);
     assert.equal(defaultPosixShell(SupportedOs.MACOS_ARM64), '/bin/zsh');
     assert.equal(defaultPosixShell(SupportedOs.LINUX), '/bin/bash');
+});
+
+test('the session program sits beside the core of every platform', () => {
+    assert.deepEqual(relativeSessionSegments(SupportedOs.WINDOWS), ['bin', 'win', 'kvist-session.exe']);
+    assert.deepEqual(relativeSessionSegments(SupportedOs.LINUX), ['bin', 'linux', 'kvist-session']);
+    assert.deepEqual(relativeSessionSegments(SupportedOs.MACOS_ARM64), ['bin', 'mac-arm64', 'kvist-session']);
+    assert.deepEqual(relativeSessionSegments(SupportedOs.MACOS_X64), ['bin', 'mac-x64', 'kvist-session']);
 });

@@ -1934,7 +1934,7 @@ pub fn run(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
     if code != SWITCH_FRONTEND
         && let Ok(core) = core::command(std::env::var("KVIST_CORE_CMD").ok().as_deref())
     {
-        crate::farewell::print(&core, workspace);
+        crate::farewell::print(&core::session_command_for(&core), workspace);
     }
     Ok(code)
 }

@@ -53,7 +53,7 @@ impl Agents {
             Some(name) => ops::Request { op: "switch", session_name: Some(name), history_limit: None, history_before: None, stdin: None },
             None => ops::Request { op: "launch", session_name: None, history_limit: None, history_before: None, stdin: None },
         };
-        ops::run(&argv, workspace, &pin)?;
+        ops::run(&core::session_command_for(&argv), workspace, &pin)?;
         let (ready, handshake) = mpsc::channel();
         let mut core = core::Core::spawn(app, &id, &argv, workspace, ready).map_err(|error| format!("could not start the core: {error}"))?;
         if handshake.recv_timeout(HANDSHAKE_WAIT).is_err() {
@@ -118,7 +118,7 @@ async fn session_op(
         return Err(format!("the page may not run the session operation {op}"));
     }
     let path = existing_dir(&workspace)?;
-    let argv = core_argv()?;
+    let argv = core::session_command_for(&core_argv()?);
     tauri::async_runtime::spawn_blocking(move || {
         let request = ops::Request {
             op: &op,

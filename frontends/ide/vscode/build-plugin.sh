@@ -113,6 +113,20 @@ log "Installing the host binary into the extension ($BINARY_RELATIVE)"
 mkdir -p "$(dirname "$BINARY_DST")"
 install -m 755 "$BINARY_SRC" "$BINARY_DST"
 
+# The native session program (kernel/session-rs) goes beside the core: the extension asks it
+# for session operations instead of starting the whole frozen core. Optional; the extension
+# works without it, only slower, so a missing Rust is a warning and not a failure.
+SESSION_RELATIVE="$(dirname "$BINARY_RELATIVE")/kvist-session"
+SESSION_DST="$EXTENSION_DIR/$SESSION_RELATIVE"
+# A copy of an earlier build must not ship next to a core it may not match.
+rm -f "$SESSION_DST"
+log "Building the native session program"
+if command -v cargo >/dev/null 2>&1 && (cd "$PROJECT_DIR/kernel/session-rs" && cargo build --release --locked); then
+	install -m 755 "$PROJECT_DIR/kernel/session-rs/target/release/kvist-session" "$SESSION_DST"
+else
+	printf 'warning: the native session program was not built; the extension will serve session operations through the core.\n' >&2
+fi
+
 log "Compiling VS Code extension"
 cd "$EXTENSION_DIR"
 npm run build

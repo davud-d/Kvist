@@ -52,6 +52,10 @@ checkout's build, and passes its own core in `KVIST_CORE_CMD`. Run directly,
   it to the Ink app), else this checkout's `.venv/bin/python kernel/__main__.py`.
   Its stderr goes to `kvist-glass-core-<pid>.log` in the temporary folder; the
   log is removed when the core exits cleanly and kept otherwise.
+- One-shot session operations (the launch, a session's history, the input
+  history, the farewell) run in `KVIST_SESSION_CMD` when the launcher names it:
+  the native session program, for a core on this machine only
+  (`docs/UI_API.md`, §8a). Without it they go to the core.
 - The photograph stays alone on screen until the core says `hello` (about
   10–15 s, mostly the core fetching model lists). If the core cannot start,
   the reason and the log's path are shown there.

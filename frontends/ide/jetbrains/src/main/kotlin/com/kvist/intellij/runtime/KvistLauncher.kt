@@ -15,7 +15,8 @@ import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlin.io.path.invariantSeparatorsPathString
 
-data class KvistTarget(val binaryPath: Path, val workspace: Path)
+/** [sessionPath] is the native session program for one-shot `--session-op` calls, when the plugin has one. */
+data class KvistTarget(val binaryPath: Path, val workspace: Path, val sessionPath: Path? = null)
 
 object KvistLauncher {
     private val LOG = logger<KvistLauncher>()
@@ -93,7 +94,9 @@ object KvistLauncher {
         if (!ensureBinaryReadyForLaunch(launchSpec, report)) {
             return null
         }
-        return KvistTarget(launchSpec.binaryPath, launchSpec.projectPath)
+        val session = KvistBinaryResolver.resolveSessionPath(launchSpec.operatingSystem)
+            ?.takeIf { !launchSpec.operatingSystem.isPosix || Files.isExecutable(it) || it.toFile().setExecutable(true) }
+        return KvistTarget(launchSpec.binaryPath, launchSpec.projectPath, session)
     }
 
     fun isLaunchContextAvailable(project: Project?): Boolean {

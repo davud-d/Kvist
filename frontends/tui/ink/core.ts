@@ -9,6 +9,9 @@ import { PROTOCOL_VERSION, type CoreEvent, type InputKind, type Reply } from "./
 export interface CoreCommand {
   command: string
   prefixArgs: string[]
+  // What runs the one-shot session operations instead of the core: the native session
+  // program, when the launcher named it (KVIST_SESSION_CMD, only for a core on this machine).
+  session?: { command: string; prefixArgs: string[] }
 }
 
 export interface CoreOptions {
@@ -24,17 +27,32 @@ export interface CoreOptions {
 // The Python launcher passes the exact interpreter/binary it is running as, so
 // a frozen `kvist` binary and a source checkout both work without guessing.
 export function resolveCoreCommand(env: NodeJS.ProcessEnv = process.env): CoreCommand {
+  const session = sessionCommand(env.KVIST_SESSION_CMD)
   if (env.KVIST_CORE_CMD) {
     const parts: unknown = JSON.parse(env.KVIST_CORE_CMD)
     if (!Array.isArray(parts) || parts.length === 0 || !parts.every((p) => typeof p === "string")) {
       throw new Error("KVIST_CORE_CMD must be a non-empty JSON array of strings.")
     }
-    return { command: parts[0] as string, prefixArgs: parts.slice(1) as string[] }
+    return { command: parts[0] as string, prefixArgs: parts.slice(1) as string[], ...session }
   }
   const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)))
   const venvPython = path.join(repoRoot, ".venv", "bin", "python")
   const python = existsSync(venvPython) ? venvPython : "python3"
-  return { command: python, prefixArgs: [path.join(repoRoot, "kernel", "__main__.py")] }
+  return { command: python, prefixArgs: [path.join(repoRoot, "kernel", "__main__.py")], ...session }
+}
+
+// KVIST_SESSION_CMD is a convenience the launcher adds: a value that cannot be used leaves
+// the session operations with the core, which serves them either way.
+function sessionCommand(raw: string | undefined): Pick<CoreCommand, "session"> {
+  if (!raw) return {}
+  let parts: unknown
+  try {
+    parts = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!Array.isArray(parts) || parts.length === 0 || !parts.every((p) => typeof p === "string" && p !== "")) return {}
+  return { session: { command: parts[0] as string, prefixArgs: parts.slice(1) as string[] } }
 }
 
 // Without the launcher (`npm run dev`, a bare `node dist-ui/kvist-tui.mjs`) the

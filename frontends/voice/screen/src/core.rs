@@ -33,7 +33,8 @@ const HISTORY_LIMIT: &str = "500";
 
 pub struct Core {
     child: Child,
-    argv: Vec<String>,
+    /// What runs the one-shot session operations (`session_command`).
+    session_argv: Vec<String>,
     workspace: PathBuf,
     /// `None` once closed, which tells the core to finish.
     stdin: Option<ChildStdin>,
@@ -56,6 +57,22 @@ pub fn command(env_value: Option<&str>) -> Result<Vec<String>, String> {
         Ok(argv) if !argv.is_empty() && argv.iter().all(|a| !a.is_empty()) => Ok(argv),
         _ => Err(format!("KVIST_CORE_CMD must be a non-empty JSON array of strings, got {raw}")),
     }
+}
+
+/// The command for one-shot session operations: `KVIST_SESSION_CMD` (the native session
+/// program, which the launcher names only for a core on this machine) or the core itself.
+/// The program answers `--session-op` exactly as the core does, without starting Python.
+pub fn session_command(env_value: Option<&str>, core: &[String]) -> Vec<String> {
+    match env_value.map(serde_json::from_str::<Vec<String>>) {
+        Some(Ok(argv)) if !argv.is_empty() && argv.iter().all(|a| !a.is_empty()) => argv,
+        // Nothing usable was named: the core serves these operations as it always has.
+        _ => core.to_vec(),
+    }
+}
+
+/// `session_command` for this process's environment.
+pub fn session_command_for(core: &[String]) -> Vec<String> {
+    session_command(std::env::var("KVIST_SESSION_CMD").ok().as_deref(), core)
 }
 
 impl Core {
@@ -91,7 +108,8 @@ impl Core {
             // The receiver may already be gone when the interface quits first.
             let _ = sender.send(Message::Gone("the core exited".to_string()));
         });
-        Ok(Core { child, argv: argv.to_vec(), workspace: workspace.to_path_buf(), stdin: Some(stdin), messages, log })
+        let session_argv = session_command_for(argv);
+        Ok(Core { child, session_argv, workspace: workspace.to_path_buf(), stdin: Some(stdin), messages, log })
     }
 
     /// Runs a one-shot core process (`--session-op …`) on a thread and sends
@@ -103,7 +121,7 @@ impl Core {
         input: Option<String>,
         parse: fn(&str) -> Result<T, String>,
     ) -> Receiver<Result<T, String>> {
-        let argv = self.argv.clone();
+        let argv = self.session_argv.clone();
         let workspace = self.workspace.clone();
         let (sender, results) = mpsc::channel();
         thread::spawn(move || {
@@ -228,6 +246,15 @@ mod tests {
         assert!(command(Some("kvist-core")).is_err());
         let default = command(None).unwrap();
         assert!(default[0].ends_with(".venv/bin/python") && default[1].ends_with("kernel/__main__.py"));
+    }
+
+    #[test]
+    fn session_operations_go_to_the_program_the_launcher_names_or_to_the_core() {
+        let core = vec!["python".to_string(), "kernel/__main__.py".to_string()];
+        assert_eq!(session_command(Some(r#"["/opt/kvist-session"]"#), &core), ["/opt/kvist-session"]);
+        for unusable in [None, Some("[]"), Some(r#"[""]"#), Some("/opt/kvist-session")] {
+            assert_eq!(session_command(unusable, &core), core);
+        }
     }
 
     #[test]

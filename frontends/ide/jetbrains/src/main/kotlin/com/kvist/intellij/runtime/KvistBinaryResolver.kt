@@ -48,6 +48,22 @@ object KvistBinaryResolver {
         }
     }
 
+    /** The native session program, built beside the core of the same platform. */
+    fun expectedRelativeSessionPath(os: SupportedOs): Path {
+        val name = if (os == SupportedOs.WINDOWS) "kvist-session.exe" else "kvist-session"
+        return expectedRelativeBinaryPath(os).resolveSibling(name)
+    }
+
+    /**
+     * The session program bundled with the plugin, or null. It answers `--session-op` without
+     * starting the core, which for a frozen binary means without unpacking it. Optional: the
+     * plugin works without it, only slower.
+     */
+    fun resolveSessionPath(os: SupportedOs): Path? {
+        val pluginPath = resolveInstalledPluginPath(logDetails = false) ?: return null
+        return pluginPath.resolve(expectedRelativeSessionPath(os)).normalize().takeIf { Files.isRegularFile(it) }
+    }
+
     fun resolveBinaryPath(os: SupportedOs, logDetails: Boolean = true): Path? {
         val pluginPath = resolveInstalledPluginPath(logDetails) ?: return null
         val relativePath = expectedRelativeBinaryPath(os)

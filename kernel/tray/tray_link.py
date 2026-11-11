@@ -87,6 +87,13 @@ def _spawn_detached(argv: list[str]) -> None:
     child_env = {key: value for key, value in os.environ.items() if key != "ELECTRON_RUN_AS_NODE"}
     # The daemon runs `--session-op history` with the same core that started it.
     child_env["KVIST_CORE_CMD"] = json.dumps(core_command())
+    # ...or, when there is one, with the native session program, which answers without starting the core.
+    from kernel.session.native import SESSION_CMD_ENV, find_session_binary
+
+    child_env.pop(SESSION_CMD_ENV, None)
+    session_program = find_session_binary()
+    if session_program is not None:
+        child_env[SESSION_CMD_ENV] = json.dumps([session_program])
     subprocess.Popen(argv, env=child_env, **options)
 
 

@@ -1578,7 +1578,7 @@ pub fn run(caps: Caps, fps: u32, workspace: &Path, demo: bool, keep_session: boo
         && !demo
         && let Ok(core) = core::command(std::env::var("KVIST_CORE_CMD").ok().as_deref())
     {
-        crate::farewell::print(&core, workspace);
+        crate::farewell::print(&core::session_command_for(&core), workspace);
     }
     Ok(code)
 }

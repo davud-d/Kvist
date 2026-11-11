@@ -42,4 +42,27 @@ function resolveKvistCommand({
   throw new Error(`Kvist source entry point not found: ${mainPath}`)
 }
 
-module.exports = { resolveKvistCommand }
+// The native session program answers `--session-op` without starting the core: about 2 ms
+// instead of the frozen core unpacking itself on every call. It is optional; null means
+// the core serves session operations, as it always did. KVIST_SESSION_BIN names a file or,
+// when that file is missing, switches the program off (the same rule the core follows).
+function resolveSessionCommand({
+  appIsPackaged,
+  resourcesPath,
+  projectRoot,
+  platform = process.platform,
+  env = process.env,
+  existsSync = fs.existsSync,
+}) {
+  const name = platform === "win32" ? "kvist-session.exe" : "kvist-session"
+  const candidates = env.KVIST_SESSION_BIN
+    ? [path.resolve(env.KVIST_SESSION_BIN)]
+    : [
+        ...(appIsPackaged ? [path.join(resourcesPath, "bin", name)] : []),
+        path.join(projectRoot, "kernel", "session-rs", "target", "release", name),
+      ]
+  const found = candidates.find((candidate) => existsSync(candidate))
+  return found ? { command: found, prefixArgs: [] } : null
+}
+
+module.exports = { resolveKvistCommand, resolveSessionCommand }

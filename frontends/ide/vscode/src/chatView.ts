@@ -177,7 +177,13 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         if (machine) {
             return { command: binaryPath, prefixArgs: ['--machine', machine, ...(folder ? ['--remote-workspace', folder] : [])] };
         }
-        return { command: binaryPath, prefixArgs: host && folder ? ['--remote', host, '--remote-workspace', folder] : [] };
+        if (host && folder) {
+            return { command: binaryPath, prefixArgs: ['--remote', host, '--remote-workspace', folder] };
+        }
+        // The sessions are this computer's only here; with a server named they are the server's and
+        // the operations must go through the proxy above.
+        const session = this.binaryResolver.resolveSessionPath();
+        return { command: binaryPath, prefixArgs: [], ...(session ? { session: { command: session, prefixArgs: [] } } : {}) };
     }
 
     private workspacePath(): string | undefined {
@@ -342,7 +348,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             return;
         }
         // "list" is "status" without the whole histories of every session.
-        const list = await readJson<SessionInfo>(command, workspace, ['--workspace', workspace, '--session-op', 'list']);
+        const list = await readJson<SessionInfo>(command.session ?? command, workspace, ['--workspace', workspace, '--session-op', 'list']);
         if (!list) {
             return;
         }
@@ -358,7 +364,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             return;
         }
         const reply = await readJson<{ ok: boolean; error?: string; has_more?: boolean; events?: { event: JournalEvent }[] }>(
-            command,
+            command.session ?? command,
             workspace,
             ['--workspace', workspace, '--session-op', 'history', '--session-name', name, '--history-limit', String(HISTORY_LIMIT)]
         );

@@ -39,6 +39,36 @@ pub fn command(env_value: Option<&str>) -> Result<Vec<String>, String> {
     }
 }
 
+const SESSION_NAME: &str = if cfg!(windows) { "kvist-session.exe" } else { "kvist-session" };
+
+/// The command for one-shot session operations (`--session-op`, see `ops`): the native
+/// session program when there is one, which answers them without starting the core, else
+/// the core itself. The program is `KVIST_SESSION_CMD` (a JSON array, as the launcher
+/// names it), the one installed beside an installed core, or the one built in the crate
+/// of the checkout the core comes from. It is looked for next to the core it belongs to
+/// and nowhere else, so it is never a build of another version.
+pub fn session_command(env_value: Option<&str>, core: &[String], checkout: &Path) -> Vec<String> {
+    if let Some(Ok(argv)) = env_value.map(serde_json::from_str::<Vec<String>>)
+        && !argv.is_empty()
+        && argv.iter().all(|a| !a.is_empty())
+    {
+        return argv;
+    }
+    let candidate = match core {
+        [installed] => Path::new(installed).parent().map(|dir| dir.join(SESSION_NAME)),
+        _ => Some(checkout.join("kernel/session-rs/target/release").join(SESSION_NAME)),
+    };
+    match candidate {
+        Some(program) if is_file(&program) => vec![program.display().to_string()],
+        _ => core.to_vec(),
+    }
+}
+
+/// `session_command` for this process: its environment and this checkout.
+pub fn session_command_for(core: &[String]) -> Vec<String> {
+    session_command(std::env::var("KVIST_SESSION_CMD").ok().as_deref(), core, Path::new(CHECKOUT))
+}
+
 /// Where an installed app looks for the agent. A struct so a test can say
 /// what the machine looks like.
 pub struct Lookup {
@@ -214,6 +244,33 @@ mod tests {
 
     fn nowhere() -> Lookup {
         Lookup { exe: None, home: None, local_app_data: None, path: None }
+    }
+
+    #[test]
+    fn session_operations_use_the_program_named_installed_or_built_beside_their_core() {
+        let scratch = std::env::temp_dir().join(format!("kvist-session-cmd-{}", std::process::id()));
+        let installed_core = vec![scratch.join("lib").join(CORE_NAME).display().to_string()];
+        let checkout_core = vec!["python".to_string(), "kernel/__main__.py".to_string()];
+        // Nothing next to the core: the core serves them.
+        assert_eq!(session_command(None, &installed_core, &scratch), installed_core);
+        assert_eq!(session_command(None, &checkout_core, &scratch), checkout_core);
+
+        touch(&scratch.join("lib").join(SESSION_NAME));
+        touch(&scratch.join("kernel/session-rs/target/release").join(SESSION_NAME));
+        let beside = vec![scratch.join("lib").join(SESSION_NAME).display().to_string()];
+        let built = vec![scratch.join("kernel/session-rs/target/release").join(SESSION_NAME).display().to_string()];
+        assert_eq!(session_command(None, &installed_core, &scratch), beside);
+        assert_eq!(session_command(None, &checkout_core, &scratch), built);
+        // An installed core is never paired with the checkout's build, which may be another version.
+        std::fs::remove_file(scratch.join("lib").join(SESSION_NAME)).unwrap();
+        assert_eq!(session_command(None, &installed_core, &scratch), installed_core);
+
+        // The launcher's choice wins; an unusable one is ignored.
+        assert_eq!(session_command(Some(r#"["/opt/kvist-session"]"#), &checkout_core, &scratch), ["/opt/kvist-session"]);
+        for unusable in ["[]", r#"[""]"#, "/opt/kvist-session"] {
+            assert_eq!(session_command(Some(unusable), &checkout_core, &scratch), built);
+        }
+        std::fs::remove_dir_all(&scratch).unwrap();
     }
 
     #[test]

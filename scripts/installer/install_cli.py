@@ -76,6 +76,9 @@ STEPS = {
     "build_voice": "Building the Kvist voice screen",
     "voice_no_cargo": "[yellow]Rust not found — the Kvist voice screen will not be included (install Rust from the installer)[/yellow]",
     "voice_failed": "[yellow]Kvist voice screen build failed — it will not be included (see the log)[/yellow]",
+    "build_session": "Building the native session program",
+    "session_no_cargo": "[yellow]Rust not found — session operations will run in Python (install Rust from the installer)[/yellow]",
+    "session_failed": "[yellow]Native session program build failed — session operations will run in Python (see the log)[/yellow]",
     "build_opencode": "Installing the OpenCode-style UI packages",
     "opencode_no_bun": "[yellow]Bun not found — the OpenCode-style UI will not be included (tick Bun in the release installer, or set KVIST_BUN)[/yellow]",
     "build_opencode_binary": "Compiling the OpenCode-style UI",
@@ -101,6 +104,9 @@ GLASS_BINARY = GLASS_DIR / "target" / "release" / "kvist-glass"
 # The voice screen, another Rust program of its own; kvist.spec packs it the same way.
 VOICE_SCREEN_DIR = PROJECT_ROOT / "frontends" / "voice" / "screen"
 VOICE_SCREEN_BINARY = VOICE_SCREEN_DIR / "target" / "release" / "kvist-voice-screen"
+# The native session program (--session-op without starting Python); kvist.spec packs it too.
+SESSION_PROGRAM_DIR = PROJECT_ROOT / "kernel" / "session-rs"
+SESSION_PROGRAM_BINARY = SESSION_PROGRAM_DIR / "target" / "release" / ("kvist-session.exe" if IS_WINDOWS else "kvist-session")
 # The OpenCode-style UI runs from source on Bun; the checkout only needs its packages.
 OPENCODE_DIR = PROJECT_ROOT / "frontends" / "tui" / "opencode"
 OPENCODE_PACKAGES = OPENCODE_DIR / "node_modules" / "@opentui"
@@ -117,6 +123,8 @@ LOG_FILE = Path(tempfile.gettempdir()) / "kvist-install.log"
 
 BINARY_NAME = "kvist.exe" if IS_WINDOWS else "kvist"
 CORE_NAME = "kvist-core.exe" if IS_WINDOWS else "kvist-core"
+# Installed beside the core: the frontends that start without a launcher (Tauri, the tray) look for it there.
+SESSION_NAME = "kvist-session.exe" if IS_WINDOWS else "kvist-session"
 WRAPPER_NAME = "kvist.cmd" if IS_WINDOWS else "kvist"
 WEB_WRAPPER_NAME = "kvist-web.cmd" if IS_WINDOWS else "kvist-web"
 BRIDGE_WRAPPER_NAME = "kvist-web-bridge.cmd" if IS_WINDOWS else "kvist-web-bridge"
@@ -440,6 +448,21 @@ def build_voice_screen(status: Status | None = None) -> bool:
     )
 
 
+def build_session_program(status: Status | None = None) -> bool:
+    """Build ``kvist-session``, which serves ``--session-op`` and which kvist.spec packs into the binary.
+
+    Optional: without Rust or after a failed build the core serves session operations in
+    Python. It builds on every system the core runs on, Windows included. Returns whether
+    a build exists.
+    """
+    return _build_rust_screen(
+        status,
+        SESSION_PROGRAM_DIR,
+        SESSION_PROGRAM_BINARY,
+        ("build_session", "session_no_cargo", "session_failed"),
+    )
+
+
 def find_bun() -> str | None:
     """Same search order as ``kernel.main.find_bun``: this script cannot import the core."""
     for candidate in (
@@ -484,6 +507,7 @@ def build_binary(status: Status | None = None) -> Path:
     build_terminal_ui(status)
     build_glass(status)
     build_voice_screen(status)
+    build_session_program(status)
     build_opencode(status)
 
     show_step(status, STEPS["build_binary"])
@@ -497,6 +521,33 @@ def build_binary(status: Status | None = None) -> Path:
         raise SystemExit(f"error: build finished but binary not found at {built}")
     show_step(status, STEPS["build_done"])
     return built
+
+
+def install_session_program(lib_dir: Path, program: Path | None = None) -> bool:
+    """Put ``kvist-session`` beside the installed core; True when one is installed afterwards.
+
+    The copy inside the frozen core is not enough for a frontend: it would have to start the
+    whole core to reach it. A copy left by an earlier install belongs to an earlier core, so
+    when this build has none it is removed rather than kept next to a core it may not match.
+    """
+    program = SESSION_PROGRAM_BINARY if program is None else program
+    target = lib_dir / SESSION_NAME
+    if not program.is_file():
+        target.unlink(missing_ok=True)
+        return False
+    temporary = _new_temporary(lib_dir, f".{SESSION_NAME}.")
+    try:
+        shutil.copy2(program, temporary)
+        make_executable(temporary)
+        clear_quarantine(temporary)
+        temporary.replace(target)
+    except PermissionError as exc:
+        raise SystemExit(
+            f"error: cannot overwrite {target}. Close every running kvist session and re-run install_cli.py."
+        ) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
 
 
 def find_default_binary() -> Path | None:
@@ -778,6 +829,7 @@ def _install_cli(args: argparse.Namespace, status: Status | None = None) -> Path
                 binary = build_binary(status)
 
     wrapper_path = install(binary.resolve(), args.lib_dir, args.bin_dir, status=status)
+    install_session_program(args.lib_dir)
     show_step(status, STEPS["done"])
     hold_last_step()
     return wrapper_path

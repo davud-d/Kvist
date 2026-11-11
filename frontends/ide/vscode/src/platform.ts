@@ -36,6 +36,13 @@ export function relativeBinarySegments(os: SupportedOs): string[] {
     }
 }
 
+// The native session program, built beside the core for the same platform. It answers
+// `--session-op` without starting the core, which for a frozen binary means without unpacking it.
+export function relativeSessionSegments(os: SupportedOs): string[] {
+    const segments = relativeBinarySegments(os);
+    return [...segments.slice(0, -1), os === SupportedOs.WINDOWS ? 'kvist-session.exe' : 'kvist-session'];
+}
+
 // Linux and macOS start the binary through a POSIX shell and need its execute bit.
 export function isPosix(os: SupportedOs | null): boolean {
     return os !== null && os !== SupportedOs.WINDOWS;

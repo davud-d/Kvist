@@ -66,3 +66,40 @@ test("finds the bundled binary inside a macOS app bundle", () => {
 
   assert.deepEqual(command, { command: bundled, prefixArgs: [] })
 })
+
+const { resolveSessionCommand } = require("../src/command-resolver")
+
+const session = (existing, overrides = {}) => resolveSessionCommand({
+  appIsPackaged: true,
+  resourcesPath: "/app/resources",
+  projectRoot: "/project",
+  platform: "linux",
+  env: {},
+  existsSync: (value) => existing.includes(value),
+  ...overrides,
+})
+
+test("a packaged app uses the session program bundled beside the core", () => {
+  assert.deepEqual(session(["/app/resources/bin/kvist-session"]), { command: "/app/resources/bin/kvist-session", prefixArgs: [] })
+  assert.equal(session(["/app/resources/bin/kvist-session.exe"]), null) // the Windows name means nothing on Linux
+  assert.equal(
+    session(["/app/resources/bin/kvist-session.exe"], { platform: "win32" }).command,
+    "/app/resources/bin/kvist-session.exe",
+  )
+})
+
+test("a source checkout uses the program built in the crate", () => {
+  const built = "/project/kernel/session-rs/target/release/kvist-session"
+  assert.equal(session([built], { appIsPackaged: false }).command, built)
+  assert.equal(session([built], { appIsPackaged: false, platform: "win32" }), null)
+})
+
+test("without the program the core serves session operations", () => {
+  assert.equal(session([]), null)
+})
+
+test("KVIST_SESSION_BIN names the program, and a missing file switches it off", () => {
+  const present = ["/custom/kvist-session", "/app/resources/bin/kvist-session"]
+  assert.equal(session(present, { env: { KVIST_SESSION_BIN: "/custom/kvist-session" } }).command, "/custom/kvist-session")
+  assert.equal(session(present, { env: { KVIST_SESSION_BIN: "/custom/absent" } }), null)
+})

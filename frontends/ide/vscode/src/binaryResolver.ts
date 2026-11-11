@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFileSync } from 'child_process';
-import { SupportedOs, currentOs, isMacos, isPosix, relativeBinarySegments } from './platform';
+import { SupportedOs, currentOs, isMacos, isPosix, relativeBinarySegments, relativeSessionSegments } from './platform';
 
 export class BinaryResolver {
     private extensionPath: string;
@@ -33,6 +33,23 @@ export class BinaryResolver {
         }
 
         return binaryPath;
+    }
+
+    // The session program bundled with the extension, or null. It belongs to the bundled core:
+    // with "kvist.binaryPath" set the core is someone else's build, and so is what sits beside it.
+    resolveSessionPath(): string | null {
+        if (vscode.workspace.getConfiguration('kvist').get<string>('binaryPath', '').trim()) {
+            return null;
+        }
+        const os = this.getCurrentOs();
+        if (!os) {
+            return null;
+        }
+        const sessionPath = path.join(this.extensionPath, ...relativeSessionSegments(os));
+        if (!fs.existsSync(sessionPath) || this.validateBinary(sessionPath)) {
+            return null;
+        }
+        return sessionPath;
     }
 
     // Gatekeeper refuses a quarantined binary that is not notarized. Nothing is wrong when the

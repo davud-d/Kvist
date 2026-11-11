@@ -108,6 +108,14 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q .
 
+      # kernel/tests/test_session_native.py compares this program with the Python
+      # implementation and skips without it. It has a Unix and a Windows body (sys.rs).
+      - name: Build and test the native session program
+        working-directory: kernel/session-rs
+        run: |
+          cargo test --locked
+          cargo build --release --locked
+
       - name: Run offline test suite
         run: python -m pytest -ra
 
@@ -203,13 +211,13 @@ jobs:
             install: >-
               sudo pkg install -y python312 py312-pip py312-sqlite3 py312-pillow
               py312-cryptography py312-pydantic2 py312-pydantic-core py312-tiktoken py312-jiter
-              py312-keyring py312-paramiko git ripgrep
+              py312-keyring py312-paramiko git ripgrep rust
           - name: openbsd
             version: "8.0"
             python: python3.14
             install: >-
               sudo pkg_add python py3-pip py3-Pillow py3-cryptography py3-pydantic
-              py3-pydantic-core py3-tiktoken py3-jiter py3-keyring py3-paramiko git ripgrep
+              py3-pydantic-core py3-tiktoken py3-jiter py3-keyring py3-paramiko git ripgrep rust
           - name: netbsd
             version: "11.0"
             python: python3.12
@@ -240,6 +248,9 @@ jobs:
             # the real shim). This is what backs the claim that a BSD machine can serve as a Kvist server, so it is
             # a step of its own and not part of the informational run below.
             KVIST_REQUIRE_SSHD=1 .venv/bin/python -m pytest -ra -p no:cacheprovider kernel/tests/test_ssh_real_sshd.py kernel/tests/test_ssh_install.py kernel/tests/test_ssh_proxy.py kernel/tests/test_ssh_daemon.py
+            # The native session program (kernel/session-rs) on this system, then its comparison with the Python
+            # implementation. Informational like the rest: the core serves session operations itself without it.
+            (cd kernel/session-rs && cargo test --locked && cargo build --release --locked && cd ../.. && .venv/bin/python -m pytest -ra -p no:cacheprovider -m "" kernel/tests/test_session_native.py) || echo "::warning::the native session program does not build or pass on ${{ matrix.name }}"
             # Informational: the whole default suite and the doctor's view of the system, so the first runs show
             # what else breaks here. A failure of either does not fail the job (it is continue-on-error anyway).
             .venv/bin/python -m kernel --doctor || echo "::warning::doctor reported problems"

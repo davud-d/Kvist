@@ -30,6 +30,21 @@ function resolveCoreCommand({
   return [python, entry]
 }
 
+/**
+ * The argv for one-shot session operations: `KVIST_SESSION_CMD` (the native session program, named by
+ * the core that started this daemon) or the core itself, which serves them as well, only slower.
+ */
+function resolveSessionCommand(core, env = process.env) {
+  if (!env.KVIST_SESSION_CMD) return core
+  try {
+    const parts = JSON.parse(env.KVIST_SESSION_CMD)
+    if (Array.isArray(parts) && parts.length && parts.every((part) => typeof part === "string" && part)) return parts
+  } catch {
+    // A value that cannot be read is ignored: the core serves the operation.
+  }
+  return core
+}
+
 /** Run a one-shot core operation and parse the single JSON object it prints. */
 function runCoreOp(core, args) {
   return new Promise((resolve, reject) => {
@@ -48,4 +63,4 @@ function runCoreOp(core, args) {
   })
 }
 
-module.exports = { resolveCoreCommand, runCoreOp }
+module.exports = { resolveCoreCommand, resolveSessionCommand, runCoreOp }

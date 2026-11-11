@@ -363,8 +363,40 @@ _DIRECT_CLI_ARGS = (
 )
 
 
+def _run_native_session_op(args: argparse.Namespace) -> int | None:
+    """Hand the operation to the native session program; None when Python has to serve it."""
+    import subprocess
+
+    from kernel.session.native import find_session_binary, native_command
+
+    binary = find_session_binary()
+    if binary is None or not args.workspace:
+        return None
+    command = native_command(
+        binary,
+        args.workspace,
+        args.session_op,
+        args.session_name,
+        limit=args.history_limit,
+        before=args.history_before,
+        after=args.history_after,
+    )
+    try:
+        # stdin and stdout are inherited: the program reads the input of
+        # input-history-add and prints the answer itself.
+        return subprocess.call(command)
+    except OSError:
+        # The file is there but cannot run on this machine (another
+        # architecture, a broken build); nothing has been done yet.
+        return None
+
+
 def _run_session_op(args: argparse.Namespace) -> None:
     import json
+
+    native_exit = _run_native_session_op(args)
+    if native_exit is not None:
+        raise SystemExit(native_exit)
 
     from kernel.session.durable_json import JsonStorageError
     from kernel.sandbox.redaction import sanitize_display_text
@@ -676,7 +708,14 @@ if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.selection_task:
 
 # The GUI spawns a session op per switch and per sidebar project. Importing the
 # provider SDKs and terminal UI below first made each one ~1 s instead of ~50 ms.
-if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.session_op:
+# With --remote/--machine the sessions are the server's: main() forwards the request there
+# (kernel/ssh/entry.py), and serving it here would answer for the local stand-in folder.
+if (
+    _DIRECT_CLI_ARGS is not None
+    and _DIRECT_CLI_ARGS.session_op
+    and not _DIRECT_CLI_ARGS.remote
+    and not _DIRECT_CLI_ARGS.machine
+):
     _run_session_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
@@ -1186,7 +1225,7 @@ def launch_glass(args: argparse.Namespace) -> int | None:
         command.append("--force")
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
-        env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file)}
+        env = _frontend_environment(args, core, KVIST_SWITCH_FILE=str(switch_file))
         try:
             code = subprocess.call(command, env=env)
         except KeyboardInterrupt:
@@ -1258,12 +1297,7 @@ def launch_voice(args: argparse.Namespace) -> int | None:
         command.append("--continue")
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
-        env = {
-            **os.environ,
-            "KVIST_CORE_CMD": json.dumps(core),
-            "KVIST_VOICE_SCREEN": screen,
-            "KVIST_SWITCH_FILE": str(switch_file),
-        }
+        env = _frontend_environment(args, core, KVIST_VOICE_SCREEN=screen, KVIST_SWITCH_FILE=str(switch_file))
         try:
             code = subprocess.call(command, env=env)
         except KeyboardInterrupt:
@@ -1360,12 +1394,7 @@ def launch_opencode(args: argparse.Namespace) -> int | None:
         command += ["--fast-model", args.fast_model, "--smart-model", args.smart_model]
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
-        env = {
-            **os.environ,
-            "KVIST_CORE_CMD": json.dumps(core),
-            "KVIST_SWITCH_FILE": str(switch_file),
-            "KVIST_COMMAND_FRONTEND": "ink",
-        }
+        env = _frontend_environment(args, core, KVIST_SWITCH_FILE=str(switch_file), KVIST_COMMAND_FRONTEND="ink")
         try:
             code = subprocess.call(command, env=env)
         except KeyboardInterrupt:
@@ -1400,6 +1429,26 @@ def _core_command(args: argparse.Namespace) -> list[str]:
     if args.open_session:
         core += ["--open-session", args.open_session]
     return core
+
+
+def _frontend_environment(args: argparse.Namespace, core: list[str], **extra: str) -> dict[str, str]:
+    """The environment of an interface this launcher starts: its core, and what else it is told.
+
+    ``KVIST_SESSION_CMD`` lets it run one-shot session operations in the native session
+    program without starting the core. It is named only for a core on this machine: with
+    ``--remote`` the sessions are the server's, and an inherited value would answer for
+    the local stand-in folder instead.
+    """
+    import json
+
+    from kernel.session.native import SESSION_CMD_ENV, find_session_binary
+
+    env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), **extra}
+    env.pop(SESSION_CMD_ENV, None)
+    binary = None if args.remote else find_session_binary()
+    if binary is not None:
+        env[SESSION_CMD_ENV] = json.dumps([binary])
+    return env
 
 
 def _launch_workspace(args: argparse.Namespace) -> Path:
@@ -1489,7 +1538,7 @@ def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: 
 
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
-        env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file), "KVIST_COMMAND_FRONTEND": "ink"}
+        env = _frontend_environment(args, core, KVIST_SWITCH_FILE=str(switch_file), KVIST_COMMAND_FRONTEND="ink")
         try:
             code = subprocess.call(command, env=env)
         except KeyboardInterrupt:

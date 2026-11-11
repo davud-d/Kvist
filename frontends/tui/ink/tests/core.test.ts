@@ -86,6 +86,23 @@ test("sessionOp parses the one-line JSON reply", async () => {
   assert.equal(status.active_session, "chat-fake")
 })
 
+test("KVIST_SESSION_CMD names the program for session operations; an unusable value leaves them to the core", () => {
+  const core = { KVIST_CORE_CMD: JSON.stringify(["/x/python", "/x/main.py"]) }
+  const named = resolveCoreCommand({ ...core, KVIST_SESSION_CMD: JSON.stringify(["/x/kvist-session"]) })
+  assert.deepEqual(named.session, { command: "/x/kvist-session", prefixArgs: [] })
+  assert.deepEqual([named.command, named.prefixArgs], ["/x/python", ["/x/main.py"]])
+  for (const unusable of ["", "[]", '[""]', '["a", 1]', "/x/kvist-session"]) {
+    assert.equal(resolveCoreCommand({ ...core, KVIST_SESSION_CMD: unusable }).session, undefined)
+  }
+})
+
+test("a session operation goes to the named program, not to the core", async () => {
+  // The core here is a program that does not exist: only the named one can have answered.
+  const routed = { command: "/nonexistent/kvist-core", prefixArgs: [], session: command }
+  const status = await sessionOp(routed, process.cwd(), "list")
+  assert.equal(status.active_session, "chat-fake")
+})
+
 type Result = Extract<CoreEvent, { type: "command_result" }>
 type Request = Extract<CoreEvent, { type: "input_request" }>
 

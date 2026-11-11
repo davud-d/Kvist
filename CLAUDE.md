@@ -15,6 +15,8 @@ back, and repeats until done. Several frontends drive the same Python core.
   `protocol/` (action protocol, parser, frontend events), `sandbox/` (executor, terminal, policies, approvals),
   `session/`, `context/`, `llm/`, `plan/`, `memory/`, `plugins/` (skills), `ssh/` (remote core), `config/`,
   `prompts/` (data), `tests/`.
+- `kernel/session-rs/` — Rust crate `kvist-session`: `--session-op` without starting Python (Linux/macOS/BSD/Windows, optional;
+  `kernel/session/native.py` hands requests to it, Python serves them when it is missing).
 - `frontends/` — `tui/{classic,ink,opencode,glass}`, `gui/{electron,tauri}`, `ide/{vscode,jetbrains}`, `zed`,
   `voice`, `kvide`, `tray`. Ink's TS modules are also imported by VS Code and OpenCode: check both sides.
 - `scripts/` (installers, e2e smokes), `docs/` (`UI_API.md` = frontend protocol, `SKILLS.md`, `remote.md`),
@@ -49,6 +51,7 @@ python3 -m venv .venv && .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python scripts/e2e_tools_smoke.py              # tools vs a fake provider (~3 s)
 .venv/bin/python -m compileall -x '\.agent-workspace/|/workspace/' -q .
 
+cd kernel/session-rs && cargo test && cargo build --release   # then test_session_native.py compares it with Python
 cd frontends/tui/ink && npm install && npm run build && npm test && npm run typecheck
 cd frontends/ide/vscode && npm test && npm run typecheck
 cd frontends/gui/electron && npm test
@@ -62,6 +65,9 @@ cd frontends/gui/tauri && node --test "tests/*.test.mjs" && (cd src-tauri && car
   Never print config secrets: read exact non-secret keys only.
 - Per-project state lives in `<workspace>/.kvist/` (sessions, change journal, logs). Frontends use
   `main.py --session-op ...`, never the files.
+- `--session-op` has two implementations: `session_store.py` (+ the storage half of `agent_logging.py`,
+  `durable_json.py`, `sandbox/redaction.py`) and `kernel/session-rs`. A change to one is a change to both;
+  `test_session_native.py` fails until they agree again, and is skipped when the crate is not built.
 - Adding an action type: update `protocol/protocol.py`, the parser schema, the executor dispatch and the role
   prompts in `kernel/prompts/system/` (`test_prompt_protocol_sync.py` enforces it).
 - Editing a bundled skill means raising its version and updating `kernel/tests/bundled_skill_digests.json`.

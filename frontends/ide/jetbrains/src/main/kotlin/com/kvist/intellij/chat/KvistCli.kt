@@ -22,6 +22,11 @@ internal object KvistCli {
         return run(target, args, stdin = null, READ_TIMEOUT_MS)
     }
 
+    /** A `--session-op` request: the native session program answers it when the plugin has one, else the core. */
+    fun readSessionJson(target: KvistTarget, args: List<String>): JsonObject? {
+        return run(target, args, stdin = null, READ_TIMEOUT_MS, program = target.sessionPath ?: target.binaryPath)
+    }
+
     // The payload may carry an API key, so it goes to stdin and is never logged.
     fun configOp(target: KvistTarget, op: String, payload: JsonObject): JsonObject {
         val timeoutMs = if (op == "set-provider" && payload.get("provider")?.asString == "chatgpt") 190_000 else CONFIG_OP_TIMEOUT_MS
@@ -32,7 +37,7 @@ internal object KvistCli {
     fun sessionOp(target: KvistTarget, op: String, name: String? = null): JsonObject? {
         val args = mutableListOf("--workspace", target.workspace.toString(), "--session-op", op)
         if (name != null) args += listOf("--session-name", name)
-        return readJson(target, args)
+        return readSessionJson(target, args)
     }
 
     fun failure(error: String): JsonObject {
@@ -42,8 +47,14 @@ internal object KvistCli {
         return reply
     }
 
-    private fun run(target: KvistTarget, args: List<String>, stdin: String?, timeoutMs: Int): JsonObject? {
-        val commandLine = GeneralCommandLine(listOf(target.binaryPath.toString()) + args)
+    private fun run(
+        target: KvistTarget,
+        args: List<String>,
+        stdin: String?,
+        timeoutMs: Int,
+        program: java.nio.file.Path = target.binaryPath,
+    ): JsonObject? {
+        val commandLine = GeneralCommandLine(listOf(program.toString()) + args)
             .withWorkingDirectory(target.workspace)
             .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE)
             .withCharset(StandardCharsets.UTF_8)

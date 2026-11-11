@@ -59,6 +59,10 @@ frontends/ide/jetbrains/bin/win/kvist.exe
 *.log
 
 # binary files
+frontends/ide/vscode/bin/*/kvist-session
+frontends/ide/vscode/bin/*/kvist-session.exe
+frontends/ide/jetbrains/bin/*/kvist-session
+frontends/ide/jetbrains/bin/*/kvist-session.exe
 *.bin
 *.exe
 *.dll

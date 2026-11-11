@@ -69,7 +69,8 @@ test/       node --test
 
 ```bash
 npm test
-npm run dist     # собирает ядро PyInstaller'ом в resources/bin, затем пакует
+npm run dist     # собирает ядро PyInstaller'ом в resources/bin, добавляет нативную программу
+                 # сессий (необязательно, нужен Rust: `npm run build:session`), затем пакует
 ```
 
 В `package.json` стоит `"workspaces": []`, чтобы electron-builder считал эту папку своим

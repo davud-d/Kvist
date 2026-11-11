@@ -370,7 +370,7 @@ internal class KvistChatHost(
     // What the user saw in a session, as the events the core recorded; the page replays them.
     private fun sendHistory(name: String) {
         val target = target() ?: return
-        val reply = KvistCli.readJson(
+        val reply = KvistCli.readSessionJson(
             target,
             listOf("--workspace", target.workspace.toString(), "--session-op", "history", "--session-name", name, "--history-limit", HISTORY_LIMIT.toString()),
         )

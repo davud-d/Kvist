@@ -26,6 +26,12 @@ if "--tray-op" in sys.argv and sys.argv[sys.argv.index("--tray-op") + 1 :][:1] i
 
     raise SystemExit(_tray_bar_main(sys.argv))
 
+# A session operation the native program can serve needs none of the core either.
+if "--session-op" in sys.argv:
+    from kernel.session.native import hand_over_plain_request
+
+    hand_over_plain_request(sys.argv[1:])
+
 if "--web-controller" in sys.argv:
     sys.argv.remove("--web-controller")
     from kvist_web.cli import main as _web_main

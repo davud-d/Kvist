@@ -374,6 +374,34 @@ kvist --workspace WS --session-op reset
 сессию с самым свежим checkpoint (`null`, если такой нет) — после `launch` это,
 как правило, не активная сессия.
 
+**Нативная программа сессий.** `kvist-session` (`kernel/session-rs`, Rust; Linux,
+macOS, BSD и Windows) отвечает на те же запросы с теми же аргументами, тем же JSON и
+теми же файлами и блокировками, не запуская Python: около 2 мс на операцию
+вместо примерно 120. Она необязательна. Ядро ищет её в `KVIST_SESSION_BIN`,
+затем как `kvist-session` в `PATH`, затем в сборке рабочей копии
+(`cargo build --release` в `kernel/session-rs`; установщик собирает её, когда
+есть Rust) и передаёт ей каждый `--session-op`; если программы нет, запрос
+обслуживает реализация на Python, так что фронтенду, который вызывает
+`kvist --session-op …`, менять ничего не нужно. Если в `KVIST_SESSION_BIN`
+указать несуществующий файл, программа отключается.
+
+Как её получает каждый фронтенд: приложение Electron, расширение VS Code и плагин
+JetBrains собирают её рядом с упакованным ядром (`npm run build:session`,
+`build-plugin.*`), когда есть Rust, и обращаются к ней напрямую за операциями с сессиями;
+расширение VS Code делает это только для локального ядра, никогда с `--remote`/`--machine`.
+Приложение Tauri и трей находят её рядом с установленным `kvist-core` (её кладёт туда
+установщик CLI, устаревшую копию он удаляет) или, из рабочей копии, в сборке крейта; трею
+о ней сообщает запустившее его ядро. Rust-интерфейсы, Ink и OpenCode берут
+`KVIST_SESSION_CMD` у лаунчера.
+
+Фронтенду, который запускает лаунчер, дополнительно передаётся
+`KVIST_SESSION_CMD`: JSON-массив, как `KVIST_CORE_CMD`, — команда, к которой
+вместо команды ядра дописывается `--workspace WS --session-op …`. Переменная
+задаётся только для ядра на этой машине и убирается в остальных случаях: с
+`--remote` сессии принадлежат серверу, и эти операции должны идти через команду
+ядра, то есть через ssh-прокси. Фронтенд, который сам запускает ядро,
+по-прежнему вызывает ядро.
+
 **Названия сессий.** `title` в каждом элементе `status`/`list` выше вычисляется
 заново при каждом вызове (первая цель / первое сообщение чата / цель
 checkpoint, иначе имя сессии). Отдельно от этого ядро также генерирует и
@@ -911,7 +939,9 @@ Electron просто спавнит бинарь `kvist`.
 Шов ядра: `ui.py`, `approvals.py`, `terminal_banner.py`.
 Протокол событий: `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
 `event_stdio.py`, `frontends.py`.
-Headless-сессии: `session_store.py` (за `--session-op`).
+Headless-сессии: `session_store.py` (за `--session-op`), его нативный двойник
+`kernel/session-rs` и `kernel/session/native.py`, который передаёт ему запросы;
+`kernel/tests/test_session_native.py` держит две реализации вместе.
 Участник ACP (§8d): `acp_frontend.py`, `acp_events.py`.
 Тесты: `kernel/tests/test_frontend_protocol.py`, `kernel/tests/test_event_stream_ui.py`,
 `kernel/tests/test_event_session.py`, `kernel/tests/test_frontends.py`,

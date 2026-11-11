@@ -185,6 +185,19 @@ fi
 log "Installing the host binary into the plugin ($BINARY_RELATIVE)"
 install_executable "$BINARY_SRC" "$BINARY_DST"
 
+# The native session program (kernel/session-rs) goes beside the core: the plugin asks it for
+# session operations instead of starting the whole frozen core. Optional; the plugin works
+# without it, only slower, so a missing Rust is a warning and not a failure.
+SESSION_DST="$PLUGIN_DIR/$(dirname "$BINARY_RELATIVE")/kvist-session"
+# A copy of an earlier build must not ship next to a core it may not match.
+rm -f "$SESSION_DST"
+log "Building the native session program"
+if command -v cargo >/dev/null 2>&1 && (cd "$PROJECT_DIR/kernel/session-rs" && cargo build --release --locked); then
+	install_executable "$PROJECT_DIR/kernel/session-rs/target/release/kvist-session" "$SESSION_DST"
+else
+	printf 'warning: the native session program was not built; the plugin will serve session operations through the core.\n' >&2
+fi
+
 refresh_sandbox_binary
 
 log "Building JetBrains plugin ZIP"

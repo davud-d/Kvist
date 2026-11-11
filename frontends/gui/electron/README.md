@@ -69,7 +69,8 @@ test/       node --test
 
 ```bash
 npm test
-npm run dist     # builds the core with PyInstaller into resources/bin, then packages
+npm run dist     # builds the core with PyInstaller into resources/bin, adds the native session
+                 # program (optional, needs Rust: `npm run build:session`), then packages
 ```
 
 `package.json` sets `"workspaces": []` so electron-builder treats this folder as its own root.

@@ -1,0 +1,21 @@
+[package]
+name = "kvist-session"
+version = "0.1.0"
+edition = "2024"
+# File::lock, the cross-platform file lock, is stable from 1.89.
+rust-version = "1.89"
+description = "Kvist's headless session operations (--session-op) as a native program"
+publish = false
+
+[dependencies]
+regex = "1.13.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemInformation",
+] }

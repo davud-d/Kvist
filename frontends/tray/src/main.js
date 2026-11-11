@@ -8,7 +8,7 @@ const { promisify } = require("node:util")
 const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen } = require("electron")
 
 const { locateBar, parseX11Dock, placePanel } = require("./bar-locator")
-const { resolveCoreCommand, runCoreOp } = require("./core-command")
+const { resolveCoreCommand, resolveSessionCommand, runCoreOp } = require("./core-command")
 const { startEndpoint } = require("./endpoint")
 const { focusTerminal } = require("./focus-window")
 const { Registry } = require("./registry")
@@ -101,7 +101,7 @@ async function loadTranscript() {
   const selected = registry.get(selectedId)
   if (!selected) return
   try {
-    const payload = await runCoreOp(core, [
+    const payload = await runCoreOp(resolveSessionCommand(core), [
       "--workspace", selected.workspace,
       "--session-op", "history",
       "--session-name", selected.session,

@@ -373,6 +373,32 @@ or `1` on failure:
 whichever session holds the newest resumable checkpoint (`null` if none), which
 after a `launch` is normally not the active one.
 
+**The native session program.** `kvist-session` (`kernel/session-rs`, Rust; Linux,
+macOS, the BSDs and Windows) answers the same requests with the same arguments, the same JSON and
+the same files and locks, without starting Python: about 2 ms for an operation
+instead of about 120. It is optional. The core looks for it in
+`KVIST_SESSION_BIN`, then as `kvist-session` on `PATH`, then in a checkout's
+build (`cargo build --release` in `kernel/session-rs`; the installer builds it
+when Rust is there), and hands every `--session-op` to it; when it is missing,
+the Python implementation serves the request, so a frontend that calls
+`kvist --session-op …` needs no change. Setting `KVIST_SESSION_BIN` to a file
+that does not exist switches the program off.
+
+How each frontend gets it: the Electron app, the VS Code extension and the JetBrains
+plugin build it beside the bundled core (`npm run build:session`, `build-plugin.*`), when
+Rust is there, and ask it directly for session operations; the VS Code extension does so
+only for a local core, never with `--remote`/`--machine`. A Tauri app and the tray find it
+beside the installed `kvist-core` (the CLI installer puts it there and removes a stale copy)
+or, from a checkout, in the crate's build; the tray is told by the core that starts it. The
+Rust interfaces and Ink/OpenCode take `KVIST_SESSION_CMD` from the launcher.
+
+A frontend the launcher starts is also given `KVIST_SESSION_CMD`: a JSON array
+like `KVIST_CORE_CMD`, the command to append `--workspace WS --session-op …` to
+instead of the core's. It is set only for a core on this machine and removed
+otherwise: with `--remote` the sessions belong to the server, and these
+operations must go through the core command, which is the ssh proxy. A frontend
+that starts its own core keeps calling the core.
+
 **Session titles.** The `title` in each `status`/`list` item above is derived
 fresh on every call (first goal / first chat message / checkpoint goal, or the
 session name). Separately, the core also generates and *stores* a short title
@@ -905,7 +931,9 @@ The core does not change — only the transport.
 Core seam: `ui.py`, `approvals.py`, `terminal_banner.py`.
 Event protocol: `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
 `event_stdio.py`, `frontends.py`.
-Headless sessions: `session_store.py` (behind `--session-op`).
+Headless sessions: `session_store.py` (behind `--session-op`), its native twin
+`kernel/session-rs` and `kernel/session/native.py`, which hands requests to it;
+`kernel/tests/test_session_native.py` holds the two implementations together.
 ACP peer (§8d): `acp_frontend.py`, `acp_events.py`.
 Tests: `kernel/tests/test_frontend_protocol.py`, `kernel/tests/test_event_stream_ui.py`,
 `kernel/tests/test_event_session.py`, `kernel/tests/test_frontends.py`,

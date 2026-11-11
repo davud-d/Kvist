@@ -110,6 +110,26 @@ $DestFolder = Split-Path $WinBinaryDst
 if (-not (Test-Path $DestFolder)) { New-Item -ItemType Directory -Path $DestFolder | Out-Null }
 Copy-Item -Path $WinBinarySrc -Destination $WinBinaryDst -Force
 
+# The native session program (kernel/session-rs) goes beside the core: the plugin asks it for
+# session operations instead of starting the whole frozen core. Optional, so a missing Rust is a warning.
+$SessionDst = Join-Path $DestFolder "kvist-session.exe"
+# A copy of an earlier build must not ship next to a core it may not match.
+if (Test-Path $SessionDst) { Remove-Item -Path $SessionDst -Force }
+Write-Log "Building the native session program"
+$Cargo = Get-Command cargo -ErrorAction SilentlyContinue
+$SessionBuilt = $false
+if ($Cargo) {
+    Push-Location (Join-Path $ProjectDir "kernel\session-rs")
+    & cargo build --release --locked
+    $SessionBuilt = ($LASTEXITCODE -eq 0)
+    Pop-Location
+}
+if ($SessionBuilt) {
+    Copy-Item -Path (Join-Path $ProjectDir "kernel\session-rs\target\release\kvist-session.exe") -Destination $SessionDst -Force
+} else {
+    Write-Warning "The native session program was not built; the plugin will serve session operations through the core."
+}
+
 Refresh-SandboxBinary
 
 Write-Log "Building JetBrains plugin ZIP"

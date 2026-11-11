@@ -7,7 +7,7 @@ const os = require("node:os")
 const path = require("node:path")
 const test = require("node:test")
 
-const { resolveCoreCommand } = require("../src/core-command")
+const { resolveCoreCommand, resolveSessionCommand } = require("../src/core-command")
 const { startEndpoint } = require("../src/endpoint")
 const { focusTerminal } = require("../src/focus-window")
 const { Registry } = require("../src/registry")
@@ -248,4 +248,12 @@ test("an X11 dock window under the pointer is the bar; other windows are not", (
   assert.equal(parseX11Dock({ pointer: { x: 91, y: 13 }, windowType: normal, geometry, bounds: MONITOR }), null)
   assert.equal(parseX11Dock({ pointer: { x: 91, y: 500 }, windowType: dock, geometry, bounds: MONITOR }), null)
   assert.equal(parseX11Dock({ pointer: { x: 91, y: 13 }, windowType: dock, geometry: "", bounds: MONITOR }), null)
+})
+
+test("session operations go to the native session program the core named, else to the core", () => {
+  const core = ["kvist", "--x"]
+  assert.deepEqual(resolveSessionCommand(core, { KVIST_SESSION_CMD: '["/opt/kvist-session"]' }), ["/opt/kvist-session"])
+  for (const unusable of [undefined, "", "[]", '[""]', '["a", 1]', "not json"]) {
+    assert.deepEqual(resolveSessionCommand(core, { KVIST_SESSION_CMD: unusable }), core)
+  }
 })

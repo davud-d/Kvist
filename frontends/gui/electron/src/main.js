@@ -5,7 +5,7 @@ const path = require("node:path")
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen, shell } = require("electron")
 
-const { resolveKvistCommand } = require("./command-resolver")
+const { resolveKvistCommand, resolveSessionCommand: resolveNativeSessionCommand } = require("./command-resolver")
 const { runCoreJson, runCoreOk } = require("./core-ops")
 const { gitInfo, gitDiff, gitCommit, splitPatchByFile } = require("./git")
 const { KvistProcess } = require("./kvist-process")
@@ -36,6 +36,16 @@ function resolveCommand() {
     resourcesPath: process.resourcesPath,
     projectRoot: path.resolve(__dirname, "../../../.."),
   })
+}
+
+// What runs the one-shot session operations: the native session program when there is
+// one, else the core.
+function resolveSessionCommand() {
+  return resolveNativeSessionCommand({
+    appIsPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    projectRoot: path.resolve(__dirname, "../../../.."),
+  }) || resolveCommand()
 }
 
 function validateWorkspace(value) {
@@ -73,7 +83,7 @@ function checkedSessionName(name) {
 function sessionOp(projectPath, op, extraArgs = []) {
   const resolved = validateWorkspace(projectPath)
   return runCoreOk(
-    resolveCommand(),
+    resolveSessionCommand(),
     ["--workspace", resolved, "--session-op", op, ...extraArgs],
     { cwd: resolved, failure: "Kvist session process failed." },
   )
@@ -273,7 +283,7 @@ function registerSessionIpc() {
 
   ipcMain.handle("kvist:input-history", () => sessionOp(workspace, "input-history"))
   ipcMain.handle("kvist:input-history-add", (_event, text) => runCoreJson(
-    resolveCommand(),
+    resolveSessionCommand(),
     ["--workspace", workspace, "--session-op", "input-history-add"],
     { cwd: workspace, stdin: String(text || ""), failure: "Could not save the input." },
   ))

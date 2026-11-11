@@ -16,8 +16,9 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "build:core": "node scripts/build-core.js",
+    "build:session": "node scripts/build-session.js",
     "dist:app": "electron-builder",
-    "dist": "npm run build:core && npm run dist:app"
+    "dist": "npm run build:core && npm run build:session && npm run dist:app"
   },
   "dependencies": {
     "marked": "^18.0.9",
@@ -43,7 +44,9 @@
         "to": "bin",
         "filter": [
           "kvist",
-          "kvist.exe"
+          "kvist.exe",
+          "kvist-session",
+          "kvist-session.exe"
         ]
       }
     ],

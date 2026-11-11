@@ -152,6 +152,48 @@ def test_windows_builds_no_voice_screen(monkeypatch):
     assert cli.build_voice_screen() is False
 
 
+def test_the_cli_build_includes_the_session_program_when_cargo_is_there(monkeypatch, tmp_path):
+    built = tmp_path / "kvist-session"
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "SESSION_PROGRAM_BINARY", built)
+    monkeypatch.setattr(cli, "find_cargo", lambda: "/usr/bin/cargo")
+    commands = []
+
+    def build(command, cwd=None):
+        commands.append((command, cwd))
+        built.write_text("")
+
+    monkeypatch.setattr(cli, "run_logged", build)
+    assert cli.build_session_program() is True
+    assert commands == [(["/usr/bin/cargo", "build", "--release", "--locked"], cli.SESSION_PROGRAM_DIR)]
+    assert (cli.SESSION_PROGRAM_DIR / "Cargo.lock").is_file(), "--locked needs the lock file"
+
+
+def test_the_cli_build_goes_on_without_rust_for_the_session_program_too(monkeypatch, tmp_path):
+    steps = []
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "SESSION_PROGRAM_BINARY", tmp_path / "missing")
+    monkeypatch.setattr(cli, "find_cargo", lambda: None)
+    monkeypatch.setattr(cli, "show_step", lambda status, text: steps.append(text))
+    assert cli.build_session_program() is False
+    assert steps == [cli.STEPS["session_no_cargo"]]
+
+
+def test_the_session_program_is_built_on_windows_too(monkeypatch, tmp_path):
+    built = tmp_path / "kvist-session.exe"
+    monkeypatch.setattr(cli, "IS_WINDOWS", True)
+    monkeypatch.setattr(cli, "SESSION_PROGRAM_BINARY", built)
+    monkeypatch.setattr(cli, "find_cargo", lambda: "cargo.exe")
+    monkeypatch.setattr(cli, "run_logged", lambda command, cwd=None: built.write_text(""))
+    assert cli.build_session_program() is True
+
+
+def test_the_core_looks_for_the_session_program_where_the_installer_builds_it():
+    from kernel.session import native
+
+    assert native._BUILD == cli.SESSION_PROGRAM_BINARY
+
+
 def test_the_cli_build_compiles_the_opencode_ui_with_bun(monkeypatch, tmp_path):
     packages = tmp_path / "node_modules" / "@opentui"
     built = tmp_path / "dist" / "kvist-opencode"
@@ -183,3 +225,27 @@ def test_the_cli_build_goes_on_without_bun_and_says_so(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "show_step", lambda status, text: steps.append(text))
     assert cli.build_opencode() is False
     assert steps == [cli.STEPS["opencode_no_bun"]]
+
+
+def test_the_session_program_is_installed_beside_the_core(monkeypatch, tmp_path):
+    program = tmp_path / "built" / "kvist-session"
+    program.parent.mkdir()
+    program.write_bytes(b"new program")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    assert cli.install_session_program(lib, program) is True
+    installed = lib / cli.SESSION_NAME
+    assert installed.read_bytes() == b"new program"
+    assert not [item for item in lib.iterdir() if item != installed], "no temporary file is left behind"
+    program.write_bytes(b"newer program")
+    assert cli.install_session_program(lib, program) is True
+    assert installed.read_bytes() == b"newer program"
+
+
+def test_a_session_program_of_an_earlier_install_is_not_kept_without_a_new_one(tmp_path):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / cli.SESSION_NAME).write_bytes(b"old program")
+    assert cli.install_session_program(lib, tmp_path / "not-built") is False
+    assert not (lib / cli.SESSION_NAME).exists()
+    assert cli.install_session_program(lib, tmp_path / "not-built") is False
