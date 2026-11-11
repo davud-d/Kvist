@@ -917,3 +917,14 @@ Headless-сессии: `session_store.py` (за `--session-op`).
 `kernel/tests/test_event_session.py`, `kernel/tests/test_frontends.py`,
 `kernel/tests/test_session_store.py`, `frontends/zed/tests/test_acp_frontend.py`,
 `frontends/zed/tests/test_acp_events.py`.
+
+
+## 8h. Список провайдеров: `--config-info`
+
+`kvist --workspace WS --config-info` печатает один JSON-объект со всеми провайдерами (`providers`, затем
+`custom_providers`): `id`, `label`, `auth_type`, `has_credentials`, `defaults`, `saved_models` и `options`
+(модели, которые он предлагает, каждая `{value, label, description, icon}`). Для фронтенда, который рисует
+логотипы, `icon` называет бренд коротким slug (`anthropic`, `openai`, ...; у своего провайдера пусто), а
+`model_icons` сопоставляет каждому упомянутому моделью id бренд её производителя, так что `cc/claude-opus-5`
+через шлюз показывает знак Anthropic. Slug'и берутся из `kernel/config/brand_icons.py`; фронтенд без картинки
+для slug'а рисует монограмму.

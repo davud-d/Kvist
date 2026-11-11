@@ -911,3 +911,13 @@ Tests: `kernel/tests/test_frontend_protocol.py`, `kernel/tests/test_event_stream
 `kernel/tests/test_event_session.py`, `kernel/tests/test_frontends.py`,
 `kernel/tests/test_session_store.py`, `frontends/zed/tests/test_acp_frontend.py`,
 `frontends/zed/tests/test_acp_events.py`.
+
+
+## 8h. The provider list: `--config-info`
+
+`kvist --workspace WS --config-info` prints one JSON object with every provider (`providers`, then
+`custom_providers`): `id`, `label`, `auth_type`, `has_credentials`, `defaults`, `saved_models` and `options`
+(the models it offers, each `{value, label, description, icon}`). For a frontend that draws logos, `icon` names the
+brand as a short slug (`anthropic`, `openai`, ...; empty for a custom provider) and `model_icons` maps each
+model id the provider mentions to the brand of its maker, so a gateway's `cc/claude-opus-5` shows Anthropic's
+mark. The slugs come from `kernel/config/brand_icons.py`; a frontend with no artwork for a slug draws a monogram.

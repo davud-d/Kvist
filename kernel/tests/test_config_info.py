@@ -108,3 +108,22 @@ def test_build_config_info_includes_custom_providers(isolated_config):
     keyless = by_id["custom:keyless"]
     assert keyless["has_credentials"] is False
     assert keyless["missing_keys"] == ["API key"]
+
+
+def test_a_custom_provider_has_no_brand(isolated_config):
+    user_config.save_user_config(
+        {
+            "custom_providers": {
+                "my-gateway": {
+                    "base_url": "https://example.invalid/v1",
+                    "api_key": "fixture-not-a-real-key",
+                    "models": {"fast": "claude-haiku-4-5", "smart": "claude-opus-5"},
+                }
+            }
+        }
+    )
+    info = config_info.build_config_info()
+    custom = next(entry for entry in info["custom_providers"] if entry["id"] == "custom:my-gateway")
+    assert custom["icon"] == ""
+    # The gateway has no brand of its own, but the models behind it do.
+    assert custom["model_icons"] == {"claude-haiku-4-5": "anthropic", "claude-opus-5": "anthropic"}

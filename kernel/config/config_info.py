@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kernel.config.brand_icons import model_icon, provider_icon
 from kernel.llm.llm_clients import (
     ANYMODEL_PROVIDER,
     ANTHROPIC_PROVIDER,
@@ -57,6 +58,23 @@ _BUILTIN_PROVIDERS = (
 )
 
 
+def _with_icons(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The selectable models, each naming the brand of its maker (a frontend draws the logo)."""
+    return [{**option, "icon": model_icon(str(option.get("value", "")))} for option in options]
+
+
+def _model_icons(*groups: Any) -> dict[str, str]:
+    """Brand slug for every model id a provider mentions: its defaults, saved overrides and options."""
+    icons: dict[str, str] = {}
+    for group in groups:
+        values = group.values() if isinstance(group, dict) else [item.get("value") for item in group]
+        for value in values:
+            model = str(value or "").strip()
+            if model and model_icon(model):
+                icons[model] = model_icon(model)
+    return icons
+
+
 def _empty_roles() -> dict[str, str]:
     return {role: "" for role in MODEL_ROLES}
 
@@ -74,15 +92,20 @@ def _builtin_summary(provider: str) -> dict[str, Any]:
     if normalized == "chatgpt":
         from kernel.providers.chatgpt_auth import has_credentials
         missing = [] if has_credentials() else ["Continue with ChatGPT / Войти через ChatGPT"]
+    defaults = {role: resolved.get(role, "") for role in MODEL_ROLES}
+    saved = {role: saved_models.get(role, "") for role in MODEL_ROLES}
+    options = _with_icons(get_model_options(normalized))
     return {
         "auth_type": "oauth" if normalized == "chatgpt" else "api_key",
         "id": normalized,
         "label": provider_label(normalized),
+        "icon": provider_icon(normalized),
         "custom": False,
         "requires_manual_models": manual,
-        "defaults": {role: resolved.get(role, "") for role in MODEL_ROLES},
-        "saved_models": {role: saved_models.get(role, "") for role in MODEL_ROLES},
-        "options": get_model_options(normalized),
+        "defaults": defaults,
+        "saved_models": saved,
+        "options": options,
+        "model_icons": _model_icons(defaults, saved, options),
         "has_credentials": not missing,
         "missing_keys": missing,
     }
@@ -98,11 +121,13 @@ def _custom_summary(name: str, info: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": provider_id,
         "label": provider_label(provider_id),
+        "icon": "",
         "custom": True,
         "requires_manual_models": True,
         "defaults": saved_models,
         "saved_models": saved_models,
         "options": [],
+        "model_icons": _model_icons(saved_models),
         "base_url": str(info.get("base_url", "")).strip(),
         "has_credentials": has_key,
         "missing_keys": [] if has_key else ["API key"],
