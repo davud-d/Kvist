@@ -31,6 +31,7 @@
       this.role = ""
       this.stats = this.freshStats()
       this.silent = false
+      this.folded = new Set()
     }
 
     freshStats() {
@@ -43,6 +44,7 @@
     }
 
     push(item) {
+      item.turn = this.turnCount
       item.id = this.nextId
       this.nextId += 1
       this.items.push(item)
@@ -53,6 +55,7 @@
     insertBefore(item, before) {
       const index = before ? this.items.indexOf(before) : -1
       if (index === -1) return this.push(item)
+      item.turn = this.turnCount
       item.id = this.nextId
       this.nextId += 1
       this.items.splice(index, 0, item)
@@ -81,7 +84,7 @@
     // --- turns ---------------------------------------------------------------------
     beginTurn(ts) {
       this.turnCount += 1
-      this.turn = { start: ts ?? null, end: null, ended: false, firstIndex: this.items.length, calls: 0, group: null }
+      this.turn = { number: this.turnCount, start: ts ?? null, end: null, ended: false, firstIndex: this.items.length, calls: 0, group: null, header: null }
     }
 
     ensureTurn(ts) {
@@ -117,17 +120,41 @@
         }
       }
       this.closeGroups()
-      const seconds = turn.start !== null && turn.end !== null ? turn.end - turn.start : this.liveSeconds(turn)
-      if (turn.calls > 0 && seconds >= 1) {
-        const summary = { kind: "summary", seconds, calls: turn.calls }
-        const lastAnswer = this.find((item) => item.kind === "assistant" && this.items.indexOf(item) >= turn.firstIndex)
-        if (lastAnswer && this.last() === lastAnswer) this.insertBefore(summary, lastAnswer)
-        else this.push(summary)
+      const header = turn.header
+      if (header) {
+        header.live = false
+        header.seconds = turn.start !== null && turn.end !== null ? turn.end - turn.start : this.liveSeconds(turn)
+        this.folded.add(turn.number)
+        this.emit(header, "refold")
       }
     }
 
     liveSeconds(turn) {
       return turn.liveStart ? (Date.now() - turn.liveStart) / 1000 : 0
+    }
+
+    // "Working for 12s" / "Worked for 1m 3s": one line at the head of a turn's work.
+    ensureHeader(ts) {
+      const turn = this.ensureTurn(ts)
+      if (turn.header) return turn.header
+      turn.header = this.push({ kind: "summary", live: true, start: this.silent ? null : Date.now(), seconds: 0 })
+      return turn.header
+    }
+
+    // Once a turn is over its work folds away; the last answer stays.
+    isFolded(item) {
+      if (!this.folded.has(item.turn)) return false
+      if (item.kind === "summary") return false
+      if (["work", "thinking", "notice", "helper", "image"].includes(item.kind)) return true
+      if (item.kind !== "assistant") return false
+      let last = null
+      for (const entry of this.items) if (entry.turn === item.turn && entry.kind === "assistant") last = entry
+      return last !== item
+    }
+
+    toggleFold(turn) {
+      if (this.folded.has(turn)) this.folded.delete(turn)
+      else this.folded.add(turn)
     }
 
     markLiveStart() {
@@ -241,7 +268,7 @@
     user(event, ts) {
       this.beginTurn(ts)
       this.turn.firstIndex = this.items.length
-      if (event.woken) this.push({ kind: "notice", level: "info", text: K.t("Background work finished; Kvist continued on its own.", "Фоновая работа закончилась; Kvist продолжил сам.") })
+      if (event.woken) this.push({ kind: "notice", level: "info", text: "Background work finished; Kvist continued on its own." })
       else this.push({ kind: "user", text: event.text || "", resumed: Boolean(event.resumed), woken: false, images: 0 })
     },
 
@@ -278,7 +305,7 @@
     },
 
     error(event, ts) {
-      this.push({ kind: "error", text: event.message || K.t("Kvist reported an error.", "Kvist сообщил об ошибке.") })
+      this.push({ kind: "error", text: event.message || "Kvist reported an error." })
       this.endTurn(ts)
     },
 
@@ -296,6 +323,7 @@
       this.ensureTurn(ts)
       const existing = this.find((item) => item.kind === "thinking" && item.streamId === event.stream_id)
       if (existing) return
+      this.ensureHeader(ts)
       this.closeGroups()
       this.push({ kind: "thinking", streamId: event.stream_id, text: "", seconds: 0, done: false })
     },
@@ -340,8 +368,8 @@
         addAnswer(this, event.message)
       }
       if (event.closed) this.closedNotice = this.closedNotice || " "
-      else if (event.paused) this.push({ kind: "status", tone: "muted", text: K.t("Paused. Write a correction or “continue”.", "Пауза. Напиши поправку или «продолжай».") })
-      else if (event.outcome === "incomplete") this.push({ kind: "status", tone: "warn", text: K.t("Finished, but not done.", "Закончил, но не доделал.") })
+      else if (event.paused) this.push({ kind: "status", tone: "muted", text: "Paused. Write a correction or “continue”." })
+      else if (event.outcome === "incomplete") this.push({ kind: "status", tone: "warn", text: "Finished, but not done." })
       this.endTurn(ts)
     },
 
@@ -360,6 +388,7 @@
         if (event.user_message && event.user_message.trim() !== lastAnswerText(this)) addAnswer(this, event.user_message)
         return
       }
+      this.ensureHeader(ts)
       const existing = this.findCall(event)
       let call = existing && existing.state === "writing" ? existing : null
       if (event.user_message && String(event.user_message).trim() && !call) {
@@ -388,6 +417,7 @@
     call_begin(event, ts) {
       const turn = this.ensureTurn(ts)
       if (this.calls.has(event.call_id)) return
+      this.ensureHeader(ts)
       const group = this.groupFor("", ts)
       this.newCall(group, {
         callId: event.call_id,
@@ -460,8 +490,8 @@
     },
 
     skill(event) {
-      const verb = event.state === "detached" ? K.t("detached", "отключён") : K.t("attached", "подключён")
-      this.push({ kind: "notice", level: "info", text: K.t(`Skill “${event.name || event.skill}” ${verb}.`, `Навык «${event.name || event.skill}» ${verb}.`) })
+      const verb = event.state === "detached" ? "detached" : "attached"
+      this.push({ kind: "notice", level: "info", text: `Skill “${event.name || event.skill}” ${verb}.` })
     },
 
     helper(event) {

@@ -3,7 +3,7 @@
 
 ;(function definePanels(root) {
   const K = (root.K = root.K || {})
-  const { h, t } = K
+  const { h } = K
 
   // --- helpers -----------------------------------------------------------------------
   // The same file edited several times arrives as several patches; show it once.
@@ -103,7 +103,7 @@
       }
       if (token !== this.token) return
       if (!result.isRepo) {
-        this.renderMessage(t("This project is not a git repository.", "Этот проект не git-репозиторий."))
+        this.renderMessage("This project is not a git repository.")
         return
       }
       this.renderFiles(K.diff.parseUnifiedDiff(result.patch), "git")
@@ -119,19 +119,19 @@
       K.clear(this.actions)
       const sum = totals(files)
       this.actions.append(
-        h("span", { class: "review-summary" }, files.length ? [t(`${files.length} file(s)`, `Файлов: ${files.length}`), " ", K.diff.counts(sum)] : t("No changes", "Изменений нет")),
+        h("span", { class: "review-summary" }, files.length ? [`${files.length} file(s)`, " ", K.diff.counts(sum)] : "No changes"),
         h("span", { class: "grow" }),
-        h("button", { class: "icon-btn", type: "button", title: t("Refresh", "Обновить"), "aria-label": t("Refresh", "Обновить"), onclick: () => void this.refresh() }, K.icon("refresh", 15)),
+        h("button", { class: "icon-btn", type: "button", title: "Refresh", "aria-label": "Refresh", onclick: () => void this.refresh() }, K.icon("refresh", 15)),
       )
       if (kind === "git") {
-        this.actions.append(h("button", { class: "btn small primary", type: "button", disabled: !files.length || !this.host.canWrite(), onclick: () => this.host.onCommit() }, K.icon("branch", 13), t("Commit…", "Коммит…")))
+        this.actions.append(h("button", { class: "btn small primary", type: "button", disabled: !files.length || !this.host.canWrite(), onclick: () => this.host.onCommit() }, K.icon("branch", 13), "Commit…"))
       } else {
-        this.actions.append(h("button", { class: "btn small", type: "button", disabled: !this.host.canWrite(), onclick: () => this.host.onRevert(), title: t("Restore every file the agent changed", "Вернуть все файлы, которые менял агент") }, K.icon("undo", 13), t("Revert", "Откатить")))
+        this.actions.append(h("button", { class: "btn small", type: "button", disabled: !this.host.canWrite(), onclick: () => this.host.onRevert(), title: "Restore every file the agent changed" }, K.icon("undo", 13), "Revert"))
       }
       if (!files.length) {
         this.body.append(h("div", { class: "panel-empty" }, kind === "agent"
-          ? t("The agent has not changed any files in this thread yet.", "Агент пока не менял файлы в этом треде.")
-          : t("The working tree is clean.", "Рабочее дерево чистое.")))
+          ? "The agent has not changed any files in this thread yet."
+          : "The working tree is clean."))
         return
       }
       files.forEach((file, index) => this.body.append(K.diff.renderDiffFile(file, { open: files.length <= 4 && index < 4 })))
@@ -174,12 +174,12 @@
       const jobs = thread.items.filter((item) => item.kind === "job")
       const calls = thread.shellCalls()
       if (!calls.length && !jobs.length) {
-        this.body.append(h("div", { class: "panel-empty" }, t("Commands the agent runs show up here.", "Здесь появятся команды, которые запускает агент.")))
+        this.body.append(h("div", { class: "panel-empty" }, "Commands the agent runs show up here."))
         return
       }
       for (const job of jobs) {
         const command = Array.isArray(job.command) ? job.command.join(" ") : String(job.command)
-        this.body.append(this.entry(command, job.status === "running" ? "running" : job.exitCode === 0 ? "ok" : "failed", job.output, t("background", "фон")))
+        this.body.append(this.entry(command, job.status === "running" ? "running" : job.exitCode === 0 ? "ok" : "failed", job.output, "background"))
       }
       for (const call of calls) {
         const out = call.state === "running" ? call.live : call.output
@@ -210,7 +210,7 @@
     }
     const files = K.diff.parseUnifiedDiff(result.patch)
     if (!files.length) {
-      K.toast(t("Nothing to commit.", "Коммитить нечего."))
+      K.toast("Nothing to commit.")
       return
     }
     const checks = new Map()
@@ -220,15 +220,15 @@
       checks.set(file.path, box)
       list.append(h("label", { class: "commit-file" }, box, h("span", { class: "commit-path", title: file.path }, file.path), K.diff.counts(file)))
     }
-    const message = h("textarea", { class: "field-input commit-message", rows: "5", placeholder: t("Commit message", "Сообщение коммита"), "aria-label": t("Commit message", "Сообщение коммита") })
+    const message = h("textarea", { class: "field-input commit-message", rows: "5", placeholder: "Commit message", "aria-label": "Commit message" })
     const error = h("div", { class: "field-hint is-warn" })
     const selected = () => [...checks].filter(([, box]) => box.checked).map(([path]) => path)
 
-    const generate = h("button", { class: "btn small", type: "button" }, K.icon("sparkle", 13), t("Write with Kvist", "Написать через Kvist"))
+    const generate = h("button", { class: "btn small", type: "button" }, K.icon("sparkle", 13), "Write with Kvist")
     generate.addEventListener("click", async () => {
       error.textContent = ""
       if (!selected().length) {
-        error.textContent = t("Choose at least one file.", "Выбери хотя бы один файл.")
+        error.textContent = "Choose at least one file."
         return
       }
       generate.disabled = true
@@ -243,13 +243,13 @@
 
     const body = h("div", { class: "commit-dialog" }, list, h("div", { class: "commit-tools" }, generate), message, error)
     K.modal({
-      title: t("Commit changes", "Закоммитить изменения"),
+      title: "Commit changes",
       body,
       wide: true,
       actions: [
-        { label: t("Cancel", "Отмена") },
+        { label: "Cancel" },
         {
-          label: t("Commit", "Закоммитить"),
+          label: "Commit",
           kind: "primary",
           keepOpen: true,
           onClick: async (close) => {
@@ -257,7 +257,7 @@
             try {
               const done = await root.kvist.gitCommit(message.value, selected())
               close()
-              K.toast(t(`Committed ${done.commit}`, `Коммит ${done.commit}`))
+              K.toast(`Committed ${done.commit}`)
               onDone?.()
             } catch (failure) {
               error.textContent = failure.message

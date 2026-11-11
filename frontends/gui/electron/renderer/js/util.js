@@ -23,10 +23,6 @@
     },
   }
 
-  // --- language ----------------------------------------------------------------
-  K.lang = (K.store.get("lang") || (root.navigator?.language || "en")).toLowerCase().startsWith("ru") ? "ru" : "en"
-  K.t = (en, ru) => (K.lang === "ru" ? ru : en)
-
   // --- DOM ----------------------------------------------------------------------
   function append(parent, child) {
     if (child === null || child === undefined || child === false) return
@@ -57,6 +53,12 @@
   // --- icons --------------------------------------------------------------------
   const ICONS = {
     sidebar: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/>',
+    home: '<path d="M4 11l8-7 8 7v8a1 1 0 01-1 1h-4v-6H9v6H5a1 1 0 01-1-1z"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/>',
+    arrowLeft: '<path d="M19 12H5M12 19l-7-7 7-7"/>',
+    laptop: '<rect x="5" y="5" width="14" height="10" rx="2"/><path d="M3 19h18"/>',
+    hand: '<path d="M8 12V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11V6a1.5 1.5 0 013 0v7a6 6 0 01-6 6h-1a5 5 0 01-4-2l-2-3a1.5 1.5 0 012.3-1.8L8 14"/>',
+    folderOpen: '<path d="M3 8a2 2 0 012-2h4l2 2h7a2 2 0 012 2v1H7l-3 8V8z"/><path d="M4 19l3-8h14l-3 8z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     compose: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
@@ -109,22 +111,22 @@
   // --- formatting ---------------------------------------------------------------
   K.timeAgo = function timeAgo(epochSeconds, now = Date.now() / 1000) {
     const seconds = Math.max(0, now - Number(epochSeconds || 0))
-    if (!epochSeconds || seconds < 60) return K.t("now", "сейчас")
+    if (!epochSeconds || seconds < 60) return "now"
     const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return K.t(`${minutes}m`, `${minutes} мин`)
+    if (minutes < 60) return `${minutes}m`
     const hours = Math.floor(minutes / 60)
-    if (hours < 24) return K.t(`${hours}h`, `${hours} ч`)
+    if (hours < 24) return `${hours}h`
     const days = Math.floor(hours / 24)
-    if (days < 30) return K.t(`${days}d`, `${days} дн`)
-    return K.t(`${Math.floor(days / 30)}mo`, `${Math.floor(days / 30)} мес`)
+    if (days < 30) return `${days}d`
+    return `${Math.floor(days / 30)}mo`
   }
 
   K.duration = function duration(seconds) {
     const total = Math.max(0, Math.round(seconds))
-    if (total < 60) return K.t(`${total}s`, `${total} с`)
+    if (total < 60) return `${total}s`
     const minutes = Math.floor(total / 60)
     const rest = total % 60
-    return K.t(`${minutes}m ${rest}s`, `${minutes} мин ${rest} с`)
+    return `${minutes}m ${rest}s`
   }
 
   K.baseName = (value) => String(value || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || String(value || "")
@@ -182,7 +184,7 @@
     })
 
     dialog.append(
-      K.h("div", { class: "modal-head" }, K.h("h2", {}, title), K.h("button", { class: "icon-btn", type: "button", "aria-label": K.t("Close", "Закрыть"), onclick: close }, K.icon("x"))),
+      K.h("div", { class: "modal-head" }, K.h("h2", {}, title), K.h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: close }, K.icon("x"))),
       K.h("div", { class: "modal-body" }, body),
       buttons.length ? K.h("div", { class: "modal-actions" }, buttons) : null,
     )
@@ -204,8 +206,8 @@
         title,
         body: K.h("p", { class: "modal-text" }, text),
         actions: [
-          { label: K.t("Cancel", "Отмена"), onClick: () => finish(false) },
-          { label: confirmLabel || K.t("Continue", "Продолжить"), kind: danger ? "danger" : "primary", onClick: () => finish(true) },
+          { label: "Cancel", onClick: () => finish(false) },
+          { label: confirmLabel || "Continue", kind: danger ? "danger" : "primary", onClick: () => finish(true) },
         ],
         onClose: () => finish(false),
       })
@@ -261,24 +263,28 @@
     return node
   }
 
-  // A menu item row for popovers.
-  K.menuItem = function menuItem({ icon, label, hint, active = false, danger = false, onClick, disabled = false }) {
+  // A menu item row for popovers. With `description` it is the two-line form
+  // (title over muted text); `checked` shows a tick; `warn` colours it orange.
+  K.menuItem = function menuItem({ icon, iconNode, label, hint, description, active = false, checked = false, danger = false, warn = false, keepOpen = false, onClick, disabled = false }) {
+    const mark = active || checked ? K.icon("check", 15) : null
+    const body = description
+      ? K.h("span", { class: "menu-texts" }, K.h("span", { class: "menu-label" }, label), K.h("span", { class: "menu-hint" }, description))
+      : [K.h("span", { class: "menu-label" }, label), hint ? K.h("span", { class: "menu-hint" }, hint) : K.h("span", { class: "grow" })]
     return K.h(
       "button",
-      { class: `menu-item${active ? " is-active" : ""}${danger ? " is-danger" : ""}`, type: "button", role: "menuitem", disabled, onclick: () => { K.closePopover(); onClick?.() } },
-      icon ? K.icon(icon, 15) : K.h("span", { class: "icon-gap" }),
-      K.h("span", { class: "menu-label" }, label),
-      hint ? K.h("span", { class: "menu-hint" }, hint) : null,
-      active ? K.icon("check", 14) : null,
+      { class: `menu-item${description ? " is-two" : ""}${danger ? " is-danger" : ""}${warn ? " is-warn" : ""}`, type: "button", role: "menuitem", disabled, onclick: () => { if (!keepOpen) K.closePopover(); onClick?.() } },
+      icon ? K.icon(icon, 16) : iconNode || K.h("span", { class: "icon-gap" }),
+      body,
+      mark,
     )
   }
 
   K.copyText = async function copyText(text) {
     try {
       await navigator.clipboard.writeText(text)
-      K.toast(K.t("Copied", "Скопировано"), { ms: 1600 })
+      K.toast("Copied", { ms: 1600 })
     } catch {
-      K.toast(K.t("Could not copy", "Не удалось скопировать"), { kind: "error" })
+      K.toast("Could not copy", { kind: "error" })
     }
   }
 

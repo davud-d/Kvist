@@ -3,59 +3,59 @@
 
 ;(function definePages(root) {
   const K = (root.K = root.K || {})
-  const { h, t } = K
+  const { h } = K
 
   function pageHeader(title, subtitle, ...actions) {
     return h("header", { class: "page-head" }, h("div", {}, h("h1", {}, title), subtitle ? h("p", { class: "page-sub" }, subtitle) : null), h("div", { class: "page-actions" }, actions))
   }
 
-  function loading() {
-    return h("div", { class: "panel-empty" }, h("span", { class: "spinner" }))
-  }
-
-  function failure(message) {
-    return h("div", { class: "card error-card" }, K.icon("alert", 15), h("span", {}, message))
-  }
+  const loading = () => h("div", { class: "panel-empty" }, h("span", { class: "spinner" }))
+  const failure = (message) => h("div", { class: "card error-card" }, K.icon("alert", 15), h("span", {}, message))
+  const heading = (text) => h("h2", { class: "group-heading" }, text)
+  const card = (...rows) => h("div", { class: "group-card" }, rows)
 
   // --- Skills ------------------------------------------------------------------------------------
+  function itemRow(skill) {
+    const side = h("div", { class: "item-side" },
+      skill.approved_here ? h("span", { class: "badge is-ok" }, "Approved here") : null,
+      !skill.available ? h("span", { class: "badge is-warn" }, skill.reason || "Unavailable") : null,
+    )
+    return h("div", { class: `item-row${skill.available ? "" : " is-dim"}`, title: (skill.capabilities || []).join(", ") },
+      h("span", { class: "item-icon" }, K.icon("sparkle", 20)),
+      h("div", { class: "item-main" }, h("div", { class: "item-name" }, skill.name), h("div", { class: "item-desc" }, skill.summary)),
+      side,
+    )
+  }
+
   async function skills(page) {
-    page.replaceChildren(pageHeader(t("Skills", "Навыки"), t("Packages that give Kvist new tools: a browser, an app screen, design checks and more.", "Пакеты, которые дают Kvist новые инструменты: браузер, экран приложений, проверка дизайна и другое.")), loading())
+    page.classList.add("is-wide")
+    const title = "Skills"
+    const subtitle = "Packages that give Kvist new tools: a browser, an app screen, design checks and more."
+    page.replaceChildren(pageHeader(title, subtitle), loading())
     let result
     try {
       result = await root.kvist.skills()
     } catch (error) {
-      page.replaceChildren(pageHeader(t("Skills", "Навыки")), failure(error.message))
+      page.replaceChildren(pageHeader(title), failure(error.message))
       return
     }
-    const grid = h("div", { class: "card-grid" })
-    for (const skill of result.skills || []) {
-      const chips = (skill.capabilities || []).slice(0, 6).map((capability) => h("span", { class: "chip-static" }, capability))
-      grid.append(h(
-        "article",
-        { class: `skill-card${skill.available ? "" : " is-unavailable"}` },
-        h("div", { class: "skill-top" }, K.icon("sparkle", 16), h("h3", {}, skill.name), h("span", { class: "card-meta" }, `v${skill.version}`)),
-        h("p", { class: "skill-summary" }, skill.summary),
-        h("div", { class: "chip-row" }, chips),
-        h(
-          "div",
-          { class: "skill-foot" },
-          h("span", { class: `badge ${skill.available ? "is-ok" : "is-warn"}` }, skill.available ? t("Available", "Доступен") : skill.reason || t("Unavailable", "Недоступен")),
-          skill.approved_here ? h("span", { class: "badge is-ok" }, t("Approved here", "Разрешён здесь")) : h("span", { class: "badge" }, t("Asks when used", "Спросит при запуске")),
-          skill.source?.origin ? h("span", { class: "badge" }, skill.source.origin) : null,
-        ),
-      ))
-    }
+    const all = result.skills || []
+    const ready = all.filter((skill) => skill.available)
+    const blocked = all.filter((skill) => !skill.available)
     page.replaceChildren(
-      pageHeader(t("Skills", "Навыки"), t("Packages that give Kvist new tools: a browser, an app screen, design checks and more.", "Пакеты, которые дают Kvist новые инструменты: браузер, экран приложений, проверка дизайна и другое.")),
-      (result.skills || []).length ? grid : h("div", { class: "panel-empty" }, t("No skills installed.", "Навыков нет.")),
-      h("p", { class: "page-foot" }, t("Install, approve or remove skills with ", "Установка, разрешение и удаление навыков: "), h("code", {}, "kvist --skill-op …"), t(" (see docs/SKILLS.md).", " (см. docs/SKILLS.md).")),
+      pageHeader(title, subtitle),
+      heading(`Installed (${ready.length})`),
+      ready.length ? h("div", { class: "item-grid" }, ready.map(itemRow)) : h("div", { class: "panel-empty" }, "No skills installed."),
+      blocked.length ? [heading(`Unavailable (${blocked.length})`), h("div", { class: "item-grid" }, blocked.map(itemRow))] : null,
+      h("p", { class: "page-foot" }, "Install, approve or remove skills with ", h("code", {}, "kvist --skill-op …"), " (see docs/SKILLS.md)."),
     )
   }
 
   // --- Memory -------------------------------------------------------------------------------------
   async function memory(page) {
-    const title = t("Memory", "Память")
-    const subtitle = t("What Kvist remembers about you and your projects. Everything here is yours to read and delete.", "Что Kvist помнит о тебе и твоих проектах. Всё это можно читать и удалять.")
+    page.classList.remove("is-wide")
+    const title = "Memory"
+    const subtitle = "What Kvist remembers about you and your projects. Everything here is yours to read and delete."
     page.replaceChildren(pageHeader(title, subtitle), loading())
     let data
     try {
@@ -65,22 +65,20 @@
       return
     }
     const stores = data.status?.stores || {}
-    const status = h(
-      "div",
-      { class: "stat-row" },
-      h("div", { class: "stat" }, h("b", {}, stores.user?.total ?? 0), h("span", {}, t("about you", "о тебе"))),
-      h("div", { class: "stat" }, h("b", {}, stores.workspace?.total ?? 0), h("span", {}, t("about this project", "об этом проекте"))),
-      h("div", { class: "stat" }, h("b", {}, data.status?.paused ? t("paused", "пауза") : t("on", "включена")), h("span", {}, t("memory", "память"))),
+    const stats = h("div", { class: "stat-row" },
+      h("div", { class: "stat" }, h("b", {}, stores.user?.total ?? 0), h("span", {}, "about you")),
+      h("div", { class: "stat" }, h("b", {}, stores.workspace?.total ?? 0), h("span", {}, "about this project")),
+      h("div", { class: "stat" }, h("b", {}, data.status?.paused ? "paused" : "on"), h("span", {}, "memory")),
     )
-    const list = h("div", { class: "memory-list" })
+    const list = h("div", { class: "group-card" })
     const render = () => {
       K.clear(list)
       const records = data.records.filter((record) => record.status === "active")
-      if (!records.length) list.append(h("div", { class: "panel-empty" }, t("Nothing remembered yet.", "Пока ничего не запомнено.")))
+      if (!records.length) list.append(h("div", { class: "panel-empty" }, "Nothing remembered yet."))
       for (const record of records) {
-        const forget = h("button", { class: "btn small", type: "button" }, K.icon("trash", 13), t("Forget", "Забыть"))
+        const forget = h("button", { class: "btn small", type: "button" }, K.icon("trash", 13), "Forget")
         forget.addEventListener("click", async () => {
-          if (!(await K.confirm({ title: t("Forget this?", "Забыть это?"), text: record.content, confirmLabel: t("Forget", "Забыть"), danger: true }))) return
+          if (!(await K.confirm({ title: "Forget this?", text: record.content, confirmLabel: "Forget", danger: true }))) return
           try {
             await root.kvist.memoryForget(record.id)
             data.records = data.records.filter((entry) => entry.id !== record.id)
@@ -89,25 +87,23 @@
             K.toast(error.message, { kind: "error" })
           }
         })
-        list.append(h(
-          "article",
-          { class: "memory-card" },
+        list.append(h("article", { class: "memory-card" },
           h("p", { class: "memory-text" }, record.content),
-          h("div", { class: "memory-foot" }, h("span", { class: "badge" }, record.scope === "user" ? t("about you", "о тебе") : t("project", "проект")), h("span", { class: "badge" }, record.kind), record.topic ? h("span", { class: "badge" }, record.topic) : null, h("span", { class: "grow" }), forget),
+          h("div", { class: "memory-foot" }, h("span", { class: "badge" }, record.scope === "user" ? "about you" : "project"), h("span", { class: "badge" }, record.kind), record.topic ? h("span", { class: "badge" }, record.topic) : null, h("span", { class: "grow" }), forget),
         ))
       }
     }
     render()
-    page.replaceChildren(pageHeader(title, subtitle), status, list)
+    page.replaceChildren(pageHeader(title, subtitle), stats, list)
   }
 
   // --- Settings -----------------------------------------------------------------------------------
   const SECTIONS = [
-    { id: "general", icon: "sliders", label: () => t("General", "Общие") },
-    { id: "models", icon: "key", label: () => t("Models & providers", "Модели и провайдеры") },
-    { id: "behavior", icon: "bolt", label: () => t("Agent behavior", "Поведение агента") },
-    { id: "integrations", icon: "plug", label: () => t("Integrations", "Интеграции") },
-    { id: "data", icon: "shield", label: () => t("Data & about", "Данные и о программе") },
+    { id: "general", icon: "gear", label: "General" },
+    { id: "models", icon: "key", label: "Models & providers" },
+    { id: "behavior", icon: "bolt", label: "Agent behavior" },
+    { id: "integrations", icon: "plug", label: "Integrations" },
+    { id: "data", icon: "shield", label: "Data & about" },
   ]
 
   function settingRow(label, description, control) {
@@ -133,19 +129,19 @@
     return node
   }
 
-  function generalSection() {
-    const theme = K.store.get("theme", "system")
-    return h(
-      "div",
-      { class: "settings-block" },
-      settingRow(t("Language", "Язык"), t("The interface language. Kvist answers in the language you write in.", "Язык интерфейса. Kvist отвечает на том языке, на котором ты пишешь."), select([["en", "English"], ["ru", "Русский"]], K.lang, (value) => { K.store.set("lang", value); root.location.reload() })),
-      settingRow(t("Theme", "Тема"), "", select([["system", t("System", "Системная")], ["light", t("Light", "Светлая")], ["dark", t("Dark", "Тёмная")]], theme, (value) => { K.store.set("theme", value); K.applyTheme() })),
-      settingRow(t("Show agent debug messages", "Показывать отладку агента"), t("Adds the core's diagnostic notes to the thread.", "Добавляет в тред диагностические заметки ядра."), toggle(K.store.get("debug") === "1", (on) => K.store.set("debug", on ? "1" : "0"))),
+  function generalSection(ctx) {
+    return h("div", {},
+      heading("Permissions"),
+      card(settingRow("Ask before risky commands", "Kvist asks you before running a risky command or overwriting a file. Off: risky commands are refused without asking.", toggle(ctx.approvalMode() === "ask", (on) => ctx.setApprovalMode(on ? "ask" : "deny")))),
+      heading("Appearance"),
+      card(settingRow("Theme", "", select([["system", "System"], ["light", "Light"], ["dark", "Dark"]], K.store.get("theme", "system"), (value) => { K.store.set("theme", value); K.applyTheme() }))),
+      heading("Diagnostics"),
+      card(settingRow("Show agent debug messages", "Adds the core's diagnostic notes to the thread.", toggle(K.store.get("debug") === "1", (on) => K.store.set("debug", on ? "1" : "0")))),
     )
   }
 
   async function modelsSection(ctx) {
-    const box = h("div", { class: "settings-block" }, loading())
+    const box = h("div", {}, loading())
     let info
     try {
       info = await ctx.refreshConfig()
@@ -158,52 +154,94 @@
       info = await ctx.refreshConfig()
       box.replaceChildren(...build())
     }
-    const build = () => {
-      const nodes = []
-      nodes.push(h("p", { class: "page-sub" }, t(`Saved default: ${info.saved_provider || "none"}. Pick a provider and models per task from the box under the message field.`, `Сохранённый по умолчанию: ${info.saved_provider || "нет"}. Провайдера и модели для задачи выбирай в панели под полем ввода.`)))
-      const all = [...(info.providers || []), ...(info.custom_providers || [])]
-      const connected = all.filter((provider) => provider.has_credentials)
-      const rest = all.filter((provider) => !provider.has_credentials)
-      nodes.push(h("h3", { class: "group-title" }, t(`Connected (${connected.length})`, `Подключены (${connected.length})`)), ...connected.map(providerRow))
-      if (rest.length) {
-        const more = h("details", { class: "more-providers" }, h("summary", {}, t(`Not connected (${rest.length})`, `Не подключены (${rest.length})`)), ...rest.map(providerRow))
-        more.open = moreOpen ?? connected.length === 0
-        more.addEventListener("toggle", () => { moreOpen = more.open })
-        nodes.push(more)
-      }
-      nodes.push(h("div", { class: "settings-actions" }, h("button", { class: "btn", type: "button", onclick: () => ctx.addProvider(redraw) }, K.icon("plus", 14), t("Add a custom provider", "Добавить свой провайдер"))))
-      return nodes
+
+    // A provider is a parent row (logo, name, status, action); its models are the children.
+    const expanded = new Set()
+
+    function modelsOf(provider) {
+      const roleOf = (value) => ["fast", "smart"].filter((role) => (provider.saved_models?.[role] || provider.defaults?.[role]) === value)
+      const listed = provider.options?.length
+        ? provider.options.map((option) => ({ value: option.value, label: option.label || option.value, description: option.description || "", icon: option.icon || provider.model_icons?.[option.value] || "" }))
+        : [...new Set([provider.defaults?.fast, provider.defaults?.smart, provider.saved_models?.fast, provider.saved_models?.smart].filter(Boolean))]
+          .map((value) => ({ value, label: value, description: "", icon: provider.model_icons?.[value] || "" }))
+      return listed.map((model) => ({ ...model, roles: roleOf(model.value) }))
+    }
+
+    function modelRow(provider, model) {
+      return h("div", { class: "model-row" },
+        K.brand(model.icon || provider.icon, model.label, 22),
+        h("div", { class: "model-text" },
+          h("div", { class: "model-label" }, model.label),
+          model.label !== model.value ? h("div", { class: "model-id" }, model.value) : null,
+          model.description ? h("div", { class: "model-desc" }, model.description) : null,
+        ),
+        model.roles.map((role) => h("span", { class: "badge" }, role === "fast" ? "fast model" : "smart model")),
+      )
     }
 
     function providerRow(provider) {
       const ready = provider.has_credentials
-      const status = h("span", { class: `badge ${ready ? "is-ok" : "is-warn"}` }, ready ? (provider.auth_type === "oauth" ? t("Signed in", "Вход выполнен") : t("Key saved", "Ключ сохранён")) : (provider.auth_type === "oauth" ? t("Not signed in", "Нет входа") : t("No key", "Нет ключа")))
-      const actions = h("div", { class: "row-actions" })
+      const status = h("span", { class: `badge ${ready ? "is-ok" : "is-warn"}` }, ready ? (provider.auth_type === "oauth" ? "Signed in" : "Key saved") : (provider.auth_type === "oauth" ? "Not signed in" : "No key"))
+      const actions = h("div", { class: "item-side" })
       if (provider.auth_type === "oauth") {
-        const button = h("button", { class: "btn small", type: "button" }, ready ? t("Sign out", "Выйти") : t("Sign in with ChatGPT", "Войти через ChatGPT"))
+        const button = h("button", { class: "btn small", type: "button" }, ready ? "Sign out" : "Sign in with ChatGPT")
         button.addEventListener("click", async () => {
           button.disabled = true
-          button.textContent = t("Waiting for the browser…", "Жду браузер…")
+          button.textContent = "Waiting for the browser…"
           try {
             await (ready ? root.kvist.chatgptLogout() : root.kvist.chatgptLogin())
-            await redraw()
           } catch (error) {
             K.toast(error.message, { kind: "error" })
-            await redraw()
           }
+          await redraw()
         })
         actions.append(button)
       } else if (provider.custom) {
-        actions.append(h("button", { class: "btn small", type: "button", onclick: () => deleteCustom(provider) }, K.icon("trash", 13), t("Delete", "Удалить")))
+        actions.append(h("button", { class: "btn small", type: "button", onclick: () => deleteCustom(provider) }, K.icon("trash", 13), "Delete"))
       } else {
-        actions.append(h("button", { class: "btn small", type: "button", onclick: () => keyDialog(provider) }, K.icon("key", 13), ready ? t("Replace key", "Заменить ключ") : t("Add key", "Добавить ключ")))
+        actions.append(h("button", { class: "btn small", type: "button", onclick: () => keyDialog(provider) }, K.icon("key", 13), ready ? "Replace key" : "Add key"))
       }
-      const models = provider.saved_models?.smart || provider.defaults?.smart || ""
-      return h("div", { class: "provider-row" }, h("div", { class: "provider-main" }, h("div", { class: "provider-name" }, provider.label), models ? h("div", { class: "provider-models" }, models) : null), status, actions)
+      const models = modelsOf(provider)
+      const open = expanded.has(provider.id)
+      const toggleButton = h("button", { class: "provider-toggle", type: "button", "aria-expanded": String(open), "aria-label": `Models of ${provider.label}`, title: "Models" }, K.icon("chevronRight", 15))
+      toggleButton.addEventListener("click", () => {
+        if (expanded.has(provider.id)) expanded.delete(provider.id)
+        else expanded.add(provider.id)
+        box.replaceChildren(...build())
+      })
+      const summary = models.length ? `${models.length} model${models.length > 1 ? "s" : ""}` : provider.custom ? provider.base_url || "" : "Models are set per task"
+      const row = h("div", { class: "provider-row" },
+        toggleButton,
+        h("span", { class: "provider-tile" }, K.brand(provider.icon, provider.label, 24)),
+        h("div", { class: "provider-main" }, h("div", { class: "provider-name" }, provider.label), h("div", { class: "provider-models" }, summary)),
+        status,
+        actions,
+      )
+      const wrapper = h("div", { class: `provider${open ? " is-open" : ""}` }, row)
+      if (open) {
+        wrapper.append(h("div", { class: "provider-models-list" }, models.length ? models.map((model) => modelRow(provider, model)) : h("div", { class: "model-empty" }, "No models listed. Type the ids you want in the box under the message field.")))
+      }
+      return wrapper
+    }
+
+    const build = () => {
+      const all = [...(info.providers || []), ...(info.custom_providers || [])]
+      const connected = all.filter((provider) => provider.has_credentials)
+      const rest = all.filter((provider) => !provider.has_credentials)
+      const nodes = [h("p", { class: "page-sub" }, `Saved default: ${info.saved_provider || "none"}. Pick a provider, models and role for a task in the box under the message field.`)]
+      nodes.push(heading(`Connected (${connected.length})`), card(...connected.map(providerRow)))
+      if (rest.length) {
+        const more = h("details", { class: "more-providers" }, h("summary", {}, `Not connected (${rest.length})`), card(...rest.map(providerRow)))
+        more.open = moreOpen ?? connected.length === 0
+        more.addEventListener("toggle", () => { moreOpen = more.open })
+        nodes.push(more)
+      }
+      nodes.push(h("div", { class: "settings-actions" }, h("button", { class: "btn", type: "button", onclick: () => ctx.addProvider(redraw) }, K.icon("plus", 14), "Add a custom provider")))
+      return nodes
     }
 
     async function deleteCustom(provider) {
-      if (!(await K.confirm({ title: t("Delete this provider?", "Удалить провайдера?"), text: provider.label, confirmLabel: t("Delete", "Удалить"), danger: true }))) return
+      if (!(await K.confirm({ title: "Delete this provider?", text: provider.label, confirmLabel: "Delete", danger: true }))) return
       try {
         await root.kvist.deleteCustomProvider(provider.id)
         await redraw()
@@ -214,15 +252,15 @@
 
     function keyDialog(provider) {
       const key = h("input", { class: "field-input", type: "password", autocomplete: "off", placeholder: "API key", "aria-label": "API key" })
-      const model = provider.requires_manual_models ? h("input", { class: "field-input", placeholder: t("Model id used for every role", "Id модели для всех ролей") }) : null
+      const model = provider.requires_manual_models ? h("input", { class: "field-input", placeholder: "Model id used for every role" }) : null
       const error = h("div", { class: "field-hint is-warn" })
       K.modal({
-        title: t(`${provider.label}: API key`, `${provider.label}: ключ API`),
-        body: h("div", { class: "form" }, h("p", { class: "modal-text" }, t("The key is stored in ~/.kvist/config.json and also becomes the saved default provider.", "Ключ хранится в ~/.kvist/config.json, а провайдер становится сохранённым по умолчанию.")), h("label", { class: "field" }, h("span", { class: "field-label" }, t("API key", "Ключ API")), key), model ? h("label", { class: "field" }, h("span", { class: "field-label" }, t("Model", "Модель")), model) : null, error),
+        title: `${provider.label}: API key`,
+        body: h("div", { class: "form" }, h("p", { class: "modal-text" }, "The key is stored in ~/.kvist/config.json and also becomes the saved default provider."), h("label", { class: "field" }, h("span", { class: "field-label" }, "API key"), key), model ? h("label", { class: "field" }, h("span", { class: "field-label" }, "Model"), model) : null, error),
         actions: [
-          { label: t("Cancel", "Отмена") },
+          { label: "Cancel" },
           {
-            label: t("Save", "Сохранить"),
+            label: "Save",
             kind: "primary",
             keepOpen: true,
             onClick: async (close) => {
@@ -245,7 +283,7 @@
   }
 
   async function behaviorSection() {
-    const box = h("div", { class: "settings-block" }, loading())
+    const box = h("div", {}, loading())
     let settings
     try {
       settings = (await root.kvist.getApiSettings()).settings || []
@@ -269,14 +307,15 @@
       }
       return settingRow(setting.label, `${setting.description}${setting.unit ? ` (${setting.unit})` : ""}`, control)
     })
-    const save = h("button", { class: "btn primary", type: "button" }, t("Save", "Сохранить"))
+    const save = h("button", { class: "btn primary", type: "button" }, "Save")
     const message = h("span", { class: "field-hint" })
     save.addEventListener("click", async () => {
       save.disabled = true
       message.textContent = ""
+      message.classList.remove("is-warn")
       try {
         await root.kvist.updateApiSettings(values)
-        message.textContent = t("Saved. It applies to the next task.", "Сохранено. Применится к следующей задаче.")
+        message.textContent = "Saved. It applies to the next task."
       } catch (error) {
         message.textContent = error.message
         message.classList.add("is-warn")
@@ -284,18 +323,24 @@
         save.disabled = false
       }
     })
-    box.replaceChildren(...rows, h("div", { class: "settings-actions" }, save, message))
+    box.replaceChildren(card(...rows), h("div", { class: "settings-actions" }, save, message))
     return box
   }
 
   async function integrationsSection() {
-    const box = h("div", { class: "settings-block" }, loading())
+    const box = h("div", {}, loading())
     try {
       const [mcp, connections] = await Promise.all([root.kvist.mcpServers(), root.kvist.connections()])
-      const list = (title, entries, empty, hint) => h("section", { class: "integration" }, h("h3", {}, title), entries.length ? entries.map((entry) => h("div", { class: "provider-row" }, h("div", { class: "provider-main" }, h("div", { class: "provider-name" }, entry.name || entry.id || JSON.stringify(entry)), entry.base_url || entry.command ? h("div", { class: "provider-models" }, entry.base_url || [entry.command, ...(entry.args || [])].join(" ")) : null))) : h("div", { class: "panel-empty small" }, empty), h("p", { class: "page-foot" }, hint))
+      const list = (title, entries, empty, hint) => h("div", {},
+        heading(title),
+        entries.length
+          ? card(...entries.map((entry) => h("div", { class: "provider-row" }, h("div", { class: "provider-main" }, h("div", { class: "provider-name" }, entry.name || entry.id || JSON.stringify(entry)), entry.base_url || entry.command ? h("div", { class: "provider-models" }, entry.base_url || [entry.command, ...(entry.args || [])].join(" ")) : null))))
+          : card(h("div", { class: "panel-empty small" }, empty)),
+        h("p", { class: "page-foot" }, hint),
+      )
       box.replaceChildren(
-        list(t("MCP servers", "MCP-серверы"), mcp.servers || [], t("No MCP servers connected.", "MCP-серверов нет."), [t("Add one with ", "Добавить: "), h("code", {}, "kvist --mcp-op add"), "."]),
-        list(t("Service connections", "Подключения к сервисам"), connections.connections || [], t("No connections saved.", "Подключений нет."), [t("Skills use these by name. Add with ", "Навыки используют их по имени. Добавить: "), h("code", {}, "kvist --connection-op add"), "."]),
+        list("MCP servers", mcp.servers || [], "No MCP servers connected.", ["Add one with ", h("code", {}, "kvist --mcp-op add"), "."]),
+        list("Service connections", connections.connections || [], "No connections saved.", ["Skills use these by name. Add with ", h("code", {}, "kvist --connection-op add"), "."]),
       )
     } catch (error) {
       box.replaceChildren(failure(error.message))
@@ -304,17 +349,17 @@
   }
 
   function dataSection(ctx) {
-    const reset = h("button", { class: "btn danger", type: "button", disabled: ctx.isRunning() }, K.icon("trash", 14), t("Reset all settings…", "Сбросить все настройки…"))
+    const reset = h("button", { class: "btn danger", type: "button", disabled: ctx.isRunning() }, K.icon("trash", 14), "Reset all settings…")
     reset.addEventListener("click", async () => {
-      if (!(await K.confirm({ title: t("Reset everything?", "Сбросить всё?"), text: t("This wipes ~/.kvist/config.json: every saved API key, custom provider and preference. It cannot be undone.", "Это удалит ~/.kvist/config.json: все ключи API, свои провайдеры и настройки. Отменить нельзя."), confirmLabel: t("Continue", "Продолжить"), danger: true }))) return
-      const input = h("input", { class: "field-input", placeholder: "reset", "aria-label": t("Type reset", "Введи reset") })
+      if (!(await K.confirm({ title: "Reset everything?", text: "This wipes ~/.kvist/config.json: every saved API key, custom provider and preference. It cannot be undone.", confirmLabel: "Continue", danger: true }))) return
+      const input = h("input", { class: "field-input", placeholder: "reset", "aria-label": "Type reset" })
       K.modal({
-        title: t("Final confirmation", "Последнее подтверждение"),
-        body: h("div", { class: "form" }, h("p", { class: "modal-text" }, t("Type “reset” to wipe the configuration.", "Введи «reset», чтобы стереть конфигурацию.")), input),
+        title: "Final confirmation",
+        body: h("div", { class: "form" }, h("p", { class: "modal-text" }, "Type “reset” to wipe the configuration."), input),
         actions: [
-          { label: t("Cancel", "Отмена") },
+          { label: "Cancel" },
           {
-            label: t("Wipe everything", "Стереть всё"),
+            label: "Wipe everything",
             kind: "danger",
             keepOpen: true,
             onClick: async (close) => {
@@ -324,7 +369,7 @@
                 K.store.set("run", "{}")
                 ctx.onReset()
                 close()
-                K.toast(t("Configuration wiped.", "Конфигурация стёрта."))
+                K.toast("Configuration wiped.")
               } catch (error) {
                 K.toast(error.message, { kind: "error" })
               }
@@ -334,60 +379,57 @@
       })
     })
     const shortcuts = [
-      ["Enter", t("send", "отправить")], ["Shift+Enter", t("new line", "новая строка")], ["Esc", t("pause the agent", "пауза агента")],
-      ["Ctrl+N", t("new thread", "новый тред")], ["Ctrl+K", t("search and commands", "поиск и команды")], ["Ctrl+B", t("toggle the sidebar", "боковая панель")],
-      ["Ctrl+J", t("commands drawer", "панель команд")], ["Ctrl+Shift+R", t("review panel", "панель Review")], ["Ctrl+,", t("settings", "настройки")],
+      ["Enter", "send"], ["Shift+Enter", "new line"], ["Esc", "pause the agent"],
+      ["Ctrl+N", "new thread"], ["Ctrl+K", "search"], ["Ctrl+O", "add a project folder"],
+      ["Alt+1…9", "open a recent thread"], ["Ctrl+B", "side panel"], ["Ctrl+J", "commands drawer"],
+      ["Ctrl+Shift+D", "review panel"], ["Ctrl+,", "settings"],
     ]
-    return h(
-      "div",
-      { class: "settings-block" },
-      settingRow(t("Reset configuration", "Сброс конфигурации"), t("Wipes saved keys, custom providers and preferences.", "Удаляет ключи, свои провайдеры и настройки."), reset),
-      h("section", { class: "integration" }, h("h3", {}, t("About", "О программе")), h("p", { class: "page-foot" }, `Kvist · ${t("protocol", "протокол")} v${ctx.protocolVersion} · ${ctx.workspace}`)),
-      h("section", { class: "integration" }, h("h3", {}, t("Keyboard", "Клавиши")), h("div", { class: "kbd-grid" }, shortcuts.map(([key, label]) => h("div", { class: "kbd-row" }, h("kbd", {}, key), h("span", {}, label))))),
+    return h("div", {},
+      card(settingRow("Reset configuration", "Wipes saved keys, custom providers and preferences.", reset)),
+      heading("About"),
+      card(h("div", { class: "setting" }, h("div", { class: "setting-desc" }, `Kvist · protocol v${ctx.protocolVersion} · ${ctx.workspace}`))),
+      heading("Keyboard"),
+      card(h("div", { class: "kbd-grid" }, shortcuts.map(([key, label]) => h("div", { class: "kbd-row" }, h("kbd", {}, key), h("span", {}, label))))),
     )
   }
 
+  // Draws one settings section into the page; the section list lives in the side panel.
   async function settings(page, ctx, sectionId) {
+    page.classList.remove("is-wide")
     const id = SECTIONS.some((section) => section.id === sectionId) ? sectionId : "general"
-    const nav = h("nav", { class: "settings-nav", "aria-label": t("Settings sections", "Разделы настроек") })
-    for (const section of SECTIONS) {
-      const button = h("button", { class: `settings-tab${section.id === id ? " is-active" : ""}`, type: "button" }, K.icon(section.icon, 15), section.label())
-      button.addEventListener("click", () => ctx.openSettings(section.id))
-      nav.append(button)
-    }
-    const content = h("div", { class: "settings-content" }, loading())
-    page.replaceChildren(pageHeader(t("Settings", "Настройки")), h("div", { class: "settings-layout" }, nav, content))
+    const label = SECTIONS.find((entry) => entry.id === id).label
+    page.replaceChildren(pageHeader(label), loading())
     const builders = {
-      general: () => generalSection(),
+      general: () => generalSection(ctx),
       models: () => modelsSection(ctx),
       behavior: () => behaviorSection(),
       integrations: () => integrationsSection(),
       data: () => dataSection(ctx),
     }
     const section = await builders[id]()
-    content.replaceChildren(h("h2", { class: "settings-title" }, SECTIONS.find((entry) => entry.id === id).label()), section)
+    page.replaceChildren(pageHeader(label), section)
   }
 
   // --- the custom provider form ---------------------------------------------------------------------------
   function customProviderDialog(onDone) {
     const field = (label, control, hint) => h("label", { class: "field" }, h("span", { class: "field-label" }, label), control, hint ? h("span", { class: "field-hint" }, hint) : null)
     const name = h("input", { class: "field-input", placeholder: "my-gateway", autocomplete: "off" })
-    const label = h("input", { class: "field-input", placeholder: t("Display name (optional)", "Название (необязательно)") })
+    const label = h("input", { class: "field-input", placeholder: "Display name (optional)" })
     const protocol = h("select", { class: "field-input" }, h("option", { value: "openai" }, "OpenAI-compatible"), h("option", { value: "anthropic" }, "Anthropic-compatible"))
     const baseUrl = h("input", { class: "field-input", placeholder: "https://api.example.com/v1", autocomplete: "off" })
     const apiKey = h("input", { class: "field-input", type: "password", autocomplete: "off", placeholder: "API key" })
-    const fast = h("input", { class: "field-input", placeholder: t("fast model id", "id быстрой модели") })
-    const smart = h("input", { class: "field-input", placeholder: t("smart model id (empty = same)", "id умной модели (пусто = та же)") })
+    const fast = h("input", { class: "field-input", placeholder: "fast model id" })
+    const smart = h("input", { class: "field-input", placeholder: "smart model id (empty = same)" })
     const streaming = h("input", { type: "checkbox", checked: true })
     const error = h("div", { class: "field-hint is-warn" })
     K.modal({
-      title: t("Add a custom provider", "Добавить свой провайдер"),
+      title: "Add a custom provider",
       wide: true,
-      body: h("div", { class: "form" }, field(t("Name", "Имя"), name), field(t("Label", "Подпись"), label), field(t("Protocol", "Протокол"), protocol), field("Base URL", baseUrl), field(t("API key", "Ключ API"), apiKey), field(t("Fast model", "Быстрая модель"), fast), field(t("Smart model", "Умная модель"), smart), h("label", { class: "check" }, streaming, t("Stream answers", "Потоковые ответы")), error),
+      body: h("div", { class: "form" }, field("Name", name), field("Label", label), field("Protocol", protocol), field("Base URL", baseUrl), field("API key", apiKey), field("Fast model", fast), field("Smart model", smart), h("label", { class: "check" }, streaming, "Stream answers"), error),
       actions: [
-        { label: t("Cancel", "Отмена") },
+        { label: "Cancel" },
         {
-          label: t("Create", "Создать"),
+          label: "Create",
           kind: "primary",
           keepOpen: true,
           onClick: async (close) => {
@@ -407,5 +449,5 @@
     })
   }
 
-  K.pages = { skills, memory, settings, customProviderDialog }
+  K.pages = { skills, memory, settings, customProviderDialog, SECTIONS }
 })(typeof window !== "undefined" ? window : globalThis)

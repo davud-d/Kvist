@@ -1,11 +1,12 @@
 "use strict"
-// The left column: projects, each with its threads (Kvist sessions).
+// The side panel's thread lists: projects with their threads, then recent threads.
 
 ;(function defineSidebar(root) {
   const K = (root.K = root.K || {})
-  const { h, t } = K
+  const { h } = K
 
-  const THREADS_PER_PROJECT = 7
+  const THREADS_PER_PROJECT = 5
+  const RECENT_COUNT = 12
 
   function loadSet(key) {
     try {
@@ -16,10 +17,11 @@
   }
 
   class Sidebar {
-    // host: { onNewThread(path), onOpenThread(path, name), onDeleteThread(path, name), onOpenProject(path), onRemoveProject(path), onAddProject() }
+    // host: { onNewThread(path), onOpenThread(path, name), onDeleteThread(path, name, title), onOpenProject(path), onRemoveProject(path) }
     constructor(host) {
       this.host = host
-      this.list = document.getElementById("projects")
+      this.projectsEl = document.getElementById("projects")
+      this.recentEl = document.getElementById("recent")
       this.collapsed = loadSet("collapsed")
       this.showAll = new Set()
       this.state = { projects: [], workspace: "", activeSession: "", running: false, awaiting: false }
@@ -27,13 +29,17 @@
 
     render(state) {
       this.state = { ...this.state, ...state }
-      K.clear(this.list)
       const { projects } = this.state
-      if (!projects.length) {
-        this.list.append(h("div", { class: "side-empty" }, t("No projects yet. Add a folder to begin.", "Проектов пока нет. Добавь папку, чтобы начать.")))
-        return
-      }
-      for (const project of projects) this.list.append(this.renderProject(project))
+      K.clear(this.projectsEl)
+      K.clear(this.recentEl)
+      if (!projects.length) this.projectsEl.append(h("div", { class: "side-empty" }, "No projects yet."))
+      for (const project of projects) this.projectsEl.append(this.renderProject(project))
+
+      const recent = projects
+        .flatMap((project) => (project.status?.session_items || []).map((item) => ({ project, item })))
+        .sort((a, b) => Number(b.item.updated_at) - Number(a.item.updated_at))
+        .slice(0, RECENT_COUNT)
+      for (const { project, item } of recent) this.recentEl.append(this.renderThread(project, item, false))
     }
 
     toggleCollapsed(path) {
@@ -44,22 +50,21 @@
     }
 
     renderProject(project) {
-      const { workspace } = this.state
-      const isCurrent = project.path === workspace
+      const isCurrent = project.path === this.state.workspace
       const collapsed = this.collapsed.has(project.path)
-      const group = h("div", { class: `project${isCurrent ? " is-current" : ""}${project.available ? "" : " is-missing"}` })
+      const group = h("div", { class: `project${project.available ? "" : " is-missing"}` })
 
-      const menuButton = h("button", { class: "icon-btn small", type: "button", title: t("More", "Ещё"), "aria-label": t("Project menu", "Меню проекта") }, K.icon("sliders", 14))
+      const menuButton = h("button", { class: "icon-btn small", type: "button", title: "More", "aria-label": "Project menu" }, K.icon("sliders", 14))
       menuButton.addEventListener("click", (event) => {
         event.stopPropagation()
         const menu = h("div", { class: "menu" })
         menu.append(
-          K.menuItem({ icon: "folder", label: t("Open as current project", "Сделать текущим"), disabled: isCurrent || !project.available, onClick: () => this.host.onOpenProject(project.path) }),
-          K.menuItem({ icon: "x", label: t("Remove from the list", "Убрать из списка"), danger: true, onClick: () => this.host.onRemoveProject(project.path) }),
+          K.menuItem({ icon: "folder", label: "Make current", disabled: isCurrent || !project.available, onClick: () => this.host.onOpenProject(project.path) }),
+          K.menuItem({ icon: "x", label: "Remove from the list", danger: true, onClick: () => this.host.onRemoveProject(project.path) }),
         )
         K.popover(menuButton, menu, { align: "end" })
       })
-      const newButton = h("button", { class: "icon-btn small", type: "button", title: t("New thread in this project", "Новый тред в проекте"), "aria-label": t("New thread", "Новый тред"), disabled: !project.available }, K.icon("compose", 14))
+      const newButton = h("button", { class: "icon-btn small", type: "button", title: "New thread in this project", "aria-label": "New thread", disabled: !project.available }, K.icon("compose", 14))
       newButton.addEventListener("click", (event) => {
         event.stopPropagation()
         this.host.onNewThread(project.path)
@@ -68,8 +73,7 @@
       const head = h(
         "div",
         { class: "project-head", role: "button", tabindex: "0", title: project.path, "aria-expanded": String(!collapsed) },
-        K.icon(collapsed ? "chevronRight" : "chevronDown", 13),
-        K.icon("folder", 15),
+        K.icon(collapsed ? "folder" : "folderOpen", 17),
         h("span", { class: "project-name" }, K.baseName(project.path)),
         h("span", { class: "project-actions" }, newButton, menuButton),
       )
@@ -81,17 +85,15 @@
       group.append(head)
       if (collapsed) return group
 
-      const items = [...(project.status?.session_items || [])].sort((a, b) => Number(b.updated_at) - Number(a.updated_at))
       if (!project.available) {
-        group.append(h("div", { class: "side-empty" }, t("Folder not found", "Папка не найдена")))
+        group.append(h("div", { class: "side-empty" }, "Folder not found"))
         return group
       }
-      if (!items.length) group.append(h("div", { class: "side-empty" }, t("No threads yet", "Тредов пока нет")))
+      const items = [...(project.status?.session_items || [])].sort((a, b) => Number(b.updated_at) - Number(a.updated_at))
       const expanded = this.showAll.has(project.path)
-      const visible = expanded ? items : items.slice(0, THREADS_PER_PROJECT)
-      for (const item of visible) group.append(this.renderThread(project, item))
+      for (const item of expanded ? items : items.slice(0, THREADS_PER_PROJECT)) group.append(this.renderThread(project, item, true))
       if (items.length > THREADS_PER_PROJECT) {
-        const more = h("button", { class: "thread-more", type: "button" }, expanded ? t("Show less", "Свернуть") : t(`Show all ${items.length}`, `Показать все ${items.length}`))
+        const more = h("button", { class: "thread-more", type: "button" }, expanded ? "Show less" : "Show more")
         more.addEventListener("click", () => {
           if (expanded) this.showAll.delete(project.path)
           else this.showAll.add(project.path)
@@ -102,18 +104,18 @@
       return group
     }
 
-    renderThread(project, item) {
+    renderThread(project, item, nested) {
       const { workspace, activeSession, running, awaiting } = this.state
       const active = project.path === workspace && item.name === activeSession
-      const row = h("div", { class: `thread${active ? " is-active" : ""}`, role: "button", tabindex: "0", title: `${item.title}\n${item.name}` })
-      let trailing
-      if (active && awaiting) trailing = h("span", { class: "thread-flag", title: t("Waiting for you", "Ждёт тебя") })
-      else if (active && running) trailing = h("span", { class: "spinner small", title: t("Working", "Работает") })
-      else if (item.has_checkpoint) trailing = h("span", { class: "thread-flag is-paused", title: t("Unfinished task", "Незавершённая задача") })
-      else trailing = h("span", { class: "thread-time" }, K.timeAgo(item.updated_at))
-      row.append(h("span", { class: "thread-title" }, item.title || item.name), trailing)
+      const row = h("div", { class: `thread${active ? " is-active" : ""}${nested ? " is-nested" : ""}`, role: "button", tabindex: "0", title: `${item.title}\n${K.baseName(project.path)}` })
+      let trailing = null
+      if (active && awaiting) trailing = h("span", { class: "thread-flag", title: "Waiting for you" })
+      else if (active && running) trailing = h("span", { class: "spinner small", title: "Working" })
+      else if (item.has_checkpoint) trailing = h("span", { class: "thread-flag is-paused", title: "Unfinished task" })
+      row.append(h("span", { class: "thread-title" }, item.title || item.name))
+      if (trailing) row.append(trailing)
       if (!active) {
-        const remove = h("button", { class: "icon-btn small thread-delete", type: "button", title: t("Delete thread", "Удалить тред"), "aria-label": t("Delete thread", "Удалить тред") }, K.icon("trash", 13))
+        const remove = h("button", { class: "icon-btn small thread-delete", type: "button", title: "Delete thread", "aria-label": "Delete thread" }, K.icon("trash", 13))
         remove.addEventListener("click", (event) => {
           event.stopPropagation()
           this.host.onDeleteThread(project.path, item.name, item.title || item.name)

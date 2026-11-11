@@ -13,44 +13,54 @@
   </head>
   <body>
     <div id="app" class="app">
-      <!-- Sidebar -->
-      <aside id="sidebar" class="sidebar" aria-label="Navigation">
-        <div class="side-head">
-          <img class="brand-mark" src="kvist-mark.svg" alt="" />
-          <span class="brand-name">Kvist</span>
-          <button id="sidebar-toggle" class="icon-btn" type="button" aria-label="Hide sidebar" title="Ctrl+B">
-            <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></span>
-          </button>
+      <!-- Icon rail -->
+      <nav id="rail" class="rail" aria-label="Sections">
+        <button id="rail-threads" class="rail-btn" type="button" data-nav="thread" title="Threads" aria-label="Threads" data-icon="home"></button>
+        <button id="rail-skills" class="rail-btn" type="button" data-nav="skills" title="Skills" aria-label="Skills" data-icon="sparkle"></button>
+        <button id="rail-memory" class="rail-btn" type="button" data-nav="memory" title="Memory" aria-label="Memory" data-icon="memory"></button>
+        <span class="rail-sep"></span>
+        <button id="rail-review" class="rail-btn" type="button" title="Review changes (Ctrl+Shift+D)" aria-label="Review changes" data-icon="review"></button>
+        <button id="rail-commands" class="rail-btn" type="button" title="Commands (Ctrl+J)" aria-label="Commands" data-icon="terminal"></button>
+        <span class="grow"></span>
+        <button id="rail-settings" class="rail-btn" type="button" data-nav="settings" title="Settings (Ctrl+,)" aria-label="Settings" data-icon="gear"></button>
+      </nav>
+
+      <!-- Side panel: threads, or the settings sections -->
+      <aside id="panel" class="panel" aria-label="Navigation">
+        <div id="panel-threads" class="panel-body">
+          <div class="panel-head">
+            <button id="workspace-switch" class="panel-title" type="button" aria-label="Switch project"><span>Kvist</span><span data-icon="chevronDown"></span></button>
+            <span class="grow"></span>
+            <button id="nav-search" class="icon-btn" type="button" title="Search (Ctrl+K)" aria-label="Search" data-icon="search"></button>
+          </div>
+          <button id="nav-new" class="panel-row" type="button" title="New thread (Ctrl+N)"><span data-icon="compose"></span><span>New thread</span></button>
+          <div class="panel-scroll">
+            <div class="panel-label"><span>Projects</span><button id="add-project" class="icon-btn small" type="button" title="Add a project folder" aria-label="Add a project folder" data-icon="folderPlus"></button></div>
+            <div id="projects" class="projects"></div>
+            <div class="panel-label"><span>Recent</span></div>
+            <div id="recent" class="recent"></div>
+          </div>
         </div>
-        <nav class="side-nav">
-          <button id="nav-new" class="nav-item" type="button"><span class="nav-icon" data-icon="compose"></span><span class="nav-label" data-i18n="New thread|Новый тред"></span><kbd>Ctrl+N</kbd></button>
-          <button id="nav-search" class="nav-item" type="button"><span class="nav-icon" data-icon="search"></span><span class="nav-label" data-i18n="Search|Поиск"></span><kbd>Ctrl+K</kbd></button>
-          <button id="nav-skills" class="nav-item" type="button" data-nav="skills"><span class="nav-icon" data-icon="sparkle"></span><span class="nav-label" data-i18n="Skills|Навыки"></span></button>
-          <button id="nav-memory" class="nav-item" type="button" data-nav="memory"><span class="nav-icon" data-icon="memory"></span><span class="nav-label" data-i18n="Memory|Память"></span></button>
-        </nav>
-        <div class="side-section">
-          <span data-i18n="Projects|Проекты"></span>
-          <button id="add-project" class="icon-btn small" type="button" data-i18n-title="Add a project folder|Добавить папку проекта" data-icon="folderPlus"></button>
-        </div>
-        <div id="projects" class="projects"></div>
-        <div class="side-foot">
-          <button id="nav-settings" class="nav-item" type="button" data-nav="settings"><span class="nav-icon" data-icon="sliders"></span><span class="nav-label" data-i18n="Settings|Настройки"></span><kbd>Ctrl+,</kbd></button>
+        <div id="panel-settings" class="panel-body is-hidden">
+          <button id="settings-back" class="panel-row back" type="button"><span data-icon="arrowLeft"></span><span>Back to app</span></button>
+          <h2 class="panel-heading">Settings</h2>
+          <label class="search-field"><span data-icon="search"></span><input id="settings-search" type="search" placeholder="Search" aria-label="Search settings" /></label>
+          <nav id="settings-nav" class="settings-nav" aria-label="Settings sections"></nav>
         </div>
       </aside>
 
       <!-- Main column -->
       <main class="main">
         <header id="topbar" class="topbar">
-          <button id="sidebar-open" class="icon-btn only-collapsed" type="button" aria-label="Show sidebar" title="Ctrl+B" data-icon="sidebar"></button>
+          <button id="panel-toggle" class="icon-btn" type="button" aria-label="Toggle the side panel" title="Ctrl+B" data-icon="sidebar"></button>
           <div class="title-block">
+            <span id="thread-title-icon" class="is-hidden" data-icon="folder"></span>
             <h1 id="thread-title" class="topbar-title">New thread</h1>
             <span id="thread-project" class="thread-project"></span>
           </div>
           <div id="topbar-actions" class="topbar-actions">
-            <button id="open-folder" class="btn small ghost" type="button" data-i18n-title="Open the project folder|Открыть папку проекта"><span data-icon="folder"></span><span data-i18n="Open|Открыть"></span></button>
-            <button id="commit-btn" class="btn small ghost" type="button" disabled><span data-icon="branch"></span><span data-i18n="Commit|Коммит"></span></button>
-            <button id="drawer-toggle" class="btn small ghost icon-only" type="button" data-i18n-title="Commands (Ctrl+J)|Команды (Ctrl+J)" data-icon="terminal"></button>
-            <button id="review-toggle" class="btn small ghost" type="button" data-i18n-title="Review changes (Ctrl+Shift+D)|Изменения (Ctrl+Shift+D)"><span data-icon="review"></span><span data-i18n="Review|Изменения"></span><span class="review-counts"></span></button>
+            <button id="open-folder" class="icon-btn" type="button" title="Open the project folder" aria-label="Open the project folder" data-icon="folder"></button>
+            <button id="commit-btn" class="icon-btn" type="button" title="Commit changes" aria-label="Commit changes" data-icon="branch" disabled></button>
           </div>
         </header>
 
@@ -61,22 +71,23 @@
                 <div id="timeline-inner" class="timeline-inner"></div>
               </div>
               <div id="empty" class="empty"></div>
-              <button id="jump" class="jump is-hidden" type="button" aria-label="Jump to latest"><span data-icon="arrowDown"></span></button>
+              <button id="jump" class="jump is-hidden" type="button" aria-label="Jump to latest" data-icon="arrowDown"></button>
 
               <div id="dock" class="dock">
                 <div id="setup-bar" class="bar is-warn is-hidden">
                   <span data-icon="key"></span>
-                  <span data-i18n="Connect a model provider to start working.|Подключи провайдера моделей, чтобы начать."></span>
-                  <button id="setup-open" class="btn small primary" type="button" data-i18n="Open settings|Открыть настройки"></button>
+                  <span>Connect a model provider to start working.</span>
+                  <button id="setup-open" class="btn small primary" type="button">Open settings</button>
                 </div>
                 <div id="resume-bar" class="bar is-hidden"></div>
                 <div id="request-host" class="request-host is-hidden"></div>
                 <div id="closed-bar" class="bar is-closed is-hidden"></div>
                 <div class="composer-wrap">
                   <div id="suggest" class="suggest is-hidden" role="listbox"></div>
+                  <div id="strip" class="strip"></div>
                   <form id="composer" class="composer" autocomplete="off">
                     <div id="attachments" class="attachments is-hidden"></div>
-                    <textarea id="prompt" rows="1" spellcheck="true" aria-label="Message"></textarea>
+                    <textarea id="prompt" rows="1" spellcheck="true" aria-label="Message" placeholder="Ask Kvist anything"></textarea>
                     <div class="composer-row">
                       <div class="composer-left">
                         <button id="attach-btn" class="chip icon-only" type="button" aria-label="Attach" data-icon="plus"></button>
@@ -90,7 +101,6 @@
                       </div>
                     </div>
                   </form>
-                  <div id="envbar" class="envbar"></div>
                 </div>
               </div>
             </section>
@@ -100,7 +110,7 @@
             <section id="drawer" class="drawer" aria-label="Commands">
               <div class="drawer-head">
                 <span data-icon="terminal"></span>
-                <span class="drawer-title" data-i18n="Commands|Команды"></span>
+                <span class="drawer-title">Commands</span>
                 <button id="drawer-close" class="icon-btn small" type="button" aria-label="Close" data-icon="x"></button>
               </div>
               <div id="drawer-body" class="drawer-body"></div>
@@ -112,8 +122,8 @@
             <div class="review-inner">
               <div class="review-head">
                 <div class="tabs">
-                  <button class="tab" type="button" data-tab="agent" data-i18n="Agent changes|Правки агента"></button>
-                  <button class="tab" type="button" data-tab="git" data-i18n="Working tree|Рабочее дерево"></button>
+                  <button class="tab" type="button" data-tab="agent">Agent changes</button>
+                  <button class="tab" type="button" data-tab="git">Working tree</button>
                 </div>
                 <button id="review-close" class="icon-btn small" type="button" aria-label="Close" data-icon="x"></button>
               </div>
@@ -130,6 +140,7 @@
 
     <script src="../src/protocol-state.js"></script>
     <script src="js/util.js"></script>
+    <script src="js/providers.js"></script>
     <script src="js/chrome.js"></script>
     <script src="js/diff.js"></script>
     <script src="js/thread.js"></script>

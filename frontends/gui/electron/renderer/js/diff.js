@@ -83,9 +83,9 @@
 
   function statusLabel(status) {
     return {
-      added: K.t("new", "новый"),
-      deleted: K.t("deleted", "удалён"),
-      renamed: K.t("renamed", "переименован"),
+      added: "new",
+      deleted: "deleted",
+      renamed: "renamed",
     }[status] || ""
   }
 
@@ -105,7 +105,7 @@
       body.append(K.h("div", { class: "dl hunk" }, K.h("span", { class: "ln" }), K.h("span", { class: "ln" }), K.h("span", { class: "code" }, hunk.header)))
       for (const line of hunk.lines) {
         if (rendered >= MAX_RENDERED_LINES) {
-          const more = K.h("button", { class: "diff-more", type: "button" }, K.t("Show the rest of this file", "Показать остаток файла"))
+          const more = K.h("button", { class: "diff-more", type: "button" }, "Show the rest of this file")
           more.addEventListener("click", () => {
             const full = renderLines({ ...file, __all: true })
             body.replaceWith(full)
@@ -131,8 +131,8 @@
   }
 
   function renderBody(file) {
-    if (file.binary) return K.h("div", { class: "diff-note" }, K.t("Binary file", "Бинарный файл"))
-    if (!file.hunks.length) return K.h("div", { class: "diff-note" }, K.t("No textual changes", "Нет текстовых изменений"))
+    if (file.binary) return K.h("div", { class: "diff-note" }, "Binary file")
+    if (!file.hunks.length) return K.h("div", { class: "diff-note" }, "No textual changes")
     return renderLines(file)
   }
 

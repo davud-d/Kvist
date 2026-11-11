@@ -40,9 +40,10 @@ test("thinking comes before the answer it precedes", () => {
   thread.apply(ev("reasoning_chunk", { stream_id: "s", text: "hmm" }))
   thread.apply(ev("reasoning_commit", { stream_id: "s", duration_seconds: 4 }))
   thread.apply(ev("stream_chunk", { stream_id: "s", text: "A" }))
-  assert.deepEqual(kinds(thread), ["user", "thinking", "assistant"])
-  assert.equal(thread.items[1].done, true)
-  assert.equal(thread.items[1].seconds, 4)
+  assert.deepEqual(kinds(thread), ["user", "summary", "thinking", "assistant"])
+  const thinking = thread.items.find((item) => item.kind === "thinking")
+  assert.equal(thinking.done, true)
+  assert.equal(thinking.seconds, 4)
 })
 
 test("a final that only extends the streamed answer is the same message", () => {
@@ -106,14 +107,14 @@ test("a restart of a streamed field (line 0 after later lines) starts the text o
   thread.apply(ev("call_begin", { call_id: "c", tool: "write_file", path: "a" }))
   thread.apply(ev("call_stream", { call_id: "c", field: "content", line: 0, text: "one\ntwo" }))
   thread.apply(ev("call_stream", { call_id: "c", field: "content", line: 0, text: "retry" }))
-  assert.equal(thread.items[1].calls[0].writing.content, "retry")
+  assert.equal(thread.items.find((item) => item.kind === "work").calls[0].writing.content, "retry")
 })
 
 test("a step carries the model's words before its call", () => {
   const thread = new Thread()
   thread.addUser("do")
   thread.apply(ev("step", { call_id: "c", step: 1, action_type: "read_file", action_args: { path: "x" }, user_message: "Let me look.", batch_id: "b" }))
-  assert.deepEqual(kinds(thread), ["user", "assistant", "work"])
+  assert.deepEqual(kinds(thread), ["user", "summary", "assistant", "work"])
 })
 
 test("calls that speak (final_answer) draw no card", () => {
@@ -136,17 +137,37 @@ test("results are matched by step when no call_id came", () => {
   assert.equal(call.exitCode, 0)
 })
 
-test("ending a turn stops running calls and adds a summary before the answer", () => {
+test("a turn's work gets a header; ending the turn stops running calls and folds the work", () => {
   const thread = new Thread()
   thread.addUser("go", { ts: 100 })
-  thread.apply(ev("step", { call_id: "c", step: 1, action_type: "run_shell", action_args: { command: ["x"] } }))
+  thread.apply(ev("step", { call_id: "c", step: 1, action_type: "run_shell", action_args: { command: ["x"] }, user_message: "On it." }), 101)
   thread.apply(ev("stream_commit", { stream_id: "s", text: "Finished." }))
+  const header = thread.items.find((item) => item.kind === "summary")
+  assert.equal(header.live, true)
+  assert.equal(thread.isFolded(thread.items[2]), false, "nothing folds while the turn runs")
+
   thread.apply(ev("final", { message: "Finished.", outcome: "done" }), 175)
-  const call = thread.shellCalls()[0]
-  assert.equal(call.state, "stopped")
-  const order = kinds(thread)
-  assert.deepEqual(order, ["user", "work", "summary", "assistant"])
-  assert.equal(thread.items[2].seconds, 75)
+  assert.equal(thread.shellCalls()[0].state, "stopped")
+  assert.deepEqual(kinds(thread), ["user", "summary", "assistant", "work", "assistant"])
+  assert.equal(header.live, false)
+  assert.equal(header.seconds, 75)
+
+  const [, , interim, work, last] = thread.items
+  assert.equal(thread.isFolded(interim), true, "the words before the work fold with it")
+  assert.equal(thread.isFolded(work), true)
+  assert.equal(thread.isFolded(last), false, "the last answer stays")
+  assert.equal(thread.isFolded(header), false)
+
+  thread.toggleFold(header.turn)
+  assert.equal(thread.isFolded(work), false, "the header opens the work again")
+})
+
+test("a chat answer with no work has no header", () => {
+  const thread = new Thread()
+  thread.addUser("hi")
+  thread.apply(ev("stream_commit", { stream_id: "s", text: "Hello." }))
+  thread.apply(ev("final", { message: "Hello.", outcome: "done" }), 5)
+  assert.deepEqual(kinds(thread), ["user", "assistant"])
 })
 
 test("a journal replays to the same thread as the live events", () => {

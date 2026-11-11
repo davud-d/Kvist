@@ -4,23 +4,24 @@
 
 ;(function defineComposer(root) {
   const K = (root.K = root.K || {})
-  const { h, t } = K
+  const { h } = K
 
   const MAX_IMAGES = 8
   const MAX_IMAGE_BYTES = 5 * 1024 * 1024
   const MAX_PROMPT_HEIGHT = 220
 
   const ROLES = [
-    { value: "auto", label: () => t("Auto", "Авто"), hint: () => t("Kvist picks the role per task", "Kvist сам выбирает роль") },
-    { value: "coder", label: () => t("Coder", "Кодер"), hint: () => t("Reads, edits and tests code", "Читает, правит и тестирует код") },
-    { value: "reader", label: () => t("Reader", "Читатель"), hint: () => t("Only reads: never changes files", "Только читает, файлы не трогает") },
-    { value: "devops", label: () => t("DevOps", "DevOps"), hint: () => t("Shell, services, environments", "Оболочка, сервисы, окружения") },
-    { value: "chat", label: () => t("Chat", "Чат"), hint: () => t("Talk without touching the project", "Разговор без правок проекта") },
+    { value: "universal", label: () => "Universal", hint: () => "One agent for every kind of task" },
+    { value: "auto", label: () => "Auto", hint: () => "Kvist picks the role per task" },
+    { value: "coder", label: () => "Coder", hint: () => "Reads, edits and tests code" },
+    { value: "reader", label: () => "Reader", hint: () => "Only reads: never changes files" },
+    { value: "devops", label: () => "DevOps", hint: () => "Shell, services, environments" },
+    { value: "chat", label: () => "Chat", hint: () => "Talk without touching the project" },
   ]
 
   const APPROVALS = [
-    { value: "ask", icon: "shield", label: () => t("Ask before risky commands", "Спрашивать про опасное"), hint: () => t("You approve each dangerous command", "Ты подтверждаешь каждую опасную команду") },
-    { value: "deny", icon: "shield", label: () => t("Deny risky commands", "Запрещать опасное"), hint: () => t("Dangerous commands are refused outright", "Опасные команды отклоняются сразу") },
+    { value: "ask", icon: "hand", label: () => "Ask me first", title: "Ask for permission", hint: () => "You approve each risky command, and each overwrite of a file." },
+    { value: "deny", icon: "shield", label: () => "Deny risky commands", title: "Deny risky commands", hint: () => "Risky commands are refused without asking. Kvist keeps working on what is left." },
   ]
 
   function loadRun() {
@@ -29,20 +30,20 @@
       return {
         provider: String(saved.provider || ""),
         models: { fast: String(saved.models?.fast || ""), smart: String(saved.models?.smart || "") },
-        role: ROLES.some((role) => role.value === saved.role) ? saved.role : "auto",
+        role: ROLES.some((role) => role.value === saved.role) ? saved.role : "",
         approvalMode: saved.approvalMode === "deny" ? "deny" : "ask",
       }
     } catch {
-      return { provider: "", models: { fast: "", smart: "" }, role: "auto", approvalMode: "ask" }
+      return { provider: "", models: { fast: "", smart: "" }, role: "", approvalMode: "ask" }
     }
   }
 
   function readImages(files) {
     const images = Array.from(files).filter((file) => file.type.startsWith("image/"))
-    if (images.some((file) => file.size > MAX_IMAGE_BYTES)) return Promise.reject(new Error(t("An image is over 5 MiB.", "Картинка больше 5 МиБ.")))
+    if (images.some((file) => file.size > MAX_IMAGE_BYTES)) return Promise.reject(new Error("An image is over 5 MiB."))
     return Promise.all(images.map((file) => new Promise((resolve, reject) => {
       const reader = new FileReader()
-      reader.onerror = () => reject(new Error(t("Could not read the image.", "Не удалось прочитать картинку.")))
+      reader.onerror = () => reject(new Error("Could not read the image."))
       reader.onload = () => resolve({ name: file.name, data_url: String(reader.result) })
       reader.readAsDataURL(file)
     })))
@@ -72,7 +73,6 @@
       this.suggest = document.getElementById("suggest")
       this.chips = {
         approval: document.getElementById("approval-chip"),
-        role: document.getElementById("role-chip"),
         model: document.getElementById("model-chip"),
       }
       this.meter = document.getElementById("context-meter")
@@ -83,7 +83,13 @@
 
     // --- run options -----------------------------------------------------------------
     options() {
-      return { provider: this.run.provider, models: { ...this.run.models }, role: this.run.role, approvalMode: this.run.approvalMode }
+      return { provider: this.run.provider, models: { ...this.run.models }, role: this.effectiveRole(), approvalMode: this.run.approvalMode }
+    }
+
+    // The role the next task runs under: the one picked here, else the one saved in
+    // the terminal app (so both frontends behave alike).
+    effectiveRole() {
+      return this.run.role || this.host.getConfig()?.saved_role || "auto"
     }
 
     saveRun() {
@@ -93,7 +99,7 @@
     }
 
     resetRun() {
-      this.run = { provider: "", models: { fast: "", smart: "" }, role: "auto", approvalMode: "ask" }
+      this.run = { provider: "", models: { fast: "", smart: "" }, role: "", approvalMode: "ask" }
       this.saveRun()
     }
 
@@ -105,98 +111,133 @@
 
     updateChips() {
       const approval = APPROVALS.find((item) => item.value === this.run.approvalMode)
-      const role = ROLES.find((item) => item.value === this.run.role)
       K.clear(this.chips.approval)
-      this.chips.approval.append(K.icon(approval.icon, 14), h("span", {}, approval.label()))
-      K.clear(this.chips.role)
-      this.chips.role.append(K.icon("sparkle", 14), h("span", {}, role.label()))
-      const model = this.run.models.smart || this.run.models.fast
-      const provider = this.run.provider ? this.providerLabel(this.run.provider) : ""
-      const text = model ? `${provider ? `${provider} · ` : ""}${model}` : provider || t("Saved model", "Модель по умолчанию")
+      this.chips.approval.append(K.icon(approval.icon, 16), h("span", {}, approval.label()))
+
+      // The model the next task will really use: the one picked here, else the saved one.
+      const info = this.host.getConfig()
+      const id = this.run.provider || info?.saved_provider || ""
+      const entry = [...(info?.providers || []), ...(info?.custom_providers || [])].find((item) => item.id === id)
+      const model = this.run.models.smart || entry?.saved_models?.smart || entry?.defaults?.smart || ""
       K.clear(this.chips.model)
-      this.chips.model.append(h("span", { class: "chip-text" }, text), K.icon("chevronDown", 13))
-      this.chips.model.title = t("Provider and models for the next task", "Провайдер и модели для следующей задачи")
+      this.chips.model.append(...[
+        K.brand(entry?.model_icons?.[model] || entry?.icon || "", entry?.label || model, 16),
+        model ? h("span", { class: "model-name" }, model) : null,
+        h("span", { class: "chip-text" }, entry?.label || (model ? "" : "Choose a model")),
+        K.icon("chevronDown", 14),
+      ].filter(Boolean))
+      this.chips.model.title = `Provider, models and role for the next task (${this.effectiveRole()})`
     }
 
     // --- chips ----------------------------------------------------------------------------
     openApproval() {
-      const list = h("div", { class: "menu" }, h("div", { class: "menu-title" }, t("Permissions", "Разрешения")))
+      const list = h("div", { class: "menu" }, h("div", { class: "menu-title" }, "How should Kvist ask?"))
       for (const item of APPROVALS) {
-        list.append(K.menuItem({ icon: item.icon, label: item.label(), hint: item.hint(), active: item.value === this.run.approvalMode, onClick: () => { this.run.approvalMode = item.value; this.saveRun() } }))
+        list.append(K.menuItem({ icon: item.icon, label: item.title, description: item.hint(), checked: item.value === this.run.approvalMode, onClick: () => { this.run.approvalMode = item.value; this.saveRun() } }))
       }
       K.popover(this.chips.approval, list, { placement: "above" })
     }
 
-    openRole() {
-      const list = h("div", { class: "menu" }, h("div", { class: "menu-title" }, t("Agent role", "Роль агента")))
-      for (const item of ROLES) {
-        list.append(K.menuItem({ icon: "sparkle", label: item.label(), hint: item.hint(), active: item.value === this.run.role, onClick: () => { this.run.role = item.value; this.saveRun() } }))
+    // The "+" menu: what can be added to the message, then the skills Kvist has.
+    async openPlus() {
+      const menu = h("div", { class: "menu" }, h("div", { class: "menu-title" }, "Add"))
+      menu.append(
+        K.menuItem({ icon: "image", label: "Images", description: "Attach pictures for Kvist to look at", onClick: () => this.picker.click() }),
+        K.menuItem({ icon: "file", label: "A project file", description: "Mention a file with @", onClick: () => { this.setText(`${this.input.value}${this.input.value && !/\s$/.test(this.input.value) ? " " : ""}@`); this.updateSuggest() } }),
+        K.menuItem({ icon: "folder", label: "Work in a project", description: "Choose the project for new threads", onClick: () => this.host.chooseProject() }),
+      )
+      const skills = await this.host.skillList().catch(() => [])
+      if (skills.length) {
+        menu.append(h("div", { class: "menu-title" }, "Skills"))
+        for (const skill of skills.filter((entry) => entry.available)) {
+          menu.append(K.menuItem({ icon: "sparkle", label: skill.name, hint: skill.summary, onClick: () => this.setText(`Use the ${skill.name} skill to `) }))
+        }
       }
-      K.popover(this.chips.role, list, { placement: "above" })
+      K.popover(this.attach, menu, { placement: "above", className: "is-wide" })
     }
 
     async openModel() {
       await this.host.ensureConfig()
       const info = this.host.getConfig()
-      const select = h("select", { class: "field-input", "aria-label": t("Provider", "Провайдер") })
-      select.append(new Option(t("Saved default", "Сохранённый по умолчанию") + (info?.saved_provider ? ` · ${this.providerLabel(info.saved_provider)}` : ""), ""))
-      for (const entry of [...(info?.providers || []), ...(info?.custom_providers || [])]) {
-        select.append(new Option(`${entry.has_credentials ? "● " : "○ "}${entry.label}`, entry.id))
+      const everyone = [...(info?.providers || []), ...(info?.custom_providers || [])]
+      let chosen = this.run.provider
+      const providerList = h("div", { class: "role-list" })
+      const drawProviders = () => {
+        K.clear(providerList)
+        const usable = everyone.filter((entry) => entry.has_credentials || entry.id === chosen)
+        const saved = everyone.find((entry) => entry.id === info?.saved_provider)
+        providerList.append(K.menuItem({ iconNode: K.brand(saved?.icon || "", saved?.label || "Saved", 20), label: "Saved default", hint: saved?.label || "", checked: chosen === "", keepOpen: true, onClick: () => pick("") }))
+        for (const entry of usable) {
+          providerList.append(K.menuItem({ iconNode: K.brand(entry.icon, entry.label, 20), label: entry.label, checked: chosen === entry.id, keepOpen: true, onClick: () => pick(entry.id) }))
+        }
       }
-      select.value = this.run.provider
-      if (select.value !== this.run.provider) select.value = ""
+      const pick = (id) => {
+        chosen = id
+        fast.value = ""
+        smart.value = ""
+        commit()
+        drawProviders()
+      }
 
-      const fast = h("input", { class: "field-input", list: "model-suggestions", placeholder: t("fast model", "быстрая модель"), value: this.run.models.fast, "aria-label": t("Fast model", "Быстрая модель") })
-      const smart = h("input", { class: "field-input", list: "model-suggestions", placeholder: t("smart model", "умная модель"), value: this.run.models.smart, "aria-label": t("Smart model", "Умная модель") })
+      const fast = h("input", { class: "field-input", list: "model-suggestions", placeholder: "fast model", value: this.run.models.fast, "aria-label": "Fast model" })
+      const smart = h("input", { class: "field-input", list: "model-suggestions", placeholder: "smart model", value: this.run.models.smart, "aria-label": "Smart model" })
       const suggestions = h("datalist", { id: "model-suggestions" })
       const hint = h("div", { class: "field-hint" })
 
       const refresh = () => {
-        const summary = [...(info?.providers || []), ...(info?.custom_providers || [])].find((entry) => entry.id === (select.value || info?.saved_provider))
+        const summary = everyone.find((entry) => entry.id === (chosen || info?.saved_provider))
         K.clear(suggestions)
         for (const option of summary?.options || []) suggestions.append(new Option(option.label || "", option.value))
-        fast.placeholder = summary?.saved_models?.fast || summary?.defaults?.fast || t("fast model", "быстрая модель")
-        smart.placeholder = summary?.saved_models?.smart || summary?.defaults?.smart || t("smart model", "умная модель")
+        fast.placeholder = summary?.saved_models?.fast || summary?.defaults?.fast || "fast model"
+        smart.placeholder = summary?.saved_models?.smart || summary?.defaults?.smart || "smart model"
         hint.textContent = summary && !summary.has_credentials
-          ? t("No API key saved for this provider: add it in Settings.", "Для этого провайдера нет ключа: добавь его в настройках.")
-          : t("Empty fields use the provider's saved or default models.", "Пустые поля берут сохранённые или стандартные модели провайдера.")
+          ? "No API key saved for this provider: add it in Settings."
+          : "Empty fields use the provider's saved or default models."
         hint.classList.toggle("is-warn", Boolean(summary && !summary.has_credentials))
       }
       const commit = () => {
         const models = { fast: fast.value.trim(), smart: smart.value.trim() }
         if (Boolean(models.fast) !== Boolean(models.smart)) {
-          hint.textContent = t("Fill both model fields, or clear both.", "Заполни оба поля модели или очисти оба.")
+          hint.textContent = "Fill both model fields, or clear both."
           hint.classList.add("is-warn")
           return
         }
-        this.run.provider = select.value
+        this.run.provider = chosen
         this.run.models = models
         this.saveRun()
         refresh()
       }
-      select.addEventListener("change", () => {
-        fast.value = ""
-        smart.value = ""
-        commit()
-      })
       fast.addEventListener("change", commit)
       smart.addEventListener("change", commit)
       refresh()
+      drawProviders()
+
+      const roles = h("div", { class: "role-list" })
+      const drawRoles = () => {
+        K.clear(roles)
+        for (const item of ROLES) {
+          roles.append(K.menuItem({ icon: "sparkle", label: item.label(), hint: item.hint(), checked: item.value === this.effectiveRole(), keepOpen: true, onClick: () => { this.run.role = item.value; this.saveRun(); drawRoles() } }))
+        }
+      }
+      drawRoles()
 
       const panel = h(
         "div",
         { class: "model-panel" },
-        h("div", { class: "menu-title" }, t("Model for the next task", "Модель для следующей задачи")),
-        h("label", { class: "field" }, h("span", { class: "field-label" }, t("Provider", "Провайдер")), select),
-        h("label", { class: "field" }, h("span", { class: "field-label" }, t("Fast model", "Быстрая модель")), fast),
-        h("label", { class: "field" }, h("span", { class: "field-label" }, t("Smart model", "Умная модель")), smart),
+        h("div", { class: "menu-title" }, "Model for the next task"),
+        h("div", { class: "menu-title" }, "Provider"),
+        providerList,
+        h("label", { class: "field" }, h("span", { class: "field-label" }, "Fast model"), fast),
+        h("label", { class: "field" }, h("span", { class: "field-label" }, "Smart model"), smart),
         suggestions,
         hint,
+        h("div", { class: "menu-title" }, "Role"),
+        roles,
         h(
           "div",
           { class: "model-actions" },
-          h("button", { class: "btn small", type: "button", onclick: () => { K.closePopover(); this.host.addProvider() } }, K.icon("plus", 13), t("Custom provider", "Свой провайдер")),
-          h("button", { class: "btn small", type: "button", onclick: () => { K.closePopover(); this.host.openSettings("models") } }, K.icon("sliders", 13), t("Settings", "Настройки")),
+          h("button", { class: "btn small", type: "button", onclick: () => { K.closePopover(); this.host.addProvider() } }, K.icon("plus", 13), "Custom provider"),
+          h("button", { class: "btn small", type: "button", onclick: () => { K.closePopover(); this.host.openSettings("models") } }, K.icon("sliders", 13), "Settings"),
         ),
       )
       K.popover(this.chips.model, panel, { placement: "above", align: "end", className: "is-wide" })
@@ -216,16 +257,16 @@
 
     placeholder() {
       return this.running
-        ? t("Kvist is working… Esc pauses it", "Kvist работает… Esc ставит на паузу")
-        : t("Ask Kvist to do something. @ mentions a file, / opens commands", "Попроси Kvist что-нибудь сделать. @ — файл, / — команды")
+        ? "Kvist is working… Esc pauses it"
+        : "Ask Kvist anything"
     }
 
     updateSend() {
       K.clear(this.send)
       this.send.classList.toggle("is-stop", this.running)
-      this.send.append(K.icon(this.running ? "stop" : "arrowUp", this.running ? 18 : 17))
-      this.send.setAttribute("aria-label", this.running ? t("Stop", "Остановить") : t("Send", "Отправить"))
-      this.send.title = this.running ? t("Stop all", "Остановить всё") : t("Send (Enter)", "Отправить (Enter)")
+      this.send.append(K.icon(this.running ? "stop" : "arrowUp", this.running ? 18 : 18))
+      this.send.setAttribute("aria-label", this.running ? "Stop" : "Send")
+      this.send.title = this.running ? "Stop all" : "Send (Enter)"
       this.send.disabled = !this.running && !this.input.value.trim() && !this.images.length
     }
 
@@ -237,7 +278,7 @@
       const share = Math.min(1, tokens / limit)
       this.meter.classList.remove("is-hidden")
       this.meter.dataset.level = share > 0.9 ? "high" : share > 0.7 ? "mid" : "low"
-      this.meter.title = t(`Context: ${K.formatTokens(tokens)} of ${K.formatTokens(limit)} tokens`, `Контекст: ${K.formatTokens(tokens)} из ${K.formatTokens(limit)} токенов`)
+      this.meter.title = `Context: ${K.formatTokens(tokens)} of ${K.formatTokens(limit)} tokens`
       this.meter.textContent = `${Math.round(share * 100)}%`
     }
 
@@ -402,7 +443,7 @@
     async addImages(files) {
       try {
         const added = await readImages(files)
-        if (this.images.length + added.length > MAX_IMAGES) throw new Error(t("Up to 8 images.", "Не больше 8 картинок."))
+        if (this.images.length + added.length > MAX_IMAGES) throw new Error("Up to 8 images.")
         this.images = [...this.images, ...added]
         this.renderTray()
         this.updateSend()
@@ -419,7 +460,7 @@
           "div",
           { class: "thumb" },
           h("img", { src: image.data_url, alt: image.name }),
-          h("button", { class: "thumb-remove", type: "button", "aria-label": t("Remove", "Убрать"), onclick: () => { this.images.splice(index, 1); this.renderTray(); this.updateSend() } }, K.icon("x", 12)),
+          h("button", { class: "thumb-remove", type: "button", "aria-label": "Remove", onclick: () => { this.images.splice(index, 1); this.renderTray(); this.updateSend() } }, K.icon("x", 12)),
         ))
       })
     }
@@ -441,20 +482,11 @@
         event.preventDefault()
         void this.addImages(event.dataTransfer?.files || [])
       })
-      const picker = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", multiple: true, class: "is-hidden" })
-      picker.addEventListener("change", () => { void this.addImages(picker.files); picker.value = "" })
-      this.form.append(picker)
-      this.attach.addEventListener("click", () => {
-        const menu = h("div", { class: "menu" })
-        menu.append(
-          K.menuItem({ icon: "image", label: t("Attach images", "Прикрепить картинки"), onClick: () => picker.click() }),
-          K.menuItem({ icon: "file", label: t("Mention a file", "Упомянуть файл"), hint: "@", onClick: () => { this.setText(`${this.input.value}${this.input.value && !/\s$/.test(this.input.value) ? " " : ""}@`); this.updateSuggest() } }),
-          K.menuItem({ icon: "terminal", label: t("Slash commands", "Слэш-команды"), hint: "/", onClick: () => { this.setText("/"); this.updateSuggest() } }),
-        )
-        K.popover(this.attach, menu, { placement: "above" })
-      })
+      this.picker = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", multiple: true, class: "is-hidden" })
+      this.picker.addEventListener("change", () => { void this.addImages(this.picker.files); this.picker.value = "" })
+      this.form.append(this.picker)
+      this.attach.addEventListener("click", () => void this.openPlus())
       this.chips.approval.addEventListener("click", () => this.openApproval())
-      this.chips.role.addEventListener("click", () => this.openRole())
       this.chips.model.addEventListener("click", () => void this.openModel())
     }
 
@@ -483,7 +515,7 @@
         event.preventDefault()
         // Enter never stops a task: only the Stop button does.
         if (this.running) {
-          K.toast(t("Kvist is working. Press Esc to pause it, or use Stop.", "Kvist работает. Esc ставит на паузу, кнопка Стоп останавливает."), { ms: 2800 })
+          K.toast("Kvist is working. Press Esc to pause it, or use Stop.", { ms: 2800 })
           return
         }
         this.submit()

@@ -51,7 +51,7 @@ Not covered: several tasks running at once (one task per app; other threads open
 ended), automations, queued follow-ups while a task runs (`Enter` never stops a task;
 use *Pause* or *Stop*), inline comments on a diff.
 
-The interface is English and Russian (*Settings → General*), light and dark.
+The interface is English only, light and dark. Providers and models carry the maker's logo (the core names the brand in `--config-info`; `renderer/providers/` holds the artwork, a monogram stands in where there is none); a provider row opens onto its models.
 
 ## Layout
 

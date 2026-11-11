@@ -19,33 +19,32 @@
   function describe(call) {
     const a = call.args || {}
     const path = call.path || a.path || ""
-    const t = K.t
     switch (call.type) {
-      case "read_file": return { icon: "file", verb: t("Read", "Прочитал"), subject: path }
-      case "read_multiple_files": return { icon: "file", verb: t("Read", "Прочитал"), subject: t(`${(a.paths || []).length} files`, `файлов: ${(a.paths || []).length}`) }
-      case "write_file": return { icon: "pencil", verb: t("Wrote", "Записал"), subject: path }
-      case "append_file": return { icon: "pencil", verb: t("Appended to", "Дописал в"), subject: path }
-      case "replace_in_file": return { icon: "pencil", verb: t("Edited", "Изменил"), subject: path }
+      case "read_file": return { icon: "file", verb: "Read", subject: path }
+      case "read_multiple_files": return { icon: "file", verb: "Read", subject: `${(a.paths || []).length} files` }
+      case "write_file": return { icon: "pencil", verb: "Wrote", subject: path }
+      case "append_file": return { icon: "pencil", verb: "Appended to", subject: path }
+      case "replace_in_file": return { icon: "pencil", verb: "Edited", subject: path }
       case "list_dir":
-      case "list_tree": return { icon: "folder", verb: t("Listed", "Просмотрел"), subject: path || "." }
-      case "find_files": return { icon: "search", verb: t("Found files", "Искал файлы"), subject: a.pattern || "" }
-      case "search_code": return { icon: "search", verb: t("Searched", "Искал в коде"), subject: a.query || "" }
-      case "git_status": return { icon: "branch", verb: t("Checked git status", "Проверил git status"), subject: "" }
-      case "git_diff": return { icon: "branch", verb: t("Read git diff", "Прочитал git diff"), subject: "" }
-      case "run_shell": return { icon: "terminal", verb: a.background ? t("Started", "Запустил") : t("Ran", "Выполнил"), subject: commandText(a) || call.description }
-      case "job_output": return { icon: "bolt", verb: t("Read job output", "Прочитал вывод задачи"), subject: a.job_id || "" }
-      case "job_stop": return { icon: "bolt", verb: t("Stopped job", "Остановил задачу"), subject: a.job_id || "" }
-      case "web_search": return { icon: "globe", verb: t("Searched the web", "Искал в сети"), subject: a.query || "" }
-      case "fetch_url": return { icon: "globe", verb: t("Opened", "Открыл"), subject: a.url || "" }
-      case "delegate_task": return { icon: "bot", verb: t("Delegated", "Поручил"), subject: a.task || call.description }
-      case "generate_image": return { icon: "image", verb: t("Drew an image", "Нарисовал картинку"), subject: a.prompt || "" }
-      case "ask_user": return { icon: "info", verb: t("Asked you", "Спросил тебя"), subject: a.question || "" }
-      case "wait": return { icon: "pause", verb: t("Waited", "Подождал"), subject: "" }
+      case "list_tree": return { icon: "folder", verb: "Listed", subject: path || "." }
+      case "find_files": return { icon: "search", verb: "Found files", subject: a.pattern || "" }
+      case "search_code": return { icon: "search", verb: "Searched", subject: a.query || "" }
+      case "git_status": return { icon: "branch", verb: "Checked git status", subject: "" }
+      case "git_diff": return { icon: "branch", verb: "Read git diff", subject: "" }
+      case "run_shell": return { icon: "terminal", verb: a.background ? "Started" : call.state === "running" ? "Running" : "Ran", subject: commandText(a) || call.description }
+      case "job_output": return { icon: "bolt", verb: "Read job output", subject: a.job_id || "" }
+      case "job_stop": return { icon: "bolt", verb: "Stopped job", subject: a.job_id || "" }
+      case "web_search": return { icon: "globe", verb: "Searched the web", subject: a.query || "" }
+      case "fetch_url": return { icon: "globe", verb: "Opened", subject: a.url || "" }
+      case "delegate_task": return { icon: "bot", verb: "Delegated", subject: a.task || call.description }
+      case "generate_image": return { icon: "image", verb: "Drew an image", subject: a.prompt || "" }
+      case "ask_user": return { icon: "info", verb: "Asked you", subject: a.question || "" }
+      case "wait": return { icon: "pause", verb: "Waited", subject: "" }
       case "skill_call":
-      case "skills": return { icon: "sparkle", verb: t("Skill", "Навык"), subject: [a.skill, a.tool].filter(Boolean).join(" · ") || call.description }
-      case "memory": return { icon: "memory", verb: t("Memory", "Память"), subject: a.op || call.description }
-      case "helper": return { icon: "bot", verb: t("Helper", "Помощник"), subject: call.description }
-      case "sessions": return { icon: "list", verb: t("Sessions", "Сессии"), subject: call.description }
+      case "skills": return { icon: "sparkle", verb: "Skill", subject: [a.skill, a.tool].filter(Boolean).join(" · ") || call.description }
+      case "memory": return { icon: "memory", verb: "Memory", subject: a.op || call.description }
+      case "helper": return { icon: "bot", verb: "Helper", subject: call.description }
+      case "sessions": return { icon: "list", verb: "Sessions", subject: call.description }
       default: return { icon: "bolt", verb: call.type.replaceAll("_", " "), subject: call.description }
     }
   }
@@ -54,7 +53,6 @@
   const isQuiet = (call) => call.state === "ok" && !isEdit(call)
 
   function groupSummary(group) {
-    const t = K.t
     let explored = 0
     let commands = 0
     let web = 0
@@ -66,11 +64,11 @@
       else if (!isEdit(call)) other += 1
     }
     const parts = []
-    if (explored) parts.push(t(`Explored ${explored}`, `Изучил: ${explored}`))
-    if (commands) parts.push(t(`Ran ${commands} command${commands > 1 ? "s" : ""}`, `Команд: ${commands}`))
-    if (web) parts.push(t(`Browsed ${web}`, `Сеть: ${web}`))
-    if (other) parts.push(t(`${other} more`, `Прочее: ${other}`))
-    return parts.join(" · ") || t("Worked", "Работал")
+    if (explored) parts.push(`Explored ${explored}`)
+    if (commands) parts.push(`Ran ${commands} command${commands > 1 ? "s" : ""}`)
+    if (web) parts.push(`Browsed ${web}`)
+    if (other) parts.push(`${other} more`)
+    return parts.join(" · ") || "Worked"
   }
 
   function isOpen(call) {
@@ -81,14 +79,15 @@
 
   function lastLines(text, count) {
     const lines = String(text || "").split("\n")
-    return lines.length > count ? [`… ${lines.length - count} ${K.t("lines above", "строк выше")}`, ...lines.slice(-count)].join("\n") : lines.join("\n")
+    return lines.length > count ? [`… ${lines.length - count} ${"lines above"}`, ...lines.slice(-count)].join("\n") : lines.join("\n")
   }
 
-  function statusMark(call) {
-    if (call.state === "ok") return K.icon("check", 14)
-    if (call.state === "failed") return K.icon("x", 14)
-    if (call.state === "stopped") return K.icon("pause", 14)
-    return h("span", { class: "spinner", "aria-label": K.t("Running", "Выполняется") })
+  // The icon at the start of a row: the call's kind, or its state when it is not simply done.
+  function leadingMark(call, kindIcon) {
+    if (call.state === "failed") return K.icon("x", 15)
+    if (call.state === "stopped") return K.icon("pause", 15)
+    if (call.state === "running" || call.state === "writing") return h("span", { class: "spinner small", "aria-label": "Running" })
+    return K.icon(kindIcon, 15)
   }
 
   function callBody(call) {
@@ -98,7 +97,7 @@
       const out = call.state === "running" ? call.live : call.output
       body.append(h("pre", { class: "term" }, h("span", { class: "prompt" }, "$ "), commandText(a), out ? `\n${lastLines(out, 60)}` : ""))
       if (a.justification) body.append(h("div", { class: "call-note" }, a.justification))
-      if (call.exitCode !== null && call.exitCode !== 0) body.append(h("div", { class: "call-note is-error" }, K.t(`Exit code ${call.exitCode}`, `Код выхода ${call.exitCode}`)))
+      if (call.exitCode !== null && call.exitCode !== 0) body.append(h("div", { class: "call-note is-error" }, `Exit code ${call.exitCode}`))
       return body
     }
     if (isEdit(call)) {
@@ -109,7 +108,7 @@
       }
       const files = call.patch ? K.diff.parseUnifiedDiff(call.patch) : []
       if (files.length) body.append(K.diff.renderBody(files[0]))
-      else body.append(h("div", { class: "call-note" }, call.summary || K.t("No changes", "Без изменений")))
+      else body.append(h("div", { class: "call-note" }, call.summary || "No changes"))
       if (call.state === "failed" && call.output) body.append(h("pre", { class: "term is-error" }, call.output))
       return body
     }
@@ -128,11 +127,10 @@
     const head = h(
       "button",
       { class: "call-head", type: "button", "aria-expanded": String(open), title: info.subject },
-      K.icon(info.icon, 14),
+      leadingMark(call, info.icon),
       h("span", { class: "call-verb" }, info.verb),
       h("span", { class: "call-subject" }, info.subject),
       counts,
-      statusMark(call),
     )
     head.addEventListener("click", () => {
       call.open = !isOpen(call)
@@ -153,7 +151,7 @@
         "div",
         { class: "codeblock-head" },
         h("span", {}, lang),
-        h("button", { class: "icon-btn small", type: "button", title: K.t("Copy", "Копировать"), onclick: () => K.copyText(pre.textContent || "") }, K.icon("copy", 13)),
+        h("button", { class: "icon-btn small", type: "button", title: "Copy", onclick: () => K.copyText(pre.textContent || "") }, K.icon("copy", 13)),
       )
       pre.replaceWith(wrapper)
       wrapper.append(head, pre)
@@ -169,22 +167,22 @@
 
   const RENDERERS = {
     user(item) {
-      return h("div", { class: "msg user" }, h("div", { class: "bubble" }, item.text, item.images ? h("div", { class: "bubble-note" }, K.t(`${item.images} image(s) attached`, `Картинок: ${item.images}`)) : null))
+      return h("div", { class: "msg user" }, h("div", { class: "bubble" }, item.text, item.images ? h("div", { class: "bubble-note" }, `${item.images} image(s) attached`) : null))
     },
 
     assistant(item) {
       const node = h("div", { class: `msg assistant${item.streaming ? " is-streaming" : ""}${item.skill ? " is-skill" : ""}` })
       node.append(renderMarkdown(item.text))
       if (!item.streaming) {
-        node.append(h("div", { class: "msg-actions" }, h("button", { class: "icon-btn small", type: "button", title: K.t("Copy answer", "Копировать ответ"), onclick: () => K.copyText(item.text) }, K.icon("copy", 14))))
+        node.append(h("div", { class: "msg-actions" }, h("button", { class: "icon-btn small", type: "button", title: "Copy answer", onclick: () => K.copyText(item.text) }, K.icon("copy", 14))))
       }
       return node
     },
 
     thinking(item, ctx) {
       const label = item.done
-        ? (item.seconds > 0 ? K.t(`Thought for ${K.duration(item.seconds)}`, `Думал ${K.duration(item.seconds)}`) : K.t("Thought", "Размышлял"))
-        : K.t("Thinking…", "Думает…")
+        ? (item.seconds > 0 ? `Thought for ${K.duration(item.seconds)}` : "Thought")
+        : "Thinking…"
       const node = h("details", { class: `thinking${item.done ? "" : " is-live"}` }, h("summary", {}, K.icon("chevronRight", 13), h("span", { class: "thinking-label" }, label)))
       if (item.open) node.open = true
       node.addEventListener("toggle", () => { item.open = node.open })
@@ -217,7 +215,7 @@
     },
 
     plan(item) {
-      return h("div", { class: "card plan-card" }, h("div", { class: "card-title" }, K.icon("list", 14), K.t("Plan", "План")), renderMarkdown(item.markdown))
+      return h("div", { class: "card plan-card" }, h("div", { class: "card-title" }, K.icon("list", 14), "Plan"), renderMarkdown(item.markdown))
     },
 
     notice(item) {
@@ -229,8 +227,15 @@
       return h("div", { class: "card error-card" }, K.icon("alert", 15), h("span", {}, item.text))
     },
 
-    summary(item) {
-      return h("div", { class: "worked" }, h("span", { class: "worked-line" }), h("span", { class: "worked-text" }, K.t(`Worked for ${K.duration(item.seconds)}`, `Работал ${K.duration(item.seconds)}`)), h("span", { class: "worked-line" }))
+    summary(item, ctx) {
+      if (item.live) {
+        const seconds = item.start ? (Date.now() - item.start) / 1000 : 0
+        return h("div", { class: "worked is-live" }, `Working for ${K.duration(seconds)}`)
+      }
+      const open = !ctx.thread.folded.has(item.turn)
+      const node = h("button", { class: `worked${open ? " is-open" : ""}`, type: "button", "aria-expanded": String(open) }, `Worked for ${K.duration(item.seconds)} `, K.icon("chevronRight", 15))
+      node.addEventListener("click", () => ctx.toggleFold(item.turn))
+      return node
     },
 
     status(item) {
@@ -240,9 +245,9 @@
     job(item) {
       const running = item.status === "running"
       const command = Array.isArray(item.command) ? item.command.join(" ") : String(item.command || "")
-      const label = running ? K.t("Running in background", "Работает в фоне")
-        : item.status === "exited" ? K.t(`Exited with code ${item.exitCode}`, `Завершилась, код ${item.exitCode}`)
-          : item.status === "timed_out" ? K.t("Timed out", "Время вышло") : K.t("Stopped", "Остановлена")
+      const label = running ? "Running in background"
+        : item.status === "exited" ? `Exited with code ${item.exitCode}`
+          : item.status === "timed_out" ? "Timed out" : "Stopped"
       return h(
         "div",
         { class: `card job-card${running ? " is-running" : ""}` },
@@ -254,12 +259,12 @@
     helper(item) {
       const running = ["starting", "running", "paused"].includes(item.state)
       const stop = running
-        ? h("button", { class: "btn small", type: "button", onclick: () => root.kvist.stopHelper(item.agentId).catch((error) => K.toast(error.message, { kind: "error" })) }, K.t("Stop", "Стоп"))
+        ? h("button", { class: "btn small", type: "button", onclick: () => root.kvist.stopHelper(item.agentId).catch((error) => K.toast(error.message, { kind: "error" })) }, "Stop")
         : null
       return h(
         "div",
         { class: "card helper-card" },
-        h("div", { class: "card-title" }, K.icon("bot", 14), h("span", { class: "card-name" }, `${K.t("Helper", "Помощник")} ${item.agentId}`), h("span", { class: "card-meta" }, item.state), stop),
+        h("div", { class: "card-title" }, K.icon("bot", 14), h("span", { class: "card-name" }, `${"Helper"} ${item.agentId}`), h("span", { class: "card-meta" }, item.state), stop),
         item.task ? h("div", { class: "card-text" }, item.task) : null,
         item.activity && running ? h("div", { class: "card-sub" }, item.activity) : null,
         item.summary && !running ? h("div", { class: "card-sub" }, item.summary) : null,
@@ -267,7 +272,7 @@
     },
 
     artifact(item) {
-      const show = h("button", { class: "btn small", type: "button", onclick: () => root.kvist.showArtifact(item.path).catch((error) => K.toast(error.message, { kind: "error" })) }, K.icon("folder", 13), K.t("Show in folder", "Показать в папке"))
+      const show = h("button", { class: "btn small", type: "button", onclick: () => root.kvist.showArtifact(item.path).catch((error) => K.toast(error.message, { kind: "error" })) }, K.icon("folder", 13), "Show in folder")
       return h(
         "div",
         { class: "card artifact-card" },
@@ -278,20 +283,20 @@
     },
 
     image(item) {
-      if (item.state === "failed") return h("div", { class: "notice is-warn" }, K.icon("alert", 14), h("span", {}, K.t(`Image failed: ${item.error}`, `Картинка не получилась: ${item.error}`)))
-      return h("div", { class: "notice is-info" }, h("span", { class: "spinner" }), h("span", {}, K.t("Drawing an image…", "Рисую картинку…")))
+      if (item.state === "failed") return h("div", { class: "notice is-warn" }, K.icon("alert", 14), h("span", {}, `Image failed: ${item.error}`))
+      return h("div", { class: "notice is-info" }, h("span", { class: "spinner" }), h("span", {}, "Drawing an image…"))
     },
 
     screen(item) {
-      if (item.state === "closed" || item.state === "unavailable") return h("div", { class: "notice is-info" }, K.icon("monitor", 14), h("span", {}, K.t(`${item.title || "Screen"} closed`, `Экран «${item.title || "агента"}» закрыт`)))
+      if (item.state === "closed" || item.state === "unavailable") return h("div", { class: "notice is-info" }, K.icon("monitor", 14), h("span", {}, `${item.title || "Screen"} closed`))
       const open = item.url
-        ? h("button", { class: "btn small", type: "button", onclick: () => root.kvist.openViewer(item.url).catch((error) => K.toast(error.message, { kind: "error" })) }, K.icon("external", 13), K.t("Open in browser", "Открыть в браузере"))
+        ? h("button", { class: "btn small", type: "button", onclick: () => root.kvist.openViewer(item.url).catch((error) => K.toast(error.message, { kind: "error" })) }, K.icon("external", 13), "Open in browser")
         : null
       return h(
         "div",
         { class: "card screen-card" },
-        h("div", { class: "card-title" }, K.icon("monitor", 14), h("span", { class: "card-name" }, item.title || K.t("Agent screen", "Экран агента")), h("span", { class: "card-meta" }, item.state), open),
-        item.streamUrl && item.state !== "starting" ? h("img", { class: "screen-preview", src: item.streamUrl, alt: "" }) : h("div", { class: "card-sub" }, K.t("Starting…", "Запускается…")),
+        h("div", { class: "card-title" }, K.icon("monitor", 14), h("span", { class: "card-name" }, item.title || "Agent screen"), h("span", { class: "card-meta" }, item.state), open),
+        item.streamUrl && item.state !== "starting" ? h("img", { class: "screen-preview", src: item.streamUrl, alt: "" }) : h("div", { class: "card-sub" }, "Starting…"),
       )
     },
   }
@@ -328,7 +333,8 @@
       this.stick = true
     }
 
-    renderAll() {
+    renderAll(scroll = true) {
+      const keep = this.scroller.scrollTop
       this.clear()
       const fragment = document.createDocumentFragment()
       for (const item of this.thread.items) {
@@ -338,19 +344,29 @@
         fragment.append(node)
       }
       this.inner.insertBefore(fragment, this.liveNode)
-      this.scrollToEnd(true)
+      if (scroll) this.scrollToEnd(true)
+      else this.scroller.scrollTop = keep
     }
 
     build(item) {
       const render = RENDERERS[item.kind]
       if (!render) return null
-      const node = render(item, { rerender: (target) => this.schedule(target) })
+      const node = render(item, {
+        rerender: (target) => this.schedule(target),
+        thread: this.thread,
+        toggleFold: (turn) => { this.thread.toggleFold(turn); this.renderAll(false) },
+      })
       node.dataset.itemId = String(item.id)
+      node.classList.toggle("is-folded", this.thread.isFolded(item))
       return node
     }
 
     change(item, mode, before) {
       if (mode === "status" || mode === "stats") return
+      if (mode === "refold") {
+        this.renderAll(false)
+        return
+      }
       if (mode === "remove") {
         this.nodes.get(item.id)?.remove()
         this.nodes.delete(item.id)
@@ -413,7 +429,7 @@
       }
       if (!this.liveParts) {
         this.liveParts = { text: h("span", { class: "live-text" }), time: h("span", { class: "live-time" }) }
-        this.liveNode.replaceChildren(h("span", { class: "spinner" }), this.liveParts.text, this.liveParts.time, actions || null)
+        this.liveNode.replaceChildren(...[h("span", { class: "spinner" }), this.liveParts.text, this.liveParts.time, actions].filter(Boolean))
       }
       this.liveParts.text.textContent = text
       this.liveParts.time.textContent = elapsed || ""
