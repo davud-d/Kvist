@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from kernel.context.language_utils import choose_localized_text
-from kernel.llm.provider_registry import ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS
+from kernel.llm.provider_registry import ANYMODEL_PROVIDER, KIMI_PROVIDER, MANUAL_OPENAI_PROVIDERS
 from kernel.providers.anymodel_pricing import coefficient_labels
 from openai import OpenAI
 from kernel.sandbox.redaction import redact_text
@@ -84,6 +84,10 @@ REGIONAL_BASE_URL_CANDIDATES: dict[str, tuple[str, ...]] = {
     "moonshot": (
         "https://api.moonshot.ai/v1",
         "https://api.moonshot.cn/v1",
+    ),
+    KIMI_PROVIDER: (
+        "https://api.kimi.ai/coding/v1",
+        "https://api.kimi.com/coding/v1",
     ),
     "minimax": (
         "https://api.minimax.io/v1",
@@ -175,6 +179,7 @@ MODEL_ROLES = ("fast", "smart")
 
 # Default models per provider.
 _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
+    KIMI_PROVIDER: {"fast": "kimi-for-coding", "smart": "k3.1-pro"},
     CHATGPT_PROVIDER: {"fast": "gpt-6.1-sol", "smart": "gpt-6.1-sol"},
     OPENAI_PROVIDER: {
         # GPT-5.6 Luna across roles: the cost-optimized tier of the current
@@ -208,6 +213,38 @@ _MODEL_ENV_KEYS = {
 
 # Model options presented to the user when selecting models.
 _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
+    KIMI_PROVIDER: [
+        {
+            "value": "k3.1-pro",
+            "label": "Kimi K3.1 Pro",
+            "description": "Flagship coding model, up to 1M context — the smart default",
+        },
+        {
+            "value": "k3.1-pro-highspeed",
+            "label": "Kimi K3.1 Pro Highspeed",
+            "description": "Same model at 2–3× speed; uses about twice the quota",
+        },
+        {
+            "value": "k3",
+            "label": "Kimi K3",
+            "description": "Previous flagship, up to 1M context",
+        },
+        {
+            "value": "k3-256k",
+            "label": "Kimi K3 256K",
+            "description": "256K context; uses about half the quota of K3",
+        },
+        {
+            "value": "kimi-for-coding",
+            "label": "Kimi K2.8 Preview",
+            "description": "Efficient routine development — the fast default",
+        },
+        {
+            "value": "kimi-for-coding-highspeed",
+            "label": "Kimi K2.7 Code Highspeed",
+            "description": "256K context and faster output; uses about 3× quota",
+        },
+    ],
     CHATGPT_PROVIDER: [{"value": "gpt-6.1-sol", "label": "GPT-6.1 Sol"}],
     OPENAI_PROVIDER: [
         # Current OpenAI catalog (developers.openai.com/api/docs/models).
@@ -511,6 +548,8 @@ def normalize_provider(provider: str | None) -> str:
         return candidate
     if candidate in {"chatgpt plus/pro", "chatgpt-plus-pro"}:
         return CHATGPT_PROVIDER
+    if candidate in {"kimi code", "kimi-code"}:
+        return KIMI_PROVIDER
     # OmniRoute aliases
     if candidate in {"omni", "or", "9router"}:
         return OMNIROUTE_PROVIDER
@@ -681,10 +720,11 @@ def resolve_models_for_provider(
     """Resolve configured models for each role, applying defaults and deprecation checks."""
     normalized_provider = normalize_provider(provider)
 
-    # OmniRoute, OpenRouter, manual-tier and custom providers have no defaults - only saved models and env overrides
+    # Most manual-tier providers have no defaults, only saved models and env
+    # overrides. Kimi Code has a stable documented catalog and curated defaults.
     if (
         normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
-        or normalized_provider in MANUAL_MODEL_PROVIDERS
+        or (normalized_provider in MANUAL_MODEL_PROVIDERS and normalized_provider != KIMI_PROVIDER)
         or is_custom_provider(normalized_provider)
     ):
         resolved: dict[str, str] = {}
@@ -1089,9 +1129,9 @@ def provider_supports_streaming(provider: str) -> bool:
     chat completions correctly but break on ``stream=true``. Streaming is opt-in
     per provider via its saved ``streaming`` flag, defaulting to off.
 
-    AnyModel is the one manual-tier provider listed here: it is the blank-start
-    default, so leaving it off meant a first run never streamed at all, and its
-    ``stream=true`` support was verified against the live endpoint.
+    AnyModel is listed because it is the blank-start default and its streaming
+    was verified live. Kimi Code documents streaming Chat Completions on its
+    membership endpoint; the remaining manual tier stays unverified.
     """
     normalized = normalize_provider(provider)
     if is_custom_provider(normalized):
@@ -1105,6 +1145,7 @@ def provider_supports_streaming(provider: str) -> bool:
         ANTHROPIC_PROVIDER,
         DEEPSEEK_PROVIDER,
         ANYMODEL_PROVIDER,
+        KIMI_PROVIDER,
     )
 
 
@@ -1222,10 +1263,10 @@ def get_model_options(
     normalized_provider = normalize_provider(provider)
     if (
         normalized_provider == OMNIROUTE_PROVIDER
-        or normalized_provider in MANUAL_MODEL_PROVIDERS
+        or (normalized_provider in MANUAL_MODEL_PROVIDERS and normalized_provider != KIMI_PROVIDER)
         or is_custom_provider(normalized_provider)
     ):
-        # OmniRoute, manual-tier and custom providers use manual input, no predefined options
+        # OmniRoute, most manual-tier and custom providers use manual input.
         return []
     return [dict(item) for item in _MODEL_OPTIONS.get(normalized_provider, [])]
 

@@ -15,7 +15,9 @@ Kvist и как её установить, написано в [README](../READM
   OpenRouter, OmniRoute (локальный OpenAI-совместимый шлюз на
   `http://localhost:20128/v1`) и FreeFlow LLM (beta);
 - ChatGPT Plus/Pro через вход в браузере, без API-ключа;
-- 36 других OpenAI-совместимых сервисов (Qwen, Moonshot, Mistral, Groq, xAI,
+- Kimi Code (id `kimi`) по API-ключу из Kimi Code Console: расход идёт из квоты
+  подписки, а не из оплаты за токены на платформе Moonshot;
+- другие OpenAI-совместимые сервисы (Qwen, Moonshot, Mistral, Groq, xAI,
   Together, Cohere и другие; полный список — `MANUAL_OPENAI_PROVIDERS` в
   `kernel/llm/llm_clients.py`);
 - любой свой endpoint, совместимый с OpenAI или Anthropic.
@@ -24,6 +26,19 @@ Kvist и как её установить, написано в [README](../READM
 для сложных задач, ошибок разбора и застоев. Выбираются через `/models`.
 `/change-api` заменяет ключ. `AGENT_LLM_PROVIDER` переопределяет сохранённого
 провайдера на один запуск.
+
+### Kimi Code
+
+Выберите **Kimi Code** в `/provider` (id `kimi`) и вставьте API-ключ, созданный
+в Kimi Code Console. Это ключ подписки, а не Kimi Open Platform: запросы идут на
+`https://api.kimi.ai/coding/v1` за пределами Китая или
+`https://api.kimi.com/coding/v1` в Китае и расходуют квоту подписки. По умолчанию
+используются `kimi-for-coding` (fast) и `k3.1-pro` (smart). При включённой
+**Dynamic model loading** (по умолчанию включена) запуск и `/models` запрашивают
+живой каталог Kimi Code, поэтому новые модели появляются без обновления Kvist.
+Если каталог недоступен или пуст, `/models` использует шесть документированных
+моделей и позволяет ввести id вручную. Набор моделей и размер контекста зависят
+от тарифа.
 
 ### AnyModel
 

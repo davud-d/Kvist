@@ -15,7 +15,7 @@ _TABLE_PATH = Path(__file__).with_name("model_prices.json")
 
 # Providers whose bill is not per token (a subscription) or is set by a gateway whose
 # multiplier we cannot turn into dollars: any number here would be invented.
-_UNPRICED = frozenset({"chatgpt", "anymodel", "omniroute", "freeflow"})
+_UNPRICED = frozenset({"chatgpt", "kimi", "anymodel", "omniroute", "freeflow"})
 
 # kvist provider -> the ``provider`` value of that vendor's rows in the table.
 _TABLE_PROVIDER = {

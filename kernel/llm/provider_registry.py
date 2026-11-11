@@ -10,14 +10,17 @@ from __future__ import annotations
 # it is the blank-start default and the one manual-tier provider whose
 # streaming is verified, so two capability lookups have to reference it.
 ANYMODEL_PROVIDER = "anymodel"
+KIMI_PROVIDER = "kimi"
 
 # ── Third-party OpenAI-compatible providers ("manual" tier) ═════════════════
 #
 # Wired exactly like OmniRoute/OpenRouter already are: one API key, a fixed
 # default base URL (region-overridable via the matching *_base_url key), and
-# no built-in model catalog or defaults — these vendors' model ids change far
-# too often for a static default to stay correct, so the user always types
-# them, same as OmniRoute. Adding a new one is exactly this dict entry: every
+# usually no built-in model catalog or defaults — these vendors' model ids change
+# far too often for a static default to stay correct, so the user normally types
+# them, same as OmniRoute. Kimi Code is the documented exception: llm_clients
+# gives it curated models and defaults. Adding an ordinary provider is exactly
+# this dict entry: every
 # lookup below keys off MANUAL_OPENAI_PROVIDERS / MANUAL_MODEL_PROVIDERS
 # instead of a dedicated per-provider branch.
 MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
@@ -32,6 +35,12 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
         "api_key_key": "moonshot_api_key",
         "base_url_key": "moonshot_base_url",
         "default_base_url": "https://api.moonshot.ai/v1",
+    },
+    KIMI_PROVIDER: {
+        "label": "Kimi Code",
+        "api_key_key": "kimi_api_key",
+        "base_url_key": "kimi_base_url",
+        "default_base_url": "https://api.kimi.ai/coding/v1",
     },
     "zhipu": {
         "label": "Zhipu AI (BigModel)",

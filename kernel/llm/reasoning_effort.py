@@ -32,6 +32,7 @@ from kernel.llm.llm_clients import (
     ANTHROPIC_PROVIDER,
     DEEPSEEK_PROVIDER,
     FREEFLOW_PROVIDER,
+    KIMI_PROVIDER,
     OMNIROUTE_PROVIDER,
     OPENAI_PROVIDER,
     OPENROUTER_PROVIDER,
@@ -99,6 +100,17 @@ _DEEPSEEK_SCALE: dict[str, str] = {
     "medium": "high",
     "high": "high",
     "xhigh": "high",
+    "max": "max",
+}
+
+# Kimi Code accepts low/high/max. Its K3.1 Pro models reject thinking-off,
+# so Kvist's "false" means the cheapest supported thinking, not a model change.
+_KIMI_SCALE: dict[str, str] = {
+    "false": "low",
+    "low": "low",
+    "medium": "high",
+    "high": "high",
+    "xhigh": "max",
     "max": "max",
 }
 
@@ -206,6 +218,9 @@ def reasoning_request_kwargs(provider: str, level: str) -> dict[str, Any]:
 
     if normalized_provider == "chatgpt":
         return {"reasoning_effort": "low" if normalized_level == "false" else normalized_level}
+
+    if normalized_provider == KIMI_PROVIDER:
+        return {"reasoning_effort": _KIMI_SCALE[normalized_level]}
 
     if uses_anthropic_protocol(normalized_provider):
         # Consumed by _AnthropicCompletionsNamespace; kept out of the OpenAI
@@ -355,6 +370,12 @@ def effort_advisory(provider: str, level: str) -> str | None:
     if normalized_provider == "chatgpt":
         return ("ChatGPT: false uses low reasoning / ChatGPT: false использует low."
                 if normalized_level == "false" else None)
+
+    if normalized_provider == KIMI_PROVIDER:
+        mapped = _KIMI_SCALE[normalized_level]
+        if mapped != normalized_level:
+            return f"Kimi Code: '{normalized_level}' is sent as '{mapped}'."
+        return None
 
     if is_custom_provider(normalized_provider):
         return (

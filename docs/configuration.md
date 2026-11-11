@@ -15,7 +15,9 @@ file in another folder. Per-project state is under `<workspace>/.kvist/`
   OpenRouter, OmniRoute (a local OpenAI-compatible gateway on
   `http://localhost:20128/v1`) and FreeFlow LLM (beta);
 - ChatGPT Plus/Pro through browser sign-in, with no API key;
-- 36 other OpenAI-compatible services (Qwen, Moonshot, Mistral, Groq, xAI,
+- Kimi Code (id `kimi`) through an API key from Kimi Code Console, with usage
+  counted against the membership quota rather than pay-as-you-go Moonshot billing;
+- other OpenAI-compatible services (Qwen, Moonshot, Mistral, Groq, xAI,
   Together, Cohere and others; the full list is `MANUAL_OPENAI_PROVIDERS` in
   `kernel/llm/llm_clients.py`);
 - any endpoint of your own, OpenAI-compatible or Anthropic-compatible.
@@ -23,6 +25,19 @@ file in another folder. Per-project state is under `<workspace>/.kvist/`
 Every provider has a **fast** model for routine steps and a **smart** model for
 complex tasks, parse errors and stalls. Choose them with `/models`. `/change-api`
 replaces the key. `AGENT_LLM_PROVIDER` overrides the saved provider for one launch.
+
+### Kimi Code
+
+Select **Kimi Code** in `/provider` (id `kimi`) and paste an API key created in
+Kimi Code Console. This is a membership credential, not a Kimi Open Platform
+key: requests use `https://api.kimi.ai/coding/v1` overseas or
+`https://api.kimi.com/coding/v1` in China and count against the subscription
+quota. The default models are `kimi-for-coding` (fast) and `k3.1-pro` (smart).
+With **Dynamic model loading** enabled (the default), launch and `/models` query
+Kimi Code's live model catalog, so newly released model IDs appear without a
+Kvist update. If discovery fails or returns nothing, `/models` falls back to the
+six documented IDs and still allows manual entry. Availability and context size
+depend on the membership tier.
 
 ### AnyModel
 

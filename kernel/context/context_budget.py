@@ -97,6 +97,13 @@ MODEL_INPUT_LIMITS: dict[str, int] = {
     "llama-3.1": 131_072,
     "qwen3": 131_072,
     "gpt-oss": 131_072,
+    # Kimi Code — kimi.com/code/docs/en/kimi-code/models.html. The 1M tiers
+    # require an eligible plan; a lower plan's rejection is learned at runtime.
+    "k3.1-pro": 1_048_576,
+    "k3-256k": 262_144,
+    "k3": 1_048_576,
+    "kimi-for-coding-highspeed": 262_144,
+    "kimi-for-coding": 1_048_576,
     "kimi-k2": 256_000,
 }
 

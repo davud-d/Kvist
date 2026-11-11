@@ -10,7 +10,9 @@
   OpenAI-compatible gateway, default `http://localhost:20128/v1`), FreeFlow (beta).
 - **ChatGPT Plus/Pro** by browser sign-in, no API key; tokens are stored in the config
   (mode 0600); `/change-api` reauthorizes; usage counts against the person's plan.
-- About 36 other OpenAI-compatible vendors (Qwen, Moonshot, Mistral, Groq, xAI, Together,
+- **Kimi Code** (id `kimi`): an API key from Kimi Code Console, membership-quota
+  billing, live model discovery with curated fallbacks, and overseas/China endpoints.
+- Other OpenAI-compatible vendors (Qwen, Moonshot, Mistral, Groq, xAI, Together,
   Cohere, Gemini and others): one API key and an optional regional base URL each.
 - A custom endpoint of the person's own, OpenAI- or Anthropic-compatible (`custom:` prefix).
 
