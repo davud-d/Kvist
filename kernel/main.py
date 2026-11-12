@@ -1460,11 +1460,29 @@ def _launch_workspace(args: argparse.Namespace) -> Path:
     return resolve_workspace_path(args.workspace)
 
 
+def _packed_node() -> str | None:
+    """The Node.js packed into this frozen binary, or None when the build carries none."""
+    unpacked = getattr(sys, "_MEIPASS", None)
+    if not unpacked:
+        return None
+    packed = Path(unpacked) / "node" / ("node.exe" if os.name == "nt" else "node")
+    if not packed.is_file():
+        return None
+    if not os.access(packed, os.X_OK):
+        # The unpack folder is ours, but the archive may not have kept the executable bit.
+        try:
+            packed.chmod(packed.stat().st_mode | 0o111)
+        except OSError:
+            return None
+    return str(packed)
+
+
 def find_node() -> str | None:
     """The Node.js the terminal interface runs on.
 
     ``KVIST_NODE`` (the release installer's bootstrap names the one it downloaded) wins, then the
-    ``node`` folder the installer put beside this frozen binary, then ``node`` on PATH.
+    Node packed into this frozen binary (the single-binary release), then the ``node`` folder the
+    installer put beside it, then ``node`` on PATH.
     """
     import shutil
 
@@ -1472,6 +1490,9 @@ def find_node() -> str | None:
     if explicit and os.access(explicit, os.X_OK):
         return explicit
     if getattr(sys, "frozen", False):
+        packed = _packed_node()
+        if packed is not None:
+            return packed
         installed = Path(sys.executable).resolve().parent / "node" / "bin" / "node"
         if installed.is_file() and os.access(installed, os.X_OK):
             return str(installed)

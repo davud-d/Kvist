@@ -286,6 +286,33 @@ def test_find_node_prefers_the_installers_node_then_the_installed_one_then_path(
     assert main.find_node() == installed
 
 
+def test_find_node_prefers_the_node_packed_into_the_binary(monkeypatch, tmp_path):
+    import shutil
+
+    def node_at(path, mode):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(mode)
+        return path
+
+    on_path = node_at(tmp_path / "path" / "node", 0o755)
+    beside = node_at(tmp_path / "lib" / "node" / "bin" / "node", 0o755)
+    # The archive did not keep the executable bit; find_node restores it.
+    packed = node_at(tmp_path / "unpacked" / "node" / ("node.exe" if os.name == "nt" else "node"), 0o644)
+    monkeypatch.setattr(shutil, "which", lambda name: str(on_path) if name == "node" else None)
+    monkeypatch.delenv("KVIST_NODE", raising=False)
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(main.sys, "executable", str(tmp_path / "lib" / "kvist-core"))
+    monkeypatch.setattr(main.sys, "_MEIPASS", str(tmp_path / "unpacked"), raising=False)
+
+    assert main.find_node() == str(packed)
+    assert os.access(packed, os.X_OK)
+
+    # No Node in the build: the installer's copy beside the binary is next.
+    packed.unlink()
+    assert main.find_node() == str(beside)
+
+
 def test_installer_without_its_script_refuses_to_start(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("KVIST_INSTALL_SCRIPT", raising=False)
     monkeypatch.setattr(main, "_DIRECT_CLI_ARGS", None)

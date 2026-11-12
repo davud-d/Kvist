@@ -119,6 +119,16 @@ _OPENCODE_EXE = 'kvist-opencode.exe' if sys.platform == 'win32' else 'kvist-open
 _OPENCODE_BIN = os.path.join(SPECPATH, 'frontends', 'tui', 'opencode', 'dist', _OPENCODE_EXE)
 _opencode_binaries = [(_OPENCODE_BIN, 'frontends/tui/opencode/dist')] if os.path.isfile(_OPENCODE_BIN) else []
 
+# The Node.js the terminal UI runs on, packed for the single-binary release
+# (.github/workflows/release-binary.yml): KVIST_BUNDLE_NODE names the node executable. It goes in as
+# plain data, not as a binary, so PyInstaller leaves the file untouched (macOS keeps Node's own code
+# signature); main.find_node runs it from the unpack folder. Named but missing is a build error: a
+# release without Node would only fail on the first launch.
+_NODE_BUNDLE = os.environ.get('KVIST_BUNDLE_NODE', '')
+if _NODE_BUNDLE and not os.path.isfile(_NODE_BUNDLE):
+    raise SystemExit(f'KVIST_BUNDLE_NODE names a missing file: {_NODE_BUNDLE}')
+_node_datas = [(_NODE_BUNDLE, 'node')] if _NODE_BUNDLE else []
+
 # Data keeps its path relative to the module that reads it: kernel modules
 # unpack under kernel/, the classic terminal's modules at the top level.
 a = Analysis(
@@ -138,6 +148,7 @@ a = Analysis(
         # metadata exists inside a frozen build either).
         ('pyproject.toml', '.'),
         *_ui_datas,
+        *_node_datas,
         *_voice_datas,
     ],
     hiddenimports=local_hiddenimports,

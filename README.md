@@ -84,6 +84,23 @@ The release assets can also be downloaded one by one: `kvist-linux-x64`,
 `kvist-jetbrains.zip` and `kvist-vscode.vsix`. To install from files already on
 disk, run `bash install.sh --from <dir>` or `.\install.ps1 -From <dir>`.
 
+### Single binary
+
+If you only want the terminal interface, there is a lighter release,
+`latest-binary-build`: one file per system that holds the core, the terminal UI,
+the Node.js it runs on and the native session program. The installer downloads
+it (about 180 MB), checks it against `SHA256SUMS` and, on a first install, opens
+the setup screen. It installs nothing else: the IDE plugins, the desktop app and
+the other interfaces are downloaded by hand from the release above.
+
+```bash
+curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.sh | bash
+```
+
+```powershell
+irm https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.ps1 | iex
+```
+
 ### From source
 
 You need Python 3.11 or newer.

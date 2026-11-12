@@ -84,6 +84,23 @@ irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/insta
 `kvist-jetbrains.zip`, `kvist-vscode.vsix`. Чтобы поставить из файлов на диске,
 запустите `bash install.sh --from <dir>` или `.\install.ps1 -From <dir>`.
 
+### Один бинарник
+
+Если нужен только терминальный интерфейс, есть облегчённый релиз
+`latest-binary-build`: один файл на систему, в котором ядро, терминальный UI,
+Node.js для него и нативная программа сессий. Установщик скачивает его
+(около 180 МБ), сверяет с `SHA256SUMS` и при первой установке открывает экран
+настройки. Больше он ничего не ставит: плагины IDE, десктопное приложение и
+остальные интерфейсы скачиваются вручную из релиза выше.
+
+```bash
+curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.sh | bash
+```
+
+```powershell
+irm https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.ps1 | iex
+```
+
 ### Из исходников
 
 Нужен Python 3.11 или новее.
