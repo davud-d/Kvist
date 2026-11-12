@@ -5,11 +5,10 @@ name: Release Binary
 # scripts/release/binary downloads exactly this file and nothing else; the IDE plugins, the desktop
 # app and the other interfaces stay in the Plugin release and are installed by hand.
 #
-# Every push to main publishes the rolling release `latest-binary-build`; a manual run from any
-# branch builds and smoke-tests the binaries but publishes nothing.
+# Every push, to any branch, builds and smoke-tests the binaries; only a push to main also publishes
+# the rolling release `latest-binary-build`.
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
