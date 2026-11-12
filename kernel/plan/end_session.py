@@ -532,7 +532,10 @@ def log_tag_instead_of_words(agent: Any) -> None:
 def _run(agent: Any, args: dict[str, Any], tag_syntax: bool) -> Outcome:
     if not available(agent, agent._state.current_agent_role):
         return _error(f"Unknown tool {ACTION!r}.")
-    if "message_id" in args:
+    # A provider that fills every field sends message_id with the answer to a review: while one is open, a
+    # confirm is the answer, whatever else came with it.
+    answers_review = agent._state.end_session_review is not None and "confirm" in args and "reason" in args
+    if "message_id" in args and not answers_review:
         return _flag(agent, int(args["message_id"]), tag_syntax, request=bool(args.get("request")))
     return _decide(agent, bool(args["confirm"]), " ".join(str(args["reason"]).split()))
 

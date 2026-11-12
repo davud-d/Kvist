@@ -739,13 +739,16 @@ _MESSAGE_ID_RE = re.compile(r"#?\s*([1-9][0-9]*)")
 
 
 def _validate_end_session(args: dict[str, Any]) -> None:
-    """Two forms: ``{message_id[, request]}`` flags a message, ``{confirm, reason}`` answers the review."""
+    """Two forms: ``{message_id[, request]}`` flags a message, ``{confirm, reason}`` answers the review.
+
+    A provider that makes the model fill every field sends both forms at once; which one counts depends
+    on whether a review is open, which only the runtime knows (``end_session._run``). Each part present
+    is checked on its own here.
+    """
+    if "message_id" not in args:
+        require_keys(args, {"confirm", "reason"})
+    require_only_allowed_keys(args, {"message_id", "request", "confirm", "reason"})
     if "message_id" in args:
-        # The id decides the form. A provider that makes the model fill every field also gets confirm and a
-        # reason, which belong to the other form; they carry nothing here.
-        args.pop("confirm", None)
-        args.pop("reason", None)
-        require_only_allowed_keys(args, {"message_id", "request"})
         if "request" in args and args["request"] is not True:
             raise CommandValidationError("'request' must be true, or left out")
         value = args["message_id"]
@@ -754,12 +757,17 @@ def _validate_end_session(args: dict[str, Any]) -> None:
         if match is None:
             raise CommandValidationError("'message_id' must be the number of a message, e.g. 7")
         args["message_id"] = int(match.group(1))
+    if "message_id" not in args:
+        if not isinstance(args["confirm"], bool):
+            raise CommandValidationError("'confirm' must be true or false")
+        require_str(args, "reason")
         return
-    require_keys(args, {"confirm", "reason"})
-    require_only_allowed_keys(args, {"confirm", "reason"})
-    if not isinstance(args["confirm"], bool):
-        raise CommandValidationError("'confirm' must be true or false")
-    require_str(args, "reason")
+    # Beside a message_id the pair is an answer to the review only when it is a whole one; anything less
+    # is filler and goes.
+    answer_ok = isinstance(args.get("confirm"), bool) and isinstance(args.get("reason"), str) and args["reason"].strip()
+    if not answer_ok:
+        args.pop("confirm", None)
+        args.pop("reason", None)
 
 
 def _require_outcome(args: dict[str, Any]) -> None:

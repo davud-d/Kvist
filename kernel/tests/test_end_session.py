@@ -106,10 +106,13 @@ def test_the_two_forms_pass_validation_and_the_id_is_read_as_a_number():
     validate_action_args("end_session", {"confirm": False, "reason": "about the test"})
 
 
-def test_a_provider_that_fills_every_field_still_flags_the_message():
-    args = {"message_id": 3, "request": True, "confirm": True, "reason": "the person asked"}
-    validate_action_args("end_session", args)
-    assert args == {"message_id": 3, "request": True}
+def test_filler_beside_a_message_id_is_dropped_and_a_whole_answer_is_kept():
+    junk = {"message_id": 3, "request": True, "confirm": False, "reason": ""}
+    validate_action_args("end_session", junk)
+    assert junk == {"message_id": 3, "request": True}
+    both = {"message_id": 3, "request": True, "confirm": True, "reason": "the person asked"}
+    validate_action_args("end_session", both)
+    assert both["confirm"] is True
 
 
 @pytest.mark.parametrize(
@@ -353,6 +356,23 @@ def test_an_insult_gets_only_the_warning_and_ends_the_turn(tmp_path):
     assert len(prompts) == 1
     assert ui.ended == [] and not end_session.is_closed(agent)
     assert result == end_session.warning_text("en")
+
+
+def test_a_review_answer_that_repeats_message_id_still_closes_the_session(tmp_path):
+    agent = _agent(tmp_path, RecordingUI())
+    _warned(agent)
+
+    result, _prompts = _turn(
+        agent,
+        "shut up, idiot",
+        [
+            _call("end_session", message_id=3),
+            _call("end_session", message_id=3, request=True, confirm=True, reason="#3 calls the agent an idiot"),
+        ],
+    )
+
+    assert result == end_session.closed_text("en")
+    assert read_session_document(agent)["closed"] is True
 
 
 def test_insult_warning_insult_review_confirm_closes_the_session(tmp_path):
