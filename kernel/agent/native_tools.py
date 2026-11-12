@@ -364,12 +364,15 @@ ACTION_TOOLS.update({
     "feedback": ToolSpec(
         "Draft a GitHub issue about Kvist itself: a fault in a tool or the runtime, a loop you cannot leave, a "
         "missing capability, an idea. Nothing is sent: the draft waits, the person reads it with /feedback as a "
-        "letter and decides to send, keep or discard it. Write it as a report others can act on: what happened, "
-        "what you expected, how to reproduce it, exact error text. Never put in secrets, the person's names, paths "
+        "letter and decides to send, keep or discard it. Write it in English whatever language the person speaks: "
+        "the tracker is public. Make it a report others can act on: what happened, what you expected, how to "
+        "reproduce it. Evidence: when a tool can capture the problem on screen, save the screenshot in the "
+        "scratchpad and tell the person its path in chat, so they attach it to the issue (the body carries no local "
+        "paths); otherwise put the relevant log or error lines in a fenced block in the body. Never put in secrets, the person's names, paths "
         "outside the project or contents of their files. Calling it again replaces the draft, which is how you "
         "rework it when the person asks.",
         {
-            "title": {"type": "string", "description": "One line, at most 120 characters."},
+            "title": {"type": "string", "description": "One line in English, at most 120 characters."},
             "body": {"type": "string", "description": "The report in Markdown, at most 6000 characters."},
         },
         ("title", "body"),

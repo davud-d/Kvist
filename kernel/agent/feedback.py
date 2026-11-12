@@ -35,6 +35,12 @@ ISSUES_URL = f"https://github.com/{RELEASE_REPO}/issues"
 GH_TIMEOUT_SECONDS = 60
 
 
+def not_english(text: str) -> bool:
+    """True when most of the letters are Cyrillic: the tracker is public and read in English."""
+    letters = [char for char in text if char.isalpha()]
+    return bool(letters) and sum("\u0400" <= char <= "\u04ff" for char in letters) / len(letters) > 0.3
+
+
 class FeedbackError(Exception):
     """A feedback step the runtime refuses, with the reason for the person or the model."""
 

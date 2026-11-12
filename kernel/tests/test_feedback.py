@@ -57,6 +57,15 @@ def test_malformed_feedback_calls_are_refused(args):
         validate_action_args("feedback", args)
 
 
+def test_a_report_in_another_language_is_refused_but_quoted_errors_pass():
+    with pytest.raises(CommandValidationError, match="in English"):
+        validate_action_args("feedback", {"title": "некоторые провайдеры ломают tool calling", "body": "Описание проблемы"})
+    with pytest.raises(CommandValidationError, match="in English"):
+        validate_action_args("feedback", {"title": "Tool calling breaks", "body": "Описание проблемы и шаги воспроизведения"})
+    quoted = "Steps: attach a skill, then the call fails with the error below, which the runtime prints in Russian.\n```\nОшибка: лишнее поле page\n```"
+    validate_action_args("feedback", {"title": "Extra field rejected", "body": quoted})
+
+
 def test_the_person_sees_the_draft_as_a_letter_with_the_footer(drafted):
     ui = FakeUI("keep")
     ok, text = feedback.run_dialog(drafted, ui, russian=False)

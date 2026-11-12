@@ -20,7 +20,7 @@ from kernel.protocol.protocol import (
 from kernel.memory.schema import KINDS as MEMORY_KINDS
 from kernel.memory.schema import OPERATIONS as MEMORY_OPERATIONS
 from kernel.memory.schema import RELATIONS as MEMORY_RELATIONS
-from kernel.agent.feedback import MAX_BODY_CHARS as FEEDBACK_MAX_BODY, MAX_TITLE_CHARS as FEEDBACK_MAX_TITLE
+from kernel.agent.feedback import MAX_BODY_CHARS as FEEDBACK_MAX_BODY, MAX_TITLE_CHARS as FEEDBACK_MAX_TITLE, not_english
 from kernel.agent.scheduler import MAX_WAIT_SECONDS, WEEKDAYS
 
 ALLOWED_ACTIONS = {
@@ -500,6 +500,11 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_only_allowed_keys(args, {"title", "body"})
         require_str(args, "title")
         require_str(args, "body")
+        if not_english(args["title"]) or not_english(args["body"]):
+            raise CommandValidationError(
+                "Write the report in English: it goes to a public tracker, whatever language the person speaks. "
+                "Quote non-English error text inside a code block."
+            )
         if len(args["title"]) > FEEDBACK_MAX_TITLE:
             raise CommandValidationError(f"'title' is {len(args['title'])} characters; at most {FEEDBACK_MAX_TITLE}")
         if len(args["body"]) > FEEDBACK_MAX_BODY:
