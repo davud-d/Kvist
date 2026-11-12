@@ -21,6 +21,7 @@ import stat
 import string
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -237,8 +238,25 @@ def seed_workspace(workspace: Path) -> None:
 # --- Scenarios ----------------------------------------------------------------
 
 
+def _in_a_new_second(op: SessionOp) -> SessionOp:
+    """``op`` that waits for a new second before an operation that allocates a name.
+
+    Auto names are timestamped to the second. The Python run is fast enough to reuse a name
+    the native run (one process per operation) has already outlived, so the two would
+    number their names differently by timing alone.
+    """
+
+    def run(workspace: Path, name: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if name in ("new", "launch"):
+            time.sleep(1.0 - time.time() % 1.0 + 0.01)
+        return op(workspace, name, *args, **kwargs)
+
+    return run
+
+
 def test_a_fresh_workspace_goes_through_the_whole_lifecycle_identically(tmp_path, binary):
     def script(workspace: Path, op: SessionOp) -> list:
+        op = _in_a_new_second(op)
         return [
             op(workspace, "status"),
             op(workspace, "list"),

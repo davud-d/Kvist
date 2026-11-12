@@ -50,6 +50,8 @@ impl OpError {
         };
         let reason = error.to_string();
         let reason = reason.split(" (os error").next().unwrap_or(&reason);
-        OpError::Os(format!("[Errno {code}] {reason}: {}", pytext::repr(&path.to_string_lossy())))
+        // Python names a Windows error code `WinError` and drops the message's trailing dot.
+        let (label, reason) = if cfg!(windows) { ("WinError", reason.trim_end_matches('.')) } else { ("Errno", reason) };
+        OpError::Os(format!("[{label} {code}] {reason}: {}", pytext::repr(&path.to_string_lossy())))
     }
 }

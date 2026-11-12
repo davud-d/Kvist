@@ -21,11 +21,13 @@ def _runtime_directories() -> set[str]:
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
     parents = {Path(name).parent for name in tracked}
-    registry_draft = Path("frontends/zed/registry")
+    # Not Python: a registry draft, and the Rust crate built into its own binary.
+    not_packages = (Path("frontends/zed/registry"), Path("kernel/session-rs"))
     return {
         ".".join(parent.parts)
         for parent in parents
-        if "tests" not in parent.parts and not parent.is_relative_to(registry_draft)
+        if "tests" not in parent.parts
+        and not any(parent.is_relative_to(skipped) for skipped in not_packages)
     }
 
 
