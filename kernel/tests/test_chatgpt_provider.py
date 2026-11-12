@@ -314,10 +314,10 @@ def test_zero_cached_tokens_is_a_real_zero(monkeypatch):
     assert turn.cache_read_tokens == 0
 
 
-def test_cached_tokens_above_input_tokens_are_dropped(monkeypatch):
+def test_cached_tokens_above_input_tokens_mean_input_excludes_the_cache(monkeypatch):
     turn = _turn_from_responses_usage(monkeypatch, NS(
         input_tokens=10, output_tokens=20, total_tokens=30, input_tokens_details=NS(cached_tokens=50)))
-    assert (turn.cache_read_tokens, turn.cache_write_tokens) == (None, None)
+    assert (turn.input_tokens, turn.cache_read_tokens, turn.cache_write_tokens) == (60, 50, None)
 
 
 @pytest.mark.parametrize("terminal", [None, NS(type="response.incomplete", response=NS(error=None)),

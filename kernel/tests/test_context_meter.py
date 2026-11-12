@@ -93,3 +93,23 @@ def test_fraction_is_clamped_and_safe_for_zero_limit():
     assert ContextUsage(limit=100, used=250).fraction == 1.0
     assert ContextUsage(limit=100, used=250).free == 0
     assert ContextUsage(limit=0, used=10).fraction == 0.0
+
+
+def test_gateway_prompt_tokens_without_cache_become_whole_prompt():
+    from types import SimpleNamespace as NS
+
+    from kernel.agent.agent_model import _native_turn_from_message
+
+    usage = NS(prompt_tokens=91, completion_tokens=438, prompt_tokens_details=NS(cached_tokens=84_736))
+    turn = _native_turn_from_message(NS(content="ok", tool_calls=None), usage)
+    assert turn.input_tokens == 84_827
+    assert turn.cache_read_tokens == 84_736
+
+
+def test_inclusive_prompt_tokens_are_left_alone():
+    from types import SimpleNamespace as NS
+
+    from kernel.agent.agent_model import _native_turn_from_message
+
+    usage = NS(prompt_tokens=90_000, completion_tokens=5, prompt_tokens_details=NS(cached_tokens=84_736))
+    assert _native_turn_from_message(NS(content="ok", tool_calls=None), usage).input_tokens == 90_000

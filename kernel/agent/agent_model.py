@@ -848,6 +848,21 @@ def _cache_token_counts(usage: Any, input_tokens: int | None) -> tuple[int | Non
     return read, write
 
 
+def _prompt_usage(usage: Any) -> tuple[int | None, int | None, int | None]:
+    """(whole prompt, cache_read, cache_write) from a provider usage block.
+
+    Some gateways report ``prompt_tokens`` without the cached parts (Anthropic
+    style: 91 fresh + 84 736 cached). Cached counts larger than the prompt
+    they are supposedly part of prove that, so they are added back: the context
+    meter must see the whole window, not just the uncached tail.
+    """
+    prompt = _usage_token_count(usage, "prompt_tokens")
+    read, write = _cache_token_counts(usage, None)
+    if prompt is not None and (read or 0) + (write or 0) > prompt:
+        prompt += (read or 0) + (write or 0)
+    return prompt, read, write
+
+
 def _usage_source_of(*counts: int | None) -> UsageSource:
     """"provider" only when every count came from the provider's usage block."""
     return "estimated" if any(count is None for count in counts) else "provider"
@@ -859,9 +874,8 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         ToolCall(call_id=call.id, name=call.function.name, arguments=call.function.arguments or "{}")
         for call in (getattr(message, "tool_calls", None) or [])
     ]
-    input_tokens = _usage_token_count(usage, "prompt_tokens")
+    input_tokens, cache_read, cache_write = _prompt_usage(usage)
     output_tokens = _usage_token_count(usage, "completion_tokens")
-    cache_read, cache_write = _cache_token_counts(usage, input_tokens)
     return NativeTurn(
         content=getattr(message, "content", None) or "",
         reasoning=reasoning or safe_extract_reasoning_delta(message),
@@ -919,11 +933,11 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             # The final usage-only chunk has no choices/delta. Capture totals
             # before skipping it, and never add reasoning on top of that total.
             usage = getattr(chunk, "usage", None)
-            prompt_count = _usage_token_count(usage, "prompt_tokens")
+            prompt_count, chunk_read, chunk_write = _prompt_usage(usage)
             completion_count = _usage_token_count(usage, "completion_tokens")
             if prompt_count is not None:
                 input_tokens = prompt_count
-                cache_read, cache_write = _cache_token_counts(usage, prompt_count)
+                cache_read, cache_write = chunk_read, chunk_write
             if completion_count is not None:
                 output_tokens = completion_count
             choices = getattr(chunk, "choices", None)

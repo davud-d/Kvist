@@ -434,9 +434,9 @@ _CACHE_USAGE_FIXTURES = {
         900, 0, 600,
     ),
     "no-cache-fields": ({"prompt_tokens": 100, "completion_tokens": 5}, 100, None, None),
-    "cache-exceeds-prompt": (
+    "cache-exceeds-prompt-gateway-excludes-cache": (
         {"prompt_tokens": 100, "completion_tokens": 5, "prompt_tokens_details": {"cached_tokens": 400}},
-        100, None, None,
+        500, 400, None,
     ),
 }
 
