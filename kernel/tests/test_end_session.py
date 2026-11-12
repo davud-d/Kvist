@@ -106,6 +106,12 @@ def test_the_two_forms_pass_validation_and_the_id_is_read_as_a_number():
     validate_action_args("end_session", {"confirm": False, "reason": "about the test"})
 
 
+def test_a_provider_that_fills_every_field_still_flags_the_message():
+    args = {"message_id": 3, "request": True, "confirm": True, "reason": "the person asked"}
+    validate_action_args("end_session", args)
+    assert args == {"message_id": 3, "request": True}
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -113,7 +119,6 @@ def test_the_two_forms_pass_validation_and_the_id_is_read_as_a_number():
         {"message_id": 0},
         {"message_id": True},
         {"message_id": "seven"},
-        {"message_id": 3, "confirm": True},
         {"confirm": "yes", "reason": "r"},
         {"confirm": True, "reason": " "},
         {"confirm": True},

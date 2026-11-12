@@ -230,8 +230,10 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
                 "type": "boolean",
                 "description": "True only when the person themselves asked to close the conversation.",
             },
-            "confirm": {"type": "boolean"},
-            "reason": {"type": "string", "description": "One line: which message, what it targets."},
+            "confirm": {"type": "boolean", "description": "Only in the answer to END_SESSION REVIEW, never with message_id."},
+            "reason": {"type": "string",
+                       "description": "Only in the answer to END_SESSION REVIEW, never with message_id: one line, "
+                                      "which message, what it targets."},
         },
         (),
     ),

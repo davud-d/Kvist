@@ -741,6 +741,10 @@ _MESSAGE_ID_RE = re.compile(r"#?\s*([1-9][0-9]*)")
 def _validate_end_session(args: dict[str, Any]) -> None:
     """Two forms: ``{message_id[, request]}`` flags a message, ``{confirm, reason}`` answers the review."""
     if "message_id" in args:
+        # The id decides the form. A provider that makes the model fill every field also gets confirm and a
+        # reason, which belong to the other form; they carry nothing here.
+        args.pop("confirm", None)
+        args.pop("reason", None)
         require_only_allowed_keys(args, {"message_id", "request"})
         if "request" in args and args["request"] is not True:
             raise CommandValidationError("'request' must be true, or left out")
