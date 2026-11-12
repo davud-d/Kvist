@@ -223,6 +223,22 @@ def test_arguments_are_checked_against_the_tool_schema(agent_factory, registry, 
 
 
 @requires_runner
+def test_filler_in_undeclared_fields_of_a_skill_tool_is_dropped(agent_factory, registry, tmp_path):
+    from kernel.protocol.parser import build_command
+    from kernel.protocol.protocol import ToolCallRequest
+
+    install(registry, write_skill(tmp_path / "src"))
+    agent, _ui = _agent(agent_factory)
+    grant_all(agent.skills.grants, registry, "echo", agent.executor.workspace)
+    agent.skills.attach("echo")
+    request = ToolCallRequest("c1", "echo__say", {"text": "hi", "extra": "NONE", "page": 1, "other": None})
+
+    command = build_command(request, text="", batch_id="b", plan_step="inspect", language="en",
+                            resolve_skill_tool=agent.skills.resolve)
+    assert command.action.args["arguments"] == {"text": "hi"}
+
+
+@requires_runner
 def test_native_tool_list_carries_attached_skill_tools(agent_factory, registry, tmp_path, monkeypatch):
     from kernel.agent.agent_runtime import _call_native_turn
 

@@ -50,7 +50,7 @@ def test_build_command_returns_a_typed_command_carrying_the_batch():
     [
         ("missing", {}, "Unknown tool"),
         ("read_file", {}, "Missing required fields"),
-        ("read_file", {"path": "a", "extra": 1}, "Extra fields"),
+        ("read_file", {"path": "a", "extra": "keep me"}, "Extra fields"),
     ],
 )
 def test_build_command_rejects_an_invalid_call(name, arguments, error):
@@ -88,6 +88,16 @@ def test_build_command_drops_filler_a_provider_forced_into_unused_fields():
     command = command_for("skills", {"op": "attach", "skill": "browser", "page": 1, "query": "NONE", "path": "null"})
     assert command.action.type == "skills"
     assert "page" not in command.action.args
+
+
+@pytest.mark.parametrize("name,args,gone", [
+    ("sessions", {"op": "list", "before": 1, "query": "NONE", "limit": 1}, {"before", "query"}),
+    ("memory", {"op": "search", "query": "x", "expected_version": 1, "confirm": False}, {"expected_version", "confirm"}),
+    ("helper", {"op": "status", "agent_id": "h1", "timeout": 0, "cursor": 1, "task": ""}, {"timeout", "cursor", "task"}),
+])
+def test_filler_in_unused_fields_is_dropped_for_every_multi_operation_tool(name, args, gone):
+    command = command_for(name, args)
+    assert gone.isdisjoint(command.action.args)
 
 
 def test_extra_fields_error_names_the_accepted_fields():

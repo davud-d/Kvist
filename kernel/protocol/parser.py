@@ -171,8 +171,14 @@ def _skill_command(
 ) -> AgentCommand:
     from kernel.plugins.schema import validate
 
-    arguments = dict(call.arguments or {})
-    errors = validate(arguments, resolved.tool.parameters)
+    schema = resolved.tool.parameters
+    declared = schema.get("properties", {})
+    # null means absent; filler in a field the tool does not declare is a provider forcing every field to be filled.
+    arguments = {
+        key: value for key, value in (call.arguments or {}).items()
+        if value is not None and not (key not in declared and is_filler(value))
+    }
+    errors = validate(arguments, schema)
     if errors:
         raise CommandValidationError(f"{resolved.label}: " + "; ".join(errors[:5]))
     verb = "скилл" if language == "ru" else "skill"
@@ -782,15 +788,30 @@ def require_keys(data: dict[str, Any], required: set[str]) -> None:
 _FILLER_WORDS = frozenset({"none", "null", "nil", "n/a"})
 
 
-def _is_filler(value: Any) -> bool:
-    """What a provider that forces every schema field to be filled writes into the ones that do not apply."""
-    return value is None or (isinstance(value, str) and value.strip().lower() in ("", *_FILLER_WORDS))
+def is_filler(value: Any) -> bool:
+    """What a provider that forces every schema field to be filled writes into the ones that do not apply.
+
+    Besides null and "NONE" that is the neutral value of the type: false (never true: it asks for something), empty containers, 0 and 1
+    (1 is the schema minimum of most counters). A real path or text is never filler.
+    """
+    if value is None or value is False:
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in ("", *_FILLER_WORDS)
+    if isinstance(value, (int, float)):
+        return value in (0, 1)
+    return isinstance(value, (list, dict)) and not value
 
 
 def require_only_allowed_keys(data: dict[str, Any], allowed: set[str]) -> None:
-    # Filler in a field the operation does not take is not the model's mistake; the same text in a field
-    # it does take (write_file content) is a value, and the per-field checks judge it.
-    extra = {key for key in data if key not in allowed and not _is_filler(data[key])}
+    # Filler in a field the operation does not take is not the model's mistake: leave it out. The same
+    # text in a field it does take (write_file content) is a value, and the per-field checks judge it.
+    extra = {key for key in data if key not in allowed}
+    for key in [key for key in extra if is_filler(data[key])]:
+        del data[key]
+        extra.discard(key)
     if extra:
         # Name the accepted fields: a model that only hears "extra" repeats the same call.
         accepted = ", ".join(sorted(allowed)) or "none"

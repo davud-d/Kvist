@@ -263,7 +263,7 @@ def test_a_declined_plan_is_a_fact_in_the_next_turns_history():
 
 @pytest.mark.parametrize(
     "action, args",
-    [("offer_plan", {}), ("offer_plan", {"reason": "x", "extra": 1}), ("propose_plan", {}), ("propose_plan", {"plan": " "})],
+    [("offer_plan", {}), ("offer_plan", {"reason": "x", "extra": "keep me"}), ("propose_plan", {}), ("propose_plan", {"plan": " "})],
 )
 def test_plan_actions_validate_their_arguments(action, args):
     with pytest.raises(CommandValidationError):
