@@ -615,6 +615,24 @@ def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
     assert str(reports[0]) in result.message
 
 
+def test_feedback_shows_the_draft_and_keeps_it_on_keep(home, agent_factory):
+    from kernel.agent.feedback import load_draft, save_draft
+
+    agent = agent_factory()
+    save_draft(agent.executor.workspace, "A title", "A body")
+
+    result, requests, _ = _run_handler("feedback", agent, answers=["keep"])
+
+    assert result.ok and [option["value"] for option in requests[0].options] == ["send", "keep", "discard"]
+    assert load_draft(agent.executor.workspace) is not None
+
+
+def test_feedback_without_a_draft_is_a_failure_not_a_dialog(home, agent_factory):
+    result, requests, _ = _run_handler("feedback", agent_factory())
+
+    assert not result.ok and requests == []
+
+
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
