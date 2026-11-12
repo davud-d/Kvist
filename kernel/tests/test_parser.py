@@ -84,6 +84,12 @@ def test_build_command_still_rejects_a_filled_argument_the_operation_does_not_ta
         command_for("skills", {"op": "attach", "skill": "browser", "path": "draft", "query": None})
 
 
+def test_build_command_drops_filler_a_provider_forced_into_unused_fields():
+    command = command_for("skills", {"op": "attach", "skill": "browser", "page": 1, "query": "NONE", "path": "null"})
+    assert command.action.type == "skills"
+    assert "page" not in command.action.args
+
+
 def test_extra_fields_error_names_the_accepted_fields():
     with pytest.raises(CommandValidationError, match=r"accepts only: op, skill\. Leave out"):
         command_for("skills", {"op": "attach", "skill": "browser", "path": "draft"})

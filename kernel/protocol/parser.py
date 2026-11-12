@@ -566,6 +566,9 @@ def _optional_str_list(args: dict[str, Any], key: str, limit: int) -> None:
 
 def _validate_skills(args: dict[str, Any]) -> None:
     op = _require_op(args, _SKILL_OPS)
+    if op != "list":
+        # A provider that forces every schema field to be filled writes a number here; it means nothing outside list.
+        args.pop("page", None)
     if op == "list":
         require_only_allowed_keys(args, {"op", "query", "page"})
         require_optional_str(args, "query")
@@ -776,10 +779,18 @@ def require_keys(data: dict[str, Any], required: set[str]) -> None:
         )
 
 
+_FILLER_WORDS = frozenset({"none", "null", "nil", "n/a"})
+
+
+def _is_filler(value: Any) -> bool:
+    """What a provider that forces every schema field to be filled writes into the ones that do not apply."""
+    return value is None or (isinstance(value, str) and value.strip().lower() in ("", *_FILLER_WORDS))
+
+
 def require_only_allowed_keys(data: dict[str, Any], allowed: set[str]) -> None:
-    # An empty string in a field the operation does not take is the same filler as null;
-    # an empty string in a field it does take (write_file content) is a value.
-    extra = {key for key in data if key not in allowed and not (isinstance(data[key], str) and not data[key].strip())}
+    # Filler in a field the operation does not take is not the model's mistake; the same text in a field
+    # it does take (write_file content) is a value, and the per-field checks judge it.
+    extra = {key for key in data if key not in allowed and not _is_filler(data[key])}
     if extra:
         # Name the accepted fields: a model that only hears "extra" repeats the same call.
         accepted = ", ".join(sorted(allowed)) or "none"
