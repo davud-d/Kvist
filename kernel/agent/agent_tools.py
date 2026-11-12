@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kernel.agent.feedback import FeedbackError, save_draft
 from kernel.agent.image_generation import ImageError, generate as generate_image
 from kernel.plugins.builder import BuildError, check_draft, install_draft, scaffold_files
 from kernel.plugins.skills import SkillUseError
@@ -25,7 +26,7 @@ from kernel.memory.errors import MemoryProviderError
 from kernel.memory.extractor import ModelAccess
 from kernel.memory.schema import KINDS
 
-AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "generate_image", "skill_call"})
+AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "feedback", "generate_image", "skill_call"})
 SKILL_OPS = ("list", "attach", "detach", "read", "status")
 SESSION_OPS = ("list", "search", "read")
 HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
@@ -40,7 +41,7 @@ def run_agent_tool(agent: Any, command: AgentCommand) -> dict[str, Any]:
         if action_type == "skill_call":
             return agent.skills.call(args["skill"], args["tool"], args.get("arguments") or {}, command.call_id)
         data = _HANDLERS[action_type](agent, args)
-    except (SkillUseError, MemoryStoreError, SessionSearchError, HelperError, BuildError, ScheduleError, ImageError) as error:
+    except (FeedbackError, SkillUseError, MemoryStoreError, SessionSearchError, HelperError, BuildError, ScheduleError, ImageError) as error:
         return _error(action_type, str(error))
     return {"ok": True, "action_type": action_type, "data": data}
 
@@ -277,6 +278,17 @@ def _ask_user(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
     return {"status": "answered", "answer": text, "note": "Recorded with the person's follow-ups for this task."}
 
 
+def _feedback(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
+    draft = save_draft(agent.executor.workspace, str(args["title"]), str(args["body"]))
+    return {
+        "saved": True,
+        "title": draft["title"],
+        "next": "Nothing is sent. Tell the person the draft is ready and that /feedback shows it as a letter "
+                "and lets them send, keep or discard it. If they want changes, call feedback again with the "
+                "whole new title and body: it replaces the draft.",
+    }
+
+
 def _record_answer(agent: Any, question: str, answer: str) -> None:
     """The person's words go on the user channel (task follow-ups), never only into tool output."""
     agent._state.task_updates.append(f"Answer to your question «{question}»: {answer}")
@@ -290,6 +302,7 @@ _HANDLERS = {
     "ask_user": _ask_user,
     "wait": _wait,
     "schedule": _schedule,
+    "feedback": _feedback,
     "generate_image": generate_image,
 }
 

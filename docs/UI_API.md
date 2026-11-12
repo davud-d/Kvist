@@ -677,6 +677,7 @@ counts as yes, anything else (`false`, no answer, EOF) does nothing.
 | `settings-api` | — | a menu loop of `choice` (one row per setting, "Reset all", "Done"), then `choice` on/off or `text` for a number (asked again until valid). `{"changed_keys": string[], "values": {key: value}, "restart_required": bool}`; `restart_required` is true when `dynamic_models` changed (it applies at the next launch) |
 | `strime` | `[true\|false]` (none = toggle) | custom provider only (else `ok:false`): `{"stream": bool}` |
 | `revert` | — | `confirm` whose `body` lists the files to restore. `{"reverted": [{"path", "action": "restored\|deleted\|skipped", "reason"}]}`; nothing tracked: `{"reverted": []}` and no dialog |
+| `feedback` | — | Shows the letter Kvist drafted with its `feedback` tool (a `markdown` event: to, subject, text), then a `choice` dialog `send` / `keep` / `discard`. No draft: `ok:false`. `send` creates a GitHub issue with `gh issue create` when the GitHub CLI is signed in (the draft is removed), else opens the prefilled issue form in the browser (the draft stays until discarded). `{}`; the message says what happened and carries the issue link. Nothing is ever sent without `send`. |
 
 **`resume`** is not a wizard but a turn of the agent: `{"type":"command","name":"resume"}`
 continues the newest interrupted run, in whichever session holds its checkpoint.

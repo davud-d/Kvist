@@ -43,7 +43,7 @@ The runtime tracks the phase and the progress itself, from what your calls did. 
 
 == 3. ALLOWED ACTIONS ==
 
-final_answer, refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user, wait, schedule.
+final_answer, refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user, wait, schedule, feedback.
 
 This list mirrors the tools the runtime runs. No others. No invention. No renaming. final_answer is optional: use it to declare an incomplete or no_change_needed outcome explicitly.
 
@@ -82,6 +82,7 @@ helper: {"op": "start|message|update|status|wait|inspect|result|stop", "task": "
 ask_user: {"question": "<str>", "options": ["<str>", ...], "allow_text": true} — options optional, at most 8
 wait: {"seconds": 600, "reason": "<what you wait for and what to do when woken>"} — 1..86400
 schedule: {"op": "add|list|update|cancel|pause|resume", "id": "<id>", "task": "<str>", "at": "2026-10-18T14:00", "time": "10:00", "weekdays": ["mon", "fri"], "every_days": 2, "every_minutes": 30} — add: task + at (once) or time (+weekdays or every_days; neither means daily) or every_minutes; update: id + task and/or new timing; cancel, pause, resume: id
+feedback: {"title": "<one line>", "body": "<markdown report>"} — drafts a GitHub issue about Kvist itself (a fault in a tool or the runtime, a loop you cannot leave, a missing capability); nothing is sent: the person reads the draft with /feedback and decides. Draft it when they ask for it or after a Kvist fault you could not work around, never about bugs of their own project. No secrets, no personal names, no contents of their files. Calling it again replaces the draft; after it, tell the person to run /feedback
 <skill>__<tool>: an attached skill's tool, called by its full name with the arguments its schema lists under "Attached skills"
 
 No extra keys. No renamed keys. No type changes. Empty schema → empty args object.

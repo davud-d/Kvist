@@ -686,6 +686,7 @@ kvist --commit-message < payload.json
 | `settings-api` | — | цикл-меню: `choice` (строка на настройку, «Reset all», «Done»), затем `choice` on/off или `text` для числа (спрашивается заново, пока не подойдёт). `{"changed_keys": string[], "values": {ключ: значение}, "restart_required": bool}`; `restart_required` = true, если менялась `dynamic_models` (применяется со следующего запуска) |
 | `strime` | `[true\|false]` (без аргумента — переключить) | только кастомный провайдер (иначе `ok:false`): `{"stream": bool}` |
 | `revert` | — | `confirm`, в `body` которого список файлов к восстановлению. `{"reverted": [{"path", "action": "restored\|deleted\|skipped", "reason"}]}`; нечего откатывать: `{"reverted": []}` и без диалога |
+| `feedback` | — | Показывает письмо, которое Kvist составил инструментом `feedback` (событие `markdown`: кому, тема, текст), затем диалог `choice` `send` / `keep` / `discard`. Черновика нет — `ok:false`. `send` создаёт issue на GitHub через `gh issue create`, если GitHub CLI авторизован (черновик удаляется), иначе открывает в браузере уже заполненную форму issue (черновик остаётся, пока его не удалят). `{}`; в `message` — что произошло и ссылка. Без `send` ничего не отправляется. |
 
 **`resume`** — не мастер, а ход агента: `{"type":"command","name":"resume"}`
 продолжает самый свежий прерванный прогон в той сессии, где лежит его чекпоинт.

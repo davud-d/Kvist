@@ -79,6 +79,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         aliases=("permission",),
     ),
     SlashCommand("website", "Build a website: Kvist interviews you, builds it and checks it"),
+    SlashCommand("feedback", "Read the feedback Kvist drafted and send it as a GitHub issue, keep it or discard it"),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
     SlashCommand("doctor", "Check modules, frontends, provider, API keys and settings"),
     SlashCommand("update", "Install the newest Kvist build (restart afterwards)"),

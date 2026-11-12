@@ -117,4 +117,6 @@ def test_reader_prompt_stays_within_token_budget():
     # → 3250 for side-by-side commands: run_shell calls in a row that need no
     # approval now run at once, and the reader must know they may not depend on
     # each other; plus the cost of one big batch where a provider has no cache.
-    assert tokens <= 3250, f"reader prompt is {tokens} tokens (budget 3250)"
+    # → 3300 for feedback: a Kvist fault can show up in a read-only task, and the
+    # rule (on request or after a fault, no secrets) is kept whole.
+    assert tokens <= 3300, f"reader prompt is {tokens} tokens (budget 3300)"

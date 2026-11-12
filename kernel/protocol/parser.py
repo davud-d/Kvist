@@ -20,6 +20,7 @@ from kernel.protocol.protocol import (
 from kernel.memory.schema import KINDS as MEMORY_KINDS
 from kernel.memory.schema import OPERATIONS as MEMORY_OPERATIONS
 from kernel.memory.schema import RELATIONS as MEMORY_RELATIONS
+from kernel.agent.feedback import MAX_BODY_CHARS as FEEDBACK_MAX_BODY, MAX_TITLE_CHARS as FEEDBACK_MAX_TITLE
 from kernel.agent.scheduler import MAX_WAIT_SECONDS, WEEKDAYS
 
 ALLOWED_ACTIONS = {
@@ -59,6 +60,7 @@ ALLOWED_ACTIONS = {
     "ask_user",
     "wait",
     "schedule",
+    "feedback",
 }
 SKILL_CALL = "skill_call"
 _SKILL_OPS = ("list", "attach", "detach", "read", "status", "scaffold", "check", "install")
@@ -492,6 +494,16 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
 
     elif action_type == "schedule":
         _validate_schedule(args)
+
+    elif action_type == "feedback":
+        require_keys(args, {"title", "body"})
+        require_only_allowed_keys(args, {"title", "body"})
+        require_str(args, "title")
+        require_str(args, "body")
+        if len(args["title"]) > FEEDBACK_MAX_TITLE:
+            raise CommandValidationError(f"'title' is {len(args['title'])} characters; at most {FEEDBACK_MAX_TITLE}")
+        if len(args["body"]) > FEEDBACK_MAX_BODY:
+            raise CommandValidationError(f"'body' is {len(args['body'])} characters; at most {FEEDBACK_MAX_BODY}")
 
     elif action_type == SKILL_CALL:
         require_keys(args, {"skill", "tool"})

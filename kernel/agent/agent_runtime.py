@@ -108,7 +108,7 @@ _READ_ONLY_ACTIONS = {
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file", "generate_image"}
 # The agent's own tools never change the workspace, except a skill tool not
 # declared read-only (checked per call).
-_AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule"}
+_AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "feedback"}
 # Beyond the file reads, what plan mode still allows: it asks the person and
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
@@ -836,7 +836,7 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     if self.is_helper:
         # A helper never manages helpers and never asks the person directly:
         # its questions go through the main agent.
-        tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user", "wait", "schedule")]
+        tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user", "wait", "schedule", "feedback")]
     tools.extend(self.skills.tool_definitions())
     state.native_tool_defs = plan_mode.tools_for_phase(tools, self)
     if not state.native_messages:

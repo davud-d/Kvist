@@ -122,6 +122,8 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
         return "Drawing in the background" if data.get("status") == "drawing" else f"Saved {data.get('path', 'the picture')}"
     if action_type == "wait" and data.get("wakes_at"):
         return f"Wakes at {data['wakes_at']}"
+    if action_type == "feedback":
+        return f"Draft saved: {data.get('title', '')}".strip()
     if action_type == "schedule":
         return _schedule_summary(data)
     if action_type == "skills" and data.get("attached") and not isinstance(data.get("attached"), list):

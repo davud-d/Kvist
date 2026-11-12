@@ -4325,6 +4325,14 @@ def _stdio_memory(ctx: CommandContext) -> CommandResult:
     return CommandResult(ok, sanitize_display_text(text))
 
 
+def _stdio_feedback(ctx: CommandContext) -> CommandResult:
+    from kernel.agent.feedback import run_dialog
+
+    agent = ctx.session.agent
+    ok, text = run_dialog(agent.executor.workspace, ctx.ui, _speaks_russian(agent))
+    return CommandResult(ok, sanitize_display_text(text))
+
+
 def _speaks_russian(agent) -> bool:
     """The language of the person's last request, else the system locale."""
     language = getattr(agent._state, "response_language", "") or ""
@@ -4812,6 +4820,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "strime": _stdio_strime,
     "revert": _stdio_revert,
     "bug": _stdio_bug,
+    "feedback": _stdio_feedback,
     "doctor": _stdio_doctor,
     "update": _stdio_update,
     "permissions": _stdio_permissions,
@@ -5771,6 +5780,16 @@ def main() -> None:
                 else:
                     console.clear()
                 render_new_session_notice(started)
+                continue
+
+            if user_goal.lower() == "/feedback":
+                from kernel.agent.feedback import run_dialog
+
+                with paused_interactive_screen(interactive_screen):
+                    ok, text = run_dialog(agent.executor.workspace,
+                                          TerminalBannerUI(console=console, verbose=verbose), _speaks_russian(agent))
+                console.print(Panel(Text(sanitize_display_text(text)), title="/feedback",
+                                    border_style="bright_cyan" if ok else "red"))
                 continue
 
             if user_goal.lower() == "/bug" or user_goal.lower().startswith("/bug "):

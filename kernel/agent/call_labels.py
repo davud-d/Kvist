@@ -45,6 +45,7 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "ask_user": ("спрашивает вас", "asks you"),
     "wait": ("ждёт {target}", "waits {target}"),
     "schedule": ("расписание: {target}", "schedule: {target}"),
+    "feedback": ("пишет черновик отзыва", "drafts feedback"),
     "generate_image": ("рисует картинку {target}", "generates an image {target}"),
 }
 
