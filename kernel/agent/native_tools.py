@@ -265,8 +265,8 @@ ACTION_TOOLS.update({
             "reference": {"type": "string",
                           "description": "read: a page the attach answer listed under references, "
                                          "e.g. references/terminal.md."},
-            "query": {"type": "string", "description": "Words to filter the list by."},
-            "page": _integer(1, 100),
+            "query": {"type": "string", "description": "list only: words to filter the list by."},
+            "page": {**_integer(1, 100), "description": "list only: which page of a long list; leave out for every other op."},
             "path": {"type": "string", "description": "The draft folder in the workspace, for scaffold, check and install."},
             "summary": {"type": "string", "description": "scaffold: one sentence on what the skill adds."},
         },
