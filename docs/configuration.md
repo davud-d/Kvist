@@ -151,8 +151,12 @@ extra directories given with repeatable `--allow-read DIR`.
 
 - **Linux.** Commands run in Bubblewrap with a private HOME and `/tmp`, hidden
   `/home` and `/root`, protected secret paths masked, and no network.
-  `AGENT_SANDBOX_MODE` is `auto`, `workspace` or `bubblewrap`. `workspace` is
-  weaker: no secret masking and no isolation of `.kvist`.
+  `AGENT_SANDBOX_MODE` is `auto`, `workspace`, `bubblewrap` or `container`. `workspace` is
+  weaker: no secret masking and no isolation of `.kvist`. `container` is for a
+  benchmark task's container (`scripts/run_task.py --container`, see
+  [benchmarks.md](benchmarks.md)): the container is the sandbox, so commands run
+  unwrapped, with network and without approvals. It works only inside a Docker or
+  Podman container; anywhere else it is refused and `auto` applies.
 - **macOS.** `/usr/bin/sandbox-exec` provides offline execution on the host.
 - **Windows.** There is no offline host backend. A command that needs one is
   refused instead of running with network access.
