@@ -248,6 +248,17 @@ template in the workspace root on the first launch and appended to the role's
 system prompt on every step. If the workspace has a `.gitignore`, both names are
 added to it once; without one nothing is written.
 
+`KVIST.md` is Kvist's own notebook on the project: its rules (commands, layout,
+conventions) and its history (when Kvist first worked there, milestones,
+decisions, finished campaigns with their results). Kvist updates it herself at
+the end of a task that changed what a later run needs to know, and prunes it as
+she goes (merging old entries, dropping what nobody will use) so it stays within
+about 8,000 characters, because it rides along on every request. The runtime
+tells her the current size. Writes to this one file in the workspace root never
+ask for approval; each is still recorded in the change journal and can be
+reverted, and a symbolic link named `KVIST.md` gets no exemption. You can edit
+the file by hand at any time. `KVIST-CHAT.md` is not touched by Kvist.
+
 The files are part of the project, so Kvist treats them as untrusted: they are
 quoted into the prompt as delimited data, with instructions around them that
 limit them to commands, layout and conventions. This makes a hostile file harder

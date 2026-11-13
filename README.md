@@ -254,8 +254,11 @@ Package format, permissions and the sandbox are described in
 
 Kvist creates `KVIST.md` (for coder, reader and devops) and `KVIST-CHAT.md` in
 the workspace on first launch. Put build commands, layout and conventions there
-once. The agent reads them on every step. Because the files live in the project,
-Kvist treats their content as data that cannot change its safety rules.
+once. The agent reads them on every step. `KVIST.md` is also Kvist's own
+notebook: she records the project's history there (when she started, milestones,
+decisions, finished campaigns), corrects it and prunes it herself, without asking.
+Because the files live in the project, Kvist treats their content as data that
+cannot change its safety rules.
 
 ## Platforms
 

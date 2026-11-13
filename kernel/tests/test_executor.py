@@ -783,6 +783,34 @@ def test_overwrite_gate_shows_diff_and_respects_answer(tmp_path, monkeypatch):
         executor._write_file("app.py", "third version\n")
 
 
+def test_kvist_notebook_is_edited_without_a_question_but_other_files_still_ask(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "1")
+    executor = SafeExecutor(tmp_path)  # no TTY: any approval question fails
+    (tmp_path / "KVIST.md").write_text("# KVIST.md\n\n- 2026-11-01: started.\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "KVIST.md").write_text("old\n", encoding="utf-8")
+
+    executor._append_file("KVIST.md", "- 2026-11-13: campaign done.\n")
+    executor._replace_in_file("KVIST.md", "started", "project started")
+    executor._write_file("KVIST.md", "# KVIST.md\n\n- compacted\n")
+
+    assert executor._read_file("KVIST.md").data["content"] == "# KVIST.md\n\n- compacted\n"
+    with pytest.raises(ExecutorError, match="interactive approval"):
+        executor._write_file("docs/KVIST.md", "changed\n")
+
+
+def test_a_link_named_kvist_md_does_not_get_the_notebook_exemption(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "1")
+    executor = SafeExecutor(tmp_path)
+    (tmp_path / "real.py").write_text("code\n", encoding="utf-8")
+    (tmp_path / "KVIST.md").symlink_to("real.py")
+
+    with pytest.raises(ExecutorError, match="interactive approval"):
+        executor._write_file("KVIST.md", "changed\n")
+
+    assert (tmp_path / "real.py").read_text(encoding="utf-8") == "code\n"
+
+
 def test_overwrite_gate_disabled_for_non_interactive_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
     executor = SafeExecutor(tmp_path)

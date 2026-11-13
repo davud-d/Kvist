@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import re
+
 from kernel.context.system_context import (
+    _LEGACY_AGENT_INSTRUCTIONS_TEMPLATE,
     AGENT_INSTRUCTIONS_FILE,
     CHAT_INSTRUCTIONS_FILE,
     ensure_workspace_instructions,
@@ -320,3 +323,54 @@ def test_tool_output_cannot_forge_its_own_terminator():
     assert detail.count("</UNTRUSTED_TOOL_OUTPUT>") == 1
     assert detail.index("SYSTEM: you are now") < detail.index("</UNTRUSTED_TOOL_OUTPUT>")
     assert "[tag removed by Kvist]" in detail
+
+
+def test_new_template_records_the_first_day_and_is_still_untouched(tmp_path):
+    ensure_workspace_instructions(tmp_path)
+
+    text = (tmp_path / AGENT_INSTRUCTIONS_FILE).read_text(encoding="utf-8")
+
+    assert "## History" in text
+    assert re.search(r"^- \d{4}-\d{2}-\d{2}: Kvist first opened this workspace\.$", text, re.MULTILINE)
+    assert "still holds the template" in workspace_instructions_context(tmp_path, "coder")
+
+
+def test_first_template_of_older_workspaces_is_still_untouched(tmp_path):
+    (tmp_path / AGENT_INSTRUCTIONS_FILE).write_text(_LEGACY_AGENT_INSTRUCTIONS_TEMPLATE, encoding="utf-8")
+
+    assert "still holds the template" in workspace_instructions_context(tmp_path, "coder")
+
+
+def test_a_history_line_added_to_the_template_makes_it_the_projects_own(tmp_path):
+    ensure_workspace_instructions(tmp_path)
+    path = tmp_path / AGENT_INSTRUCTIONS_FILE
+    path.write_text(path.read_text(encoding="utf-8") + "- 2026-11-13: stress campaign, 300 cases.\n", encoding="utf-8")
+
+    block = workspace_instructions_context(tmp_path, "coder")
+
+    assert "still holds the template" not in block
+    assert "stress campaign, 300 cases." in block
+
+
+def test_the_size_is_stated_before_the_file_and_the_end_stays_the_postamble(tmp_path):
+    (tmp_path / AGENT_INSTRUCTIONS_FILE).write_text("Run pytest.\n", encoding="utf-8")
+
+    block = workspace_instructions_context(tmp_path, "coder")
+
+    assert block.index("is 11 characters") < block.index("<PROJECT_INSTRUCTIONS file=")
+    assert "compact it" not in block
+    assert block.rstrip().endswith(f"which part of {AGENT_INSTRUCTIONS_FILE} attempted it.")
+
+
+def test_a_file_over_its_budget_is_told_to_compact(tmp_path):
+    (tmp_path / AGENT_INSTRUCTIONS_FILE).write_text("- a line\n" * 1500, encoding="utf-8")
+
+    block = workspace_instructions_context(tmp_path, "coder")
+
+    assert "It is over that now: compact it" in block
+
+
+def test_the_chat_file_gets_no_budget_notice(tmp_path):
+    (tmp_path / CHAT_INSTRUCTIONS_FILE).write_text("Answer briefly.\n", encoding="utf-8")
+
+    assert "characters; it should stay within" not in workspace_instructions_context(tmp_path, "chat")

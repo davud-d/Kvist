@@ -59,6 +59,7 @@ from kernel.sandbox.auto_approval import AutoApprovalGate, Classifier, refusal_n
 from kernel.sandbox.scratchpad import Scratchpad, ScratchpadFull
 from kernel.sandbox.permission_policy import append_web_domain, load_policy
 from kernel.config.user_config import get_web_search_settings
+from kernel.context.system_context import AGENT_INSTRUCTIONS_FILE
 from kernel.sandbox.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
 
 
@@ -1145,7 +1146,7 @@ class SafeExecutor:
         raw = os.getenv("AGENT_FETCH_EXTRA_DOMAINS", "")
         return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
-    def _confirm_overwrite(self, path: str, old_text: str, new_text: str) -> None:
+    def _confirm_overwrite(self, path: str, old_text: str, new_text: str, target: Path) -> None:
         """Diff-preview HITL gate for overwriting an existing file.
 
         New files never reach this gate. Non-interactive runs (stdin is
@@ -1154,6 +1155,11 @@ class SafeExecutor:
         if not self.write_approval_enabled:
             return
         if old_text == new_text:
+            return
+        # KVIST.md is Kvist's own notebook: keeping it short and current means editing it on her own,
+        # at the end of any task, so a question per edit would defeat it. The change journal still
+        # records every edit, and ``target`` is already resolved, so a link never passes for it.
+        if target == self.workspace / AGENT_INSTRUCTIONS_FILE:
             return
 
         diff_lines = difflib.unified_diff(
@@ -1754,7 +1760,7 @@ class SafeExecutor:
         if existed:
             old_text = self._read_existing_text_for_diff(target)
             self._require_unchanged_file(target, expected_identity)
-            self._confirm_overwrite(path, old_text, content)
+            self._confirm_overwrite(path, old_text, content, target)
         self._record_change_baseline(target, existed, old_text, content)
         self._atomic_replace_text(target, content, expected_identity)
         self._promote_change_baseline(target, content)
@@ -1803,7 +1809,7 @@ class SafeExecutor:
                 f"{self.max_writable_file_bytes})"
             )
         if existed and content:
-            self._confirm_overwrite(path, old_text, old_text + content)
+            self._confirm_overwrite(path, old_text, old_text + content, target)
         self._record_change_baseline(
             target, existed, old_text if existed else None, updated_text
         )
@@ -1879,7 +1885,7 @@ class SafeExecutor:
                 f"File is too large for the replace operation "
                 f"({updated_size} bytes, limit {self.max_writable_file_bytes})"
             )
-        self._confirm_overwrite(path, original_text, updated_text)
+        self._confirm_overwrite(path, original_text, updated_text, target)
         self._record_change_baseline(target, True, original_text, updated_text)
         self._atomic_replace_text(target, updated_text, expected_identity)
         self._promote_change_baseline(target, updated_text)
