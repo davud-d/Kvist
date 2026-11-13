@@ -48,6 +48,7 @@ mod theme;
 mod farewell;
 mod icons;
 mod math;
+mod modules;
 mod orb;
 mod voice;
 mod voice_overlay;
@@ -137,7 +138,14 @@ fn orb_preview(target: Option<&String>) -> ExitCode {
         eprintln!("--orb-preview needs a file name");
         return ExitCode::from(BAD_SETTING);
     };
-    let (width, height, rgb) = orb::contact_sheet(2.5, 256);
+    let scenery = match voice::preview_scenery() {
+        Ok(scenery) => scenery,
+        Err(error) => {
+            eprintln!("kvist-voice-screen: the photograph cannot be read: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (width, height, rgb) = orb::contact_sheet(2.5, 420, &scenery);
     match image::save_buffer(path, &rgb, width, height, image::ColorType::Rgb8) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

@@ -22,8 +22,14 @@
 // Messages to the ears (stdin):   {"type":"mute","value":bool}  (its own voice must not wake it)
 //                                 {"type":"converse","seconds":n,"min_words":n}  (talk on without the wake word)
 // Messages from the ears:         {"event":"state","state":"loading|idle|listening|transcribing"}
-//                                 {"event":"text","text":…}
+//                                 {"event":"text","text":…}  {"event":"heard","text":…}
+//                                 {"event":"phrase","on":bool}  {"event":"level","value":0..1,"pause":0..1}
+//                                 {"event":"missed"}
+//
+// The orb (orb.rs) is a ball of glass with a light inside; the tools Kvist uses come out of
+// it as glass cards (modules.rs) and go back in when they are done.
 
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
@@ -45,10 +51,12 @@ use crate::anim::{self, Ease, Tween};
 use crate::backdrop::{self, Glass};
 use crate::core::{self, Core, Message};
 use crate::dialog::{Ask, Body, Choice};
+use crate::diff::{self, Patch};
 use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG};
 use crate::math;
 use crate::layout::Grid;
-use crate::orb::{ALL_STATES, Orb, OrbState};
+use crate::modules::{self, Kind as ModuleKind, Module, Modules, Preview, Shell, Status};
+use crate::orb::{ALL_STATES, Orb, OrbState, SCENERY_REACH, Scenery, Twig};
 use crate::probe::Caps;
 use crate::slash;
 use crate::voice_strings::{Strings, strings};
@@ -63,6 +71,18 @@ const ORB_SLOT: u32 = 2;
 const CARD_SLOT: u32 = 3;
 const OVERLAY_SLOT: u32 = 4;
 const MENU_SLOT: u32 = 5;
+/// The modules' glass: one slot for each place round the ball.
+/// How much of the end of a thought is kept for its card.
+const THOUGHT_KEPT_CHARS: usize = 600;
+const MODULE_SLOT: u32 = 10;
+/// Under the orb's picture, so a module comes out from behind the ball.
+const Z_MODULE: i32 = Z_CARD - 1000;
+const Z_ORB: i32 = Z_CARD + 1000;
+/// Cells between a module's edge and its text.
+const MODULE_PAD_X: u16 = 2;
+/// The most pixels along a side of the photograph's patch that the ball's glass bends: enough
+/// for the middle of a large ball, where the glass shows the photograph about life-size.
+const SCENERY_SIDE: u32 = 768;
 /// The most commands the slash list shows at once; the rest scroll.
 const SLASH_ROWS: usize = 8;
 /// After an answer is spoken, the person may talk on for this long without the wake word,
@@ -81,8 +101,12 @@ const SWITCH_FRONTEND: u8 = 64;
 const QUIT_CONFIRM: Duration = Duration::from_secs(3);
 /// The orb is drawn at most this often: each frame is a new picture for the terminal.
 const ORB_FPS: u32 = 30;
-/// The widest side of the orb's picture in pixels; the terminal scales it up.
-const ORB_TEXTURE_MAX: u32 = 360;
+/// How often an orb that only waits is drawn anew.
+const CALM_ORB_PERIOD: Duration = Duration::from_millis(100);
+/// The tallest the orb's picture is drawn. Below this it has exactly the pixels of its
+/// cells, so the terminal scales nothing; only a window taller than about 1600 pixels
+/// has it scaled up, and by little.
+const ORB_TEXTURE_MAX: u32 = 1024;
 /// The photograph is sent at most this wide; the terminal scales it to the window.
 const BACKDROP_MAX_WIDTH: u32 = 1600;
 /// How long a phrase that was not for Kvist stays on the card.
@@ -91,6 +115,13 @@ const HEARD_SECONDS: u64 = 6;
 const ERROR_SECONDS: u64 = 3;
 /// How long a state is shown in `--demo` before it moves on by itself.
 const DEMO_SECONDS: u64 = 4;
+/// The working state plays a longer story: the thinking, then the tools.
+const DEMO_WORK_SECONDS: u64 = 10;
+
+/// How long `--demo` stays in a state before it goes on to the next.
+fn demo_seconds(state: OrbState) -> u64 {
+    if state == OrbState::Working { DEMO_WORK_SECONDS } else { DEMO_SECONDS }
+}
 /// Steps that end a turn rather than work (their words arrive with `final`).
 const ENDINGS: [&str; 4] = ["final_answer", "report_to_user", "refuse", "end_session"];
 
@@ -157,6 +188,62 @@ enum Out {
 struct Demo {
     index: usize,
     since: Instant,
+    /// How many steps of the state's little play have been shown.
+    played: usize,
+}
+
+/// What `--demo` plays while it shows the working state, so the modules can be seen without
+/// a core: (milliseconds into the state, the event the core would send).
+fn demo_work() -> Vec<(u64, Value)> {
+    let skill = |call: &str, label: &str| json!({"type": "step", "batch_id": call, "call_id": call, "action_type": "skill_call", "action_args": {"skill": "browser"}, "action_description": label});
+    let done = |call: &str, summary: &str| json!({"type": "action_result", "call_id": call, "ok": true, "summary": summary});
+    // The model's thinking arrives in pieces to append, as the core sends it.
+    let piece = |text: &str| json!({"type": "reasoning_chunk", "stream_id": "demo", "text": text, "append": true});
+    vec![
+        (0, json!({"type": "reasoning_start", "stream_id": "demo"})),
+        (100, piece("Нужно открыть YouTube и найти там документальный фильм про ледники.")),
+        (700, piece(" Сначала откроем сайт, потом поищем по названию,")),
+        (1100, piece(" и поставим на паузу то, что сейчас играет в браузере.\n")),
+        (1500, piece("Лучше выбрать то, которое подлиннее: короткие ролики обычно не про устройство ледников, а про красивые кадры.\n")),
+        (2000, piece("- проверить длительность перед запуском\n- не пересказывать описание под видео")),
+        (2500, piece("\nИ последнее: сказать пользователю, как оно называется и сколько идёт.")),
+        (3300, json!({"type": "reasoning_commit", "stream_id": "demo", "duration_seconds": 3.2})),
+        (3500, json!({"type": "step", "batch_id": "e", "call_id": "d1", "action_type": "write_file", "action_description": "games/rules.py",
+            "action_args": {"path": "games/rules.py", "content": "from dataclasses import dataclass\n\n\n@dataclass\nclass Move:\n    row: int\n    col: int\n\n\ndef legal(board, move):\n    if board[move.row][move.col] != 0:\n        return False\n    return True\n"}})),
+        (4000, json!({"type": "step", "batch_id": "s", "call_id": "d2", "action_type": "run_shell", "action_description": "прогнать тесты правил игры",
+            "action_args": {"command": ["python", "-m", "pytest", "-q", "tests/test_rules.py"]}})),
+        (4400, skill("d3", "youtube.com")),
+        (5000, json!({"type": "action_result", "call_id": "d1", "ok": true, "summary": "Wrote 13 lines", "path": "games/rules.py", "lines_added": 13, "lines_removed": 0,
+            "patch": "--- /dev/null\n+++ b/games/rules.py\n@@ -0,0 +1,13 @@\n+from dataclasses import dataclass\n+\n+\n+@dataclass\n+class Move:\n+    row: int\n+    col: int\n+\n+\n+def legal(board, move):\n+    if board[move.row][move.col] != 0:\n+        return False\n+    return True\n"})),
+        (5800, json!({"type": "action_result", "call_id": "d2", "ok": true, "summary": "Command exited with code 0", "exit_code": 0,
+            "output": "============ test session starts ============\ncollected 9 items\n\ntests/test_rules.py .........        [100%]\n\n============ 9 passed in 0.31s ============"})),
+        (6400, done("d3", "browser.open: done in 2.9 s")),
+    ]
+}
+
+/// The lines of a tall card, made for a content (its generation) and a width: how many of them are
+/// the command at the head (the terminal's), and all of them.
+struct TallLines {
+    generation: u64,
+    width: usize,
+    head: usize,
+    lines: Vec<text::Line>,
+}
+
+/// A tall card's room in the window, and its height in rows, which eases towards what its words need.
+struct Tall {
+    /// Where it stands; `None` without room.
+    rect: Option<Rect>,
+    /// The places it covers (a tool does not take them while it is up).
+    covered: Option<Vec<usize>>,
+    rows: f32,
+    open: bool,
+}
+
+impl Default for Tall {
+    fn default() -> Self {
+        Tall { rect: None, covered: Some(Vec::new()), rows: 4.0, open: false }
+    }
 }
 
 pub struct Voice {
@@ -214,6 +301,24 @@ pub struct Voice {
     observer: Option<String>,
     /// The last phrase the ears heard that was not for Kvist, and when.
     overheard: Option<(String, Instant)>,
+    /// What Kvist is doing: the cards that come out of the ball.
+    modules: Modules,
+    /// How many times the model has begun to think: its cards are told apart by it.
+    thoughts: u32,
+    /// The thought as it has come so far (the core sends it in pieces).
+    thought_text: String,
+    /// The tall cards: the thoughts, the writes, the terminal.
+    tall: [Tall; modules::TALL_COUNT],
+    /// The lines of a write or a command on its card, made once for a content and a width.
+    tall_lines: [RefCell<Option<TallLines>>; modules::TALL_COUNT],
+    /// Counts the diffs and commands the cards have been given, so that the lines above are known to be stale.
+    edit_generation: u64,
+    /// How many places for modules the window has (set by the run loop from its size).
+    places: usize,
+    /// Somebody in the room is speaking now; how loud; and how much of the pause that ends their phrase has passed.
+    hearing: bool,
+    mic_level: f32,
+    pause: f32,
     outbox: Vec<Out>,
     pub quit: bool,
     /// The status the program exits with.
@@ -225,7 +330,7 @@ impl Voice {
         Voice {
             started: now,
             orb: Orb::new(if demo { ALL_STATES[0] } else { OrbState::Loading }),
-            demo: demo.then_some(Demo { index: 0, since: now }),
+            demo: demo.then_some(Demo { index: 0, since: now, played: 0 }),
             ears: Ears::Absent,
             has_voice: false,
             core_ready: demo,
@@ -262,6 +367,16 @@ impl Voice {
             notice: String::new(),
             observer: None,
             overheard: None,
+            modules: Modules::default(),
+            thoughts: 0,
+            thought_text: String::new(),
+            tall: std::array::from_fn(|_| Tall::default()),
+            tall_lines: std::array::from_fn(|_| RefCell::new(None)),
+            edit_generation: 0,
+            places: 6,
+            hearing: false,
+            mic_level: 0.0,
+            pause: 0.0,
             outbox: Vec::new(),
             quit: false,
             exit_code: 0,
@@ -283,6 +398,8 @@ impl Voice {
         }
         match self.ears {
             Ears::Listening => return OrbState::Listening,
+            // Between the phrases of one request the ears write down the last one while the person says the next.
+            Ears::Transcribing if self.hearing => return OrbState::Listening,
             Ears::Transcribing => return OrbState::Transcribing,
             _ => {}
         }
@@ -315,11 +432,18 @@ impl Voice {
     /// Per frame: choose the state, move the orb, give it the voice's loudness.
     fn tick(&mut self, now: Instant, dt: f32, clock: f32) {
         if let Some(demo) = &mut self.demo
-            && now.duration_since(demo.since) >= Duration::from_secs(DEMO_SECONDS)
+            && now.duration_since(demo.since) >= Duration::from_secs(demo_seconds(ALL_STATES[demo.index]))
         {
             demo.index = (demo.index + 1) % ALL_STATES.len();
             demo.since = now;
+            demo.played = 0;
         }
+        self.play_demo(now);
+        for tall in 0..modules::TALL_COUNT {
+            self.modules.set_tall_room(tall, self.tall[tall].covered.clone());
+        }
+        self.grow_tall(now, dt);
+        self.modules.tick(self.places, now);
         if self.overheard.as_ref().is_some_and(|(_, at)| now.duration_since(*at) >= Duration::from_secs(HEARD_SECONDS)) {
             self.overheard = None;
         }
@@ -334,14 +458,195 @@ impl Voice {
         let state = self.resolve(now);
         self.orb.set_state(state);
         self.level *= (-dt * 6.0).exp();
+        // Between two reports of the ears (ten a second) the loudness falls, so silence shows at once.
+        self.mic_level *= (-dt * 5.0).exp();
         let talking = matches!(state, OrbState::Speaking | OrbState::Narrating);
-        // Without a voice reporting its loudness the swell follows a speech-like rhythm.
-        self.orb.level = if talking && (self.demo.is_some() || !self.has_voice) {
+        let target = if talking && (self.demo.is_some() || !self.has_voice) {
+            // Without a voice reporting its loudness the swell follows a speech-like rhythm.
             (0.5 + 0.5 * (clock * 7.0).sin() * (clock * 2.3).cos()).abs()
-        } else {
+        } else if talking {
             self.level
+        } else if self.hearing {
+            // The person's own voice: the orb moves with it, also while it only waits for
+            // the wake word, so they can see that the microphone hears them.
+            self.mic_level
+        } else {
+            0.0
         };
+        // The light follows the loudness quickly but without flicker.
+        self.orb.level += (target - self.orb.level) * (1.0 - (-dt * 14.0).exp());
+        self.orb.pause = if self.hearing { self.pause } else { 0.0 };
         self.orb.step(dt);
+    }
+
+    /// `--demo` shows the modules in the working state and a voice with a pause in the listening one.
+    fn play_demo(&mut self, now: Instant) {
+        let Some(demo) = &mut self.demo else { return };
+        let ms = now.duration_since(demo.since).as_millis() as u64;
+        match ALL_STATES[demo.index] {
+            OrbState::Working => {
+                let script = demo_work();
+                let due: Vec<Value> = script.iter().skip(demo.played).take_while(|(at, _)| *at <= ms).map(|(_, event)| event.clone()).collect();
+                demo.played += due.len();
+                for event in due {
+                    self.on_work(&event, now);
+                }
+            }
+            OrbState::Listening => {
+                // Two seconds of speech, then the pause that ends the phrase.
+                let seconds = ms as f32 / 1000.0;
+                self.hearing = true;
+                self.pause = ((seconds - 2.0) / 1.8).clamp(0.0, 1.0);
+                self.mic_level = if seconds < 2.0 { (0.45 + 0.4 * (seconds * 9.0).sin() * (seconds * 3.1).cos()).abs() } else { 0.0 };
+            }
+            _ => self.hearing = false,
+        }
+    }
+
+    /// The tools Kvist uses become modules: a call starting, a call ending.
+    fn on_work(&mut self, event: &Value, now: Instant) {
+        let text = |key: &str| event.get(key).and_then(Value::as_str).unwrap_or("");
+        let call = text("call_id");
+        match text("type") {
+            "action_result" => {
+                self.modules.end(call, event.get("ok").and_then(Value::as_bool).unwrap_or(false), text("summary"), now);
+                // The write's real diff, with the file's own line numbers, takes the place of the one from its arguments.
+                // Only the card of a command takes it; for any other call this finds nothing to finish.
+                if self.modules.is_shell_call(call) {
+                    self.edit_generation += 1;
+                    let output = text("output");
+                    self.modules.finish_shell(call, if output.is_empty() { text("summary") } else { output }, event.get("exit_code").and_then(Value::as_i64), now);
+                }
+                if let Some(patch) = event.get("patch").and_then(Value::as_str).filter(|patch| !patch.is_empty()) {
+                    let count = |key: &str| event.get(key).and_then(Value::as_u64).unwrap_or(0) as u32;
+                    self.edit_generation += 1;
+                    let (added, removed) = (count("lines_added"), count("lines_removed"));
+                    self.modules.set_preview(call, Preview { path: text("path").to_string(), patch: patch.to_string(), added, removed });
+                }
+            }
+            kind @ ("step" | "call_begin") => {
+                let action = if kind == "step" { text("action_type") } else { text("tool") };
+                let Some(module) = modules::kind(action) else { return };
+                let skill = event.pointer("/action_args/skill").and_then(Value::as_str).unwrap_or("");
+                let label = if kind == "step" { text("action_description") } else { text("description") };
+                // A step without a call id (an older core) is told apart by its number.
+                let call = if call.is_empty() { format!("step-{}", event.get("step").and_then(Value::as_i64).unwrap_or(0)) } else { call.to_string() };
+                self.modules.begin(text("batch_id"), &call, module, skill, label);
+                // A write shows what it puts in the file as soon as it is known.
+                if let Some(preview) = event.get("action_args").and_then(|args| preview_from_args(action, args)) {
+                    self.edit_generation += 1;
+                    self.modules.set_preview(&call, preview);
+                }
+                // A command shows as a terminal does.
+                if let Some(command) = event.get("action_args").and_then(|args| shell_command(action, args)) {
+                    self.edit_generation += 1;
+                    self.modules.set_shell(&call, &command);
+                }
+            }
+            "reasoning_start" => {
+                self.thoughts += 1;
+                self.thought_text.clear();
+            }
+            "reasoning_chunk" => self.on_thought(text("text"), event.get("append").and_then(Value::as_bool)),
+            "reasoning_commit" => self.end_thought(now),
+            _ => {}
+        }
+    }
+
+    /// A tall card is as tall as its words need (up to its window) and grows with them, not by a
+    /// jump of a row: its height eases towards the target.
+    fn grow_tall(&mut self, now: Instant, dt: f32) {
+        for index in 0..modules::TALL_COUNT {
+            let wanted = {
+                let card = self.modules.shown().iter().find(|module| module.slot == modules::TALL_SLOT + index);
+                match (card, self.tall[index].rect) {
+                    (Some(card), Some(rect)) => Some(3.0 + self.tall_line_count(index, card, rect, now) as f32),
+                    _ => None,
+                }
+            };
+            let tall = &mut self.tall[index];
+            match wanted {
+                None => tall.open = false,
+                Some(wanted) if tall.open => tall.rows += (wanted - tall.rows) * (1.0 - (-dt * 12.0).exp()),
+                Some(wanted) => {
+                    tall.rows = wanted;
+                    tall.open = true;
+                }
+            }
+        }
+    }
+
+    /// How many lines a tall card's words fill, at least one and at most its window.
+    fn tall_line_count(&self, index: usize, card: &Module, rect: Rect, now: Instant) -> usize {
+        let count = if index == modules::TALL_THOUGHTS {
+            thought_lines(&card.detail, thought_width(rect)).len()
+        } else {
+            let since = card.shell.as_ref().and_then(|shell| shell.got).map(|got| now.saturating_duration_since(got).as_secs_f32());
+            self.with_tall_lines(index, card, rect, |head, lines| shown_rows(head, lines.len(), since, card.shell.is_some()))
+        };
+        count.clamp(1, modules::TALL_LINES as usize)
+    }
+
+    /// The lines of the write or the command on the card of `card`, made for the card's width and
+    /// kept until the content or the width changes; `with` gets how many of them are the command
+    /// at the head, and the lines.
+    fn with_tall_lines<T>(&self, index: usize, card: &Module, rect: Rect, with: impl FnOnce(usize, &[text::Line]) -> T) -> T {
+        let width = rect.width.saturating_sub(2 * MODULE_PAD_X) as usize;
+        let mut cached = self.tall_lines[index].borrow_mut();
+        if !cached.as_ref().is_some_and(|made| made.generation == self.edit_generation && made.width == width) {
+            let (head, lines) = match (&card.preview, &card.shell) {
+                (Some(preview), _) if index == modules::TALL_EDITS => {
+                    (0, diff::inline(&Patch::parse(&preview.patch, diff::language(&preview.path)), width, "…"))
+                }
+                (_, Some(shell)) => shell_lines(shell, width),
+                _ => (0, Vec::new()),
+            };
+            *cached = Some(TallLines { generation: self.edit_generation, width, head, lines });
+        }
+        let made = cached.as_ref().expect("just made");
+        with(made.head, &made.lines)
+    }
+
+    /// The card of the model's current thinking.
+    fn thought_call(&self) -> String {
+        format!("thoughts:{}", self.thoughts)
+    }
+
+    /// The model's thinking as it streams: its card opens with the first words. `append` says that
+    /// `words` are the next bytes of the thought (what the core sends now); without it they are the
+    /// whole thought so far (what older cores sent). A provider that does not let the thinking be
+    /// seen sends none, and then there is no card.
+    fn on_thought(&mut self, words: &str, append: Option<bool>) {
+        if append == Some(true) {
+            self.thought_text.push_str(words);
+        } else {
+            self.thought_text = words.to_string();
+        }
+        // Only the end of it is shown, and the whole of a long thought is not kept.
+        let from = self.thought_text.char_indices().rev().nth(THOUGHT_KEPT_CHARS * 3).map_or(0, |(at, _)| at);
+        self.thought_text.drain(..from);
+        // Lines stay lines (a thought can hold code or a list); the spaces inside them are one each.
+        let shown: Vec<String> =
+            self.thought_text.lines().map(|line| line.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|line| !line.is_empty()).collect();
+        let shown = shown.join("\n");
+        if shown.is_empty() {
+            return;
+        }
+        let from = shown.char_indices().rev().nth(THOUGHT_KEPT_CHARS).map_or(0, |(at, _)| at);
+        let call = self.thought_call();
+        if self.modules.has(&call) {
+            self.modules.set_detail(&call, &shown[from..]);
+        } else {
+            self.modules.begin("", &call, ModuleKind::Thoughts, "", &shown[from..]);
+        }
+    }
+
+    /// The model has finished thinking: its card shows that, and closes.
+    fn end_thought(&mut self, now: Instant) {
+        let call = self.thought_call();
+        if self.modules.has(&call) {
+            self.modules.end(&call, true, "", now);
+        }
     }
 
     /// Once the assistant has finished speaking, tell the ears the person may answer without the wake word.
@@ -445,8 +750,17 @@ impl Voice {
                 }
             }
             "notice" => self.toast(text("text"), text("level") == "info", now),
-            "wake" | "reasoning_start" | "reasoning_chunk" => self.turn = Turn::Thinking,
-            "step" if !ENDINGS.contains(&text("action_type")) => self.turn = Turn::Working,
+            "wake" => self.turn = Turn::Thinking,
+            "reasoning_start" | "reasoning_chunk" => {
+                self.turn = Turn::Thinking;
+                self.on_work(event, now);
+            }
+            "reasoning_commit" => self.on_work(event, now),
+            "step" if !ENDINGS.contains(&text("action_type")) => {
+                self.turn = Turn::Working;
+                self.on_work(event, now);
+            }
+            "call_begin" | "action_result" => self.on_work(event, now),
             "stream_start" => self.stream_text.clear(),
             "stream_chunk" => {
                 if event.get("append").and_then(Value::as_bool) == Some(false) {
@@ -468,6 +782,7 @@ impl Voice {
             "turn_end" => {
                 self.turn = Turn::Idle;
                 self.stream_text.clear();
+                self.modules.finish_all(now);
             }
             "error" => {
                 self.error_until = Some(now + Duration::from_secs(ERROR_SECONDS));
@@ -655,6 +970,7 @@ impl Voice {
         self.turn = Turn::Idle;
         self.context = None;
         self.converse = None;
+        self.modules.clear();
         self.stop_voice();
     }
 
@@ -685,8 +1001,20 @@ impl Voice {
                     self.overheard = Some((phrase.to_string(), now));
                 }
             }
+            "phrase" => {
+                self.hearing = event.get("on").and_then(Value::as_bool) == Some(true);
+                self.pause = 0.0;
+            }
+            "level" => {
+                let number = |key: &str| event.get(key).and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0, 1.0) as f32;
+                self.mic_level = number("value");
+                self.pause = number("pause");
+            }
+            // Words meant for Kvist that the recognition lost: say so, or the person waits for nothing.
+            "missed" => self.toast(strings().voice_missed, false, now),
             "gone" => {
                 self.ears = Ears::Absent;
+                self.hearing = false;
                 self.notice = strings().voice_stt_gone.to_string();
             }
             _ => {}
@@ -974,14 +1302,21 @@ fn speech_estimate(words: &str) -> Duration {
     Duration::from_secs_f32((0.4 + count * 0.32).clamp(1.0, 12.0))
 }
 
-/// Where the orb sits: its size in cells, its corner, and the side of its picture.
+/// Where the orb sits: its size in cells, its corner, and the size of its picture in pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct OrbBox {
     cols: u16,
     rows: u16,
     col: u16,
     row: u16,
-    texture: u32,
+    width: u32,
+    height: u32,
+}
+
+impl OrbBox {
+    fn cells(&self) -> Rect {
+        Rect::new(self.col, self.row, self.cols, self.rows)
+    }
 }
 
 /// Rows kept below the orb for its caption, what is said, and the status line.
@@ -994,7 +1329,199 @@ fn orb_box(grid: Grid) -> OrbBox {
     let cols = (side_px.div_ceil(grid.cw) as u16).min(grid.cols.saturating_sub(2)).max(2);
     let col = (grid.cols - cols) / 2;
     let row = (grid.rows.saturating_sub(TEXT_ROWS + rows) / 2).max(1);
-    OrbBox { cols, rows, col, row, texture: side_px.clamp(64, ORB_TEXTURE_MAX) }
+    // The picture has the pixels of the cells it covers (a whole number of cells is a little
+    // wider than it is tall), so the ball is a true circle drawn at the size it is shown at.
+    // A very tall window gets a smaller picture of the same shape, scaled up by the terminal.
+    let (width, height) = (cols as u32 * grid.cw, side_px);
+    let shrink = (ORB_TEXTURE_MAX as f32 / height as f32).min(1.0);
+    let scaled = |px: u32| ((px as f32 * shrink).round() as u32).max(8);
+    OrbBox { cols, rows, col, row, width: scaled(width), height: scaled(height) }
+}
+
+/// A module's card on its way out of the ball or back: the glass as it is now in pixels
+/// (a line, a wider line, a card unfolding), the twig that reaches it, and how visible its text is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ModuleSpot {
+    slot: usize,
+    /// Its place: where the words go once it is open.
+    cells: Rect,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    /// How open it is, 0 a line and 1 a card.
+    open: f32,
+    /// How many lines of words the glass is tall enough for (the thoughts card grows with its text).
+    lines: usize,
+    /// The colour of its kind: the line it comes out as shines with it.
+    glow: [u8; 3],
+    /// Seconds since it came out of the ball.
+    age: f32,
+    /// Seconds since a command's output came, for the terminal card.
+    since_result: Option<f32>,
+    twig: Twig,
+    text: f32,
+}
+
+/// Where and how big a module's glass picture was made (x, y, width, height in pixels).
+type PlateKey = (i64, i64, u32, u32);
+
+/// The thickness of the line a card comes out of the ball as.
+const FOLD_LINE_PX: f32 = 3.0;
+
+fn status_colour(module: &Module) -> ratatui::style::Color {
+    match module.status() {
+        Status::Running => module_face(module).2,
+        Status::Done => theme::MOSS,
+        Status::Failed => theme::ROSEHIP,
+    }
+}
+
+/// The terminal's lines: the prompt and the command (a few rows at most), then what it printed,
+/// then how it ended if it failed; and how many of them are the command.
+fn shell_lines(shell: &Shell, width: usize) -> (usize, Vec<text::Line>) {
+    let prompt = Style::default().fg(theme::MOSS).add_modifier(Modifier::BOLD);
+    let command: text::Line = vec![(shell.command.clone(), Style::default())];
+    let mut lines: Vec<text::Line> = text::wrap(&command, width.saturating_sub(2).max(4))
+        .into_iter()
+        .take(3)
+        .enumerate()
+        .map(|(index, row)| {
+            let mut line: text::Line = vec![((if index == 0 { "$ " } else { "  " }).to_string(), prompt)];
+            line.extend(row.into_iter().map(|(word, _)| (word, Style::default().fg(theme::FOG))));
+            line
+        })
+        .collect();
+    let head = lines.len();
+    if let Some(output) = &shell.output {
+        for source in output.trim_end().lines() {
+            let spans: text::Line = vec![(source.replace('\t', "    "), Style::default())];
+            lines.extend(
+                text::wrap(&spans, width.max(4)).into_iter().map(|row| row.into_iter().map(|(word, _)| (word, Style::default().fg(theme::MIST))).collect::<text::Line>()),
+            );
+        }
+        if let Some(code) = shell.exit.filter(|code| *code != 0) {
+            lines.push(vec![(format!("exit code {code}"), Style::default().fg(theme::ROSEHIP))]);
+        }
+    }
+    (head, lines)
+}
+
+/// How many of a terminal's lines are on screen: the command at once, the output a line at a
+/// time as a terminal prints it (all of it within a second or so), and a command that has not
+/// answered has only itself. `terminal` is false for a card that is not one.
+fn shown_rows(head: usize, total: usize, since_result: Option<f32>, terminal: bool) -> usize {
+    if !terminal {
+        return total;
+    }
+    let Some(since) = since_result else { return head };
+    let output = total.saturating_sub(head);
+    let speed = (output as f32 / 1.2).max(30.0);
+    head + ((since * speed) as usize).min(output)
+}
+
+/// The command line of a `run_shell` call as a person would type it: the words of the argv list,
+/// those with spaces in quotes. `None` for any other action.
+fn shell_command(action: &str, args: &Value) -> Option<String> {
+    if action != "run_shell" {
+        return None;
+    }
+    match args.get("command")? {
+        Value::String(line) => Some(line.clone()),
+        Value::Array(words) => Some(
+            words
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|word| if word.is_empty() || word.contains(char::is_whitespace) { format!("'{word}'") } else { word.to_string() })
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+        _ => None,
+    }
+}
+
+/// How many lines of a write the card gets at most to parse: the rest is not shown.
+const PREVIEW_LINES: usize = 150;
+
+/// The diff of a write as its arguments say it will go: all of `content` is added (to a file that
+/// may exist: the real diff replaces this one when the result comes), and an exact fragment is
+/// swapped for another. `None` for any other action.
+fn preview_from_args(action: &str, args: &Value) -> Option<Preview> {
+    let word = |key: &str| args.get(key).and_then(Value::as_str);
+    let path = word("path")?.to_string();
+    let (old, new) = match action {
+        "write_file" | "append_file" => ("", word("content")?),
+        "replace_in_file" => (word("old_text")?, word("new_text")?),
+        _ => return None,
+    };
+    let (removed, added) = (old.lines().count(), new.lines().count());
+    let mut patch = format!("@@ -{},{removed} +1,{added} @@\n", if removed == 0 { 0 } else { 1 });
+    patch.extend(old.lines().take(PREVIEW_LINES).map(|line| format!("-{line}\n")));
+    patch.extend(new.lines().take(PREVIEW_LINES).map(|line| format!("+{line}\n")));
+    Some(Preview { path, patch, added: added as u32, removed: removed as u32 })
+}
+
+/// How many columns the words of the thoughts card wrap to.
+fn thought_width(card: Rect) -> usize {
+    // The card's padding, and the rule with its space.
+    card.width.saturating_sub(2 * MODULE_PAD_X + 2).max(4) as usize
+}
+
+/// The thought as lines of the card: each line of it wrapped to the width.
+fn thought_lines(thought: &str, width: usize) -> Vec<String> {
+    thought
+        .lines()
+        .flat_map(|line| {
+            let spans: text::Line = vec![(line.to_string(), Style::default())];
+            text::wrap(&spans, width).into_iter().map(|row| row.iter().map(|(word, _)| word.as_str()).collect::<String>())
+        })
+        .collect()
+}
+
+/// The model's thought as a window of a few lines that scrolls as the thought grows: the newest
+/// words at the bottom, the oldest fading out at the top, a thin rule down the left side. `rows`
+/// is how many of them the glass is tall enough for just now.
+fn draw_thought(p: &mut Painter, card: Rect, rows: usize, thought: &str) {
+    let left = (card.x + MODULE_PAD_X) as i32;
+    let body = left + 2;
+    let lines = thought_lines(thought, thought_width(card));
+    let window = modules::TALL_LINES as usize;
+    let overflow = lines.len() > window;
+    let shown = &lines[lines.len().saturating_sub(window)..];
+    let glass = ratatui::style::Color::Rgb(theme::GLASS_TINT[0], theme::GLASS_TINT[1], theme::GLASS_TINT[2]);
+    for (index, line) in shown.iter().enumerate().take(rows) {
+        let y = card.y as i32 + 2 + index as i32;
+        // Only a thought that has outgrown the window fades at its top: the lines that are going.
+        let gone = if overflow { [0.78, 0.5, 0.22].get(index).copied().unwrap_or(0.0) } else { 0.0 };
+        p.text(left, y, "│", Style::default().fg(theme::mix(theme::DUSK, glass, gone)));
+        p.text(body, y, line, Style::default().fg(theme::mix(theme::MIST, glass, gone)));
+    }
+}
+
+/// A module's icon, name and colour.
+fn module_face(module: &Module) -> (&'static str, String, ratatui::style::Color) {
+    let s = strings();
+    let (icon, name, colour) = match module.kind {
+        ModuleKind::Files => (theme::I_EYE, s.module_files, theme::MIST),
+        ModuleKind::Search => (theme::I_SEARCH, s.module_search, theme::SYN_OPERATOR),
+        ModuleKind::WebSearch => (theme::I_SEARCH, s.module_web_search, theme::LINK),
+        ModuleKind::Page => (theme::I_GLOBE, s.module_page, theme::LINK),
+        ModuleKind::Edit => (theme::I_EDIT, s.module_edit, theme::MOSS),
+        ModuleKind::Shell => (theme::I_TERMINAL, s.module_shell, theme::SYN_TYPE),
+        ModuleKind::Git => (theme::I_BRANCH, s.module_git, theme::SYN_NUMBER),
+        ModuleKind::Helper => (theme::I_HELPER, s.module_helper, theme::SYN_KEYWORD),
+        ModuleKind::Skill if module.title == "browser" => (theme::I_GLOBE, s.module_browser, theme::LINK),
+        ModuleKind::Skill => (icons::I_TOOLS, s.module_skill, theme::SYN_FUNCTION),
+        ModuleKind::Memory => (icons::I_DATABASE, s.module_memory, theme::SYN_KEYWORD),
+        ModuleKind::Picture => (icons::I_PICTURE, s.module_picture, theme::SYN_NUMBER),
+        ModuleKind::Plan => (icons::I_CHECKLIST, s.module_plan, theme::SYN_FUNCTION),
+        ModuleKind::Timer => (icons::I_CLOCK, s.module_timer, theme::MIST),
+        ModuleKind::Thoughts => (icons::I_SPARKLE, s.module_thoughts, theme::SYN_KEYWORD),
+        ModuleKind::Other => (icons::I_TOOLS, s.module_other, theme::MIST),
+    };
+    // A skill is known by its own name, except the browser, which has a word of its own.
+    let own_name = module.kind == ModuleKind::Skill && !module.title.is_empty() && module.title != "browser";
+    (icon, if own_name { module.title.clone() } else { name.to_string() }, colour)
 }
 
 // ───────────────────────────── processes ─────────────────────────────
@@ -1204,6 +1731,180 @@ impl Voice {
         CardPlan { rect: Rect::new(x, y, width, height), caption, overheard, toast, notice }
     }
 
+    /// Where each module's glass is now, with the twig that reaches it. A module whose
+    /// place a menu or a dialog covers is left out until that closes.
+    fn module_spots(&self, grid: Grid, now: Instant) -> Vec<ModuleSpot> {
+        let orb = orb_box(grid);
+        let places = modules::places(grid, orb.cells());
+        let covered = [self.overlay_plan(grid).map(|plan| plan.rect), self.menu_plan(grid)];
+        let (cw, ch) = (grid.cw as f32, grid.ch as f32);
+        // The ball's centre in the window's pixels, and half the orb's height: the unit its picture is drawn in.
+        let centre = ((orb.col as f32 + orb.cols as f32 / 2.0) * cw, (orb.row as f32 + orb.rows as f32 / 2.0) * ch);
+        let unit = orb.rows as f32 * ch / 2.0;
+        let mut spots = Vec::new();
+        for module in self.modules.shown() {
+            let cells = if module.slot >= modules::TALL_SLOT { modules::tall_place(grid, orb.cells(), module.slot - modules::TALL_SLOT) } else { places.get(module.slot).copied() };
+            let Some(cells) = cells else { continue };
+            if covered.iter().flatten().any(|rect| rect.intersects(cells)) {
+                continue;
+            }
+            let shape = modules::fold(module.out.value(now));
+            // The thoughts card is only as tall as its words, from the top of its place down.
+            let rows = if module.slot >= modules::TALL_SLOT { self.tall[module.slot - modules::TALL_SLOT].rows } else { cells.height as f32 };
+            let (full_w, full_h) = (cells.width as f32 * cw, rows * ch);
+            let (width, height) = (full_w * shape.width, FOLD_LINE_PX + (full_h - FOLD_LINE_PX) * shape.height);
+            // Still inside the ball: nothing to see yet.
+            if width < 2.0 {
+                continue;
+            }
+            // The middle of the card goes from the ball's centre to the middle of its place.
+            let place = (cells.x as f32 * cw + full_w / 2.0, cells.y as f32 * ch + full_h / 2.0);
+            let middle = (centre.0 + (place.0 - centre.0) * shape.travel, centre.1 + (place.1 - centre.1) * shape.travel);
+            let (x, y) = (middle.0 - width / 2.0, middle.1 - height / 2.0);
+            let near = if modules::on_the_right(cells, orb.cells()) { x } else { x + width };
+            let (r, g, b) = theme::rgb(status_colour(module));
+            let twig = Twig {
+                to: ((near - centre.0) / unit, (middle.1 - centre.1) / unit),
+                colour: [r, g, b],
+                grown: 1.0,
+                flow: if module.status() == Status::Running { 1.0 } else { 0.0 },
+            };
+            let (gr, gg, gb) = theme::rgb(module_face(module).2);
+            spots.push(ModuleSpot { slot: module.slot, cells, x, y, width, height, open: shape.height, lines: ((height / ch) as i32 - 3).max(0) as usize, glow: [gr, gg, gb], age: now.saturating_duration_since(module.since).as_secs_f32(), since_result: module.shell.as_ref().and_then(|shell| shell.got).map(|got| now.saturating_duration_since(got).as_secs_f32()), twig, text: shape.text });
+        }
+        spots
+    }
+
+    /// The words on the modules: what each one is, how far it has got, and what it is doing.
+    /// They appear when the glass has all but arrived, and go before it leaves.
+    fn draw_modules(&self, p: &mut Painter, spots: &[ModuleSpot], ms: u128) {
+        for spot in spots.iter().filter(|spot| spot.text > 0.0) {
+            let Some(module) = self.modules.shown().iter().find(|module| module.slot == spot.slot) else { continue };
+            let (icon, name, colour) = module_face(module);
+            let left = (spot.cells.x + MODULE_PAD_X) as i32;
+            let right = (spot.cells.right() - MODULE_PAD_X) as i32;
+            let y = spot.cells.y as i32 + 1;
+            let (done, total) = module.progress();
+            let count = if total > 1 { format!("{done}/{total} ") } else { String::new() };
+            let (mark, mark_colour) = match module.status() {
+                Status::Running => (theme::spinner(ms), colour),
+                Status::Done => (theme::I_CHECK, theme::MOSS),
+                Status::Failed => (theme::I_CLOSE, theme::ROSEHIP),
+            };
+            let state: text::Line = vec![(count, Style::default().fg(theme::DUSK)), (mark.to_string(), Style::default().fg(mark_colour))];
+            let room = (right - left) as usize;
+            let name_room = room.saturating_sub(text::line_width(&state) + 4);
+            let thinking = module.kind == ModuleKind::Thoughts;
+            // A write that has the tall card shows what it puts in the file, as the conversation screen does.
+            let tall = module.slot >= modules::TALL_SLOT;
+            if let (true, ModuleKind::Edit, Some(preview)) = (tall, module.kind, &module.preview) {
+                self.draw_edit(p, spot, module, preview, ms);
+                text::fade(p.buf, spot.cells, 1.0 - spot.text, theme::NIGHT);
+                continue;
+            }
+            if let (true, ModuleKind::Shell, Some(shell)) = (tall, module.kind, &module.shell) {
+                self.draw_shell(p, spot, module, shell, ms);
+                text::fade(p.buf, spot.cells, 1.0 - spot.text, theme::NIGHT);
+                continue;
+            }
+            let name = text::fit(&name, name_room);
+            let mut head: text::Line = vec![(format!("{icon}  "), Style::default().fg(colour))];
+            // The words "Thoughts" shimmer while the model thinks, as the word on the card under the orb does.
+            if thinking && module.status() == Status::Running {
+                head.extend(text::shimmer(&name, ms, theme::MIST, theme::FOG));
+            } else {
+                head.push((name, Style::default().fg(theme::FOG).add_modifier(Modifier::BOLD)));
+            }
+            p.line(left, y, &head);
+            p.line_right(right, y, &state);
+            let detail = module.detail.replace('\n', " ");
+            if thinking {
+                draw_thought(p, spot.cells, spot.lines, &module.detail);
+            } else {
+                p.text(left, y + 1, &text::fit(&detail, room), Style::default().fg(theme::MIST));
+            }
+            text::fade(p.buf, spot.cells, 1.0 - spot.text, theme::NIGHT);
+        }
+    }
+
+    /// The card of a write: the file, how many lines it adds and removes, and the diff, which
+    /// scrolls through if it is longer than the window (all of it within about two seconds).
+    fn draw_edit(&self, p: &mut Painter, spot: &ModuleSpot, module: &Module, preview: &Preview, ms: u128) {
+        let card = spot.cells;
+        let (icon, name, colour) = module_face(module);
+        let left = (card.x + MODULE_PAD_X) as i32;
+        let right = (card.right() - MODULE_PAD_X) as i32;
+        let y = card.y as i32 + 1;
+        let (done, total) = module.progress();
+        let count = if total > 1 { format!("{done}/{total} ") } else { String::new() };
+        let (mark, mark_colour) = match module.status() {
+            Status::Running => (theme::spinner(ms), colour),
+            Status::Done => (theme::I_CHECK, theme::MOSS),
+            Status::Failed => (theme::I_CLOSE, theme::ROSEHIP),
+        };
+        let state: text::Line = vec![
+            (count, Style::default().fg(theme::DUSK)),
+            (format!("+{} ", preview.added), Style::default().fg(theme::MOSS)),
+            (format!("−{} ", preview.removed), Style::default().fg(theme::ROSEHIP)),
+            (mark.to_string(), Style::default().fg(mark_colour)),
+        ];
+        // The file's name, or its end when the path is long: the name is what matters.
+        let room = (right - left) as usize;
+        let file = if preview.path.is_empty() { name } else { preview.path.clone() };
+        let file_room = room.saturating_sub(text::line_width(&state) + 5);
+        p.line(left, y, &vec![(format!("{icon}  "), Style::default().fg(colour)), (text::fit_end(&file, file_room), Style::default().fg(theme::FOG).add_modifier(Modifier::BOLD))]);
+        p.line_right(right, y, &state);
+        let window = modules::TALL_LINES as usize;
+        self.with_tall_lines(modules::TALL_EDITS, module, card, |_, lines| {
+            let extra = lines.len().saturating_sub(window);
+            let speed = (extra as f32 / 2.0).max(4.0);
+            let from = (((spot.age - 0.5).max(0.0) * speed) as usize).min(extra);
+            for (index, line) in lines.iter().skip(from).take(window.min(spot.lines)).enumerate() {
+                p.line(left, card.y as i32 + 2 + index as i32, line);
+            }
+        });
+    }
+
+    /// The card of a command, as a terminal would show it: the prompt and the command, then what it
+    /// printed, line by line as it comes; the newest lines at the bottom.
+    fn draw_shell(&self, p: &mut Painter, spot: &ModuleSpot, module: &Module, shell: &Shell, ms: u128) {
+        let card = spot.cells;
+        let (icon, name, colour) = module_face(module);
+        let left = (card.x + MODULE_PAD_X) as i32;
+        let right = (card.right() - MODULE_PAD_X) as i32;
+        let y = card.y as i32 + 1;
+        let state: text::Line = match (module.status(), shell.exit) {
+            (Status::Running, _) => vec![(theme::spinner(ms).to_string(), Style::default().fg(colour))],
+            (_, Some(code)) if code != 0 => vec![(format!("exit {code} "), Style::default().fg(theme::ROSEHIP)), (theme::I_CLOSE.to_string(), Style::default().fg(theme::ROSEHIP))],
+            (Status::Failed, _) => vec![(theme::I_CLOSE.to_string(), Style::default().fg(theme::ROSEHIP))],
+            _ => vec![(theme::I_CHECK.to_string(), Style::default().fg(theme::MOSS))],
+        };
+        // What the command is for, beside the name, when there is room.
+        let room = (right - left) as usize;
+        let purpose_room = room.saturating_sub(text::width(&name) + text::line_width(&state) + 8);
+        let mut head: text::Line = vec![(format!("{icon}  "), Style::default().fg(colour)), (name, Style::default().fg(theme::FOG).add_modifier(Modifier::BOLD))];
+        if purpose_room >= 8 && !module.detail.is_empty() && shell.output.is_none() {
+            head.push((format!("  {}", text::fit(&module.detail.replace('\n', " "), purpose_room)), Style::default().fg(theme::DUSK)));
+        }
+        p.line(left, y, &head);
+        p.line_right(right, y, &state);
+        let window = modules::TALL_LINES as usize;
+        self.with_tall_lines(modules::TALL_SHELL, module, card, |command_rows, lines| {
+            let revealed = shown_rows(command_rows, lines.len(), spot.since_result, true);
+            // The command stays at the top; the output scrolls under it, its newest lines at the bottom.
+            let room = window.saturating_sub(command_rows).max(1);
+            let from = revealed.saturating_sub(room).max(command_rows);
+            let rows: Vec<&text::Line> = lines[..command_rows.min(revealed)].iter().chain(lines[from..revealed].iter()).collect();
+            for (index, line) in rows.iter().enumerate().take(spot.lines) {
+                p.line(left, card.y as i32 + 2 + index as i32, line);
+            }
+            // A command that has not answered yet shows the cursor of a terminal waiting.
+            if shell.output.is_none() && (ms / 500) % 2 == 0 && rows.len() < spot.lines.max(1) {
+                p.text(left, card.y as i32 + 2 + rows.len() as i32, "▍", Style::default().fg(theme::MIST));
+            }
+        });
+    }
+
     /// What the menu shows beside each item: where things stand now.
     fn menu_values(&self) -> Vec<String> {
         MENU.iter()
@@ -1293,6 +1994,7 @@ impl Voice {
         let ms = now.duration_since(self.started).as_millis();
         let mut p = Painter { buf: frame.buffer_mut(), clip: area };
 
+        self.draw_modules(&mut p, &self.module_spots(grid, now), ms);
         match self.overlay_plan(grid) {
             Some(plan) => Self::draw_overlay(&mut p, &plan),
             None => self.draw_card(&mut p, grid, ms),
@@ -1400,15 +2102,61 @@ fn backdrop_rgb(width: u32, height: u32) -> Result<RgbImage, image::ImageError> 
     Ok(image)
 }
 
+/// The patch of the photograph round a point, for the ball's glass to bend: `reach` pixels
+/// each way from `centre`. Past the photograph's edge its last pixels repeat.
+fn scenery_patch(image: &RgbImage, centre: (f32, f32), reach: f32) -> Scenery {
+    let side = SCENERY_SIDE.min((reach * 2.0).ceil() as u32).max(2);
+    let (last_x, last_y) = (image.width() as f32 - 1.0, image.height() as f32 - 1.0);
+    let mut bytes = Vec::with_capacity((side * side * 3) as usize);
+    for row in 0..side {
+        for col in 0..side {
+            let across = |index: u32| ((index as f32 + 0.5) / side as f32 * 2.0 - 1.0) * reach;
+            let x = (centre.0 + across(col)).clamp(0.0, last_x);
+            let y = (centre.1 + across(row)).clamp(0.0, last_y);
+            let (x0, y0) = (x as u32, y as u32);
+            let (x1, y1) = ((x0 + 1).min(last_x as u32), (y0 + 1).min(last_y as u32));
+            let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+            for c in 0..3 {
+                let at = |px: u32, py: u32| image.get_pixel(px, py).0[c] as f32;
+                let top = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * fx;
+                let bottom = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * fx;
+                bytes.push((top + (bottom - top) * fy).round() as u8);
+            }
+        }
+    }
+    Scenery::new(side as usize, side as usize, &bytes)
+}
+
+/// The scenery of the orb in a window of `grid`, cut from the photograph as the window shows it.
+fn scenery_for(image: &RgbImage, grid: Grid) -> Scenery {
+    let orb = orb_box(grid);
+    let scale = image.width() as f32 / (grid.cols as f32 * grid.cw as f32);
+    let centre = ((orb.col as f32 + orb.cols as f32 / 2.0) * grid.cw as f32, (orb.row as f32 + orb.rows as f32 / 2.0) * grid.ch as f32);
+    let unit = orb.rows as f32 * grid.ch as f32 / 2.0;
+    scenery_patch(image, (centre.0 * scale, centre.1 * scale), SCENERY_REACH * unit * scale)
+}
+
+/// The orb's scenery in a window of an ordinary size, for `--orb-preview`.
+pub fn preview_scenery() -> Result<Scenery, image::ImageError> {
+    let grid = Grid { cols: 213, rows: 54, cw: 9, ch: 20 };
+    Ok(scenery_for(&backdrop_rgb(grid.cols as u32 * grid.cw, grid.rows as u32 * grid.ch)?, grid))
+}
+
 struct Scene {
     gpu: Gpu,
     backdrop: Option<u32>,
+    /// The photograph round the orb, which its glass bends.
+    scenery: Scenery,
+    /// The glass of each module place that has been used: its cells and its picture.
+    plates: Vec<Option<(PlateKey, u32)>>,
     /// The photograph blurred, which the glass cards lie over.
     frosted: Option<RgbImage>,
     /// The photograph unblurred and lightly blurred: the slash list's glass frosts from one to the other to `frosted`.
     sharp: Option<RgbImage>,
     soft: Option<RgbImage>,
     orb_image: Option<u32>,
+    /// When the orb's picture was last drawn.
+    orb_drawn: Instant,
     /// The cards now on screen: their cells and their pictures.
     card: Option<(Rect, u32)>,
     overlay: Option<(Rect, u32)>,
@@ -1459,7 +2207,20 @@ fn show_glass(
 
 impl Scene {
     fn new(caps: Caps) -> Self {
-        Scene { gpu: Gpu::new(caps.temp_dir), backdrop: None, frosted: None, sharp: None, soft: None, orb_image: None, card: None, overlay: None, menu: None }
+        Scene {
+            gpu: Gpu::new(caps.temp_dir),
+            backdrop: None,
+            scenery: Scenery::flat(theme::GLASS_TINT),
+            plates: Vec::new(),
+            frosted: None,
+            sharp: None,
+            soft: None,
+            orb_image: None,
+            orb_drawn: Instant::now(),
+            card: None,
+            overlay: None,
+            menu: None,
+        }
     }
 
     fn show_backdrop(&mut self, grid: Grid) -> io::Result<()> {
@@ -1469,17 +2230,67 @@ impl Scene {
         let placement = Placement { image: id, col: 0, row: 0, x_off: 0, y_off: 0, cells: Some((grid.cols, grid.rows)), crop: None, z: Z_BACKDROP };
         self.gpu.set(BACKDROP_SLOT, Some(placement));
         self.backdrop = Some(id);
+        self.scenery = scenery_for(&image, grid);
         self.frosted = Some(backdrop::blur(&image, 4, 8));
         self.soft = Some(backdrop::blur(&image, 4, 3));
         self.sharp = Some(image);
         Ok(())
     }
 
-    fn show_orb(&mut self, voice: &Voice, grid: Grid, clock: f32) -> io::Result<()> {
+    /// The glass of the modules, each as its module is now: a line, a wider one, a card unfolding.
+    /// Its size and place change every frame while it moves, so each frame has its own picture;
+    /// once it has settled the picture of its place is the same, and only the first is made.
+    fn show_modules(&mut self, grid: Grid, spots: &[ModuleSpot]) -> io::Result<()> {
+        let used = spots.iter().map(|spot| spot.slot + 1).max().unwrap_or(0);
+        if self.plates.len() < used {
+            self.plates.resize(used, None);
+        }
+        for slot in 0..self.plates.len() {
+            let Some(spot) = spots.iter().find(|spot| spot.slot == slot) else {
+                self.gpu.set(MODULE_SLOT + slot as u32, None);
+                continue;
+            };
+            let (x, y) = (spot.x.round().max(0.0) as i64, spot.y.round().max(0.0) as i64);
+            let (w, h) = (spot.width.round().max(1.0) as u32, spot.height.round().max(1.0) as u32);
+            let key = (x, y, w, h);
+            let image = match self.plates[slot] {
+                Some((made, image)) if made == key => image,
+                _ => {
+                    let Some(frosted) = self.frosted.as_ref() else { continue };
+                    // Darker than the card under the orb: a module may lie over the bright horizon.
+                    // The line it comes out as is a thread of light in the colour of its kind, and
+                    // cools into glass as it opens.
+                    let warm = (1.0 - spot.open).powf(1.6);
+                    let tint = std::array::from_fn(|c| (theme::GLASS_TINT[c] as f32 + (spot.glow[c] as f32 - theme::GLASS_TINT[c] as f32) * warm).round() as u8);
+                    let glass = Glass { tint, alpha: 0.74 + 0.2 * warm, radius: grid.ch as f32 * 0.6, rim: 0.18 + 0.45 * (1.0 - spot.open) };
+                    let (window_w, window_h) = (grid.cols as f32 * grid.cw as f32, grid.rows as f32 * grid.ch as f32);
+                    let scale = (frosted.width() as f32 / window_w, frosted.height() as f32 / window_h);
+                    let picture = backdrop::card(frosted, x, y, w, h, &glass, scale);
+                    let image = self.gpu.upload_rgba(w, h, picture.as_raw())?;
+                    if let Some((_, old)) = self.plates[slot].replace((key, image)) {
+                        self.gpu.free(old);
+                    }
+                    image
+                }
+            };
+            // Pixel for pixel: the picture is made the size it is shown at.
+            self.gpu.set(MODULE_SLOT + slot as u32, Some(Placement::at_px(image, spot.x, spot.y, grid.cw, grid.ch, None, Z_MODULE)));
+        }
+        Ok(())
+    }
+
+    fn show_orb(&mut self, voice: &Voice, grid: Grid, clock: f32, spots: &[ModuleSpot], now: Instant) -> io::Result<()> {
+        // A waiting orb only breathes: a new picture of it a few times a second is as smooth
+        // to the eye as thirty, and it waits for most of the day.
+        let calm = voice.orb.calm() && spots.is_empty();
+        if calm && self.orb_image.is_some() && now.saturating_duration_since(self.orb_drawn) < CALM_ORB_PERIOD {
+            return Ok(());
+        }
+        self.orb_drawn = now;
         let spot = orb_box(grid);
-        let side = spot.texture as usize;
-        let picture = voice.orb.render(clock, side);
-        let id = self.gpu.upload_rgba(spot.texture, spot.texture, &picture)?;
+        let twigs: Vec<Twig> = spots.iter().map(|module| module.twig).collect();
+        let picture = voice.orb.render(clock, spot.width as usize, spot.height as usize, &self.scenery, &twigs);
+        let id = self.gpu.upload_rgba(spot.width, spot.height, &picture)?;
         let placement = Placement {
             image: id,
             col: spot.col,
@@ -1488,7 +2299,7 @@ impl Scene {
             y_off: 0,
             cells: Some((spot.cols, spot.rows)),
             crop: None,
-            z: Z_CARD,
+            z: Z_ORB,
         };
         self.gpu.set(ORB_SLOT, Some(placement));
         if let Some(old) = self.orb_image.replace(id) {
@@ -1516,6 +2327,7 @@ impl Scene {
         self.sharp = None;
         self.soft = None;
         self.orb_image = None;
+        self.plates.clear();
         self.card = None;
         self.overlay = None;
         self.menu = None;
@@ -1681,6 +2493,15 @@ fn run_loop(
         let dt = now.duration_since(last).as_secs_f32().min(0.25);
         last = now;
         let clock = now.duration_since(started).as_secs_f32();
+        let orb = orb_box(grid).cells();
+        let found = modules::places(grid, orb);
+        voice.places = found.len();
+        for tall in 0..modules::TALL_COUNT {
+            voice.tall[tall].rect = modules::tall_place(grid, orb, tall);
+            voice.tall[tall].covered = voice.tall[tall]
+                .rect
+                .map(|card| found.iter().enumerate().filter(|(_, place)| place.intersects(card)).map(|(slot, _)| slot).collect());
+        }
         voice.tick(now, dt, clock);
         terminal.draw(|frame| voice.draw(frame, grid, now))?;
         let title = voice.window_title();
@@ -1692,7 +2513,9 @@ fn run_loop(
         scene.show_overlay(grid, overlay)?;
         scene.show_menu(grid, voice.menu_plan(grid), voice.menu_in.value(now))?;
         scene.show_card(grid, overlay.is_none().then(|| voice.card_plan(grid).rect))?;
-        scene.show_orb(&voice, grid, clock)?;
+        let spots = voice.module_spots(grid, now);
+        scene.show_modules(grid, &spots)?;
+        scene.show_orb(&voice, grid, clock, &spots, now)?;
         scene.gpu.flush(&mut out)?;
 
         due = anim::next_frame(due, now, period);
@@ -2457,8 +3280,10 @@ mod tests {
         let start = Instant::now();
         let mut voice = Voice::new(true, start);
         let mut seen = vec![voice.resolve(start)];
+        let mut elapsed = 0;
         for step in 1..ALL_STATES.len() {
-            voice.tick(start + Duration::from_secs(DEMO_SECONDS * step as u64), 0.016, 0.0);
+            elapsed += demo_seconds(ALL_STATES[step - 1]);
+            voice.tick(start + Duration::from_secs(elapsed), 0.016, 0.0);
             seen.push(voice.resolve(start));
         }
         assert_eq!(seen, ALL_STATES.to_vec());
@@ -2492,8 +3317,333 @@ mod tests {
             let spot = orb_box(grid);
             assert!(spot.col + spot.cols <= cols, "{cols}x{rows}: fits across");
             assert!(spot.row + spot.rows + TEXT_ROWS <= rows + 1, "{cols}x{rows}: leaves room for the text");
-            assert!((64..=ORB_TEXTURE_MAX).contains(&spot.texture));
+            // Drawn at the size it is shown at: the picture has the pixels of its cells.
+            assert_eq!((spot.width, spot.height), (spot.cols as u32 * 10, spot.rows as u32 * 20), "{cols}x{rows}");
         }
+    }
+
+    #[test]
+    fn a_very_tall_window_gets_a_smaller_picture_of_the_same_shape() {
+        let spot = orb_box(Grid { cols: 400, rows: 120, cw: 10, ch: 22 });
+        assert_eq!(spot.height, ORB_TEXTURE_MAX);
+        let (cells_w, cells_h) = (spot.cols as f32 * 10.0, spot.rows as f32 * 22.0);
+        assert!((spot.width as f32 / spot.height as f32 - cells_w / cells_h).abs() < 0.005);
+    }
+
+    #[test]
+    fn the_tools_of_a_turn_become_modules_and_the_turn_s_end_ends_them() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "step", "batch_id": "b", "call_id": "c1", "action_type": "skill_call", "action_args": {"skill": "browser"}, "action_description": "youtube.com"}), now);
+        voice.on_core(&json!({"type": "step", "batch_id": "b", "call_id": "c2", "action_type": "run_shell", "action_description": "runs the tests"}), now);
+        // The words that end a turn are spoken, not shown as work.
+        voice.on_core(&json!({"type": "step", "batch_id": "b", "call_id": "c3", "action_type": "final_answer"}), now);
+        voice.tick(now, 0.016, 0.0);
+        let shown: Vec<(String, Status)> = voice.modules.shown().iter().map(|m| (module_face(m).1, m.status())).collect();
+        assert_eq!(shown, [(strings().module_browser.to_string(), Status::Running), (strings().module_shell.to_string(), Status::Running)]);
+
+        voice.on_core(&json!({"type": "action_result", "call_id": "c2", "ok": false, "summary": "Command exited with code 1"}), now);
+        let shell = &voice.modules.shown()[1];
+        assert_eq!((shell.status(), shell.detail.as_str()), (Status::Failed, "Command exited with code 1"));
+        voice.on_core(&json!({"type": "turn_end"}), now);
+        assert_eq!(voice.modules.shown()[0].status(), Status::Done);
+    }
+
+    #[test]
+    fn a_skill_is_named_by_itself_and_a_new_session_has_no_modules() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "step", "call_id": "c1", "action_type": "skill_call", "action_args": {"skill": "calendar"}, "action_description": "adds an interview"}), now);
+        voice.tick(now, 0.016, 0.0);
+        assert_eq!(module_face(&voice.modules.shown()[0]).1, "calendar");
+        voice.reset_conversation();
+        assert!(voice.modules.shown().is_empty());
+    }
+
+    #[test]
+    fn a_module_unfolds_out_of_the_ball_and_its_text_comes_last() {
+        let now = Instant::now();
+        let grid = Grid { cols: 213, rows: 54, cw: 9, ch: 20 };
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "step", "call_id": "c1", "action_type": "fetch_url", "action_description": "youtube.com"}), now);
+        voice.tick(now, 0.016, 0.0);
+        let orb = orb_box(grid);
+        let centre = (orb.col as f32 + orb.cols as f32 / 2.0) * 9.0;
+
+        // Inside the ball there is nothing to see, and the first of it is a line at its centre.
+        assert!(voice.module_spots(grid, now).is_empty());
+        let line = voice.module_spots(grid, now + Duration::from_millis(250))[0];
+        assert!(line.height < 6.0 && line.width > line.height, "a thin line: {line:?}");
+        assert!((line.x + line.width / 2.0 - centre).abs() < line.cells.width as f32 * 9.0 / 2.0, "it is still near the ball's centre");
+        assert_eq!(line.text, 0.0);
+
+        // Half way it is a broad line on its way out, not yet a card.
+        let half = voice.module_spots(grid, now + Duration::from_millis(400))[0];
+        assert!(half.width > half.cells.width as f32 * 9.0 * 0.8 && half.height < half.cells.height as f32 * 20.0 * 0.4, "{half:?}");
+
+        let arrived = voice.module_spots(grid, now + Duration::from_secs(2))[0];
+        assert_eq!((arrived.x, arrived.y), (arrived.cells.x as f32 * 9.0, arrived.cells.y as f32 * 20.0));
+        assert_eq!((arrived.width, arrived.height), (arrived.cells.width as f32 * 9.0, arrived.cells.height as f32 * 20.0));
+        assert_eq!(arrived.text, 1.0);
+        // The twig ends on the card's near edge, outside the ball.
+        assert!(arrived.twig.to.0 > crate::orb::BALL * 1.2 && arrived.twig.flow == 1.0);
+
+        // An open menu covers nothing up there, but a dialog over a module hides it.
+        voice.menu = Some(0);
+        let hidden_by = voice.overlay_plan(grid).unwrap().rect;
+        let visible = voice.module_spots(grid, now + Duration::from_secs(2)).len();
+        assert_eq!(visible == 0, hidden_by.intersects(arrived.cells));
+    }
+
+    #[test]
+    fn the_models_thoughts_open_a_card_with_the_first_words_and_close_it_when_it_has_thought() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "s"}), now);
+        voice.tick(now, 0.016, 0.0);
+        assert!(voice.modules.shown().is_empty(), "no words yet, so nothing to show");
+
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "s", "text": "  Сначала   открою\nсайт "}), now);
+        voice.tick(now, 0.016, 0.0);
+        let card = &voice.modules.shown()[0];
+        assert_eq!((card.kind, card.detail.as_str(), card.status()), (ModuleKind::Thoughts, "Сначала открою\nсайт", Status::Running));
+
+        // The text is a snapshot that grows: the same card, not a new one for each.
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "s", "text": "Сначала открою сайт, потом поищу."}), now);
+        assert_eq!(voice.modules.shown().len(), 1);
+        assert_eq!(voice.modules.shown()[0].detail, "Сначала открою сайт, потом поищу.");
+
+        let ended = now + Duration::from_secs(4);
+        voice.on_core(&json!({"type": "reasoning_commit", "stream_id": "s", "duration_seconds": 4.0}), ended);
+        assert_eq!(voice.modules.shown()[0].status(), Status::Done);
+        voice.tick(ended + Duration::from_millis(1000), 0.016, 0.0);
+        assert_eq!(voice.modules.shown()[0].out.target(), 0.0, "it closes soon after the thinking");
+
+        // The next thought opens a card again.
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "t"}), ended);
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "t", "text": "Теперь пауза."}), ended);
+        // The place is the old card's until it has folded away.
+        voice.tick(ended + Duration::from_millis(1100), 0.016, 0.0);
+        voice.tick(ended + Duration::from_millis(1700), 0.016, 0.0);
+        voice.tick(ended + Duration::from_millis(1710), 0.016, 0.0);
+        assert!(voice.modules.shown().iter().any(|card| card.detail == "Теперь пауза." && card.out.target() == 1.0));
+    }
+
+    #[test]
+    fn the_core_sends_the_thought_in_pieces_and_they_are_put_together() {
+        let now = Instant::now();
+        let mut voice = voice();
+        let piece = |text: &str, append: Value| json!({"type": "reasoning_chunk", "stream_id": "s", "text": text, "append": append});
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "s"}), now);
+        voice.on_core(&piece("Сначала  открою", json!(true)), now);
+        voice.on_core(&piece(" сайт.\n\n", json!(true)), now);
+        voice.on_core(&piece("- потом   поищу", json!(true)), now);
+        voice.tick(now, 0.016, 0.0);
+        assert_eq!(voice.modules.shown()[0].detail, "Сначала открою сайт.\n- потом поищу", "lines stay lines");
+
+        // The text rewound: what comes is the whole thought now.
+        voice.on_core(&piece("Передумала.", json!(false)), now);
+        assert_eq!(voice.modules.shown()[0].detail, "Передумала.");
+
+        // The next thought starts from nothing, not from the end of this one.
+        voice.on_core(&json!({"type": "reasoning_commit", "stream_id": "s", "duration_seconds": 1.0}), now);
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "t"}), now);
+        voice.on_core(&piece("Новая.", json!(true)), now);
+        assert!(voice.modules.has("thoughts:2"));
+        assert_eq!(voice.modules.shown()[0].detail, "Передумала.", "the old card keeps its own words");
+    }
+
+    #[test]
+    fn the_thoughts_card_is_as_tall_as_its_words_and_no_taller_than_its_window() {
+        let now = Instant::now();
+        let grid = Grid { cols: 213, rows: 54, cw: 9, ch: 20 };
+        let mut voice = voice();
+        voice.tall[modules::TALL_THOUGHTS].rect = modules::tall_place(grid, orb_box(grid).cells(), modules::TALL_THOUGHTS);
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "s"}), now);
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "s", "text": "Коротко.", "append": true}), now);
+        voice.tick(now, 0.016, 0.0);
+        let rows = |voice: &Voice| voice.tall[modules::TALL_THOUGHTS].rows;
+        assert_eq!(rows(&voice), 4.0, "a header, one line, a blank row above and below");
+
+        let long = "слово ".repeat(200);
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "s", "text": long, "append": true}), now);
+        for _ in 0..200 {
+            voice.tick(now, 0.016, 0.0);
+        }
+        assert!((rows(&voice) - (3.0 + modules::TALL_LINES as f32)).abs() < 0.05, "{}", rows(&voice));
+    }
+
+    #[test]
+    fn a_write_shows_its_diff_first_from_its_arguments_and_then_as_the_core_made_it() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "step", "call_id": "w1", "batch_id": "b", "action_type": "write_file", "action_description": "writes a.py",
+            "action_args": {"path": "src/a.py", "content": "import os\nprint(os.getcwd())\n"}}), now);
+        voice.tick(now, 0.016, 0.0);
+        let card = &voice.modules.shown()[0];
+        assert_eq!((card.kind, card.slot), (ModuleKind::Edit, modules::TALL_SLOT + modules::TALL_EDITS));
+        let preview = card.preview.as_ref().unwrap();
+        assert_eq!((preview.path.as_str(), preview.added, preview.removed), ("src/a.py", 2, 0));
+        assert!(preview.patch.contains("+import os\n+print(os.getcwd())"));
+
+        // A replacement: the old fragment goes, the new one comes.
+        voice.on_core(&json!({"type": "step", "call_id": "w2", "batch_id": "b", "action_type": "replace_in_file",
+            "action_args": {"path": "src/a.py", "old_text": "a\nb", "new_text": "c"}}), now);
+        let replaced = &voice.modules.shown()[0];
+        assert_eq!(replaced.progress().1, 2, "two writes of a response share the card, which shows the newest");
+        assert!(replaced.preview.as_ref().unwrap().patch.contains("-a\n-b\n+c"));
+
+        // The core's own diff has the file's line numbers and the true counts.
+        let patch = "--- a/src/a.py\n+++ b/src/a.py\n@@ -10,2 +10,3 @@\n x\n+import os\n+print(1)\n y\n";
+        voice.on_core(&json!({"type": "action_result", "call_id": "w1", "ok": true, "summary": "Wrote 2 lines", "path": "src/a.py",
+            "lines_added": 2, "lines_removed": 0, "patch": patch}), now);
+        let preview = voice.modules.shown()[0].preview.as_ref().unwrap();
+        assert!(preview.patch.starts_with("--- a/src/a.py") && preview.added == 2);
+        assert_eq!(voice.edit_generation, 3, "each new diff makes the drawn lines stale");
+    }
+
+    #[test]
+    fn a_command_shows_as_a_terminal_and_its_output_comes_line_by_line() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "step", "call_id": "s1", "batch_id": "b", "action_type": "run_shell", "action_description": "run the tests",
+            "action_args": {"command": ["python", "-m", "pytest", "-q", "my tests"]}}), now);
+        voice.tick(now, 0.016, 0.0);
+        let card = &voice.modules.shown()[0];
+        assert_eq!(card.slot, modules::TALL_SLOT + modules::TALL_SHELL);
+        assert_eq!(card.shell.as_ref().unwrap().command, "python -m pytest -q 'my tests'");
+
+        voice.on_core(&json!({"type": "action_result", "call_id": "s1", "ok": false, "summary": "Command exited with code 1", "exit_code": 1,
+            "output": "FAILED test_a\n1 failed\n"}), now);
+        let shell = voice.modules.shown()[0].shell.as_ref().unwrap();
+        assert_eq!((shell.output.as_deref(), shell.exit), (Some("FAILED test_a\n1 failed\n"), Some(1)));
+        // The command is on screen at once; the output follows, a line at a time.
+        let (head, lines) = shell_lines(shell, 40);
+        assert_eq!((head, lines.len()), (1, 4), "the command, two lines of output, how it ended");
+        assert_eq!(shown_rows(head, lines.len(), None, true), 1);
+        assert_eq!(shown_rows(head, lines.len(), Some(0.0), true), 1);
+        assert!(shown_rows(head, lines.len(), Some(0.05), true) > 1);
+        assert_eq!(shown_rows(head, lines.len(), Some(5.0), true), 4);
+        assert_eq!(shown_rows(head, 9, None, false), 9, "a card that is not a terminal shows all");
+    }
+
+    #[test]
+    fn a_tool_that_is_not_a_write_has_no_diff() {
+        assert!(preview_from_args("read_file", &json!({"path": "a.py"})).is_none());
+        assert!(preview_from_args("write_file", &json!({"content": "x"})).is_none(), "no path");
+    }
+
+    #[test]
+    fn the_card_of_a_write_is_as_tall_as_its_diff_and_no_taller_than_its_window() {
+        let now = Instant::now();
+        let grid = Grid { cols: 213, rows: 54, cw: 9, ch: 20 };
+        let mut voice = voice();
+        let orb = orb_box(grid).cells();
+        voice.tall[modules::TALL_EDITS].rect = modules::tall_place(grid, orb, modules::TALL_EDITS);
+        let content: String = (0..40).map(|n| format!("line {n}\n")).collect();
+        voice.on_core(&json!({"type": "step", "call_id": "w1", "batch_id": "b", "action_type": "write_file",
+            "action_args": {"path": "a.py", "content": content}}), now);
+        for _ in 0..200 {
+            voice.tick(now, 0.016, 0.0);
+        }
+        let rows = voice.tall[modules::TALL_EDITS].rows;
+        assert!((rows - (3.0 + modules::TALL_LINES as f32)).abs() < 0.05, "{rows}");
+    }
+
+    #[test]
+    fn a_model_that_does_not_show_its_thinking_gets_no_card() {
+        // Some providers send the time it thought for and no words (the grey block stays empty).
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "s"}), now);
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "s", "text": ""}), now);
+        voice.on_core(&json!({"type": "reasoning_commit", "stream_id": "s", "duration_seconds": 9.0}), now);
+        voice.tick(now, 0.016, 0.0);
+        assert!(voice.modules.shown().is_empty());
+    }
+
+    #[test]
+    fn only_the_end_of_a_very_long_thought_is_kept() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_core(&json!({"type": "reasoning_start", "stream_id": "s"}), now);
+        let long = format!("{} конец мысли", "слово ".repeat(500));
+        voice.on_core(&json!({"type": "reasoning_chunk", "stream_id": "s", "text": long}), now);
+        voice.tick(now, 0.016, 0.0);
+        let kept = &voice.modules.shown()[0].detail;
+        assert!(kept.chars().count() <= THOUGHT_KEPT_CHARS + 1 && kept.ends_with("конец мысли"), "{} chars", kept.chars().count());
+    }
+
+    #[test]
+    fn the_person_s_voice_shows_on_the_orb_while_they_speak() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.ears = Ears::Idle;
+        voice.on_ears(&json!({"event": "phrase", "on": true}), now);
+        voice.on_ears(&json!({"event": "level", "value": 0.8, "pause": 0.0}), now);
+        for _ in 0..20 {
+            voice.tick(now, 0.016, 0.0);
+            voice.on_ears(&json!({"event": "level", "value": 0.8, "pause": 0.4}), now);
+        }
+        assert_eq!(voice.resolve(now), OrbState::Waiting, "hearing somebody is not yet being spoken to");
+        assert!(voice.orb.level > 0.5, "the light follows the voice: {}", voice.orb.level);
+        assert!((voice.orb.pause - 0.4).abs() < 1e-6);
+
+        voice.on_ears(&json!({"event": "phrase", "on": false}), now);
+        for _ in 0..60 {
+            voice.tick(now, 0.016, 0.0);
+        }
+        assert!(voice.orb.level < 0.05 && voice.orb.pause == 0.0);
+    }
+
+    #[test]
+    fn between_the_phrases_of_one_request_the_orb_listens() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_ears(&json!({"event": "state", "state": "transcribing"}), now);
+        assert_eq!(voice.resolve(now), OrbState::Transcribing);
+        // The first phrase is being written down and the person is already saying the next.
+        voice.on_ears(&json!({"event": "phrase", "on": true}), now);
+        assert_eq!(voice.resolve(now), OrbState::Listening);
+        voice.on_ears(&json!({"event": "phrase", "on": false}), now);
+        assert_eq!(voice.resolve(now), OrbState::Transcribing);
+    }
+
+    #[test]
+    fn lost_words_are_admitted_on_the_card() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.on_ears(&json!({"event": "missed"}), now);
+        assert_eq!(voice.toast.as_ref().map(|(message, ok, _)| (message.as_str(), *ok)), Some((strings().voice_missed, false)));
+    }
+
+    #[test]
+    fn the_demo_plays_modules_while_it_shows_the_working_state() {
+        let start = Instant::now();
+        let mut voice = Voice::new(true, start);
+        let working = ALL_STATES.iter().position(|state| *state == OrbState::Working).unwrap();
+        voice.step_demo(working, start);
+        // First the model thinks, and its card is the only one.
+        voice.tick(start + Duration::from_millis(1500), 0.016, 1.5);
+        assert_eq!(voice.modules.shown().iter().map(|module| module.kind).collect::<Vec<_>>(), [ModuleKind::Thoughts]);
+        // Then the tools come out, three of them, and the thoughts have closed.
+        voice.tick(start + Duration::from_millis(4600), 0.016, 4.6);
+        let tools = voice.modules.shown().iter().filter(|module| module.kind != ModuleKind::Thoughts && !module.leaving()).count();
+        assert_eq!(tools, 3);
+        voice.tick(start + Duration::from_millis(6800), 0.016, 6.8);
+        assert!(voice.modules.shown().iter().all(|module| module.status() == Status::Done));
+    }
+
+    #[test]
+    fn the_scenery_is_the_photograph_round_the_orb() {
+        // Left half red, right half blue; the orb in the middle of the window.
+        let grid = Grid { cols: 100, rows: 40, cw: 10, ch: 20 };
+        let image = RgbImage::from_fn(1000, 800, |x, _| image::Rgb(if x < 500 { [200, 0, 0] } else { [0, 0, 200] }));
+        let scenery = scenery_for(&image, grid);
+        let picture = Orb::new(OrbState::Offline).render(0.0, 200, 200, &scenery, &[]);
+        let at = |x: usize| picture[(100 * 200 + x) * 4];
+        // The glass turns the picture round: what is to the right shows on the left.
+        assert!(at(100 - 20) < at(100 + 20), "left of centre is the darker grey of blue");
     }
 
     #[test]

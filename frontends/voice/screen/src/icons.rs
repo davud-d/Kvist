@@ -11,3 +11,6 @@ pub const I_UNMUTE: &str = "\u{eb75}";
 pub const I_QUESTION: &str = "\u{eb32}";
 pub const I_DISCONNECT: &str = "\u{ead0}";
 pub const I_DATABASE: &str = "\u{eace}";
+pub const I_CLOCK: &str = "\u{ea82}";
+pub const I_CHECKLIST: &str = "\u{eab3}";
+pub const I_PICTURE: &str = "\u{eaea}";

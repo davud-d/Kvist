@@ -9,21 +9,24 @@ pub enum Ease {
     OutCubic,
     /// Overshoots slightly before settling: the "jumps out" motion.
     OutBack,
-    /// A slow start, a short fast middle, a long soft landing (for 600 ms:
-    /// about 200 ms, 50 ms, 350 ms). The fast middle makes a motion read as
-    /// quick while both ends stay calm.
-    Burst,
+    /// Slow start, fast middle, slow end, the same in both directions: the motion of a
+    /// card unfolding out of the ball and folding back (see `FOLD_ENDS`).
+    Fold,
 }
 
-/// Burst's three phases: (share of the time, share of the distance).
-const BURST_START: (f32, f32) = (1.0 / 3.0, 0.30);
-const BURST_MIDDLE: (f32, f32) = (1.0 / 12.0, 0.35);
+/// The shape of `Ease::Fold`, the one place to tune it: each end of the motion takes
+/// this share of the time (first number) and covers this share of the distance (second);
+/// the fast middle takes the rest of both. With (0.34, 0.18) a motion spends a third of
+/// its time creeping off, another third creeping in, and covers two thirds of the way in
+/// the middle third. Smaller distance shares make the ends slower and the middle faster.
+pub const FOLD_ENDS: (f32, f32) = (0.34, 0.18);
 
-/// Burst as three pieces whose speeds meet at the joins: a power curve that
-/// speeds up into a straight line, then a power curve that slows down from it.
-fn burst(t: f32) -> f32 {
-    let (t_start, d_start) = BURST_START;
-    let (t_middle, d_middle) = BURST_MIDDLE;
+/// Three pieces whose speeds meet at the joins: a power curve that speeds up into a
+/// straight line, then a power curve that slows down from it. `start` and `middle` are
+/// (share of the time, share of the distance); the end is what is left of both.
+fn three_phases(t: f32, start: (f32, f32), middle: (f32, f32)) -> f32 {
+    let (t_start, d_start) = start;
+    let (t_middle, d_middle) = middle;
     let (t_end, d_end) = (1.0 - t_start - t_middle, 1.0 - d_start - d_middle);
     let speed = d_middle / t_middle;
     if t < t_start {
@@ -48,7 +51,10 @@ impl Ease {
                 let c3 = c1 + 1.0;
                 1.0 + c3 * (t - 1.0).powi(3) + c1 * (t - 1.0).powi(2)
             }
-            Ease::Burst => burst(t),
+            Ease::Fold => {
+                let (end_time, end_distance) = FOLD_ENDS;
+                three_phases(t, FOLD_ENDS, (1.0 - 2.0 * end_time, 1.0 - 2.0 * end_distance))
+            }
         }
     }
 }
@@ -150,18 +156,29 @@ mod tests {
     }
 
     #[test]
-    fn burst_spends_its_short_middle_on_a_third_of_the_way() {
-        let at = |ms: f32| Ease::Burst.apply(ms / 600.0);
-        assert!((at(200.0) - 0.30).abs() < 1e-4);
-        assert!((at(250.0) - 0.65).abs() < 1e-4);
-        assert!(at(100.0) < 0.05, "the start is slow");
+    fn fold_creeps_at_both_ends_and_runs_in_the_middle() {
+        let at = |share: f32| Ease::Fold.apply(share);
+        assert!(at(0.10) < 0.01, "the start is slow");
+        assert!(at(0.90) > 0.99, "the end is slow");
+        assert!((at(0.5) - 0.5).abs() < 1e-5, "it is half way half way through");
+        // Speed in the middle is the distance the middle covers over the time it takes.
+        let speed = (at(0.51) - at(0.49)) / 0.02;
+        assert!((speed - (1.0 - 2.0 * FOLD_ENDS.1) / (1.0 - 2.0 * FOLD_ENDS.0)).abs() < 1e-3, "{speed}");
     }
 
     #[test]
-    fn burst_never_moves_backwards_or_jumps() {
+    fn fold_is_the_same_curve_forwards_and_back() {
+        for step in 0..=100 {
+            let t = step as f32 / 100.0;
+            assert!((Ease::Fold.apply(t) + Ease::Fold.apply(1.0 - t) - 1.0).abs() < 1e-5, "t {t}");
+        }
+    }
+
+    #[test]
+    fn fold_never_moves_backwards_or_jumps() {
         let mut previous = 0.0;
         for step in 1..=600 {
-            let value = Ease::Burst.apply(step as f32 / 600.0);
+            let value = Ease::Fold.apply(step as f32 / 600.0);
             assert!(value >= previous);
             assert!(value - previous < 0.01, "jump at step {step}");
             previous = value;
@@ -170,7 +187,7 @@ mod tests {
 
     #[test]
     fn easings_start_at_zero_and_end_at_one() {
-        for ease in [Ease::OutCubic, Ease::OutBack, Ease::Burst] {
+        for ease in [Ease::OutCubic, Ease::OutBack, Ease::Fold] {
             assert!(ease.apply(0.0).abs() < 1e-6, "{ease:?}");
             assert!((ease.apply(1.0) - 1.0).abs() < 1e-6, "{ease:?}");
         }
