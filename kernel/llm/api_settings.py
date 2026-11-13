@@ -52,9 +52,11 @@ API_SETTINGS: tuple[ApiSetting, ...] = (
         key="request_interval",
         label="Request interval",
         description=(
-            "Minimum gap between two API request starts. 0 removes the pacing "
-            "entirely; a number applies to every provider, including the "
-            "direct vendor APIs that are unpaced by default."
+            "Minimum gap between two API request starts. Relay and custom "
+            "providers are paced by it only after they have answered \"too many "
+            "requests\"; 0 removes the pacing entirely; a number applies to every "
+            "provider from the first request, including the direct vendor APIs "
+            "that are unpaced by default."
         ),
         kind="float",
         default=5.0,

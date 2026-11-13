@@ -121,9 +121,9 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
 }
 
 # Direct official-API providers (OpenAI, ChatGPT, Anthropic, DeepSeek) and
-# AnyModel skip default request pacing. Other relay and aggregator providers
-# (OpenRouter, FreeFlow, OmniRoute, custom endpoints) keep the paced defaults
-# for rate-limit politeness.
+# AnyModel are never paced by default. Other relay and aggregator providers
+# (OpenRouter, FreeFlow, OmniRoute, custom endpoints) are paced by the table
+# below only after one of them has answered "too many requests".
 _FAST_DIRECT_PROVIDERS: frozenset[str] = frozenset(
     {OPENAI_PROVIDER, CHATGPT_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
      ANYMODEL_PROVIDER}
@@ -160,7 +160,21 @@ def _get_api_interval(self) -> float:
     provider = getattr(self.config, "provider", "")
     if provider in _FAST_DIRECT_PROVIDERS:
         return 0.0
+    # A provider that never complained is not paced: a model that answers in a
+    # second would otherwise wait four more between every two steps for a limit
+    # nobody has met. The first 429 turns the default pacing on for the process.
+    if not getattr(self, "_rate_limited", False):
+        return 0.0
     return _API_PROVIDER_INTERVALS.get(provider, self.config.api_request_interval)
+
+
+_RATE_LIMIT_MARKERS = ("rate limit", "too many requests", "429")
+
+
+def _note_rate_limit(self, error: Exception) -> None:
+    """Remember that the provider said "too often", so the default pacing applies from now on."""
+    if isinstance(error, RateLimitError) or any(m in str(error).casefold() for m in _RATE_LIMIT_MARKERS):
+        self._rate_limited = True
 
 
 def _throttle_request_rate(self) -> None:
@@ -481,15 +495,19 @@ def build_role_system_prompt(
         base = f"{base}\n\n{_load_plan_mode_section()}"
     if role != "chat":
         base = f"{base}\n\n{_load_extensions_section()}"
-        if self.config.voice_mode:
-            base = f"{base}\n\n{_load_voice_mode_section()}"
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"
     from kernel.vision.vision import vision_instruction
     base = f"{base}\n\n{vision_instruction(self)}"
     project = workspace_instructions_context(self.executor.workspace, role)
-    return f"{base}\n\n{project}" if project else base
+    if project:
+        base = f"{base}\n\n{project}"
+    # Last: a fast model weighs the end of a long prompt most, and this section has to
+    # outrank the style rules of the final answer that come before it.
+    if role != "chat" and self.config.voice_mode:
+        base = f"{base}\n\n{_load_voice_mode_section()}"
+    return base
 
 
 def build_report_system_prompt(self) -> str:
@@ -719,6 +737,7 @@ def call_native_action_model(
         except RunCancelled:
             raise
         except Exception as error:
+            _note_rate_limit(self, error)
             if is_tools_rejection(error):
                 raise NativeToolsRejected(redact_text(str(error))) from error
             if "temperature" in str(error).casefold() and _sends_temperature(self, model):
@@ -1386,6 +1405,7 @@ def call_model(
                 # loop's safe-stop path.
                 raise
             except Exception as error:
+                _note_rate_limit(self, error)
                 total_duration = time.monotonic() - request_start
                 # ── log failed API request ───────────────────────
                 self._perf_logger.log_api_request(

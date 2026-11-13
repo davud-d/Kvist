@@ -99,6 +99,30 @@ def test_chosen_interval_survives_the_fast_direct_provider_zeroing(
     assert agent_model._get_api_interval(_Agent(config)) == 12.5
 
 
+@pytest.mark.parametrize("provider", ["custom:fast-model", "openrouter", "omniroute"])
+def test_a_provider_that_never_complained_is_not_paced(monkeypatch, provider):
+    """A model that answers in a second must not wait four more between steps for a limit nobody met."""
+    monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
+
+    assert agent_model._get_api_interval(_Agent(_config(provider=provider))) == 0.0
+
+
+@pytest.mark.parametrize(
+    "provider, paced",
+    [("custom:fast-model", 5.0), ("openrouter", 2.5), ("openai", 0.0)],
+)
+@pytest.mark.parametrize("complaint", ["Error code: 429 - Too Many Requests", "Rate limit reached for model"])
+def test_the_first_rate_limit_turns_the_default_pacing_on(monkeypatch, provider, paced, complaint):
+    monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
+    agent = _Agent(_config(provider=provider))
+
+    agent_model._note_rate_limit(agent, RuntimeError("connection reset by peer"))
+    assert agent_model._get_api_interval(agent) == 0.0
+
+    agent_model._note_rate_limit(agent, RuntimeError(complaint))
+    assert agent_model._get_api_interval(agent) == paced
+
+
 def test_removed_pacing_stays_removed_for_every_provider(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
     path = tmp_path / "config.json"
