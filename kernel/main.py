@@ -795,7 +795,7 @@ from kernel.llm.llm_clients import (
     validate_omniroute_model_id,
 )
 from kernel.sandbox.redaction import sanitize_display_text
-from kernel.sandbox.sandbox import NETWORK_UNENFORCED_NOTE, network_isolation_available
+from kernel.sandbox.sandbox import NETWORK_UNENFORCED_NOTE, SandboxMode, network_isolation_available
 from kernel.llm.custom_provider import (
     CustomProviderError,
     normalize_custom_provider_payload,
@@ -2195,7 +2195,10 @@ def build_agent(
         else TerminalBannerUI(console=agent_console, verbose=verbose, perf_logger=perf_logger)
     )
     warnings.extend(sync_bundled(SkillRegistry()))
-    if not network_isolation_available():
+    # A benchmark task's container: its network is the container's to decide, and its
+    # workspace is the task, which a stray KVIST.md or .gitignore line would change.
+    in_container = executor.sandbox_mode == SandboxMode.CONTAINER.value
+    if not in_container and not network_isolation_available():
         warnings.append(f"{NETWORK_UNENFORCED_NOTE}.")
     agent = LocalAgent(
         client=client,
@@ -2213,6 +2216,8 @@ def build_agent(
     effort_note = effort_advisory(config.provider, config.reasoning_effort)
     if effort_note and config.reasoning_effort != DEFAULT_EFFORT:
         warnings.append(f"Reasoning effort '{config.reasoning_effort}': {effort_note}")
+    if in_container:
+        return agent, config, warnings
     try:
         ensure_workspace_instructions(executor.workspace)
     except OSError as error:

@@ -59,6 +59,7 @@ _PROVIDER_BRANDS: dict[str, str] = {
     "github-models": "github",
     "iflytek-spark": "iflytek",
     "scaleway": "scaleway",
+    "inception": "inception",
 }
 
 # First match wins, so the specific patterns come before the general ones.
@@ -85,6 +86,7 @@ _MODEL_BRANDS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"step-", "stepfun"),
         (r"sonar|perplexity", "perplexity"),
         (r"nemotron", "nvidia"),
+        (r"mercury", "inception"),
     )
 )
 

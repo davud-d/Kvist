@@ -210,8 +210,10 @@ class TerminalExecutor(
         self._sandbox_required_unavailable = (
             self.sandbox_request == "bubblewrap" and self.sandbox_mode is not SandboxMode.BUBBLEWRAP
         )
+        # A refused container request lands here too and must get the strict
+        # fallback, not the explicit (weaker) workspace mode.
         self._automatic_restricted_fallback = (
-            self.sandbox_request in {"auto", "invalid"}
+            self.sandbox_request in {"auto", "invalid", "container"}
             and self.sandbox_mode is SandboxMode.WORKSPACE_ONLY
         )
         self._external_tool_paths = _external_tool_paths(self.workspace)
@@ -283,6 +285,9 @@ class TerminalExecutor(
                 self._run_background = None
 
     def _effective_sandbox(self) -> tuple[SandboxMode, bool, str | None]:
+        if self.sandbox_mode is SandboxMode.CONTAINER:
+            # The container decides what the network reaches; nothing here can narrow it.
+            return SandboxMode.CONTAINER, True, None
         network = bool(self._run_network)
         if self._run_sandbox == "host" or (
             self._run_network is not None and self.sandbox_mode is not SandboxMode.BUBBLEWRAP
@@ -305,6 +310,10 @@ class TerminalExecutor(
     def _confirm_run_capabilities(
         self, command: list[str], context: ExecutionContext,
     ) -> bool:
+        if self.sandbox_mode is SandboxMode.CONTAINER:
+            # Host and network are what these questions guard, and in a container
+            # both belong to the container, not to a person.
+            return True
         body = (
             f"Argv: {json.dumps(command, ensure_ascii=False)}\n"
             f"Directory / Каталог: {context.cwd}\n"
@@ -344,7 +353,9 @@ class TerminalExecutor(
         """Execute through the non-bypassable validation and approval pipeline."""
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             raise HardDenyError("Hard security denial: command must be a non-empty list of strings")
-        if (
+        # The cap keeps a command short enough for a person to read before approving
+        # it; in a container nobody approves, so only the OS limit applies.
+        if self.sandbox_mode is not SandboxMode.CONTAINER and (
             len(command) > _MAX_COMMAND_ITEMS
             or sum(len(item) for item in command) + len(command) - 1
             > _MAX_COMMAND_CHARS
@@ -1039,14 +1050,15 @@ class TerminalExecutor(
             "GIT_TERMINAL_PROMPT": "0",
             "PIP_NO_INPUT": "1",
         }
-        if self._run_sandbox == "host":
+        if self._run_sandbox == "host" or self.sandbox_mode is SandboxMode.CONTAINER:
             host_paths = [
                 part for part in os.environ.get("PATH", "").split(os.pathsep)
                 if part and Path(part).is_absolute()
             ]
             env["PATH"] = os.pathsep.join([*host_paths, env["PATH"]])
             # The person approved this run as themselves; with a blank HOME git, gh, ssh and npm
-            # all report "not logged in".
+            # all report "not logged in". In a container the task's HOME is where tools it
+            # installs (cargo, nvm, pip --user) must stay between commands.
             env["HOME"] = str(Path.home())
         explicitly_allowed = _explicit_child_env_names()
         for name, value in os.environ.items():

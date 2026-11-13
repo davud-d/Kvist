@@ -359,6 +359,9 @@ class ExecutableBindingMixin:
         work_dir: Path,
         bindings: tuple[ExecutableBinding, ...],
     ) -> None:
+        if self.sandbox_mode is SandboxMode.CONTAINER:
+            # Programs a task builds in its workspace are exactly what it has to run.
+            return
         segments = self._split_pipe_segments(command)
         for index, segment in enumerate(segments):
             token = segment[0]

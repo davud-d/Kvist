@@ -264,6 +264,12 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
         "base_url_key": "scaleway_base_url",
         "default_base_url": "https://api.scaleway.ai/v1",
     },
+    "inception": {
+        "label": "Inception (Mercury)",
+        "api_key_key": "inception_api_key",
+        "base_url_key": "inception_base_url",
+        "default_base_url": "https://api.inceptionlabs.ai/v1",
+    },
     ANYMODEL_PROVIDER: {
         "label": "AnyModel",
         "api_key_key": "anymodel_api_key",

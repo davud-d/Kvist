@@ -241,3 +241,42 @@ class DenyApprovalGate:
 
     def waiting_confirm_command(self) -> threading.Timer | None:
         return None
+
+
+class ContainerApprovalGate:
+    """Answers yes to every question, for a run inside a throwaway container.
+
+    A benchmark task runs Kvist in a container nobody watches: a question there
+    would only hang the run. Every answer is written to stderr, so the task's log
+    shows what was let through. It refuses to exist outside a container.
+    """
+
+    def __init__(self) -> None:
+        from kernel.sandbox.sandbox import running_in_container
+
+        if not running_in_container():
+            raise RuntimeError("ContainerApprovalGate is only allowed inside a Docker or Podman container")
+
+    def commit_remembered_rule(self) -> None:
+        """Nothing to remember: the container is thrown away after the task."""
+
+    def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
+        _log_container_approval(title)
+        return True
+
+    def confirm_fetch_domain(self, host: str, url: str, timeout: float | None = None) -> FetchDecision:
+        _log_container_approval(f"fetch {url}")
+        return "once"
+
+    def waiting_confirm_command(self) -> threading.Timer | None:
+        return None
+
+    def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
+        _log_container_approval(f"{json.dumps(command, ensure_ascii=False)}: {reason}")
+        return True
+
+
+def _log_container_approval(what: str) -> None:
+    import sys
+
+    print(f"[kvist container] approved: {what}", file=sys.stderr, flush=True)

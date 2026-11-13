@@ -4,7 +4,9 @@
 ``auto`` selects Bubblewrap on Linux when a system installation is present.
 When it is unavailable, the terminal applies an approval-only restricted
 fallback for commands capable of arbitrary code execution.  Explicit
-``workspace`` mode remains a user-selected weaker boundary.
+``workspace`` mode remains a user-selected weaker boundary.  ``container``
+hands the boundary to the container Kvist runs in (a benchmark task's): it is
+honoured only when the process really is inside one.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ class SandboxMode(Enum):
     WORKSPACE_ONLY = "workspace_only"
     BUBBLEWRAP = "bubblewrap"
     HOST = "host"
+    CONTAINER = "container"
 
 
 NETWORK_UNENFORCED_NOTE = (
@@ -90,9 +93,18 @@ def normalize_sandbox_request(requested: str | None = None) -> str:
     value = (value or "auto").strip().casefold()
     if value in {"workspace", "workspace_only"}:
         return "workspace"
-    if value in {"auto", "bubblewrap"}:
+    if value in {"auto", "bubblewrap", "container"}:
         return value
     return "invalid"
+
+
+# Docker writes the first, Podman the second, into every container they start.
+_CONTAINER_MARKERS = (Path("/.dockerenv"), Path("/run/.containerenv"))
+
+
+def running_in_container() -> bool:
+    """Whether this process runs inside a Docker or Podman container."""
+    return any(marker.exists() for marker in _CONTAINER_MARKERS)
 
 
 def resolve_bubblewrap_path() -> str | None:
@@ -205,6 +217,23 @@ def detect_sandbox_mode(requested: str | None = None) -> tuple[SandboxMode, str]
     raw = requested if requested is not None else os.getenv("AGENT_SANDBOX_MODE", "auto")
     request = normalize_sandbox_request(requested)
     available = bubblewrap_available()
+
+    if request == "container":
+        if running_in_container():
+            return (
+                SandboxMode.CONTAINER,
+                "Container mode: the container is the sandbox, so commands run unwrapped, "
+                "with its network and without approvals.",
+            )
+        # On a real machine this mode would hand the person's files to the model
+        # without a single question, so it falls back to the secure auto choice.
+        refused = "AGENT_SANDBOX_MODE=container was requested outside a container and is refused; "
+        if available:
+            return SandboxMode.BUBBLEWRAP, refused + "Bubblewrap is used instead."
+        return (
+            SandboxMode.WORKSPACE_ONLY,
+            refused + "the restricted automatic fallback is active instead.",
+        )
 
     if request == "bubblewrap":
         if available:

@@ -19,6 +19,7 @@ from kernel.sandbox.command_policy import (
     is_find_action_token,
 )
 from kernel.sandbox.redaction import redact_text
+from kernel.sandbox.sandbox import SandboxMode
 from kernel.sandbox.secret_paths import UnsafeSecretPathError, count_workspace_inode_aliases
 from kernel.sandbox.self_info import self_termination_denial
 from kernel.sandbox.terminal_limits import _MAX_COMMAND_CHARS, _MAX_COMMAND_ITEMS
@@ -112,6 +113,10 @@ class ArgumentValidationMixin:
             raise HardDenyError("Hard security denial: executable token is empty")
         if any("\x00" in token for token in command):
             raise HardDenyError("Hard security denial: NUL bytes are forbidden in command arguments")
+        if self.sandbox_mode is SandboxMode.CONTAINER:
+            # These rules keep the person's machine intact; a throwaway container
+            # is not that machine, and tasks there need bash -c, rm, sudo.
+            return
 
         if (
             len(command) > _MAX_COMMAND_ITEMS
@@ -131,6 +136,8 @@ class ArgumentValidationMixin:
         command: list[str],
         bindings: tuple[ExecutableBinding, ...] | None = None,
     ) -> None:
+        if self.sandbox_mode is SandboxMode.CONTAINER:
+            return
         for index, segment in enumerate(self._split_pipe_segments(command)):
             trusted_probe = bindings is None or bindings[index].trusted_system
             if is_exact_version_probe(segment) and trusted_probe:
