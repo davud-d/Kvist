@@ -20,8 +20,15 @@ from urllib.parse import urlparse
 from kernel.context.language_utils import choose_localized_text
 from kernel.llm.provider_registry import ANYMODEL_PROVIDER, KIMI_PROVIDER, MANUAL_OPENAI_PROVIDERS
 from kernel.providers.anymodel_pricing import coefficient_labels
-from openai import OpenAI
 from kernel.sandbox.redaction import redact_text
+
+
+
+def OpenAI(*args: Any, **kwargs: Any) -> Any:  # noqa: N802 - keeps the SDK class name, tests patch it
+    """The SDK takes ~0.5 s to import; it is loaded when the first client is built."""
+    from openai import OpenAI as _OpenAI
+    return _OpenAI(*args, **kwargs)
+
 
 # Provider names.
 OPENAI_PROVIDER = "openai"

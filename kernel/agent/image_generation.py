@@ -17,7 +17,9 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import openai
+from kernel.lazy import lazy_import
+
+openai = lazy_import("openai")
 
 from kernel.agent.agent_state import RunCancelled
 from kernel.agent.cancellable_call import call_cancellable

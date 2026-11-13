@@ -11,6 +11,7 @@ from types import SimpleNamespace as NS
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
+import openai
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -341,7 +342,7 @@ def test_a_spent_subscription_allowance_over_http_names_the_usage_page(monkeypat
         def __init__(self, **kwargs): self.responses = self
         def __enter__(self): return self
         def __exit__(self, *a): pass
-        def create(self, **kwargs): raise transport.APIStatusError("limit", response=response, body=body)
+        def create(self, **kwargs): raise openai.APIStatusError("limit", response=response, body=body)
     monkeypatch.setattr(transport, "OpenAI", Client)
     with pytest.raises(RuntimeError, match="chatgpt.com/settings/usage"):
         transport.ChatGPTClient().create(model="test", messages=[{"role": "user", "content": "hi"}])
@@ -354,9 +355,9 @@ def test_another_http_error_passes_through_unchanged(monkeypatch):
         def __init__(self, **kwargs): self.responses = self
         def __enter__(self): return self
         def __exit__(self, *a): pass
-        def create(self, **kwargs): raise transport.APIStatusError("boom", response=response, body=None)
+        def create(self, **kwargs): raise openai.APIStatusError("boom", response=response, body=None)
     monkeypatch.setattr(transport, "OpenAI", Client)
-    with pytest.raises(transport.APIStatusError):
+    with pytest.raises(openai.APIStatusError):
         transport.ChatGPTClient().create(model="test", messages=[{"role": "user", "content": "hi"}])
 
 

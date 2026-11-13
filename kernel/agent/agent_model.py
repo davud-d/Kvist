@@ -9,20 +9,14 @@ import sys
 import time
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from openai.types.chat import ChatCompletionMessageParam
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    APIStatusError,
-    BadRequestError,
-    AuthenticationError,
-    PermissionDeniedError,
-    NotFoundError,
-    RateLimitError,
-    InternalServerError,
-)
+from kernel.lazy import lazy_import
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam
+
+openai = lazy_import("openai")
 
 from kernel.agent.agent_context import (
     SECTION_PRIORITIES,
@@ -173,7 +167,7 @@ _RATE_LIMIT_MARKERS = ("rate limit", "too many requests", "429")
 
 def _note_rate_limit(self, error: Exception) -> None:
     """Remember that the provider said "too often", so the default pacing applies from now on."""
-    if isinstance(error, RateLimitError) or any(m in str(error).casefold() for m in _RATE_LIMIT_MARKERS):
+    if isinstance(error, openai.RateLimitError) or any(m in str(error).casefold() for m in _RATE_LIMIT_MARKERS):
         self._rate_limited = True
 
 
@@ -213,7 +207,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return None
 
     # Connection errors
-    if isinstance(error, APIConnectionError):
+    if isinstance(error, openai.APIConnectionError):
         if provider == "omniroute":
             return (
                 "OmniRoute endpoint is unavailable. Check that OmniRoute is running "
@@ -229,7 +223,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Connection error: {error_msg}"
 
     # Timeout errors
-    if isinstance(error, APITimeoutError):
+    if isinstance(error, openai.APITimeoutError):
         if provider == "omniroute":
             return "OmniRoute request timed out. Check if OmniRoute is responsive."
         if provider == "openrouter":
@@ -239,7 +233,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Request timed out: {error_msg}"
 
     # Authentication errors (401)
-    if isinstance(error, AuthenticationError):
+    if isinstance(error, openai.AuthenticationError):
         if provider == "omniroute":
             return "OmniRoute authentication failed. Check API key from Dashboard -> Endpoints."
         if provider == "openrouter":
@@ -249,7 +243,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Authentication failed: {error_msg}"
 
     # Permission errors (403)
-    if isinstance(error, PermissionDeniedError):
+    if isinstance(error, openai.PermissionDeniedError):
         if provider == "omniroute":
             return "OmniRoute permission denied. Check API key permissions."
         if provider == "openrouter":
@@ -259,7 +253,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Permission denied: {error_msg}"
 
     # Not found errors (404)
-    if isinstance(error, NotFoundError):
+    if isinstance(error, openai.NotFoundError):
         if provider == "omniroute":
             return (
                 "OmniRoute model or endpoint was not found. Check exact model id, "
@@ -278,7 +272,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Resource not found: {error_msg}"
 
     # Rate limit errors (429)
-    if isinstance(error, RateLimitError):
+    if isinstance(error, openai.RateLimitError):
         if provider == "omniroute":
             return "OmniRoute or upstream provider hit rate limit/quota."
         if provider == "openrouter":
@@ -291,7 +285,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Rate limit exceeded: {error_msg}"
 
     # Bad request errors (400)
-    if isinstance(error, BadRequestError):
+    if isinstance(error, openai.BadRequestError):
         # Check for OmniRoute-specific bad request patterns
         if provider == "omniroute" and any(
             marker in error_lower
@@ -317,7 +311,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Bad request: {error_msg}"
 
     # Server errors (500+)
-    if isinstance(error, InternalServerError):
+    if isinstance(error, openai.InternalServerError):
         if provider == "omniroute":
             return "OmniRoute or upstream provider failed. Check OmniRoute logs."
         if provider == "openrouter":
@@ -327,7 +321,7 @@ def _format_llm_error(error: Exception, provider: str | None = None) -> str:
         return f"Server error: {error_msg}"
 
     # Generic APIStatusError
-    if isinstance(error, APIStatusError):
+    if isinstance(error, openai.APIStatusError):
         status_code = getattr(error, "status_code", None)
         if status_code and status_code >= 500:
             if provider == "omniroute":
@@ -682,14 +676,18 @@ def _failed_probe_verdict(self, error: Exception) -> tuple[bool | None, str]:
     return (None, "probe_failed") if _is_transient_error(error) else (False, "provider_rejected")
 
 
-_TRANSIENT_ERROR_TYPES = (
-    APITimeoutError,
-    APIConnectionError,
-    RateLimitError,
-    InternalServerError,
-    TimeoutError,
-    ConnectionError,
-)
+def _transient_error_types() -> tuple[type[BaseException], ...]:
+    # A function, not a constant: building the tuple at import would load the SDK.
+    return (
+        openai.APITimeoutError,
+        openai.APIConnectionError,
+        openai.RateLimitError,
+        openai.InternalServerError,
+        TimeoutError,
+        ConnectionError,
+    )
+
+
 # Wrapper clients (Anthropic, FreeFlow) raise their own types; their text is
 # all that tells a lost request from a provider's answer.
 _TRANSIENT_ERROR_MARKERS = (
@@ -700,7 +698,7 @@ _TRANSIENT_ERROR_MARKERS = (
 
 def _is_transient_error(error: Exception) -> bool:
     """The request never got the provider's answer: nothing it says is a verdict."""
-    if isinstance(error, _TRANSIENT_ERROR_TYPES):
+    if isinstance(error, _transient_error_types()):
         return True
     text = str(error).casefold()
     return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
@@ -2224,7 +2222,7 @@ def _should_retry_model_error(error: Exception) -> bool:
         return False
 
     # Check specific exception types
-    if isinstance(error, (AuthenticationError, PermissionDeniedError, NotFoundError, BadRequestError)):
+    if isinstance(error, (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError, openai.BadRequestError)):
         return False
 
     # Retry transient errors

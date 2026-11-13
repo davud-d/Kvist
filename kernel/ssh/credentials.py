@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 
-import httpx
+from kernel.lazy import lazy_import
+
+httpx = lazy_import("httpx")
 
 from kernel.config import user_config
 from kernel.llm.llm_clients import (

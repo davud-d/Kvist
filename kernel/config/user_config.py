@@ -9,8 +9,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from openai import AuthenticationError, OpenAI
 
+from kernel.lazy import lazy_import
 from kernel.session.durable_json import (
     JsonStorageCorruptError,
     JsonStorageError,
@@ -22,8 +22,10 @@ from kernel.llm.llm_clients import (
     FREEFLOW_PROVIDER, OPENAI_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
     ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, MANUAL_OPENAI_PROVIDERS,
     ANYMODEL_PROVIDER, CUSTOM_PROVIDER_PREFIX, is_custom_provider, extract_custom_provider_name,
-    normalize_provider,
+    normalize_provider, OpenAI,
 )
+
+openai = lazy_import("openai")
 
 USER_CONFIG_DIRNAME = ".kvist"
 USER_CONFIG_FILENAME = "config.json"
@@ -938,7 +940,7 @@ def validate_api_key(api_key: str, model: str, language_hint: str | None = None)
     client = OpenAI(api_key=api_key)
     try:
         client.models.list()
-    except AuthenticationError as error:
+    except openai.AuthenticationError as error:
         raise RuntimeError("Invalid OpenAI API key.") from error
     except Exception as error:
         raise RuntimeError("Failed to validate OpenAI API key.") from error

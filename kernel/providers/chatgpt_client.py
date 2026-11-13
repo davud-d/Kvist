@@ -8,10 +8,12 @@ import uuid
 from types import SimpleNamespace as NS
 from typing import Any
 
-import httpx
-from openai import APIStatusError, AuthenticationError, OpenAI
-
+from kernel.lazy import lazy_import
+from kernel.llm.llm_clients import OpenAI
 from kernel.providers import chatgpt_auth as auth
+
+httpx = lazy_import("httpx")
+openai = lazy_import("openai")
 
 
 def _input(messages: list[dict]) -> tuple[list[dict], str]:
@@ -121,7 +123,7 @@ def _usage_limit_error() -> RuntimeError:
                         "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
 
 
-def _http_error_code(error: APIStatusError) -> str:
+def _http_error_code(error: openai.APIStatusError) -> str:
     body = error.body if isinstance(error.body, dict) else {}
     detail = body.get("error") if isinstance(body.get("error"), dict) else body
     return str(detail.get("code") or detail.get("type") or "")
@@ -167,10 +169,10 @@ class ChatGPTClient:
             try:
                 yield from self._stream_request(request, token)
                 return
-            except AuthenticationError:
+            except openai.AuthenticationError:
                 if attempt:
                     raise auth.ChatGPTAuthError("ChatGPT access was revoked. Sign in again / Войдите в ChatGPT снова.") from None
-            except APIStatusError as error:
+            except openai.APIStatusError as error:
                 if _http_error_code(error) in _USAGE_LIMIT_CODES:
                     raise _usage_limit_error() from None
                 raise

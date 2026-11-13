@@ -29,7 +29,9 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-import httpx
+from kernel.lazy import lazy_import
+
+httpx = lazy_import("httpx")
 
 from kernel.config.user_config import get_user_config_path, load_user_config
 

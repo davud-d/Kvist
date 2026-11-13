@@ -13,7 +13,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-import httpx
+from kernel.lazy import lazy_import
+
+httpx = lazy_import("httpx")
 import jwt
 
 from kernel.config.user_config import _update_user_config, load_user_config
