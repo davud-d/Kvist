@@ -33,3 +33,18 @@ def emit_text(text: str) -> None:
 def emit_heard(text: str) -> None:
     """Report a phrase that was not addressed to Kvist, so the screen can show what the room sounds like."""
     emit(event="heard", text=text)
+
+
+def emit_phrase(on: bool) -> None:
+    """Say that somebody in the room began to speak, or that the phrase is over."""
+    emit(event="phrase", on=on)
+
+
+def emit_level(value: float, pause: float) -> None:
+    """Report a block of the phrase being said: its loudness, and how much of the pause that ends the phrase has passed."""
+    emit(event="level", value=round(value, 3), pause=round(pause, 3))
+
+
+def emit_missed() -> None:
+    """Admit that words meant for Kvist could not be recognized, so the person repeats them instead of waiting."""
+    emit(event="missed")

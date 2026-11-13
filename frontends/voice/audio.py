@@ -4,11 +4,13 @@ from __future__ import annotations
 import logging
 import queue
 import subprocess
+import time
 
 import numpy as np
 
 from config import MIN_SPEECH_SECONDS
-from endpointing import is_speech
+from endpointing import is_speech, loudness
+from events import emit_level, emit_phrase
 
 
 class AudioMixin:
@@ -19,6 +21,9 @@ class AudioMixin:
 
         if self.muted:
             # The assistant is speaking: its own voice must not become a phrase.
+            if self.phrase is not None:
+                self.phrase_ended = time.monotonic()
+                emit_phrase(False)
             self.phrase = None
             self.pre_roll.clear()
             return
@@ -30,20 +35,27 @@ class AudioMixin:
             if not is_speech(chunk):
                 return
             self.phrase = list(self.pre_roll)
+            # A conversation window is kept by when the person began, not by when they finished.
+            self.phrase_started = time.monotonic()
             self.pre_roll.clear()
             self.endpointer.reset()
             self.endpointer.feed(chunk)
+            emit_phrase(True)
+            emit_level(loudness(chunk), 0.0)
             return
 
         self.phrase.append(chunk)
         if self.endpointer.feed(chunk) is None:
+            emit_level(loudness(chunk), self.endpointer.pause_share())
             return
 
         phrase, self.phrase = self.phrase, None
+        self.phrase_ended = time.monotonic()
+        emit_phrase(False)
         if self.endpointer.speech < MIN_SPEECH_SECONDS:
             return
         try:
-            self.phrases.put_nowait(phrase)
+            self.phrases.put_nowait((self.phrase_started, phrase))
         except queue.Full:
             logging.warning("Recognition is behind; dropped a phrase")
 

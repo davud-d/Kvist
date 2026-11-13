@@ -8,36 +8,46 @@ import time
 import numpy as np
 
 from config import (
-    CONTINUATION_MIN_WORDS, CONTINUATION_SECONDS, FILLERS, FOLLOW_UP_MIN_WORDS, FOLLOW_UP_SECONDS, FS, GATE_BEAM_SIZE, GATE_VAD_FILTER, INITIAL_PROMPT, INITIAL_PROMPTS, LANGUAGE,
-    LANGUAGE_SWITCH_FACTOR, LANGUAGE_SWITCH_MIN, LANGUAGES, MAIN_BEAM_SIZE, NOISE_PHRASES,
+    CONTINUATION_MIN_WORDS, CONTINUATION_SECONDS, FILLERS, FOLLOW_UP_MIN_WORDS, FOLLOW_UP_SECONDS, FS, GATE_BEAM_SIZE,
+    GATE_HEAD_SECONDS, GATE_VAD_FILTER, INITIAL_PROMPT, INITIAL_PROMPTS, JOIN_GRACE_MAX_SECONDS, JOIN_GRACE_PER_SECOND,
+    JOIN_WAIT_MAX_SECONDS, LANGUAGE, LANGUAGE_SWITCH_FACTOR, LANGUAGE_SWITCH_MIN, LANGUAGES, MAIN_BEAM_SIZE,
+    NOISE_PHRASES, BLOCK_SECONDS, VOICE_CHECK_EVERY_SECONDS, VOICE_CHECK_MIN_SECONDS, VOICE_CHECK_TAIL_SECONDS,
 )
-from events import emit_heard, emit_state, emit_text
+from endpointing import has_voice
+from events import emit_heard, emit_missed, emit_state, emit_text
 from wake import strip_wake_word
 
 
 class TranscriptionMixin:
-    def handle_phrase(self, audio: np.ndarray) -> None:
+    def handle_phrase(self, audio: np.ndarray, started: float) -> None:
         """Recognize one phrase heard in the room and act on it if it is addressed to Kvist.
 
         It is addressed to Kvist when it starts with the wake word, or when a
         conversation is open (after the wake word alone, after Kvist answered)
         and it is a real phrase, not a stray word or the noise Whisper writes down.
+
+        `started` is when the person began to say it (time.monotonic). A conversation
+        covers a phrase that began inside it: a long sentence ends, and is recognized,
+        well after the window it started in has closed, and judging it by that later
+        moment threw away everything but short, hurried phrases.
         """
         language = self.pick_language(audio)
-        heard, command = self.listen_for_wake_word(audio, language)
+        head = audio[: round(GATE_HEAD_SECONDS * FS)]
+        heard, command = self.listen_for_wake_word(head, language)
         if command is not None:
             logging.info("Wake word heard")
             self.follow_up_deadline = 0.0
             self.pause_audio()
             if command:
-                self.deliver_command(audio, language, wake_heard=True, gate_text=command)
+                # The gate's wording is a fallback only when it heard the whole command.
+                self.deliver_command(audio, language, wake_heard=True, gate_command=command if len(head) == len(audio) else "")
                 return
             self.converse(FOLLOW_UP_SECONDS, FOLLOW_UP_MIN_WORDS)
             return
 
-        if time.monotonic() < self.follow_up_deadline and self.is_real_phrase(heard):
+        if started < self.follow_up_deadline and self.is_real_phrase(heard):
             self.follow_up_deadline = 0.0
-            self.deliver_command(audio, language, wake_heard=False, gate_text=heard)
+            self.deliver_command(audio, language, wake_heard=False)
             return
         if heard:
             emit_heard(heard)
@@ -78,32 +88,106 @@ class TranscriptionMixin:
                 return heard, command
         return heard, None
 
-    def deliver_command(self, audio: np.ndarray, language: str | None, wake_heard: bool, gate_text: str) -> None:
-        """Recognize the command with the main model and emit its text as a `text` event."""
+    def deliver_command(self, audio: np.ndarray, language: str | None, wake_heard: bool, gate_command: str = "") -> None:
+        """Recognize the command with the main model and emit its text as a `text` event.
+
+        `gate_command` is the gate model's wording of the whole command after the
+        wake word; it is empty when the gate read only the start of a long phrase.
+        """
         emit_state("transcribing")
         try:
-            text = self.transcribe(self.model, audio, MAIN_BEAM_SIZE, language)
+            text = self.recognize_command(audio, language)
             if wake_heard:
-                # The main model spells the wake word its own way; if it is not found,
-                # the gate model's wording of the command is the fallback.
+                # The main model spells the wake word its own way. If it is not found, the
+                # gate model's wording of the command is the fallback; of a long phrase the
+                # gate has only the start, and the main model's text is kept with the odd name in it.
                 stripped = strip_wake_word(text)
-                text = stripped if stripped is not None else gate_text
+                if stripped is not None:
+                    text = stripped
+                elif gate_command:
+                    text = gate_command
 
             if not text:
                 logging.info("Nothing recognized")
                 return
 
-            emit_text(text)
+            self.held.append(text)
+            self.held_seconds += len(audio) / FS
             self.converse(CONTINUATION_SECONDS, CONTINUATION_MIN_WORDS, announce=False)
         except Exception:
             logging.exception("Transcription failed")
+            # The person spoke to Kvist and nothing will come of it: say so, or they wait in silence.
+            emit_missed()
         finally:
-            self.restore_audio()
-            emit_state("idle")
+            if self.held:
+                self.release_held()
+            else:
+                self.restore_audio()
+                emit_state("idle")
+
+    def release_held(self) -> None:
+        """Hand over the request once the person has finished it: every phrase of it, as one text."""
+        if not self.held or self.person_goes_on():
+            return
+        text = " ".join(self.held)
+        self.held.clear()
+        self.held_seconds = 0.0
+        emit_text(text)
+        self.restore_audio()
+        emit_state("idle")
+
+    def person_goes_on(self) -> bool:
+        """Whether more of the held request may still be coming."""
+        if not self.phrases.empty():
+            return True
+        if self.phrase is not None:
+            # Somebody speaks. A phrase that began after the conversation closed needs the
+            # wake word to be for Kvist, so it cannot add to the request: no reason to wait for it.
+            # Nor is a noise a reason, or a film, that never lets the phrase end.
+            if self.phrase_started >= self.follow_up_deadline:
+                return False
+            return time.monotonic() - self.phrase_started < JOIN_WAIT_MAX_SECONDS and self.phrase_has_voice()
+        grace = min(JOIN_GRACE_MAX_SECONDS, JOIN_GRACE_PER_SECOND * self.held_seconds)
+        return time.monotonic() - self.phrase_ended < grace
+
+    def phrase_has_voice(self) -> bool:
+        """Whether the phrase being said holds a voice; too short to tell counts as one, the next look decides."""
+        chunks = list(self.phrase)  # the microphone thread keeps appending to it
+        if len(chunks) * BLOCK_SECONDS < VOICE_CHECK_MIN_SECONDS:
+            return True
+        now = time.monotonic()
+        if now - self.voice_checked < VOICE_CHECK_EVERY_SECONDS:
+            return self.voice_found
+        self.voice_checked = now
+        self.voice_found = has_voice(self.join_phrase(chunks[-round(VOICE_CHECK_TAIL_SECONDS / BLOCK_SECONDS):]))
+        return self.voice_found
+
+    def recognize_command(self, audio: np.ndarray, language: str | None) -> str:
+        """The command's text by the main model; when that model fails, the small one takes over for good.
+
+        The main model can load and pass its trial and still run out of video memory
+        in the middle of somebody's phrase: another program took the memory since, or
+        a real phrase needs more than the trial did. CTranslate2 reports that as a
+        RuntimeError. The phrase is not lost: the small model, which is known to
+        work (it has just read this phrase for the wake word), recognizes it, and
+        the main one is let go so that its memory is free again.
+        """
+        try:
+            return self.transcribe(self.model, audio, MAIN_BEAM_SIZE, language)
+        except RuntimeError:
+            if self.model is self.gate_model:
+                raise
+            logging.exception("The main model failed; the small model recognizes commands from now on")
+            self.model = self.gate_model
+            return self.transcribe(self.model, audio, MAIN_BEAM_SIZE, language)
 
     def expire_follow_up(self) -> None:
         """Give up waiting for a command that did not follow the bare wake word."""
         if not self.follow_up_deadline or time.monotonic() < self.follow_up_deadline:
+            return
+        # Somebody is speaking, or their phrase waits to be recognized: it began inside the
+        # conversation and still belongs to it.
+        if self.phrase is not None or not self.phrases.empty():
             return
         self.follow_up_deadline = 0.0
         self.restore_audio()

@@ -85,7 +85,16 @@ class VoiceToTextApp(AudioMixin, TranscriptionMixin):
         self.endpointer = Endpointer()
         self.pre_roll: deque[np.ndarray] = deque(maxlen=round(PRE_ROLL_SECONDS / BLOCK_SECONDS))
         self.phrase: Optional[list[np.ndarray]] = None
-        self.phrases: queue.Queue[list[np.ndarray]] = queue.Queue(maxsize=MAX_QUEUED_PHRASES)
+        self.phrase_started = 0.0
+        self.phrase_ended = 0.0
+        # The last look at whether the phrase being said holds a voice (time.monotonic, and what it found).
+        self.voice_checked = 0.0
+        self.voice_found = False
+        # The phrases of a request the person may not have finished, and how many seconds of sound they were.
+        self.held: list[str] = []
+        self.held_seconds = 0.0
+        # Each phrase with the moment it began (time.monotonic).
+        self.phrases: queue.Queue[tuple[float, list[np.ndarray]]] = queue.Queue(maxsize=MAX_QUEUED_PHRASES)
 
         logging.info("Loading models...")
         # The larger model first: it gets the GPU memory, the small one takes what is left.
@@ -163,12 +172,14 @@ class VoiceToTextApp(AudioMixin, TranscriptionMixin):
 
             while self.running:
                 try:
-                    chunks = self.phrases.get(timeout=0.5)
+                    # Short, so a held request leaves soon after the person went quiet.
+                    started, chunks = self.phrases.get(timeout=0.1)
                 except queue.Empty:
+                    self.release_held()
                     self.expire_follow_up()
                     continue
                 try:
-                    self.handle_phrase(self.join_phrase(chunks))
+                    self.handle_phrase(self.join_phrase(chunks), started)
                 except Exception:  # a model or driver failure on one phrase must not end the listening
                     logging.exception("Could not handle a phrase")
                     emit_state("idle")
