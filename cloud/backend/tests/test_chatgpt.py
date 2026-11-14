@@ -7,7 +7,7 @@ import hashlib
 import json
 import time
 from datetime import timedelta
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 import pytest
@@ -94,14 +94,18 @@ def begin(client, openai: FakeOpenAI) -> dict[str, str]:
     return query
 
 
-def finish(client, state: str, **extra: str):
+def paste(client, address: str) -> str:
+    """What the customer does after OpenAI: pastes the address of the page that failed to open."""
+    return client.post("/api/chatgpt/finish", json={"callback": address}).json()["result"]
+
+
+def finish(client, state: str, **extra: str) -> str:
     params = {"code": "one-time-code", "state": state, "client_id": CLIENT_ID, **extra}
-    return client.get("/auth/chatgpt/callback", params=params, follow_redirects=False)
+    return paste(client, chatgpt.REDIRECT_URI + "?" + urlencode(params))
 
 
 def connect(client, openai: FakeOpenAI) -> None:
-    response = finish(client, begin(client, openai)["state"])
-    assert response.headers["location"] == "/onboarding?chatgpt=ok"
+    assert finish(client, begin(client, openai)["state"]) == "ok"
 
 
 def run(client, function, *args, **kwargs):
@@ -118,17 +122,17 @@ def user_row(client) -> User:
         return user
 
 
-def test_the_customer_is_sent_to_openai_with_a_callback_on_this_server(client, openai):
+def test_the_customer_is_sent_to_openai_with_a_loopback_address_which_is_all_it_accepts(client, openai):
     query = begin(client, openai)
-    assert query["redirect_uri"] == "http://127.0.0.1:8740/auth/chatgpt/callback"
+    assert query["redirect_uri"] == "http://127.0.0.1:38457/auth/callback"
+    assert urlsplit(query["redirect_uri"]).hostname == "127.0.0.1"
     assert query["code_challenge_method"] == "S256" and query["response_type"] == "code"
     assert PLAN_SCOPE in query["scope"] and query["client_id"] == "dynamic_agent_client"
 
 
 def test_signing_in_stores_the_tokens_encrypted_and_the_state_only_as_a_hash(client, openai):
     query = begin(client, openai)
-    response = finish(client, query["state"])
-    assert (response.status_code, response.headers["location"]) == (302, "/onboarding?chatgpt=ok")
+    assert finish(client, query["state"]) == "ok"
     sent = openai.requests[0]
     assert sent["grant_type"] == "authorization_code" and sent["client_id"] == CLIENT_ID
     assert sent["redirect_uri"] == query["redirect_uri"] and sent["code_verifier"]
@@ -142,22 +146,22 @@ def test_signing_in_stores_the_tokens_encrypted_and_the_state_only_as_a_hash(cli
 
 def test_an_attempt_works_once(client, openai):
     state = begin(client, openai)["state"]
-    assert finish(client, state).headers["location"].endswith("chatgpt=ok")
-    assert finish(client, state).headers["location"].endswith("chatgpt=expired")
+    assert finish(client, state) == "ok"
+    assert finish(client, state) == "expired"
     assert len(openai.requests) == 1
 
 
 def test_an_unknown_state_is_refused_without_calling_openai(client, openai):
     begin(client, openai)
-    assert finish(client, "made-up").headers["location"].endswith("chatgpt=expired")
+    assert finish(client, "made-up") == "expired"
     assert openai.requests == []
 
 
-def test_an_attempt_older_than_three_minutes_is_refused(client, openai):
+def test_an_attempt_older_than_ten_minutes_is_refused(client, openai):
     state = begin(client, openai)["state"]
     with session_scope(client.app.state.session_factory) as db:
         db.query(ChatGPTLogin).one().expires_at = utcnow() - timedelta(seconds=1)
-    assert finish(client, state).headers["location"].endswith("chatgpt=expired")
+    assert finish(client, state) == "expired"
     assert openai.requests == []
 
 
@@ -171,9 +175,8 @@ def test_the_attempt_is_only_stored_as_a_hash(client, openai):
 
 def test_a_declined_sign_in_connects_nothing(client, openai):
     state = begin(client, openai)["state"]
-    response = client.get("/auth/chatgpt/callback", params={"error": "access_denied", "state": state},
-                          follow_redirects=False)
-    assert response.headers["location"].endswith("chatgpt=denied")
+    pasted = chatgpt.REDIRECT_URI + "?" + urlencode({"error": "access_denied", "state": state})
+    assert paste(client, pasted) == "denied"
     assert client.get("/api/chatgpt").json()["state"] == ""
 
 
@@ -189,14 +192,61 @@ def test_a_sign_in_that_cannot_be_trusted_is_not_saved(client, openai, change, r
         openai.refused = True
     else:
         openai.nonce = "someone-elses-nonce"
-    assert finish(client, state).headers["location"].endswith(f"chatgpt={reason}")
+    assert finish(client, state) == reason
     assert client.get("/api/chatgpt").json()["state"] == ""
 
 
-def test_a_callback_without_a_session_goes_home(client_factory, openai):
+def test_finishing_needs_a_session(client_factory, openai):
     client = client_factory(openai, AUTH_DEV_LOGIN="true")
-    response = client.get("/auth/chatgpt/callback", params={"state": "x", "code": "y"}, follow_redirects=False)
-    assert response.headers["location"] == "/"
+    response = client.post("/api/chatgpt/finish", json={"callback": chatgpt.REDIRECT_URI + "?state=x&code=y"})
+    assert response.status_code == 401
+    assert openai.requests == []
+
+
+@pytest.mark.parametrize("address", [
+    "https://evil.example/auth/callback?code=a&state=b",
+    "http://127.0.0.1:38457/other?code=a&state=b",
+    "http://127.0.0.1:1455/auth/callback?code=a&state=b",
+    "http://localhost:38457/auth/callback?code=a&state=b",
+    "http://127.0.0.1.evil.example:38457/auth/callback?code=a&state=b",
+    "javascript:alert(1)",
+    "just some words",
+    "code=a&state=b",
+])
+def test_an_address_that_is_not_the_one_we_sent_openai_to_is_turned_back_unused(client, openai, address):
+    state = begin(client, openai)["state"]
+    assert paste(client, address) == "bad_link"
+    assert openai.requests == []
+    # The attempt is still alive: a wrong paste does not cost the customer the sign-in.
+    assert finish(client, state) == "ok"
+
+
+def test_the_address_may_come_with_surrounding_spaces_and_a_fragment(client, openai):
+    state = begin(client, openai)["state"]
+    query = urlencode({"code": "c", "state": state, "client_id": CLIENT_ID})
+    assert paste(client, f"  {chatgpt.REDIRECT_URI}?{query}#x \n") == "ok"
+
+
+def test_someone_elses_attempt_cannot_be_finished_by_pasting_its_address(client_factory, openai, client):
+    from conftest import make_user
+
+    state = begin(client, openai)["state"]
+    with session_scope(client.app.state.session_factory) as db:
+        make_user(db, "other", github_id=2)
+    other = client_factory(openai, AUTH_DEV_LOGIN="true")
+    # The dev login only signs in user 1, so the second person is a session cookie made for them.
+    from kvist_cloud import auth
+
+    with session_scope(client.app.state.session_factory) as db:
+        version = db.get(User, 2).session_version
+    other.cookies.set(auth.SESSION_COOKIE, auth._serializer(client.app.state.settings, "session").dumps(
+        {"u": 2, "v": version}))
+    assert paste(other, chatgpt.REDIRECT_URI + "?" + urlencode({"code": "c", "state": state})) == "expired"
+    assert openai.requests == []
+
+
+def test_the_old_public_callback_is_gone(client):
+    assert client.get("/auth/chatgpt/callback", follow_redirects=False).status_code == 404
 
 
 def test_a_token_with_time_left_is_handed_out_without_asking_openai(client, openai):
@@ -368,3 +418,31 @@ def test_a_task_needs_a_working_sign_in(engine, state, code):
         with pytest.raises(ApiError) as refused:
             tasks.can_run(db, user)
         assert refused.value.code == code
+
+
+# -- switched off (the production default) -------------------------------------------------------------
+
+
+@pytest.fixture
+def off_client(client_factory, openai):
+    client = client_factory(openai, AUTH_DEV_LOGIN="true", CHATGPT_SIGNIN="false")
+    dev_login(client)
+    return client
+
+
+def test_switched_off_the_provider_is_not_offered(off_client):
+    offered = [p["id"] for p in off_client.get("/api/model-providers").json()]
+    assert "chatgpt" not in offered and offered
+
+
+def test_switched_off_every_way_in_says_not_yet_and_asks_openai_nothing(off_client, openai):
+    for answer in (
+        off_client.post("/api/chatgpt/start", json={}),
+        off_client.post("/api/chatgpt/finish", json={"callback": chatgpt.REDIRECT_URI + "?code=c&state=s"}),
+        off_client.post("/api/model-key", json={"provider": "chatgpt", "key": "whatever-1234567890"}),
+    ):
+        assert answer.status_code == 503 and answer.json()["error"]["code"] == "chatgpt_unavailable"
+    assert openai.requests == []
+    with session_scope(off_client.app.state.session_factory) as db:
+        assert db.query(ChatGPTLogin).count() == 0
+

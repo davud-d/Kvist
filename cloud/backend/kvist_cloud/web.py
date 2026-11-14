@@ -120,7 +120,7 @@ def _boot(request: Request, db: Session, user: User) -> dict[str, object]:
         "subscription": subscription_view(db, user),
         "billing": billing_config(request),
         "key": key_summary(user),
-        "providers": list_providers(),
+        "providers": list_providers(request),
         "has_tasks": db.scalar(select(Task.id).where(Task.user_id == user.id).limit(1)) is not None,
     }
 

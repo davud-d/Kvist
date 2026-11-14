@@ -18,6 +18,7 @@ from pydantic import Field
 from sqlalchemy.orm import Session
 
 from .auth import current_user, http_client
+from .chatgpt import require_enabled
 from .config import Settings
 from .db import get_db
 from .errors import ApiError
@@ -243,11 +244,13 @@ async def _provider_client(request: Request, provider: ModelProvider) -> httpx.A
 
 
 @router.get("/api/model-providers")
-def list_providers() -> list[dict[str, object]]:
+def list_providers(request: Request) -> list[dict[str, object]]:
+    sign_in_allowed = request.app.state.settings.chatgpt_signin
     return [
         {"id": p.id, "label": p.label, "keys_page": p.keys_page, "needs_base_url": p.needs_base_url,
          "needs_model": p.needs_model, "partner": p.partner, "sign_in": p.sign_in}
         for p in PROVIDERS.values()
+        if sign_in_allowed or not p.sign_in
     ]
 
 
@@ -302,6 +305,7 @@ async def save_key(
     if provider is None:
         raise ApiError(400, "unknown_provider", "Pick a provider. / Выбери провайдера.")
     if provider.sign_in:
+        require_enabled(request)
         raise ApiError(400, "sign_in_required", "This one is connected by signing in. / Он подключается входом.")
     # Only what this provider asks for is kept: a stale address or model from another choice is dropped.
     base_url = payload.base_url.strip() if provider.needs_base_url else ""

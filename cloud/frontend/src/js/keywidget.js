@@ -6,16 +6,37 @@ import { t } from "./i18n.js";
 
 const DEBOUNCE_MS = 700;
 const DRAFT_KEY = "kvist.keyDraft";
-const SIGN_IN_RESULTS = ["denied", "expired", "refused", "unreachable", "no_plan", "identity"];
+const SIGN_IN_RESULTS = ["denied", "expired", "refused", "unreachable", "no_plan", "identity", "bad_link"];
 
-/** Back from OpenAI the address says how it went (`?chatgpt=ok` or a reason); it is read once and removed. */
-function takeSignInResult() {
-  const url = new URL(location.href);
-  const result = url.searchParams.get("chatgpt") || "";
-  if (!result) return "";
-  url.searchParams.delete("chatgpt");
-  history.replaceState(history.state, "", url);
-  return result;
+/**
+ * OpenAI only sends the browser back to a loopback address, so the customer ends on a page that fails to open
+ * (nothing listens on their computer) whose address carries the one-time code. They copy that address here.
+ */
+function pasteStep(url) {
+  const field = h("textarea.input", { rows: 3, spellcheck: "false", autocomplete: "off", autocapitalize: "off",
+    placeholder: t("chatgpt.pastePlaceholder"), "aria-label": t("chatgpt.pasteLabel") });
+  const send = h("button.btn", { type: "button", text: t("chatgpt.finish") });
+  const note = h("p.hint", { "aria-live": "polite" });
+  const say = (kind, text) => { note.className = `hint ${kind}`; note.textContent = text; };
+  send.addEventListener("click", async () => {
+    send.disabled = true;
+    say("wait", t("chatgpt.checking"));
+    try {
+      const { result } = await api("/api/chatgpt/finish", { method: "POST", body: { callback: field.value.trim() } });
+      if (result === "ok") {
+        location.reload();
+        return;
+      }
+      say("err", t(`chatgpt.result.${SIGN_IN_RESULTS.includes(result) ? result : "refused"}`));
+    } catch (error) {
+      say("err", t(`errors.${error.code}`));
+    }
+    send.disabled = false;
+  });
+  return h("div.stack", {},
+    h("p", {}, h("a.btn", { href: url, target: "_blank", rel: "noopener noreferrer", text: t("chatgpt.openOpenAI") })),
+    h("ol.small", {}, ...["step1", "step2", "step3"].map((key) => h("li", { text: t(`chatgpt.${key}`) }))),
+    field, h("p", {}, send), note);
 }
 
 // The provider, address and model survive a reload or a trip to another page; the key itself never does
@@ -38,11 +59,10 @@ function writeDraft(draft) {
 }
 
 export function keyWidget({ providers, saved, onValid }) {
-  const returned = takeSignInResult();
   const draft = readDraft();
   const draftProvider = providers.some((item) => item.id === draft.provider) ? draft.provider : "";
-  let provider = returned ? "chatgpt" : saved.set ? saved.provider : draftProvider || providers[0].id;
-  let changing = !saved.set || (returned !== "" && returned !== "ok");
+  let provider = saved.set ? saved.provider : draftProvider || providers[0].id;
+  let changing = !saved.set;
   let timer = null;
   let sequence = 0;
   const root = h("div.stack");
@@ -160,9 +180,6 @@ export function keyWidget({ providers, saved, onValid }) {
     const state = saved.provider === "chatgpt" ? saved.chatgpt_state : "";
     const notice = h("p.hint", { "aria-live": "polite" });
     const say = (kind, text) => { notice.className = `hint ${kind}`; notice.textContent = text; };
-    if (returned && returned !== "ok") {
-      say("err", t(`chatgpt.result.${SIGN_IN_RESULTS.includes(returned) ? returned : "refused"}`));
-    }
     if (state === "connected") {
       return h("div.stack", {},
         h("p.row", {},
@@ -178,20 +195,22 @@ export function keyWidget({ providers, saved, onValid }) {
         notice);
     }
     const signIn = h("button.btn", { type: "button", text: t(state === "needs_login" ? "chatgpt.signInAgain" : "chatgpt.signIn") });
+    const step = h("div");
     signIn.addEventListener("click", async () => {
       signIn.disabled = true;
       say("wait", t("chatgpt.opening"));
       try {
         const { url } = await api("/api/chatgpt/start", { method: "POST", body: { next: location.pathname } });
         if (new URL(url).protocol !== "https:") throw Object.assign(new Error("url"), { code: "internal" });
-        location.assign(url);
+        say("", "");
+        replace(step, pasteStep(url));
       } catch (error) {
-        signIn.disabled = false;
         say("err", t(`errors.${error.code}`));
       }
+      signIn.disabled = false;
     });
     return h("div.stack", {}, h("p.dim", { text: t(state === "needs_login" ? "chatgpt.needsLogin" : "chatgpt.intro") }),
-      h("p", {}, signIn), notice);
+      h("p", {}, signIn), notice, step);
   }
 
   const form = () => root.querySelector("[data-form]");

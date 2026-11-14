@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """Sign in with ChatGPT, on the server: the customer's ChatGPT plan pays for their model.
 
-The customer is sent to OpenAI and comes back to ``/auth/chatgpt/callback`` on this server, so no port on
-their computer is involved. The attempt behind that callback lives three minutes, is bound to the signed-in
-customer and works once. The tokens are stored encrypted (they have to be sent back to OpenAI, so a hash
-would be useless); only the attempt's ``state`` is kept as a hash.
+OpenAI accepts only a loopback address as the place to send the browser back to (a public https address is
+refused with ``invalid redirect_uri``). So the customer is sent to OpenAI, and at the end the browser lands on
+``http://127.0.0.1:<port>/auth/callback`` on their own computer, where nothing listens: the page fails to open,
+but its address carries the one-time code. The customer pastes that address into Kvist Cloud
+(``POST /api/chatgpt/finish``) and this server finishes the exchange. The attempt behind it lives ten
+minutes, is bound to the signed-in customer and works once. The tokens are stored encrypted (they have to be
+sent back to OpenAI, so a hash would be useless); only the attempt's ``state`` is kept as a hash.
 
 A refresh token is replaced whenever it is used, so exactly one place renews it: ``fresh_access_token``. A
 machine only ever gets the short-lived access token. Once a day ``check_forever`` renews every saved
@@ -21,11 +24,10 @@ import secrets
 import time
 import uuid
 from datetime import timedelta
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Request
-from fastapi.responses import RedirectResponse
 from kernel.providers.chatgpt_endpoints import (
     AGENT_CLIENT_ID,
     AUTHORIZE_ENDPOINT,
@@ -39,16 +41,17 @@ from pydantic import Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .auth import app_http_client, current_user, http_client, optional_user, safe_next
-from .config import Settings
+from .auth import app_http_client, current_user, http_client, safe_next
 from .db import get_db, session_scope, utcnow
+from .errors import ApiError
 from .models import ChatGPTLogin, User
 from .secrets import Vault, remember
 from .validation import InputModel
 
 log = logging.getLogger("kvist_cloud.chatgpt")
 
-LOGIN_SECONDS = 180
+# Long enough to sign in at OpenAI, copy the address and paste it back.
+LOGIN_SECONDS = 600
 # A token with less left than this is renewed before it is handed out.
 RENEW_BEFORE_SECONDS = 600
 FIRST_CHECK_SECONDS = 60.0
@@ -170,14 +173,26 @@ def _hash(state: str) -> str:
     return hashlib.sha256(state.encode()).hexdigest()
 
 
-def _redirect_uri(settings: Settings) -> str:
-    return f"{settings.public_url}/auth/chatgpt/callback"
+# Any loopback port is accepted by OpenAI; a rarely used one, so that a program already listening on the
+# customer's computer (a local Codex sign-in uses 1455) does not catch the redirect first.
+REDIRECT_URI = "http://127.0.0.1:38457/auth/callback"
+
+
+def pasted_params(pasted: str) -> dict[str, str]:
+    """The query of the address the customer copied from the page that failed to open.
+
+    Only the exact redirect address is accepted, so a link to anywhere else is turned back before it is used.
+    """
+    parts, expected = urlsplit(pasted.strip()), urlsplit(REDIRECT_URI)
+    if (parts.scheme, parts.netloc, parts.path) != (expected.scheme, expected.netloc, expected.path):
+        raise ChatGPTError("bad_link")
+    return dict(parse_qsl(parts.query))
 
 
 # -- signing in ------------------------------------------------------------------------------
 
 
-def begin_login(db: Session, vault: Vault, settings: Settings, user: User, redirect_to: str) -> str:
+def begin_login(db: Session, vault: Vault, user: User, redirect_to: str) -> str:
     """Opens an attempt and returns OpenAI's address for the customer's browser."""
     now = utcnow()
     db.execute(delete(ChatGPTLogin).where((ChatGPTLogin.user_id == user.id) | (ChatGPTLogin.expires_at < now)))
@@ -193,7 +208,7 @@ def begin_login(db: Session, vault: Vault, settings: Settings, user: User, redir
         # OpenAI answers a returning customer with the client it already made for them.
         "client_id": previous["client_id"] if previous else AGENT_CLIENT_ID,
         "ext_agent_host_id": "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"kvist-cloud/user/{user.id}")),
-        "response_type": "code", "redirect_uri": _redirect_uri(settings), "scope": SCOPES, "resource": RESOURCE,
+        "response_type": "code", "redirect_uri": REDIRECT_URI, "scope": SCOPES, "resource": RESOURCE,
         "state": state, "nonce": nonce, "code_challenge_method": "S256", "code_challenge": challenge,
         "agent_name_hint": "Kvist",
     }
@@ -201,13 +216,13 @@ def begin_login(db: Session, vault: Vault, settings: Settings, user: User, redir
 
 
 async def complete_login(
-    db: Session, vault: Vault, client: httpx.AsyncClient, settings: Settings, user: User, params: dict[str, str]
-) -> tuple[str, str]:
-    """The callback's work. Returns where to send the customer and ``"ok"`` or the reason it did not work."""
+    db: Session, vault: Vault, client: httpx.AsyncClient, user: User, params: dict[str, str]
+) -> str:
+    """Finishes the attempt from the pasted address's query. Returns ``"ok"`` or the reason it did not work."""
     row = db.scalars(select(ChatGPTLogin).where(ChatGPTLogin.state_hash == _hash(params.get("state", "")))).first()
     if row is None or row.user_id != user.id or row.expires_at < utcnow():
-        return "/onboarding", "expired"
-    verifier, nonce, target = vault.decrypt(row.verifier_enc), row.nonce, row.redirect_to
+        return "expired"
+    verifier, nonce = vault.decrypt(row.verifier_enc), row.nonce
     # Used once, whatever happens next.
     db.delete(row)
     db.commit()
@@ -221,20 +236,20 @@ async def complete_login(
             raise ChatGPTError("identity")
         tokens = await _token_request(client, {
             "grant_type": "authorization_code", "client_id": client_id, "code": code,
-            "code_verifier": verifier, "redirect_uri": _redirect_uri(settings),
+            "code_verifier": verifier, "redirect_uri": REDIRECT_URI,
         })
         claims = _claims(str(tokens.get("id_token", "")))
         _check_identity(claims, client_id, nonce)
         who = {"client_id": client_id, "subject": claims["sub"], "email": str(claims.get("email", ""))}
         record = _record(tokens, who)
     except ChatGPTError as error:
-        return target, error.code
+        return error.code
     _save(vault, user, record)
     # One model per account, as with a key: the plan replaces whatever was chosen before.
     user.model_provider = PROVIDER_ID
     user.model_key_enc = user.model_key_last4 = user.model_base_url = user.model_name = ""
     db.commit()
-    return target, "ok"
+    return "ok"
 
 
 # -- keeping it good -------------------------------------------------------------------------
@@ -338,6 +353,12 @@ async def _revoke(client: httpx.AsyncClient, record: dict) -> bool:
 # -- API -------------------------------------------------------------------------------------
 
 
+def require_enabled(request: Request) -> None:
+    if not request.app.state.settings.chatgpt_signin:
+        raise ApiError(503, "chatgpt_unavailable", "Sign in with ChatGPT is not available yet, use an API key for now. "
+                       "/ Вход через ChatGPT пока недоступен, пока используй ключ API.")
+
+
 class StartIn(InputModel):
     next: str = Field(default="/onboarding", max_length=200)
 
@@ -346,26 +367,29 @@ class StartIn(InputModel):
 def start(
     payload: StartIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict[str, str]:
-    url = begin_login(
-        db, request.app.state.vault, request.app.state.settings, user, safe_next(payload.next, "/onboarding")
-    )
+    require_enabled(request)
+    url = begin_login(db, request.app.state.vault, user, safe_next(payload.next, "/onboarding"))
     return {"url": url}
 
 
-@router.get("/auth/chatgpt/callback")
-async def callback(
-    request: Request, user: User | None = Depends(optional_user), db: Session = Depends(get_db)
-) -> RedirectResponse:
-    if user is None:
-        return RedirectResponse("/", status_code=302)
+class FinishIn(InputModel):
+    # The address of the page that failed to open: it is long (a code and a state), but nowhere near this.
+    callback: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/api/chatgpt/finish")
+async def finish(
+    payload: FinishIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, str]:
+    """The customer pastes the address they were left on; the answer is ``ok`` or why it did not work."""
+    require_enabled(request)
+    try:
+        params = pasted_params(payload.callback)
+    except ChatGPTError as error:
+        return {"result": error.code}
     async with http_client(request) as client:
-        target, result = await complete_login(
-            db, request.app.state.vault, client, request.app.state.settings, user, dict(request.query_params)
-        )
-    separator = "&" if "?" in target else "?"
-    response = RedirectResponse(f"{target}{separator}chatgpt={result}", status_code=302)
-    response.headers["Cache-Control"] = "no-store"
-    return response
+        result = await complete_login(db, request.app.state.vault, client, user, params)
+    return {"result": result}
 
 
 @router.get("/api/chatgpt")

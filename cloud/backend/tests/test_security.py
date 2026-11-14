@@ -138,6 +138,7 @@ FIELDS = [
     *[("POST", "/api/admin/users/1/ban", {"days": 1, "reason": "abuse"}, k) for k in ("permanent", "days", "reason")],
     *[("POST", "/api/billing/checkout", {"plan": "trial"}, k) for k in ("plan", "method")],
     ("POST", "/api/chatgpt/start", {"next": "/onboarding"}, "next"),
+    ("POST", "/api/chatgpt/finish", {"callback": "http://127.0.0.1:38457/auth/callback?code=a&state=b"}, "callback"),
 ]
 
 
