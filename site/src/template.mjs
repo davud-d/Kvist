@@ -6,6 +6,8 @@
  * needs JavaScript to be readable.
  */
 
+import { CLOUD_URL } from "./config.mjs";
+
 const SITE = "https://kvist.site";
 
 const esc = (value) =>
@@ -178,6 +180,25 @@ const cards = (items) =>
     )
     .join("\n          ");
 
+/** A front-page section made of a heading and a grid of cards. Kvist Cloud is
+    the one that ends in a link out, so it is the one that carries `link`. */
+function cardSection(t, key) {
+  const block = t[key];
+  const link = block.link
+    ? `\n      <p class="hero-links"><a class="linkout" href="${esc(CLOUD_URL)}" rel="noopener">${esc(block.link)}</a></p>`
+    : "";
+  return `<section class="section" id="${key}">
+    <div class="wrap">
+      <p class="kicker">${esc(block.kicker)}</p>
+      <h2 class="h2">${esc(block.h2)}</h2>
+      <p class="lede">${esc(block.lede)}</p>
+      <ul class="grid reveal">
+          ${cards(block.items)}
+      </ul>${block.honest ? `\n      <p class="note">${esc(block.honest)}</p>` : ""}${link}
+    </div>
+  </section>`;
+}
+
 function head({ t, css, meta, path, otherPath }) {
   const url = SITE + path;
   const jsonLd = {
@@ -259,7 +280,7 @@ function langbar(t, otherPath) {
 }
 
 export function render({ t, css, buildId }) {
-  const rail = ["demo", "loop", "boundary", "recovery", "control", "anymodel", "install"]
+  const rail = ["demo", "loop", "boundary", "recovery", "control", "anymodel", "cloud", "install"]
     .map((key) => `<a href="#${key}">${esc(t.nav[key])}</a>`)
     .join("\n      ") +
     `\n      <a class="rail-cta" href="${esc(t.dir)}install/">${esc(t.nav.howto)}</a>`;
@@ -305,23 +326,8 @@ ${header({ t, home: t.dir, rail })}
     </div>
   </section>
 
-  ${["loop", "boundary", "recovery", "control", "anymodel"]
-    .map(
-      (key) => `<section class="section" id="${key}">
-    <div class="wrap">
-      <p class="kicker">${esc(t[key].kicker)}</p>
-      <h2 class="h2">${esc(t[key].h2)}</h2>
-      <p class="lede">${esc(t[key].lede)}</p>
-      <ul class="grid reveal">
-          ${cards(t[key].items)}
-      </ul>${
-        t[key].honest
-          ? `\n      <p class="note">${esc(t[key].honest)}</p>`
-          : ""
-      }
-    </div>
-  </section>`,
-    )
+  ${["loop", "boundary", "recovery", "control", "anymodel", "cloud"]
+    .map((key) => cardSection(t, key))
     .join("\n\n  ")}
 
   <section class="section" id="install">
@@ -438,6 +444,11 @@ ${header({ t, home: t.dir, rail, label: page.meta.title })}
 
   <section class="section">
     <div class="wrap">
+      <p class="cloud-aside">
+        <span class="term">${esc(page.cloud.term)}</span>
+        ${esc(page.cloud.text)}
+        <a class="linkout" href="${esc(CLOUD_URL)}" rel="noopener">${esc(page.cloud.link)}</a>
+      </p>
       <p class="note" style="margin-top:0">${esc(page.alt)}</p>
     </div>
   </section>

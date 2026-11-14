@@ -327,6 +327,18 @@
   );
 }
 
+/* The install page's way out for someone who would rather not install: a plain
+   paragraph that closes the guide, not a panel. The hatched .note under it is
+   the from-source aside, so the two read as different kinds of remark. */
+.cloud-aside {
+  max-width: var(--measure);
+  margin: 0 0 var(--s-5);
+  color: var(--dim);
+  font-size: var(--t-15);
+}
+.cloud-aside .term { display: block; margin-bottom: var(--s-2); color: var(--tx); }
+.cloud-aside .linkout { display: inline-block; margin-top: var(--s-3); color: var(--tx); }
+
 /* -- steps ----------------------------------------------------------------- */
 
 .steps { display: grid; gap: var(--s-4); margin-top: var(--s-6); }

@@ -20,6 +20,7 @@
     "recovery": "Recovery",
     "control": "Control",
     "anymodel": "AnyModel",
+    "cloud": "Cloud",
     "install": "Install",
     "repo": "Repository",
     "theme": "Switch theme",
@@ -177,6 +178,27 @@
       }
     ]
   },
+  "cloud": {
+    "kicker": "Kvist Cloud",
+    "h2": "Nothing to install: Kvist on a cloud machine",
+    "lede": "Kvist Cloud is a subscription where every customer gets a cloud machine running Kvist. You paste your own model key, write a task, and the agent does it on that machine.",
+    "items": [
+      {
+        "term": "Your machine, your key",
+        "text": "Each customer gets a cloud machine that runs Kvist. Paste your own model key, write what you want done in plain words, and the agent does it there. Nothing has to be installed on your own computer."
+      },
+      {
+        "term": "It sleeps between tasks",
+        "text": "When there is nothing to do the machine sleeps. You pay for the hours the agent actually works, not for the hours it waits."
+      },
+      {
+        "term": "Or keep it on your computer",
+        "text": "On the Remote plan the agent runs on your own computer and the cloud is only the go-between. Tasks, the queue, the web workspace and history work as on any plan, and no hours are counted."
+      }
+    ],
+    "honest": "Early access: Kvist Cloud is not generally available yet and there is no date to give. To run Kvist today, install it.",
+    "link": "Kvist Cloud — early access"
+  },
   "install": {
     "kicker": "Install",
     "h2": "Get started with Kvist",
@@ -240,6 +262,11 @@
     "caveat": {
       "term": "About the screenshots",
       "text": "They were taken from the release installer in a clean home directory. The last two show a local test gateway instead of a real provider, so the provider and model names there are not what you will see; the layout is."
+    },
+    "cloud": {
+      "term": "Prefer not to install anything?",
+      "text": "Kvist Cloud gives you a cloud machine that already runs Kvist: paste your own model key, write a task, and the agent does it there. It is in early access and not generally available yet.",
+      "link": "Kvist Cloud — early access"
     },
     "stepWord": "Step",
     "steps": [

@@ -3,7 +3,7 @@
  * build.mjs — renders the two locales into dist/ and checks the budgets.
  *
  *   node build.mjs            # build once
- *   node build.mjs --serve    # build, then serve dist/ on :4173
+ *   node build.mjs --serve    # build, then serve dist/ on :4173 (PORT=<n> to change)
  *
  * The whole generator is this file plus src/template.mjs. esbuild does the two
  * things worth a tool — minifying the CSS and bundling the modules — and
@@ -371,4 +371,4 @@ function serve(port = 4173) {
 }
 
 await main();
-if (process.argv.includes("--serve")) serve();
+if (process.argv.includes("--serve")) serve(Number(process.env.PORT) || 4173);
