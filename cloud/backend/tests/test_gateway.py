@@ -292,3 +292,19 @@ def test_real_runner_runs_a_task_to_the_end(live_stack):
 def _status(stack, task_id: int) -> str:
     with stack.db() as db:
         return db.get(Task, task_id).status
+
+
+def test_a_provider_that_keeps_refusing_is_its_own_reason_not_a_generic_failure():
+    from kvist_cloud.tasks import apply_event
+
+    refused = ("Kvist stopped: too many errors in a row. Last errors: Failed to get model response: "
+               "Error code: 400 - Request is missing x-opencode-session")
+    task = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
+    apply_event(task, {"type": "final", "message": refused, "outcome": "incomplete"})
+    assert (task.status, task.status_reason, task.final_message) == (TaskStatus.FAILED, "model_refused", refused)
+
+    # An incomplete run for another reason, or a 5xx glitch, keeps the old behaviour.
+    other = Task(status=TaskStatus.RUNNING, status_reason="", outcome="")
+    glitch = "Failed to get model response: Error code: 503"
+    apply_event(other, {"type": "final", "message": glitch, "outcome": "incomplete"})
+    assert (other.status, other.status_reason) == (TaskStatus.DONE, "")

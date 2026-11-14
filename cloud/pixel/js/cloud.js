@@ -136,6 +136,9 @@ export function warnings(state, agent = null, extra = []) {
     found.push({ id: "low-hours", level: "warn", text: "warn low hours", action: "plan", value: duration(sub.balance_seconds) });
   }
   if (!key?.set) found.push({ id: "no-key", level: "warn", text: "warn no key", action: "key" });
+  if (machine?.display_status === "creating") {
+    found.push({ id: "machine-preparing", level: "warn", text: "warn machine preparing" });
+  }
   if (machine?.display_status === "error") {
     // A person cannot act on "wake_failed", so each known reason says what happened and what to try; the code
     // stays at the end of the sentence for whoever they write to.

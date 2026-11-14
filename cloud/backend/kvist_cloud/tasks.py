@@ -41,6 +41,8 @@ PAUSE_REASONS = frozenset(
     {"hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted",
      "machine_sleeping", "machine_suspended"}
 )
+# The core's own words when the model's provider answered with a client error (400-499) again and again.
+MODEL_REFUSED = re.compile(r"Failed to get model response: Error code: 4\d\d")
 
 
 def _finish(task: Task, status: str, reason: str = "") -> None:
@@ -73,7 +75,10 @@ def apply_event(task: Task, event: dict) -> None:
     if kind == "final":
         task.final_message = str(event.get("message", ""))
         task.outcome = str(event.get("outcome", "")) or "done"
-        if task.status_reason in PAUSE_REASONS or event.get("paused"):
+        if task.outcome == "incomplete" and MODEL_REFUSED.search(task.final_message):
+            # The agent gave up because the model's provider kept refusing: a setting to fix, not a task to retry.
+            _finish(task, TaskStatus.FAILED, "model_refused")
+        elif task.status_reason in PAUSE_REASONS or event.get("paused"):
             _finish(task, TaskStatus.PAUSED, task.status_reason or "user")
         elif task.status_reason == "cancelled":
             _finish(task, TaskStatus.CANCELLED)

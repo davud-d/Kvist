@@ -112,6 +112,9 @@ test("warnings come before the trouble: no plan, no hours, few hours, no key, no
   assert.deepEqual(ids({ ...fine, projects: [] }), ["no-projects"]);
   assert.deepEqual(ids({ ...fine, ready: false, projects: [] }), []);
   assert.deepEqual(ids({ ...fine, machine: { display_status: "error", detail: "x" } }), ["machine-error"]);
+  // A machine on its first boot says so, instead of letting the silence look like a fault.
+  assert.deepEqual(ids({ ...fine, machine: { display_status: "creating" } }), ["machine-preparing"]);
+  assert.deepEqual(ids({ ...fine, machine: { display_status: "waking" } }), []);
   // A person cannot act on a code: a known one gets a sentence of its own and a retry, with the code kept in it.
   const trouble = (detail) => warnings({ ...fine, machine: { display_status: "error", detail } })[0];
   assert.deepEqual([trouble("wake_failed").text, trouble("wake_failed").value, trouble("wake_failed").action],
