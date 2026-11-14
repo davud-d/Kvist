@@ -7,7 +7,7 @@ import { fromBoot } from "../boot.js";
 import { h, replace, skeleton } from "../dom.js";
 import { t } from "../i18n.js";
 import { watchMachine } from "../machine.js";
-import { errorBox, liveRegion, machinePill } from "../ui.js";
+import { errorBox, liveRegion, machinePill, manualAccessBox } from "../ui.js";
 
 async function waitForSubscription(tries = 60) {
   for (let i = 0; i < tries; i += 1) {
@@ -101,7 +101,7 @@ export async function startScreen(root, { me, navigate }) {
         : null,
       problem));
   } else {
-    replace(action, errorBox({ code: "billing_unavailable" }));
+    replace(action, manualAccessBox());
   }
 
   return watchMachine((machine) => {

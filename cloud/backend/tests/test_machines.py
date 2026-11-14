@@ -218,11 +218,28 @@ def test_machine_that_never_dials_in_is_marked(app_factory, engine):
         machine = make_machine(db, make_user(db))
         machine.status = MachineStatus.WAKING
         machine.last_active_at = utcnow() - timedelta(minutes=10)
+        machine.created_at = utcnow() - timedelta(days=1)
     with TestClient(app) as client:
         client.portal.call(machines.sweep_once, app)
     with session_scope(factory) as db:
         machine = db.scalars(select(Machine)).one()
         assert (machine.status, machine.status_detail) == (MachineStatus.ERROR, "wake_timeout")
+
+
+def test_a_first_boot_gets_time_to_install_before_it_is_given_up_on(app_factory, engine):
+    from fastapi.testclient import TestClient
+
+    app = app_factory()
+    factory = make_session_factory(engine)
+    with session_scope(factory) as db:
+        machine = make_machine(db, make_user(db))
+        machine.status = MachineStatus.WAKING
+        machine.last_active_at = utcnow() - timedelta(minutes=10)  # long past a plain wake's 3 minutes
+        machine.created_at = utcnow() - timedelta(minutes=10)  # but the machine itself is 10 minutes old
+    with TestClient(app) as client:
+        client.portal.call(machines.sweep_once, app)
+    with session_scope(factory) as db:
+        assert db.scalars(select(Machine)).one().status == MachineStatus.WAKING
 
 
 def test_display_status(db):
@@ -235,3 +252,20 @@ def test_display_status(db):
     task.status = TaskStatus.WAITING_FOR_USER
     db.flush()
     assert machines.display_status(db, machine) == "waiting_for_you"
+
+
+def test_a_machine_that_has_not_dialled_in_is_never_called_working(db):
+    user = make_user(db)
+    machine = make_machine(db, user)
+    make_task(db, user, machine, status=TaskStatus.STARTING)
+    # First boot: waking, never connected (installing its packages takes minutes).
+    machine.status, machine.connected, machine.last_beat_second = MachineStatus.WAKING, False, None
+    assert machines.display_status(db, machine) == "creating"
+    # A sleeper coming back has been up before.
+    machine.last_beat_second = 1_800_000_000
+    assert machines.display_status(db, machine) == "waking"
+    machine.status = MachineStatus.CREATING
+    assert machines.display_status(db, machine) == "waking"
+    # Once the runner is there, the task decides.
+    machine.status, machine.connected = MachineStatus.AWAKE, True
+    assert machines.display_status(db, machine) == "working"

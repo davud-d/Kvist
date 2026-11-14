@@ -27,6 +27,7 @@ router = APIRouter()
 SWEEP_SECONDS = 30.0
 # A machine that was asked to wake and never dialled in.
 WAKE_TIMEOUT = timedelta(minutes=3)
+FIRST_BOOT_TIMEOUT = timedelta(minutes=20)
 REMOTE_PROVIDER = "remote"
 
 
@@ -82,6 +83,11 @@ def display_status(db: Session, machine: Machine) -> str:
     """What the dashboard says: asleep, working, waiting for you."""
     if machine.suspended:
         return "suspended"
+    if machine.provider != REMOTE_PROVIDER and not machine.connected and machine.status in (
+            MachineStatus.CREATING, MachineStatus.WAKING):
+        # Whatever the tasks say, nothing runs until the runner has dialled in. A machine that never has (its
+        # first boot installs packages and takes minutes) is "creating"; a sleeper waking up is "waking".
+        return MachineStatus.WAKING if machine.last_beat_second is not None else MachineStatus.CREATING
     statuses = set(
         db.scalars(select(Task.status).where(Task.machine_id == machine.id, Task.status.in_(TaskStatus.ACTIVE)))
     )
@@ -255,7 +261,9 @@ async def sweep_once(app: FastAPI) -> None:
             # A customer's own machine comes up when its owner starts the runner, which can be much later.
             never_came_up = (machine.status == MachineStatus.WAKING and not machine.connected
                              and machine.provider != REMOTE_PROVIDER)
-            if never_came_up and now - machine.last_active_at > WAKE_TIMEOUT:
+            # The first boot installs the guest's packages, which takes minutes: it gets its own, longer allowance.
+            deadline = max(machine.last_active_at + WAKE_TIMEOUT, machine.created_at + FIRST_BOOT_TIMEOUT)
+            if never_came_up and now > deadline:
                 machine.status = MachineStatus.ERROR
                 machine.status_detail = "wake_timeout"
                 continue
@@ -274,10 +282,12 @@ async def sweep_forever(app: FastAPI) -> None:
             log.exception("machine sweep failed")
 
 
-async def on_signed_in(request: Request, db: Session, user: User, _github_token: str) -> None:
-    """Sign-in hook: the machine starts being created while the person enters their card."""
-    app = request.app
-    record_step(db, "github_login", user_id=user.id, visitor_id=request.cookies.get("kc_visitor", ""))
+async def ensure_machine(app: FastAPI, db: Session, user: User) -> None:
+    """A person who may use hours gets a machine: created in the background, or woken if it sleeps.
+
+    Called wherever hours appear (sign-in, an admin granting a plan), so the machine is ready by the time the person
+    reaches the task screen. Commits the caller's session.
+    """
     if ban_active(user):
         db.commit()
         return
@@ -295,6 +305,20 @@ async def on_signed_in(request: Request, db: Session, user: User, _github_token:
     db.commit()
     if machine.status == MachineStatus.ASLEEP:
         spawn(app, wake(app, machine.id))
+
+
+async def ensure_machine_for(app: FastAPI, user_id: int) -> None:
+    """``ensure_machine`` for code that has no session of its own to hand over (an admin's grant)."""
+    with session_scope(app.state.session_factory) as db:
+        user = db.get(User, user_id)
+        if user is not None:
+            await ensure_machine(app, db, user)
+
+
+async def on_signed_in(request: Request, db: Session, user: User, _github_token: str) -> None:
+    """Sign-in hook: the machine starts being created while the person enters their card."""
+    record_step(db, "github_login", user_id=user.id, visitor_id=request.cookies.get("kc_visitor", ""))
+    await ensure_machine(request.app, db, user)
 
 
 @router.get("/api/machines")

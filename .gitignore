@@ -151,3 +151,5 @@ clickjacking-test.png
 
 # Local notes.
 *.private.md
+cloud/vendor/
+cloud/.wheels/

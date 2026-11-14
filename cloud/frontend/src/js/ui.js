@@ -2,6 +2,16 @@
 import { h } from "./dom.js";
 import { t } from "./i18n.js";
 
+/** Payments are off and this is not a dev server: access is handed out by the admin, by hand. */
+export function manualAccessBox() {
+  return h("div.card", {},
+    h("p.h3", { text: t("manual.title") }),
+    h("p", { text: t("manual.body") }),
+    h("p", {}, h("a.btn", { href: "https://t.me/brmalov", target: "_blank", rel: "noopener noreferrer",
+      text: t("manual.button") })),
+    h("p.small", { text: t("manual.after") }));
+}
+
 /** An error with what to do about it, and the support code when the server failed. */
 export function errorBox(error, retry) {
   const code = (error && error.code) || "fallback";

@@ -35,7 +35,7 @@
   },
   "machineStatus": {
     "offline": "Offline: start the connector",
-    "creating": "Being created",
+    "creating": "Preparing (first start takes a few minutes)",
     "asleep": "Asleep",
     "waking": "Waking up",
     "awake": "Awake",
@@ -58,6 +58,7 @@
     "user": "You paused it. Press Continue when you want.",
     "cancelled": "You stopped this task.",
     "agent_error": "The agent hit an error and stopped. The events above say what happened.",
+    "model_refused": "The model's provider refused the request. Check the key, address and model in the settings, or pick another provider.",
     "clone_failed": "Could not clone the repository. Check the link and reconnect GitHub with access to this repository.",
     "repo_not_allowed": "That repository link is not allowed.",
     "start_failed": "Kvist did not start on the machine.",
@@ -101,6 +102,7 @@
     "bad_request": "Check the form.",
     "github_unreachable": "GitHub is not answering. Try again in a minute.",
     "billing_unavailable": "Billing is not answering. Try again in a minute.",
+    "chatgpt_unavailable": "Sign-in with ChatGPT is not available yet. Use an API key for now.",
     "oauth_failed": "GitHub did not confirm the sign-in. Try again.",
     "oauth_state": "The sign-in link expired. Start again.",
     "not_found": "This page does not exist or is not yours.",
@@ -112,13 +114,22 @@
     "signIn": "Sign in with ChatGPT",
     "signInAgain": "Sign in again",
     "opening": "Opening OpenAI…",
+    "openOpenAI": "Open the OpenAI sign-in",
+    "step1": "Sign in on OpenAI's page and allow access to your plan.",
+    "step2": "At the end the browser shows an error page, because it cannot open 127.0.0.1. That is expected: nothing is wrong.",
+    "step3": "Copy the whole address from that tab's address bar, paste it below and press Finish.",
+    "pasteLabel": "Address of the page that did not open",
+    "pastePlaceholder": "http://127.0.0.1:38457/auth/callback?code=…&state=…",
+    "finish": "Finish sign-in",
+    "checking": "Checking…",
     "connected": "Signed in · {email}",
     "connectedNoEmail": "Signed in with ChatGPT",
     "needsLogin": "Your ChatGPT sign-in ran out or was revoked. Sign in again and tasks will run again.",
     "disconnect": "Disconnect ChatGPT",
     "result": {
       "denied": "You declined access on OpenAI's side. Sign in again and allow it.",
-      "expired": "The time to sign in ran out (three minutes) or the link was already used. Start again.",
+      "expired": "The time to sign in ran out (ten minutes) or the address was already used. Start again.",
+      "bad_link": "That is not the address OpenAI sent you to. Copy the whole address from the tab that failed to open; it starts with http://127.0.0.1:38457/auth/callback.",
       "refused": "OpenAI did not accept the sign-in. Try again.",
       "unreachable": "OpenAI is not answering right now. Try again in a minute.",
       "no_plan": "Signing in needs permission to use your ChatGPT plan. Sign in again and leave that box ticked.",
@@ -168,6 +179,12 @@
       "If your hours run out mid-task, the task pauses. Nothing is deleted."
     ],
     "signedIn": "Open your dashboard"
+  },
+  "manual": {
+    "title": "Access is issued by hand for now",
+    "body": "Online payments are switched off for the moment. The administrator grants a plan or extra hours manually: message them on Telegram, say your GitHub login, and they will switch it on.",
+    "button": "Write on Telegram: @brmalov",
+    "after": "Once it is granted, reload this page and carry on."
   },
   "start": {
     "remoteTitle": "Remote: your own machine",

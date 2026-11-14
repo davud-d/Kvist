@@ -1,0 +1,10 @@
+# Backup host. Installed by scripts/setup_backup_host.sh; the timer is enabled by hand after the first backup.
+[Unit]
+Description=Alert when the newest Kvist Cloud backup is too old
+
+[Service]
+Type=oneshot
+User=borg
+Environment=KVIST_BACKUP_ENV=/etc/kvist-cloud/backup-host.env
+ExecStart=/usr/local/lib/kvist-backup/backup_maintenance.sh check
+NoNewPrivileges=yes

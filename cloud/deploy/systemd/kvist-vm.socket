@@ -1,0 +1,15 @@
+# The one door from the control server to the hypervisor (docs/DEPLOY.md, "Customer machines").
+# Only root and the group kvist-cloud can open it; each connection starts kvist-vm@.service as root.
+[Unit]
+Description=Kvist Cloud VM helper socket
+
+[Socket]
+ListenStream=/run/kvist-vm.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=kvist-cloud
+Accept=yes
+MaxConnections=8
+
+[Install]
+WantedBy=sockets.target

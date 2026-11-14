@@ -7,7 +7,7 @@ import { h, modal, replace, skeleton } from "../dom.js";
 import { exportButton } from "../exporter.js";
 import { dateTime, hoursMinutes, percentLeft, shortDate } from "../format.js";
 import { locale, t } from "../i18n.js";
-import { emptyBox, errorBox, liveRegion, machinePill, taskPill } from "../ui.js";
+import { emptyBox, errorBox, liveRegion, machinePill, manualAccessBox, taskPill } from "../ui.js";
 import { workspaceLink } from "../workspace.js";
 
 function disputeDialog(row, onSent) {
@@ -68,7 +68,8 @@ function hoursCard(view, config, refresh, announce) {
     view.purchased_seconds > 0
       ? h("p.small", {}, t("dashboard.purchased", { h: hoursMinutes(view.purchased_seconds, t) }))
       : null,
-    h("p", {}, buy));
+    // Payments off on a real server: more hours come from the admin, not from a button that cannot work.
+    config.enabled || config.dev ? h("p", {}, buy) : manualAccessBox());
 }
 
 // The Remote plan: the machine is the person's own, so the page shows how to connect it, not hours.

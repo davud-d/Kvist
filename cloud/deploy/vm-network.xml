@@ -1,0 +1,20 @@
+<!--
+  The customers' VMs' network: libvirt's "default" (NAT, bridge virbr0), with its DNS switched off.
+  dnsmasq then only does DHCP on the bridge. Two reasons: a host that already runs a DNS server (named takes
+  every new address the moment a bridge appears) cannot share port 53 with it, and a VM has no business asking
+  the host anything. The guests get public resolvers from DHCP instead. Loaded by scripts/install_vm_host.sh.
+-->
+<network xmlns:dnsmasq="http://libvirt.org/schemas/network/dnsmasq/1.0">
+  <name>default</name>
+  <forward mode="nat"/>
+  <bridge name="virbr0" stp="on" delay="0"/>
+  <dns enable="no"/>
+  <ip address="192.168.122.1" netmask="255.255.255.0">
+    <dhcp>
+      <range start="192.168.122.2" end="192.168.122.254"/>
+    </dhcp>
+  </ip>
+  <dnsmasq:options>
+    <dnsmasq:option value="dhcp-option=6,9.9.9.9,1.1.1.1"/>
+  </dnsmasq:options>
+</network>

@@ -7,8 +7,8 @@
 агент работает.
 
 В этой папке MVP: сервер управления, раннер, который живёт на каждой машине, и веб-фронтенд. Всё
-работает на одном компьютере; для запуска на настоящем хостинге остаётся написать один адаптер
-провайдера (`backend/kvist_cloud/providers/sprites.py`). Устройство описано в
+работает на одном компьютере; на сервере машина каждого клиента — виртуальная машина KVM, которую создаёт
+`backend/kvist_cloud/providers/libvirt.py` ([docs/DEPLOY.ru.md](docs/DEPLOY.ru.md)). Устройство описано в
 [docs/ARCHITECTURE.ru.md](docs/ARCHITECTURE.ru.md).
 
 ## Запуск локально
@@ -58,12 +58,15 @@ backend/kvist_cloud/   сервер управления (FastAPI, SQLAlchemy 2,
   events.py            живая рассылка           ledger.py   журнал часов, лента, споры
   limits.py            очередь, конец часов     billing.py  callback-и Platega (по умолчанию выкл.)
   funnel.py            шаги воронки, конверсия  exports.py  экспорт архива
-  web.py               собранный фронтенд, CSP, gzip        providers/  base, local, sprites
+  web.py               собранный фронтенд, CSP, gzip        providers/  base, local, libvirt, remote
 backend/migrations/    Alembic; здесь же триггеры журнала против UPDATE/DELETE
 runner/kvist_runner/   процесс на машине: WebSocket, heartbeat, свой Kvist на задачу
 frontend/              ванильный JS + esbuild; build.mjs проверяет локали, контраст и бюджеты
 pixel/                 пиксельное окно (копия Kvist Pixel) на облаке: отдаётся по /pixel/, см. pixel/README.ru.md
 scripts/dev.sh         локальный запуск одной командой   scripts/fake_model.py  фейковая модель
+scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   выкладка, см. docs/DEPLOY.ru.md
+scripts/backup*.sh, restore.sh, setup_backup_host.sh   бэкапы, см. docs/BACKUP.ru.md
+deploy/systemd, deploy/nginx   сервис, прокси и таймеры бэкапов
 ```
 
 ## Настройка
@@ -159,7 +162,8 @@ Callback URL (кабинет: Настройки → Callback URLs) — `<PUBLIC
 повторного входа. Dev-оплата, бесплатные часы и искусственные продления работают только при
 `AUTH_DEV_LOGIN=true`, выключенном биллинге и loopback `PUBLIC_URL`.
 `MACHINE_PROVIDER=local` ограничен loopback: он **не изолирует** недоверенных пользователей.
-Адаптер Sprites ещё не реализован, поэтому публичный хостинг пока не готов.
+`MACHINE_PROVIDER=libvirt` изолирует: на клиента одна виртуальная машина KVM, сеть изолирована так, как описано
+в [docs/DEPLOY.ru.md](docs/DEPLOY.ru.md).
 
 OAuth запрашивает `read:user repo`. Для приватных репозиториев существующим пользователям
 нужно переподключить GitHub и разрешить `repo`, а при необходимости — доступ организации.

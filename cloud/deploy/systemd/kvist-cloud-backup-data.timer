@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily data-dir backup of Kvist Cloud
+
+[Timer]
+OnCalendar=*-*-* 02:20:00
+RandomizedDelaySec=600
+Persistent=true
+Unit=kvist-cloud-backup@data.service
+
+[Install]
+WantedBy=timers.target

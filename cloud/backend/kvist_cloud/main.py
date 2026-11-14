@@ -21,6 +21,7 @@ from . import (
     exports,
     funnel,
     gateway,
+    health,
     keys,
     ledger,
     machines,
@@ -53,9 +54,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     loops = [
         asyncio.create_task(machines.sweep_forever(app)),
         asyncio.create_task(billing.sweep_forever(app)),
-        asyncio.create_task(chatgpt.check_forever(app)),
-        asyncio.create_task(gateway.push_chatgpt_forever(app)),
     ]
+    if app.state.settings.chatgpt_signin:
+        # Off, the server makes no request to OpenAI for anyone's plan.
+        loops += [
+            asyncio.create_task(chatgpt.check_forever(app)),
+            asyncio.create_task(gateway.push_chatgpt_forever(app)),
+        ]
     try:
         yield
     finally:
@@ -120,6 +125,7 @@ def create_app(
             )
         return await call_next(request)
 
+    app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(keys.router)
     app.include_router(chatgpt.router)

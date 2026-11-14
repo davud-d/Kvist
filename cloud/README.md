@@ -7,8 +7,8 @@ own model key, writes a task, and the agent does it on the machine. The machine 
 tasks; the customer pays for the hours the agent works.
 
 This folder is the MVP: the control server, the runner that lives on each machine, and the web
-frontend. Everything runs on one computer; going live means writing one provider adapter
-(`backend/kvist_cloud/providers/sprites.py`). The design is in
+frontend. Everything runs on one computer; on a server each customer's machine is a KVM virtual machine made by
+`backend/kvist_cloud/providers/libvirt.py` ([docs/DEPLOY.md](docs/DEPLOY.md)). The design is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Run it locally
@@ -57,12 +57,15 @@ backend/kvist_cloud/   the control server (FastAPI, SQLAlchemy 2, Alembic)
   events.py            live fan-out          ledger.py   append-only hours ledger, feed, disputes
   limits.py            queue, hours running out          billing.py  Platega callbacks (off by default)
   funnel.py            funnel steps, conversion          exports.py  archive export
-  web.py               the built frontend, CSP, gzip     providers/  base, local, sprites (stub)
+  web.py               the built frontend, CSP, gzip     providers/  base, local, libvirt, remote
 backend/migrations/    Alembic; the ledger's no-UPDATE/no-DELETE triggers live here
 runner/kvist_runner/   the process on a machine: WebSocket, heartbeat, one Kvist per task
 frontend/              vanilla JS + esbuild; build.mjs checks locales, contrast and budgets
 pixel/                 the pixel-game window (a copy of Kvist Pixel) on the cloud: served at /pixel/, see pixel/README.md
 scripts/dev.sh         the one-command local run    scripts/fake_model.py  the fake model
+scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   shipping, see docs/DEPLOY.md
+scripts/backup*.sh, restore.sh, setup_backup_host.sh   backups, see docs/BACKUP.md
+deploy/systemd, deploy/nginx   the service, the proxy and the backup timers
 ```
 
 ## Configuration
@@ -155,7 +158,8 @@ Trial eligibility uses GitHub's authenticated `created_at`, strictly older than 
 and a durable lifetime trial-use marker. Unknown ages fail closed until GitHub is reconnected.
 Dev checkout/top-ups and synthetic renewals require `AUTH_DEV_LOGIN=true`, billing disabled, and a
 loopback `PUBLIC_URL`. `MACHINE_PROVIDER=local` is restricted to loopback: it does **not** isolate
-hostile tenants. The Sprites adapter remains unimplemented, so this is not yet public hosting.
+hostile tenants. `MACHINE_PROVIDER=libvirt` does: one KVM virtual machine per customer, with the network isolation
+described in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 OAuth requests `read:user repo`. Existing users must reconnect GitHub and authorize `repo` (and any
 organization access) to list and clone private repositories. OAuth's `repo` scope is broad; the token

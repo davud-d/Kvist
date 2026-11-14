@@ -1,0 +1,15 @@
+# Loads the customers' VM isolation rules (deploy/vm-firewall.nft, installed to /etc/kvist-cloud/).
+[Unit]
+Description=Kvist Cloud VM network isolation
+Before=libvirtd.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/kvist-cloud/vm-firewall.nft
+ExecStop=-/usr/sbin/nft delete table inet kvist_vm
+ExecStop=-/usr/sbin/nft delete table bridge kvist_vm
+
+[Install]
+WantedBy=multi-user.target

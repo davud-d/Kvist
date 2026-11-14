@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Request
 from pydantic import Field, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -136,8 +136,8 @@ def get_user(user_id: int, request: Request, _admin: User = Depends(admin_user),
 
 
 @router.post("/api/admin/users/{user_id}/plan")
-def give_plan(user_id: int, payload: PlanIn, admin: User = Depends(admin_user),
-              db: Session = Depends(get_db)) -> dict[str, object]:
+def give_plan(user_id: int, payload: PlanIn, request: Request, background: BackgroundTasks,
+              admin: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, object]:
     user = _target(db, user_id)
     lock_account(db, user.id)
     now = utcnow()
@@ -147,12 +147,15 @@ def give_plan(user_id: int, payload: PlanIn, admin: User = Depends(admin_user),
            note=note)
     _record(db, admin, user, "plan", plan=payload.plan, days=payload.days, note=note)
     db.commit()
+    # A hand-granted plan is what a payment would have been: the machine is made now, not at the next sign-in.
+    # After the response and off this handler's thread: it must not wait on account locks inside the event loop.
+    background.add_task(machines.ensure_machine_for, request.app, user.id)
     return {"ok": True, "plan": payload.plan, "until": subscription.current_period_end.isoformat()}
 
 
 @router.post("/api/admin/users/{user_id}/hours")
-def give_hours(user_id: int, payload: HoursIn, admin: User = Depends(admin_user),
-               db: Session = Depends(get_db)) -> dict[str, object]:
+def give_hours(user_id: int, payload: HoursIn, request: Request, background: BackgroundTasks,
+               admin: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, object]:
     if payload.minutes == 0:
         raise ApiError(400, "bad_request", "Minutes cannot be zero. / Минуты не могут быть нулём.")
     user = _target(db, user_id)
@@ -166,6 +169,8 @@ def give_hours(user_id: int, payload: HoursIn, admin: User = Depends(admin_user)
            minutes=abs(payload.minutes), note=note)
     _record(db, admin, user, "hours", minutes=payload.minutes, note=note)
     db.commit()
+    if payload.minutes > 0:
+        background.add_task(machines.ensure_machine_for, request.app, user.id)
     return {"ok": True, "balance_minutes": ledger.minutes(max(ledger.balance_seconds(db, user.id), 0))}
 
 

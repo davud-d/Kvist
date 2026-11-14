@@ -6,8 +6,9 @@ Kvist Cloud is a subscription: every customer gets a cloud machine with Kvist on
 customer pastes their own model key, writes a task, and the agent does it on the machine. The
 machine sleeps between tasks; the customer pays for the hours the agent actively works.
 
-This MVP runs end to end on one computer. The only piece that is not real yet is a hosting
-provider adapter (`providers/sprites.py`); `providers/local.py` stands in for it.
+This runs end to end on one computer with `providers/local.py`. On a server, `providers/libvirt.py` makes each
+customer's machine a KVM virtual machine (`scripts/setup_vm.sh`); the unprivileged server asks a small root helper
+over a socket (`scripts/vm_ctl.py`), see [DEPLOY.md](DEPLOY.md).
 
 ## Picture
 
@@ -108,9 +109,12 @@ runner, not the provider, so it works the same on any hosting.
 The customer's ChatGPT plan can pay for their model instead of an API key. The sign-in runs on the server, so
 nothing listens on the customer's computer:
 
-1. `POST /api/chatgpt/start` opens an attempt (3 minutes, one use, bound to the signed-in customer) and returns
+1. `POST /api/chatgpt/start` opens an attempt (10 minutes, one use, bound to the signed-in customer) and returns
    OpenAI's address. Only the hash of its `state` is stored; the PKCE verifier is encrypted.
-2. OpenAI sends the browser back to `/auth/chatgpt/callback`. The attempt is looked up by that state, deleted at
+2. OpenAI accepts only a loopback `redirect_uri` (a public https one is refused with a 400), so it sends the browser
+   to `http://127.0.0.1:38457/auth/callback` on the customer's own computer, where nothing listens. The page fails to
+   open, but its address carries the code; the customer pastes it into the page, which posts it to
+   `POST /api/chatgpt/finish`. Only that exact address is accepted. The attempt is looked up by its state, deleted at
    once, and its code is exchanged for tokens.
 3. The tokens are stored as one encrypted blob on the user row (they must be sent back to OpenAI, so a hash would
    be useless). The identity token is read without its signature: it came straight from OpenAI's token endpoint

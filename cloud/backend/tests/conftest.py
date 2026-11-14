@@ -34,6 +34,8 @@ def env(tmp_path) -> dict[str, str]:
         "KVIST_CLOUD_MASTER_KEY": MASTER_KEY,
         "PUBLIC_URL": "http://127.0.0.1:8740",
         "FRONTEND_DIST": str(tmp_path / "dist"),
+        # Off by default in production; the tests that are about it, and the ones that count providers, need it on.
+        "CHATGPT_SIGNIN": "true",
     }
 
 

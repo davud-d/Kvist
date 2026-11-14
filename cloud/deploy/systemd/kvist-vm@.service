@@ -1,0 +1,18 @@
+# One request from the control server: vm_ctl.py reads a JSON line from the socket and answers on it.
+# Runs as root because creating a VM needs it; vm_ctl.py validates every field and can only touch domains
+# named kvist-<number>. Installed by scripts/install_vm_host.sh (the scripts go to a root-owned folder).
+[Unit]
+Description=Kvist Cloud VM helper (one request)
+After=libvirtd.service
+
+[Service]
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+ExecStart=/usr/local/lib/kvist-vm/vm_ctl.py
+Environment=WHEELS_DIR=/opt/kvist-cloud/wheels
+Environment=SKEL_DIR=/opt/kvist-cloud/skel
+# A create waits for the image download and virt-install; nothing here should outlive that.
+RuntimeMaxSec=1500
+PrivateTmp=yes
+NoNewPrivileges=yes

@@ -1,0 +1,16 @@
+# Production host. Instances: kvist-cloud-backup@db.service, kvist-cloud-backup@data.service.
+# Expects the release layout of docs/DEPLOY.md: scripts under /opt/kvist-cloud/current, settings in /etc/kvist-cloud/cloud.env.
+[Unit]
+Description=Kvist Cloud backup (%i)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=KVIST_CLOUD_ENV_FILE=/etc/kvist-cloud/cloud.env
+ExecStart=/opt/kvist-cloud/current/scripts/backup.sh %i
+PrivateTmp=yes
+NoNewPrivileges=yes
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

@@ -1,0 +1,39 @@
+# The control server. Expects: user kvist-cloud, releases under /opt/kvist-cloud (current -> the live one),
+# settings in /etc/kvist-cloud/cloud.env, data in /var/lib/kvist-cloud (KVIST_CLOUD_DATA_DIR in that file).
+#
+# ONE worker, on purpose: the runners' gateway, the live event hub and the screen frames live in this process's
+# memory (docs/ARCHITECTURE.md). Two workers would split the runners and the browsers across processes.
+[Unit]
+Description=Kvist Cloud control server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kvist-cloud
+Group=kvist-cloud
+WorkingDirectory=/opt/kvist-cloud/current/backend
+Environment=KVIST_CLOUD_ENV_FILE=/etc/kvist-cloud/cloud.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+# The few core files the server imports, copied into the release by scripts/vendor_kernel.sh.
+Environment=PYTHONPATH=/opt/kvist-cloud/current/vendor
+ExecStart=/opt/kvist-cloud/current/.venv/bin/python -m uvicorn --factory kvist_cloud.main:create_app \
+    --host 127.0.0.1 --port 8740 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+Restart=on-failure
+RestartSec=3
+# WebSocket clients get a moment to close before the process goes.
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/kvist-cloud
+
+[Install]
+WantedBy=multi-user.target

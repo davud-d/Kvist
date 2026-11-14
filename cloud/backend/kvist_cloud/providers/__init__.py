@@ -6,9 +6,9 @@ from urllib.parse import urlparse
 
 from ..config import LOOPBACK_HOSTS, Settings
 from .base import MachineProvider, MachineSpec, ProviderError, ProviderState
+from .libvirt import LibvirtProvider
 from .local import LocalProvider
 from .remote import RemoteProvider
-from .sprites import SpritesProvider
 
 __all__ = ["MachineProvider", "MachineSpec", "ProviderError", "ProviderState", "RemoteProvider", "make_provider"]
 
@@ -23,6 +23,6 @@ def make_provider(settings: Settings) -> MachineProvider:
             settings.kvist_command,
             settings.heartbeat_seconds,
         )
-    if settings.machine_provider == "sprites":
-        return SpritesProvider()
+    if settings.machine_provider == "libvirt":
+        return LibvirtProvider()
     raise ProviderError(f"unknown MACHINE_PROVIDER: {settings.machine_provider}")

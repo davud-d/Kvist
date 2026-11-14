@@ -1,0 +1,12 @@
+# Backup host. Installed by scripts/setup_backup_host.sh; the timer is enabled by hand after the first backup.
+[Unit]
+Description=Restore the newest Kvist Cloud database backup into a throw-away database
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=borg
+Environment=KVIST_BACKUP_ENV=/etc/kvist-cloud/backup-host.env
+ExecStart=/usr/local/lib/kvist-backup/restore.sh verify
+NoNewPrivileges=yes
+TimeoutStartSec=2h

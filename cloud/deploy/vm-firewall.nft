@@ -1,0 +1,31 @@
+# Network isolation of the customers' VMs (libvirt's default network, bridge virbr0, ports vnetN).
+# Loaded by kvist-vm-firewall.service. The VMs only ever dial out to the gateway over the internet, so:
+#   - a VM cannot talk to another VM (customer A never sees customer B's machine);
+#   - a VM cannot reach the host's own services: only DHCP is answered on the bridge (deploy/vm-network.xml);
+#   - a VM cannot reach private ranges or the provider's metadata address (169.254.0.0/16), only the internet.
+# Reloading is safe: the tables are dropped and made again.
+add table bridge kvist_vm
+delete table bridge kvist_vm
+add table inet kvist_vm
+delete table inet kvist_vm
+
+table bridge kvist_vm {
+    chain forward {
+        type filter hook forward priority -200; policy accept;
+        # Frames between two VM ports. Traffic to the host or the internet goes through the bridge itself.
+        iifname "vnet*" oifname "vnet*" counter drop
+    }
+}
+
+table inet kvist_vm {
+    chain forward {
+        type filter hook forward priority -10; policy accept;
+        iifname "virbr0" ip daddr { 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 } counter drop
+        iifname "virbr0" oifname "virbr0" counter drop
+    }
+    chain input {
+        type filter hook input priority -10; policy accept;
+        iifname "virbr0" udp dport 67 counter accept
+        iifname "virbr0" counter drop
+    }
+}

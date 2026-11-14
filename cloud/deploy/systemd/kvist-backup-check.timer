@@ -1,0 +1,9 @@
+[Unit]
+Description=Every half hour: is the newest Kvist Cloud backup fresh?
+
+[Timer]
+OnCalendar=*:0/30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

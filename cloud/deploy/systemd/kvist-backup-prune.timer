@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily retention of the Kvist Cloud backups
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

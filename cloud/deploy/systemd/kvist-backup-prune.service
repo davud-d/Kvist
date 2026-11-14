@@ -1,0 +1,11 @@
+# Backup host. Installed by scripts/setup_backup_host.sh.
+[Unit]
+Description=Apply the retention to the Kvist Cloud backups
+
+[Service]
+Type=oneshot
+User=borg
+Environment=KVIST_BACKUP_ENV=/etc/kvist-cloud/backup-host.env
+ExecStart=/usr/local/lib/kvist-backup/backup_maintenance.sh prune
+NoNewPrivileges=yes
+TimeoutStartSec=2h
