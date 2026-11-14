@@ -125,7 +125,7 @@ XSS = '<img src=x onerror="globalThis.__xss=1"><script>globalThis.__xss=1</scrip
 FIELDS = [
     ("PATCH", "/api/me", {"locale": "en"}, "locale"),
     *[("POST", "/api/model-key", {"provider": "deepseek", "key": "test-key-12345678"}, k)
-      for k in ("provider", "key", "base_url", "model")],
+      for k in ("provider", "key", "base_url", "model", "headers")],
     *[("POST", "/api/tasks", {"goal": "safe"}, k) for k in ("goal", "repo_url", "project_id")],
     ("POST", "/api/tasks/1/messages", {"text": "safe"}, "text"),
     *[("POST", "/api/tasks/1/input", {"request_id": "r1"}, k) for k in ("request_id", "value", "approved")],
@@ -171,6 +171,22 @@ def test_injection_in_every_body_field(client_factory, engine, method, path, bod
     with session_scope(client.app.state.session_factory) as db:
         assert db.get(User, 1).session_version == 1
         assert db.scalar(select(func.count()).select_from(User)) == 1
+
+
+@pytest.mark.parametrize("attack", [SQL, XSS], ids=["sql", "xss"])
+def test_injection_in_the_names_and_values_of_extra_headers(client_factory, attack):
+    import httpx
+
+    client = client_factory(lambda _: httpx.Response(200, json={"data": [{"id": "m1"}]}), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    body = {"provider": "other", "key": "test-key-12345678", "base_url": "https://gw.example/v1", "model": "m1"}
+    # A name that is not a plain header name never gets as far as being stored or shown.
+    refused = client.post("/api/model-key", json=body | {"headers": {attack: "v"}})
+    assert refused.status_code == 400 and refused.json()["error"]["code"] == "bad_headers"
+    # A value is only ever kept encrypted, and the page is given the names alone.
+    client.post("/api/model-key", json=body | {"headers": {"x-note": attack}})
+    shown = client.get("/api/model-key")
+    assert attack not in shown.text and shown.json()["headers"] in ([], ["x-note"])
 
 
 @pytest.mark.parametrize("attack", [SQL, XSS])

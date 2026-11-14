@@ -73,6 +73,9 @@ export function keyWidget({ providers, saved, onValid }) {
     placeholder: t("onboarding.keyPlaceholder"), "aria-describedby": "key-hint", id: "model-key",
   });
   const baseInput = h("input.input", { type: "url", placeholder: t("onboarding.baseUrlPlaceholder"), id: "model-base" });
+  // Extra headers a gateway asks for, one "Name: value" per line. Not kept in the draft: a value may be a secret.
+  const headersInput = h("textarea.input", { rows: 3, spellcheck: "false", autocomplete: "off", autocapitalize: "off",
+    placeholder: t("onboarding.headersPlaceholder"), id: "model-headers" });
   const modelList = h("datalist", { id: "model-catalog" });
   const modelInput = h("input.input", { type: "text", spellcheck: "false", autocapitalize: "off", id: "model-name",
     list: "model-catalog", autocomplete: "off" });
@@ -85,6 +88,18 @@ export function keyWidget({ providers, saved, onValid }) {
   baseInput.addEventListener("input", remember);
   modelInput.addEventListener("input", remember);
 
+  /** "Name: value" lines to an object; a line that is not one makes the whole field wrong (null). */
+  function parseHeaders() {
+    const headers = {};
+    for (const line of headersInput.value.split("\n")) {
+      if (!line.trim()) continue;
+      const colon = line.indexOf(":");
+      if (colon < 1) return null;
+      headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+    }
+    return headers;
+  }
+
   const setHint = (kind, text) => {
     hint.className = `hint ${kind}`;
     hint.textContent = text;
@@ -96,7 +111,7 @@ export function keyWidget({ providers, saved, onValid }) {
     const chosen = providers.find((item) => item.id === provider) ?? {};
     if (!chosen.needs_model) return;
     const { models } = await api("/api/model-catalog", {
-      method: "POST", body: { provider, key, base_url: baseInput.value.trim() },
+      method: "POST", body: { provider, key, base_url: baseInput.value.trim(), headers: parseHeaders() ?? {} },
     });
     replace(modelList, models.map((id) => h("option", { value: id })));
     if (!modelInput.value.trim() && models.length) modelInput.value = models[0];
@@ -106,6 +121,11 @@ export function keyWidget({ providers, saved, onValid }) {
     const key = keyInput.value.trim();
     if (key.length < 8) return;
     const mine = ++sequence;
+    const headers = parseHeaders();
+    if (headers === null) {
+      setHint("err", t("errors.bad_headers"));
+      return;
+    }
     setHint("wait", t("keyCheck.checking"));
     onValid(false);
     try {
@@ -113,7 +133,7 @@ export function keyWidget({ providers, saved, onValid }) {
       if (mine !== sequence) return;
       const result = await api("/api/model-key", {
         method: "POST",
-        body: { provider, key, base_url: baseInput.value.trim(), model: modelInput.value.trim() },
+        body: { provider, key, base_url: baseInput.value.trim(), model: modelInput.value.trim(), headers },
       });
       if (mine !== sequence) return;
       if (!result.ok) {
@@ -147,6 +167,7 @@ export function keyWidget({ providers, saved, onValid }) {
   } });
   baseInput.addEventListener("change", check);
   modelInput.addEventListener("change", check);
+  headersInput.addEventListener("change", check);
 
   function tiles() {
     return h("fieldset.tiles", { style: "border:0;padding:0;margin:0" },
@@ -226,6 +247,7 @@ export function keyWidget({ providers, saved, onValid }) {
       showSaved
         ? h("p.row", {},
             h("span.hint.ok", { tabindex: "-1", "data-saved": "", text: t("keyCheck.ok", { last4: saved.last4 }) }),
+            saved.headers?.length ? h("span.small", { text: t("onboarding.headersSaved", { names: saved.headers.join(", ") }) }) : null,
             h("button.linkbtn", { type: "button", text: t("onboarding.changeKey"),
               onclick: () => { changing = true; onValid(false); draw(); keyInput.focus(); } }))
         : h("div.stack", { "data-form": "" },
@@ -233,6 +255,10 @@ export function keyWidget({ providers, saved, onValid }) {
               ? h("label.field", { for: "model-base" }, h("span", { text: t("onboarding.baseUrl") }), baseInput) : null,
             chosen.needs_model
               ? h("label.field", { for: "model-name" }, h("span", { text: t("onboarding.modelName") }), modelInput, modelList) : null,
+            chosen.needs_base_url
+              ? h("details", {}, h("summary", { text: t("onboarding.headersTitle") }),
+                  h("label.field", { for: "model-headers" }, h("span.small", { text: t("onboarding.headersHint") }),
+                    headersInput)) : null,
             h("label.field", { for: "model-key" }, h("span", { text: t("onboarding.keyLabel") }),
               h("span.keyrow", {}, keyInput, pasteButton)),
             hint));

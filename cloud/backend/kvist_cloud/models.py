@@ -86,6 +86,10 @@ class User(Base):
     # "other" provider only: the endpoint and the model, neither of them secret.
     model_base_url: Mapped[str] = mapped_column(String(500), default="")
     model_name: Mapped[str] = mapped_column(String(200), default="")
+    # "other" provider only: extra HTTP headers a gateway asks for. The values may be secrets, so they are one
+    # encrypted JSON object; the names alone (comma-separated) are kept readable so the page can list them.
+    model_headers_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
+    model_header_names: Mapped[str] = mapped_column(String(600), default="", server_default="")
     locale: Mapped[str] = mapped_column(String(5), default="en")
     # Admin rights given from the panel; the owners in ADMIN_GITHUB_LOGINS need no row.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")

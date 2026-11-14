@@ -33,6 +33,22 @@ export function openKeyDialog() {
   const key = h("input", { class: "field", type: "password", autocomplete: "off", spellcheck: "false", placeholder: "sk-…" });
   const base = h("input", { class: "field", type: "url", placeholder: "https://…", spellcheck: "false", value: account.key?.base_url ?? draft.base_url ?? "" });
   const model = h("input", { class: "field", type: "text", placeholder: t("model name"), spellcheck: "false", value: account.key?.model ?? draft.model ?? "" });
+  // One "Name: value" per line. Not in the draft: a value may be a secret.
+  const headers = h("textarea", { class: "field", rows: 3, spellcheck: "false", placeholder: "x-opencode-session: {session}" });
+  const parseHeaders = () => {
+    const found = {};
+    for (const line of headers.value.split("\n")) {
+      if (!line.trim()) continue;
+      const colon = line.indexOf(":");
+      if (colon < 1) return null;
+      found[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+    }
+    return found;
+  };
+  const headersBlock = () => h("details", {}, h("summary", {}, t("extra headers")),
+    h("p", { class: "dim" }, t("extra headers hint")),
+    account.key?.headers?.length ? h("p", { class: "dim" }, t("extra headers saved").replace("{names}", account.key.headers.join(", "))) : null,
+    headers);
   base.addEventListener("input", () => remember());
   model.addEventListener("input", () => remember());
   const status = h("p", { class: "dim", "aria-live": "polite" });
@@ -82,15 +98,20 @@ export function openKeyDialog() {
     // A sign-in has no key to paste and nothing to save: its own button does the work.
     const signIn = Boolean(current?.sign_in);
     key.style.display = save.style.display = signIn ? "none" : "";
-    fill(extra, signIn ? chatgptRows() : [current?.needs_base_url ? base : null, current?.needs_model ? model : null].filter(Boolean));
+    fill(extra, signIn ? chatgptRows() : [current?.needs_base_url ? base : null, current?.needs_model ? model : null, current?.needs_base_url ? headersBlock() : null].filter(Boolean));
   };
 
   save.addEventListener("click", async () => {
     if (key.value.trim().length < 8) return key.focus();
+    const extraHeaders = parseHeaders();
+    if (extraHeaders === null) {
+      status.textContent = t("bad headers");
+      return undefined;
+    }
     save.disabled = true;
     status.textContent = t("checking key");
     try {
-      const result = await api("/api/model-key", { method: "POST", body: { provider: choice.provider, key: key.value.trim(), base_url: base.value.trim(), model: model.value.trim() } });
+      const result = await api("/api/model-key", { method: "POST", body: { provider: choice.provider, key: key.value.trim(), base_url: base.value.trim(), model: model.value.trim(), headers: extraHeaders } });
       if (!result.ok) {
         status.textContent = t(result.code);
         return undefined;

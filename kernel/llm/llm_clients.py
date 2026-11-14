@@ -46,6 +46,8 @@ GEMINI_API_KEY_KEY = "gemini_api_key"
 GROQ_API_KEY_KEY = "groq_api_key"
 OMNIROUTE_API_KEY_KEY = "omniroute_api_key"
 OMNIROUTE_BASE_URL_KEY = "omniroute_base_url"
+# Extra HTTP headers for the gateway, as a JSON object (the form a plain environment variable can carry).
+OMNIROUTE_HEADERS_KEY = "omniroute_headers"
 OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/v1"
 OPENROUTER_API_KEY_KEY = "openrouter_api_key"
 OPENROUTER_BASE_URL_KEY = "openrouter_base_url"
@@ -1331,6 +1333,23 @@ def _expand_session_headers(headers: dict[str, str]) -> dict[str, str]:
     return {name: value.replace(SESSION_HEADER_PLACEHOLDER, session) for name, value in headers.items()}
 
 
+def headers_from_json(text: str | None) -> dict[str, str]:
+    """A JSON object of header name/value strings; anything else (or broken JSON) is no headers."""
+    if not text or not text.strip():
+        return {}
+    try:
+        loaded = json.loads(text)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        name.strip(): value.strip()
+        for name, value in loaded.items()
+        if isinstance(name, str) and isinstance(value, str) and name.strip() and value.strip()
+    }
+
+
 def _build_openai_client(
     api_key: str,
     base_url: str | None = None,
@@ -1381,7 +1400,9 @@ def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool 
         base_url = credentials.get(OMNIROUTE_BASE_URL_KEY, "").strip()
         if not base_url:
             base_url = OMNIROUTE_DEFAULT_BASE_URL
-        return _build_openai_client(api_key, base_url=base_url)
+        return _build_openai_client(
+            api_key, base_url=base_url, headers=headers_from_json(credentials.get(OMNIROUTE_HEADERS_KEY))
+        )
 
     if normalized_provider == OPENROUTER_PROVIDER:
         api_key = credentials.get(OPENROUTER_API_KEY_KEY, "").strip()

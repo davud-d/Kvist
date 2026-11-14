@@ -27,6 +27,7 @@ from .models import ChatGPTLogin, User
 ENCRYPTED_COLUMNS = (
     (User, "github_token_enc"),
     (User, "model_key_enc"),
+    (User, "model_headers_enc"),
     (User, "chatgpt_enc"),
     (ChatGPTLogin, "verifier_enc"),
 )

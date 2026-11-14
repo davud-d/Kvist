@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 
 from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
@@ -78,14 +79,17 @@ def start_message(app: FastAPI, db: Session, task: Task, chatgpt_access: dict | 
     if user is None or not has_model_access(user):
         return None
     key = ""
+    headers: dict[str, str] = {}
     if user.model_provider == chatgpt.PROVIDER_ID:
         if chatgpt_access is None:
             return None
     else:
         try:
             key = app.state.vault.decrypt(user.model_key_enc)
-        except SecretError:
-            log.error("task %s: the stored key cannot be decrypted", task.id)
+            if user.model_headers_enc:
+                headers = json.loads(app.state.vault.decrypt(user.model_headers_enc))
+        except (SecretError, ValueError):
+            log.error("task %s: the stored key or headers cannot be decrypted", task.id)
             return None
     settings = app.state.settings
     subscription = ledger.current_subscription(db, user.id)
@@ -110,7 +114,7 @@ def start_message(app: FastAPI, db: Session, task: Task, chatgpt_access: dict | 
         "repo_url": task.repo_url,
         "github_token": app.state.vault.decrypt(user.github_token_enc) if user.github_token_enc else "",
         "resume": task.resume_requested,
-        "env": kvist_environment(user, key),
+        "env": kvist_environment(user, key, headers),
         **({"chatgpt": chatgpt_access} if chatgpt_access is not None else {}),
         "limits": {
             "command_seconds": plan.command_minutes * 60,

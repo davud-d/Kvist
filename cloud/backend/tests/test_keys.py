@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 
 from kvist_cloud import secrets as vaultmod
-from kvist_cloud.keys import PROVIDERS, check_key, endpoint_problem, kvist_environment
+from kvist_cloud.keys import PROVIDERS, check_key, clean_headers, endpoint_problem, kvist_environment
 from kvist_cloud.models import User
 
 KEY = "sk-test-0123456789abcdef"
@@ -172,8 +172,8 @@ def test_saved_key_is_encrypted_and_shown_by_last4(client_factory, engine):
     response = client.post("/api/model-key", json={"provider": "deepseek", "key": KEY})
     assert response.json()["ok"] is True
     assert client.get("/api/model-key").json() == {
-        "provider": "deepseek", "label": "DeepSeek", "last4": "cdef", "base_url": "", "model": "", "set": True,
-        "chatgpt_state": "", "chatgpt_email": "",
+        "provider": "deepseek", "label": "DeepSeek", "last4": "cdef", "base_url": "", "model": "", "headers": [],
+        "set": True, "chatgpt_state": "", "chatgpt_email": "",
     }
     from kvist_cloud.db import make_session_factory
 
@@ -191,3 +191,114 @@ def test_invalid_key_is_not_saved(client_factory):
         "ok": False, "code": "invalid_key",
     }
     assert client.get("/api/model-key").json()["set"] is False
+
+
+# -- extra headers for the customer's own gateway ------------------------------------------------------------
+
+GATEWAY = "https://gw.example/v1"
+
+
+def gateway_needing_a_session(seen: list):
+    """Like OpenCode Go: refuses a request that carries no session header."""
+    def handler(request):
+        seen.append(dict(request.headers))
+        if "x-opencode-session" not in request.headers:
+            return httpx.Response(400, json={"error": "Request is missing x-opencode-session"})
+        return httpx.Response(200, json={"data": [{"id": "m1"}]})
+
+    return handler
+
+
+async def test_a_gateway_that_wants_a_session_header_is_checked_with_it():
+    seen: list = []
+    refused = await run_check(gateway_needing_a_session(seen), "other", base_url=GATEWAY, model="m1")
+    assert not refused.ok
+    accepted = await run_check(gateway_needing_a_session(seen), "other", base_url=GATEWAY, model="m1",
+                               headers={"x-opencode-session": "{session}"})
+    assert accepted.ok
+    sent = seen[-1]
+    # {session} became a real id for this call, and the key's own header is not the customer's to change.
+    assert sent["x-opencode-session"] not in ("", "{session}") and len(sent["x-opencode-session"]) == 36
+    assert sent["authorization"] == f"Bearer {KEY}"
+
+
+@pytest.mark.parametrize("headers", [
+    {"Authorization": "Bearer x"}, {"host": "evil.example"}, {"Content-Length": "5"}, {"cookie": "a=b"},
+    {"proxy-authorization": "x"}, {"bad name": "x"}, {"x:y": "x"}, {"x-ok": ""}, {"x-ok": "line\nbreak"},
+    {"x-ok": "é"}, {"x-ok": "v" * 501}, {"x-a": "1", "X-A": "2"}, {f"x-{i}": "v" for i in range(9)}, {"": "v"},
+])
+def test_header_rules(headers):
+    from kvist_cloud.errors import ApiError
+
+    with pytest.raises(ApiError) as refused:
+        clean_headers(headers)
+    assert refused.value.code == "bad_headers"
+
+
+def test_good_headers_are_kept_as_given():
+    assert clean_headers({" x-opencode-session ": " {session} ", "X-Team": "kvist-1"}) == {
+        "x-opencode-session": "{session}", "X-Team": "kvist-1"}
+
+
+def test_headers_are_saved_encrypted_listed_by_name_only_and_handed_to_kvist(client_factory, engine):
+    from conftest import dev_login
+
+    from kvist_cloud.db import make_session_factory
+
+    seen: list = []
+    client = client_factory(gateway_needing_a_session(seen), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    body = {"provider": "other", "key": KEY, "base_url": GATEWAY, "model": "m1"}
+    assert client.post("/api/model-key", json=body).json() == {"ok": False, "code": "bad_endpoint"}
+    secret_value = "team-secret-value-123"
+    answer = client.post("/api/model-key", json={
+        **body, "headers": {"x-opencode-session": "{session}", "x-team-token": secret_value}}).json()
+    assert answer["ok"] is True and answer["key"]["headers"] == ["x-opencode-session", "x-team-token"]
+    assert secret_value not in client.get("/api/model-key").text
+
+    with make_session_factory(engine)() as session:
+        user = session.scalars(select(User)).one()
+        assert user.model_headers_enc and secret_value not in user.model_headers_enc
+        assert user.model_header_names == "x-opencode-session,x-team-token"
+        import json as jsonmod
+
+        headers = jsonmod.loads(client.app.state.vault.decrypt(user.model_headers_enc))
+    env = kvist_environment(user, KEY, headers)
+    import json
+
+    assert json.loads(env["OMNIROUTE_HEADERS"]) == {"x-opencode-session": "{session}", "x-team-token": secret_value}
+    # Without headers nothing extra is handed over.
+    assert "OMNIROUTE_HEADERS" not in kvist_environment(user, KEY)
+
+
+def test_other_providers_take_no_headers_and_deleting_the_key_drops_them(client_factory, engine):
+    from conftest import dev_login
+
+    from kvist_cloud.db import make_session_factory
+
+    client = client_factory(lambda request: httpx.Response(200, json={"is_available": True, "data": [{"id": "m1"}]}),
+                            AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.post("/api/model-key", json={"provider": "deepseek", "key": KEY,
+                                               "headers": {"x-a": "1"}}).json()["key"]["headers"] == []
+    client.post("/api/model-key", json={"provider": "other", "key": KEY, "base_url": GATEWAY, "model": "m1",
+                                        "headers": {"x-a": "1"}})
+    assert client.get("/api/model-key").json()["headers"] == ["x-a"]
+    client.delete("/api/model-key")
+    assert client.get("/api/model-key").json()["headers"] == []
+    with make_session_factory(engine)() as session:
+        user = session.scalars(select(User)).one()
+        assert (user.model_headers_enc, user.model_header_names) == ("", "")
+
+
+def test_bad_headers_are_refused_before_anything_is_called(client_factory):
+    from conftest import dev_login
+
+    called: list = []
+    client = client_factory(lambda request: called.append(1) or httpx.Response(200, json={"data": []}),
+                            AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    answer = client.post("/api/model-key", json={"provider": "other", "key": KEY, "base_url": GATEWAY, "model": "m1",
+                                                 "headers": {"Authorization": "Bearer stolen"}})
+    assert answer.status_code == 400 and answer.json()["error"]["code"] == "bad_headers"
+    assert called == []

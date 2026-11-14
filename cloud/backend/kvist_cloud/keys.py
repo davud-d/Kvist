@@ -8,6 +8,9 @@ Check results are codes the frontend turns into plain words next to the field:
 from __future__ import annotations
 
 import ipaddress
+import json
+import re
+import uuid
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -102,6 +105,42 @@ class KeyIn(InputModel):
     key: str = Field(min_length=8, max_length=500)
     base_url: str = Field(default="", max_length=500)
     model: str = Field(default="", max_length=200)
+    # "other" only: extra HTTP headers a gateway asks for (OpenCode Go wants a session id, for example).
+    headers: dict[str, str] = Field(default_factory=dict, max_length=16)
+
+
+MAX_HEADERS = 8
+HEADER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$")
+# What the request or the key itself decides: setting these would only break the call or smuggle a second login.
+FORBIDDEN_HEADERS = frozenset({
+    "authorization", "host", "content-length", "content-type", "transfer-encoding", "connection", "upgrade", "te",
+    "trailer", "cookie", "accept-encoding",
+})
+SESSION_PLACEHOLDER = "{session}"
+BAD_HEADERS = ApiError(400, "bad_headers", "Check the extra headers: a name, a colon, a value; at most eight. "
+                       "/ Проверь заголовки: имя, двоеточие, значение; не больше восьми.")
+
+
+def clean_headers(raw: dict[str, str]) -> dict[str, str]:
+    """The customer's extra headers, or ``bad_headers``. Values may be secrets, so nothing here is ever logged."""
+    cleaned: dict[str, str] = {}
+    for name, value in raw.items():
+        name, value = name.strip(), value.strip()
+        lower = name.lower()
+        if (not HEADER_NAME.match(name) or lower in FORBIDDEN_HEADERS or lower.startswith("proxy-")
+                or lower in {seen.lower() for seen in cleaned}
+                or not value or len(value) > 500 or not value.isascii() or not value.isprintable()):
+            raise BAD_HEADERS
+        cleaned[name] = value
+    if len(cleaned) > MAX_HEADERS:
+        raise BAD_HEADERS
+    return cleaned
+
+
+def with_session(headers: dict[str, str]) -> dict[str, str]:
+    """``{session}`` becomes one id for this call: some gateways refuse a request that has none."""
+    session = str(uuid.uuid4())
+    return {name: value.replace(SESSION_PLACEHOLDER, session) for name, value in headers.items()}
 
 
 def endpoint_problem(base_url: str, allow_local: bool) -> str:
@@ -153,7 +192,8 @@ def _classify(response: httpx.Response) -> KeyCheck:
 
 
 async def check_key(
-    client: httpx.AsyncClient, provider: str, key: str, base_url: str = "", model: str = ""
+    client: httpx.AsyncClient, provider: str, key: str, base_url: str = "", model: str = "",
+    headers: dict[str, str] | None = None,
 ) -> KeyCheck:
     """One request that costs nothing: a balance or a model list, never a completion."""
     try:
@@ -177,7 +217,8 @@ async def check_key(
                 )
             )
         if base_url:
-            response = await client.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {key}"})
+            response = await client.get(f"{base_url.rstrip('/')}/models",
+                                        headers={**with_session(headers or {}), "Authorization": f"Bearer {key}"})
             if response.status_code in (404, 405) and provider != "other":
                 # A vendor with no model list: nothing cheap to ask, and a wrong key is caught by its first task.
                 return KeyCheck(True)
@@ -198,7 +239,7 @@ async def check_key(
     return KeyCheck(False, "unknown_provider")
 
 
-def kvist_environment(user: User, key: str) -> dict[str, str]:
+def kvist_environment(user: User, key: str, headers: dict[str, str] | None = None) -> dict[str, str]:
     """What Kvist needs in its environment to talk to the customer's model."""
     provider = PROVIDERS[user.model_provider]
     env = {"AGENT_LLM_PROVIDER": provider.kvist_provider}
@@ -206,6 +247,8 @@ def kvist_environment(user: User, key: str) -> dict[str, str]:
         env[provider.key_env] = key
     if provider.needs_base_url:
         env[provider.base_url_env] = user.model_base_url
+        if headers:
+            env["OMNIROUTE_HEADERS"] = json.dumps(headers)
     if provider.needs_model:
         env["AGENT_FAST_MODEL"] = user.model_name
         env["AGENT_SMART_MODEL"] = user.model_name
@@ -227,6 +270,7 @@ def key_summary(user: User) -> dict[str, object]:
         "last4": user.model_key_last4,
         "base_url": user.model_base_url,
         "model": user.model_name,
+        "headers": user.model_header_names.split(",") if user.model_header_names else [],
         "set": has_model_access(user),
         "chatgpt_state": user.chatgpt_state,
         "chatgpt_email": user.chatgpt_email,
@@ -258,6 +302,7 @@ class CatalogIn(InputModel):
     provider: str
     key: str = Field(min_length=8, max_length=500)
     base_url: str = Field(default="", max_length=500)
+    headers: dict[str, str] = Field(default_factory=dict, max_length=16)
 
 
 @router.post("/api/model-catalog")
@@ -276,8 +321,14 @@ async def model_catalog(payload: CatalogIn, request: Request, user: User = Depen
     if not base_url or endpoint_problem(base_url, settings.allow_local_endpoints):
         return {"models": []}
     try:
+        headers = clean_headers(payload.headers) if provider.needs_base_url else {}
+    except ApiError:
+        return {"models": []}
+    try:
         async with await _provider_client(request, provider) as client:
-            response = await client.get(f"{base_url.rstrip('/')}/models", headers={"Authorization": f"Bearer {key}"})
+            response = await client.get(
+                f"{base_url.rstrip('/')}/models",
+                headers={**with_session(headers), "Authorization": f"Bearer {key}"})
         data = response.json().get("data", []) if response.status_code == 200 else []
     except (httpx.HTTPError, ValueError, AttributeError):
         return {"models": []}
@@ -310,6 +361,7 @@ async def save_key(
     # Only what this provider asks for is kept: a stale address or model from another choice is dropped.
     base_url = payload.base_url.strip() if provider.needs_base_url else ""
     model = payload.model.strip() if provider.needs_model else ""
+    headers = clean_headers(payload.headers) if provider.needs_base_url else {}
     if provider.needs_base_url:
         problem = endpoint_problem(base_url, settings.allow_local_endpoints)
         if problem:
@@ -317,7 +369,7 @@ async def save_key(
     if provider.needs_model and not model:
         return {"ok": False, "code": "model_missing"}
     async with await _provider_client(request, provider) as client:
-        result = await check_key(client, payload.provider, key, base_url or provider.default_base_url, model)
+        result = await check_key(client, payload.provider, key, base_url or provider.default_base_url, model, headers)
     if not result.ok:
         return {"ok": False, "code": result.code}
     vault: Vault = request.app.state.vault
@@ -326,6 +378,8 @@ async def save_key(
     user.model_key_last4 = last4(key)
     user.model_base_url = base_url
     user.model_name = model
+    user.model_headers_enc = vault.encrypt(json.dumps(headers)) if headers else ""
+    user.model_header_names = ",".join(headers)
     record_step(db, "key_valid", user_id=user.id)
     db.commit()
     return {"ok": True, "code": "", "key": key_summary(user)}
@@ -338,5 +392,7 @@ def delete_key(user: User = Depends(current_user), db: Session = Depends(get_db)
     user.model_key_last4 = ""
     user.model_base_url = ""
     user.model_name = ""
+    user.model_headers_enc = ""
+    user.model_header_names = ""
     db.commit()
     return key_summary(user)

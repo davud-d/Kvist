@@ -44,6 +44,7 @@ GEMINI_API_KEY_KEY = "gemini_api_key"
 GROQ_API_KEY_KEY = "groq_api_key"
 OMNIROUTE_API_KEY_KEY = "omniroute_api_key"
 OMNIROUTE_BASE_URL_KEY = "omniroute_base_url"
+OMNIROUTE_HEADERS_KEY = "omniroute_headers"
 OPENROUTER_API_KEY_KEY = "openrouter_api_key"
 OPENROUTER_BASE_URL_KEY = "openrouter_base_url"
 ANTHROPIC_API_KEY_KEY = "anthropic_api_key"
@@ -65,6 +66,7 @@ _ENV_KEY_ALIASES = {
     GROQ_API_KEY_KEY: ("GROQ_API_KEY",),
     OMNIROUTE_API_KEY_KEY: ("OMNIROUTE_API_KEY",),
     OMNIROUTE_BASE_URL_KEY: ("OMNIROUTE_BASE_URL",),
+    OMNIROUTE_HEADERS_KEY: ("OMNIROUTE_HEADERS",),
     OPENROUTER_API_KEY_KEY: ("OPENROUTER_API_KEY",),
     OPENROUTER_BASE_URL_KEY: ("OPENROUTER_BASE_URL",),
     ANTHROPIC_API_KEY_KEY: ("ANTHROPIC_API_KEY",),
@@ -796,6 +798,10 @@ def ensure_provider_credentials(
             collected[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
             payload[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
             changed_values[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
+        # Not saved to the config file: it only travels from the environment (Kvist Cloud) into this run.
+        headers = _resolve_secret(payload, OMNIROUTE_HEADERS_KEY)
+        if headers:
+            collected[OMNIROUTE_HEADERS_KEY] = headers
     elif normalized_provider == OPENROUTER_PROVIDER:
         base_url = _resolve_secret(payload, OPENROUTER_BASE_URL_KEY)
         if base_url:
