@@ -79,4 +79,7 @@ def normalize_custom_provider_payload(payload: Any) -> tuple[str, dict[str, Any]
         "models": _clean_models(payload.get("models")),
         "streaming": bool(payload.get("streaming", False)),
     }
+    headers = payload.get("headers")
+    if headers:
+        config["headers"] = headers
     return name, config

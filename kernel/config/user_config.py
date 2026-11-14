@@ -989,6 +989,9 @@ def get_custom_providers(config_path: Path | None = None) -> dict[str, dict]:
                 # unverified and default to the safe non-streaming path.
                 "streaming": bool(info.get("streaming", False)),
             }
+            headers = _normalize_provider_headers(info.get("headers"))
+            if headers:
+                result[name]["headers"] = headers
     return result
 
 
@@ -1015,6 +1018,9 @@ def save_custom_provider(name: str, provider_config: dict, config_path: Path | N
         "models": _normalize_provider_models(provider_config.get("models")),
         "streaming": bool(provider_config.get("streaming", False)),
     }
+    headers = _normalize_provider_headers(provider_config.get("headers"))
+    if headers:
+        normalized_config["headers"] = headers
 
     def save_provider(payload: dict[str, object]) -> dict[str, object]:
         existing = payload.get(CUSTOM_PROVIDERS_KEY)
@@ -1079,6 +1085,17 @@ def save_style_configuration(style: str, config_path: Path | None = None) -> boo
 
     _update_user_config(set_style, config_path)
     return True
+
+
+def _normalize_provider_headers(headers: object) -> dict[str, str]:
+    """Keep only non-empty string name/value pairs of a custom provider's extra HTTP headers."""
+    if not isinstance(headers, dict):
+        return {}
+    return {
+        name.strip(): value.strip()
+        for name, value in headers.items()
+        if isinstance(name, str) and isinstance(value, str) and name.strip() and value.strip()
+    }
 
 
 def _normalize_provider_models(models: object) -> dict[str, str]:

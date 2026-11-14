@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -1321,7 +1322,21 @@ def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[s
     return tuple(required_keys)
 
 
-def _build_openai_client(api_key: str, base_url: str | None = None, api_timeout: float = 60.0) -> Any:
+SESSION_HEADER_PLACEHOLDER = "{session}"
+
+
+def _expand_session_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Fill ``{session}`` with one id per client: some gateways route and cache by it, so it must stay stable."""
+    session = str(uuid.uuid4())
+    return {name: value.replace(SESSION_HEADER_PLACEHOLDER, session) for name, value in headers.items()}
+
+
+def _build_openai_client(
+    api_key: str,
+    base_url: str | None = None,
+    api_timeout: float = 60.0,
+    headers: dict[str, str] | None = None,
+) -> Any:
     """Build an OpenAI-compatible client with explicit timeouts and HTTP-level retry."""
     import httpx
     from kernel.llm.request_log import request_log_path, wrap_transport
@@ -1340,6 +1355,8 @@ def _build_openai_client(api_key: str, base_url: str | None = None, api_timeout:
     kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 1, "http_client": http_client}
     if base_url:
         kwargs["base_url"] = base_url
+    if headers:
+        kwargs["default_headers"] = _expand_session_headers(headers)
     return OpenAI(**kwargs)
 
 
@@ -1435,7 +1452,7 @@ def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool 
         protocol = info.get("protocol", "openai").strip()
         if protocol == "anthropic":
             return AnthropicCompatibleClient(api_key=api_key, base_url=base_url, verbose=verbose)
-        return _build_openai_client(api_key, base_url=base_url)
+        return _build_openai_client(api_key, base_url=base_url, headers=info.get("headers"))
 
     _configure_freeflow_logging(verbose)
     return FreeFlowCompatibleClient(
