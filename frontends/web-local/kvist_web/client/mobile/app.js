@@ -256,7 +256,7 @@ function show(name) {
 }
 
 function paintHome() {
-    renderHome($('#home-list'), app.navigation, { open: go, create: selection => guard(createSession(selection)) });
+    renderHome($('#home-list'), app.navigation, { open: go, create: selection => createSession(selection).catch(error => toast(error.message)) });
     const { waiting, working } = counts(app.navigation);
     const line = waiting ? (winter ? t('winterWaiting', waiting) : t('waiting', waiting))
         : working ? t('working', working) : winter ? t('winterGreeting') : t('quiet');
@@ -291,10 +291,22 @@ function route() {
     guard(openSession({ serverId, workspace, session }));
 }
 
-async function createSession(target) {
-    const value = await api.createSession(target);
-    await refresh();
-    go({ ...target, session: value.active_session });
+let creating = null;
+
+// One at a time: a second tap while the first is on its way would ask for the same session. The new session
+// opens as soon as the computer has made it; the lists catch up in the background.
+function createSession(target) {
+    if (creating) return creating;
+    creating = (async () => {
+        try {
+            const value = await api.createSession(target);
+            go({ ...target, session: value.active_session });
+            guard(refresh());
+        } finally {
+            creating = null;
+        }
+    })();
+    return creating;
 }
 
 // ---- actions ------------------------------------------------------------------------------------------

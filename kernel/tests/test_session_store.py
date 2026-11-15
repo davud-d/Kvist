@@ -213,3 +213,13 @@ def test_launch_op_always_rotates_and_points_at_the_interrupted_session(agent_fa
     assert relaunched["active_session"] != "feature"
     assert relaunched["checkpoint"] is None
     assert relaunched["resumable_session"] == "feature"
+
+
+def test_allocate_makes_a_session_without_moving_the_active_one(tmp_path):
+    store = SessionStore(tmp_path)
+    store.create("work")
+    first, second = store.allocate(), store.allocate()
+    assert first != second and first.startswith("chat-")
+    status = SessionStore(tmp_path).status()
+    assert {"work", first, second} <= {item["name"] for item in status["session_items"]}
+    assert status["active_session"] == "work"

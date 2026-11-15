@@ -39,24 +39,30 @@ function inboxRow(entry, open) {
     return row;
 }
 
-// `solo`: the computer shows one folder (the one Kvist runs in), so there is nothing to choose and the way
-// to start a session is a large button under the list instead of a small "+".
-function projectCard(server, workspace, { open, create }, showServer, solo) {
+// The way to start a session is the yellow "+" beside the folder's name. `create` returns a promise; the button
+// shows it is working and ignores taps until it is done, so a slow disk cannot turn two taps into two sessions.
+function projectCard(server, workspace, { open, create }, showServer) {
     const card = el('section', 'card');
     const head = el('div', 'card-head');
     const names = el('div', 'card-names');
     names.append(el('h3', 'card-title', folderName(workspace.path)), el('p', 'card-path', showServer ? `${server.name} · ${workspace.path}` : workspace.path));
-    const add = el('button', solo ? 'btn primary new-session' : 'btn small', solo ? `+ ${t('newSession')}` : '+');
+    const add = el('button', 'btn small primary', '+');
     add.type = 'button';
     add.title = add.ariaLabel = t('newSession');
-    add.onclick = () => create({ serverId: server.id, workspace: workspace.path });
-    head.append(names);
-    if (!solo) head.append(add);
+    add.onclick = async () => {
+        if (add.ariaBusy === 'true') return;
+        add.ariaBusy = 'true';
+        try {
+            await create({ serverId: server.id, workspace: workspace.path });
+        } finally {
+            add.ariaBusy = 'false';
+        }
+    };
+    head.append(names, add);
     card.append(head);
     const items = workspace.sessions?.session_items || [];
     if (!items.length) card.append(el('p', 'card-empty', t('noSessions')));
     for (const item of items) card.append(sessionRow(server.id, workspace.path, item, open));
-    if (solo) card.append(add);
     return card;
 }
 
@@ -84,7 +90,7 @@ export function renderHome(root, navigation, handlers) {
     const servers = navigation.servers.filter(entry => entry.connection?.state === 'connected');
     const folders = servers.flatMap(entry => entry.workspaces.map(workspace => ({ server: entry.server, workspace })));
     const solo = folders.length === 1;
-    const projects = folders.map(({ server, workspace }) => projectCard(server, workspace, handlers, servers.length > 1, solo));
+    const projects = folders.map(({ server, workspace }) => projectCard(server, workspace, handlers, servers.length > 1));
     parts.push(el('h2', 'label', t(solo ? 'thisFolder' : 'projects')));
     if (projects.length) parts.push(...projects);
     else parts.push(el('p', 'card-empty', t('noProjects')));

@@ -1,6 +1,7 @@
 """Local Runtime: headless SessionStore plus lazy stdio-multi processes."""
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ class LocalRuntime(Runtime):
     ) -> None:
         self.server_id = server_id
         self._workspaces: list[str] = []
+        # Two requests that pick a name at the same moment would pick the same one.
+        self._create_lock = threading.Lock()
         self._on_workspace_added = on_workspace_added
         self.supervisor = ProcessSupervisor(server_id, broker)
         for workspace in workspaces:
@@ -74,10 +77,9 @@ class LocalRuntime(Runtime):
     def create_session(self, workspace: str, name: str | None = None) -> dict[str, Any]:
         store = SessionStore(self._workspace(workspace))
         if name:
-            result = store.create(name)
-        else:
-            result = store.new()
-        return result
+            return store.create(name)
+        with self._create_lock:
+            return {"active_session": store.allocate()}
 
     def send(self, workspace: str, session: str, text: str) -> dict[str, Any]:
         path = self._workspace(workspace)

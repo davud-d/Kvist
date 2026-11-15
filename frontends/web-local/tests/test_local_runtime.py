@@ -284,3 +284,28 @@ def test_raw_core_envelopes_mark_only_journal_events_durable(tmp_path):
 
     events = broker.after(0, timeout=0)
     assert [event.durable for event in events] == [False, True, True]
+
+
+def test_creating_sessions_at_the_same_moment_gives_each_its_own_name(tmp_path):
+    import threading
+    from kvist_web.events import EventBroker
+    from kvist_web.runtime.local import LocalRuntime
+
+    runtime = LocalRuntime("local", [str(tmp_path)], EventBroker())
+    names, errors = [], []
+
+    def create():
+        try:
+            names.append(runtime.create_session(str(tmp_path))["active_session"])
+        except ValueError as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=create) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert len(set(names)) == 6
+    # the sessions exist, and the previous ones were not dropped for being empty
+    assert set(names) <= {item["name"] for item in runtime.sessions(str(tmp_path))["session_items"]}

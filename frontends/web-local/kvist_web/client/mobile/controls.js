@@ -23,7 +23,7 @@ export function createControls(ctx) {
         const rows = COMMANDS.filter(command => PHONE.includes(command.name)).map(command => ({
             label: `/${command.name}`,
             hint: current[command.name]?.() || '',
-            onPick: () => run(command.name),
+            onPick: () => run(command.name).catch(error => ctx.toast(error.message)),
         }));
         openMenu({ title: t('menuTitle'), rows });
     }

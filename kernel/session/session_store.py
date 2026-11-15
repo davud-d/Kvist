@@ -28,6 +28,7 @@ from kernel.plan import end_session
 from kernel.session.agent_logging import (
     create_session,
     delete_session,
+    generate_session_name,
     get_journal_path,
     is_valid_session_name,
     list_sessions,
@@ -198,6 +199,18 @@ class SessionStore:
         save_active_session(self, name)
         self.current_session = name
         return self.status()
+
+    def allocate(self) -> str:
+        """Create an empty session with a name of Kvist's own and return the name.
+
+        Unlike ``new`` it neither makes the session the active one nor drops the previous empty one, and it
+        builds no overview: a frontend that addresses sessions by name needs none of that, and on a slow disk
+        each of those durable writes is a second the person waits.
+        """
+        name = generate_session_name(self)
+        if not create_session(self, name):
+            raise ValueError(f"Session {name!r} already exists")
+        return name
 
     def switch(self, name: str) -> dict[str, Any]:
         if not is_valid_session_name(name):
