@@ -521,3 +521,20 @@ def test_the_live_stream_leaves_out_other_folders(scoped):
     stream.close()
     connection.close()
     assert seen == [1, 3]
+
+
+# ---- a controller that lost its interface files ----------------------------------------------------------------
+
+def test_lost_interface_files_answer_500_and_never_drop_the_connection(lan_server, monkeypatch):
+    token = pair(lan_server)["token"]
+
+    def gone():
+        raise RuntimeError("Kvist web client assets are missing from this installation.")
+
+    monkeypatch.setattr(http_api, "client_root", gone)
+    for path in ("/", "/m/", "/assets/mobile/pixel.css"):
+        status, kind, body = call(lan_server, "GET", path, token=token)
+        assert status == 500, path
+        assert "missing" in json.loads(body)["error"]
+    # what needs no file keeps answering
+    assert call(lan_server, "GET", "/health")[0] == 200

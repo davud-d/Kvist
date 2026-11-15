@@ -11,7 +11,7 @@ import webbrowser
 from pathlib import Path
 
 from .controller import WebController
-from .http_api import ControllerHTTPServer, resolve_folder
+from .http_api import ControllerHTTPServer, client_root, resolve_folder
 from .instance import InstanceDescriptor, controller_home
 from .installers import installer_for
 from . import lan
@@ -146,8 +146,8 @@ def main(argv: list[str] | None = None) -> None:
         threading.Timer(0.15, lambda: webbrowser.open(url)).start()
     print(f"Kvist web is running at {url}")
     beacon = _start_beacon(port, russian) if args.lan else None
-    if args.auto_exit:
-        threading.Thread(target=_exit_when_idle, args=(server,), name="kvist-auto-exit", daemon=True).start()
+    if args.lan:
+        threading.Thread(target=_watch, args=(server, args.auto_exit), name="kvist-watch", daemon=True).start()
     try:
         server.serve_forever(poll_interval=0.4)
     except KeyboardInterrupt:
@@ -181,11 +181,26 @@ def _listen(args, controller, token, devices, pairing) -> ControllerHTTPServer:
     raise error
 
 
-def _exit_when_idle(server: ControllerHTTPServer) -> None:
-    """The cores that started this controller keep a connection to it; when the last one is gone it has no reason to stay."""
+def _interface_present() -> bool:
+    try:
+        return (client_root() / "mobile" / "index.html").is_file()
+    except RuntimeError:
+        return False
+
+
+def _watch(server: ControllerHTTPServer, auto_exit: bool) -> None:
+    """Stop when there is no reason to stay: the interface files are gone, or (with --auto-exit) no agent runs.
+
+    The cores that started this controller keep a connection to it; when the last one is gone it has no reason
+    to stay. A controller whose own files vanished (its program was replaced under it) serves nothing, and the
+    cores start a sound one in its place."""
     while True:
         time.sleep(5.0)
-        if server.presence.idle_seconds() > IDLE_EXIT_SECONDS:
+        if not _interface_present():
+            _LOG.error("the interface files are gone, stopping", extra={"component": "web"})
+            server.shutdown()
+            return
+        if auto_exit and server.presence.idle_seconds() > IDLE_EXIT_SECONDS:
             _LOG.info("no agent is running, stopping", extra={"component": "web"})
             server.shutdown()
             return

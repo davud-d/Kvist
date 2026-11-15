@@ -173,13 +173,13 @@ class ControllerHandler(BaseHTTPRequestHandler):
         if not self._external_authorized():
             return
         if parsed.path in {"/", "/index.html"}:
-            self._index()
+            self._serve_files(self._index)
             return
         if parsed.path in {"/m", "/m/"}:
-            self._index("mobile/index.html")
+            self._serve_files(self._index, "mobile/index.html")
             return
         if parsed.path.startswith("/assets/"):
-            self._asset(parsed.path.removeprefix("/assets/"))
+            self._serve_files(self._asset, parsed.path.removeprefix("/assets/"))
             return
         session = self._browser_session()
         if session is None:
@@ -540,6 +540,17 @@ class ControllerHandler(BaseHTTPRequestHandler):
             raise PermissionError("The phone works with this computer only.")
         if resolve_folder(field("workspace")) not in scope:
             raise PermissionError("This folder is not open to the phone: no agent runs in it.")
+
+    def _serve_files(self, action, *args) -> None:
+        """Interface files that cannot be read answer 500 and say so; an unhandled error would drop the connection with no word.
+
+        A controller that outlives the replacement of the program it runs from can lose its files, and a phone
+        that gets no answer at all can only say "cannot reach the computer"."""
+        try:
+            action(*args)
+        except (RuntimeError, FileNotFoundError, PermissionError) as error:
+            _LOG.error("cannot read the interface files: %s", error, extra={"component": "web"})
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "The interface files are missing on the computer. Restart Kvist there.")
 
     def _refuse_host(self) -> None:
         # The usual cause is a phone that reaches this computer by an address that is not a private one (a VPN
