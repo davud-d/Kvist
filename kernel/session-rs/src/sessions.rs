@@ -85,10 +85,10 @@ fn validate_document(data: &Object, session: &str) -> Result<()> {
 
 /// The resumable checkpoint inside a document, in the current or the original flat layout.
 fn checkpoint_of(data: &Object) -> Option<&Object> {
-    if let Some(checkpoint) = data.get("checkpoint").and_then(Value::as_object) {
-        if checkpoint.get("goal").is_some() {
-            return Some(checkpoint);
-        }
+    if let Some(checkpoint) = data.get("checkpoint").and_then(Value::as_object)
+        && checkpoint.get("goal").is_some()
+    {
+        return Some(checkpoint);
     }
     data.get("goal").map(|_| data)
 }
@@ -236,10 +236,10 @@ pub fn load_active(workspace: &Path, warnings: &mut Vec<String>) -> Result<Strin
         }
         Err(error) => return Err(error),
     };
-    if let Some(saved) = marker.get("session").and_then(Value::as_str).filter(|name| is_valid_name(name)) {
-        if saved == "default" || state_path(workspace, saved)?.is_file() {
-            return Ok(saved.to_string());
-        }
+    if let Some(saved) = marker.get("session").and_then(Value::as_str).filter(|name| is_valid_name(name))
+        && (saved == "default" || state_path(workspace, saved)?.is_file())
+    {
+        return Ok(saved.to_string());
     }
     Ok(newest_usable(workspace)?.unwrap_or_else(|| "default".to_string()))
 }

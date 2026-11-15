@@ -23,6 +23,7 @@ mod redaction;
 mod sessions;
 mod store;
 mod sys;
+mod usage;
 
 use std::io::Read;
 use std::process::ExitCode;

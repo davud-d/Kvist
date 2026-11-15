@@ -466,6 +466,42 @@ Semantics (identical to the terminal `/session` and `/new` commands):
   the conversation it is called on. A closed session is refused
   (`{"ok": false}`): emptying it would reopen it.
 
+**Child sessions (`service`).** A session that another agent opened for its own
+work carries a `service` object in its `status`/`list` item. It always has
+`kind` and `parent_session` (the session that started it) and, by kind:
+
+- `helper` — `agent_id`, `parent_run`;
+- `executor` (one executor of a best-of run) — `run_id`, `executor_id`, `style`, `branch`;
+- `council_member` (one member of a council) — `council_id`, `executor_id`, `angle`.
+
+Such a session is never the `active_session`, never the `resumable_session`,
+and `/resume` does not offer it: a frontend shows it under its `parent_session`
+instead of among the person's own conversations. Treat any item with a
+`service` object this way, whatever its `kind`. A child session is stored in the
+same `.kvist/sessions` folder as its parent, even when its agent works in
+another directory (an executor works in its own git worktree), so one `list`
+shows the whole family. The events in the journal of a child that has an
+`executor_id` carry that `executor_id` too.
+
+**Usage totals (`usage`, `usage_total`).** Additive fields of a `status`/`list`
+item (`protocol_version` stays 1):
+
+- `usage` — everything the session itself has spent over its whole life, summed
+  over every model call (steps, router, report, ...). Present only when the
+  session has recorded any. Fields: `input_tokens`, `output_tokens`, `calls`,
+  `cost_approx`, and, when known, `cache_read_tokens`, `cache_write_tokens`,
+  `cost_usd` (the cache counts and the cost are **left out** while no call
+  reported them or had a price; a missing field means "unknown", never `0`).
+- `usage_total` — the same totals for the session plus every session below it
+  through `service.parent_session`, at any depth (a loop in the links is
+  counted once). Present when there is anything to sum, so for a session with
+  no children it equals `usage`.
+
+Cost follows the `usage` event (§7): `cost_usd` is the sum of the known per-call
+costs, and `cost_approx` is `true` when any call was approximate or had no
+price, i.e. the cost is then a lower bound. A cache count adds up only the
+calls that reported it. `reset` clears the totals; a new session starts at zero.
+
 ### Closed sessions
 
 In an interactive frontend (the classic terminal, `--frontend stdio-multi`,

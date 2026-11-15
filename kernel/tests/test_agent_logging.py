@@ -420,3 +420,115 @@ def test_future_session_version_fails_with_actionable_error(agent_factory):
 
     with pytest.raises(RuntimeError, match="(?i)unsupported session version 999"):
         agent._load_session()
+
+
+def _agent_with_session_root(root: Path, work: Path, **extra):
+    from kernel.agent.agent import LocalAgent
+    from kernel.agent.agent_state import AgentConfig
+    from kernel.sandbox.executor import SafeExecutor
+    from kernel.tests.conftest import FakeLLMClient, NullPerfLogger, NullUI
+
+    agent = LocalAgent(
+        client=FakeLLMClient(),
+        executor=SafeExecutor(work),
+        config=AgentConfig(persist_logs=False, api_request_interval=0, retry_base_delay=0),
+        ui=NullUI(),
+        session_workspace=root,
+        **extra,
+    )
+    agent._perf_logger = NullPerfLogger()
+    return agent
+
+
+@pytest.fixture
+def split_roots(tmp_path):
+    """A session root and, apart from it, the worktree an executor works in."""
+    root, work = tmp_path / "root", tmp_path / "worktree"
+    root.mkdir()
+    work.mkdir()
+    return root, work
+
+
+def test_session_files_go_to_the_session_root_and_nothing_appears_in_the_executors_worktree(split_roots):
+    root, work = split_roots
+    agent = _agent_with_session_root(root, work)
+
+    agent.new_session("task")
+    agent._session_history = [{"goal": "implement", "role": "coder", "result": "ok"}]
+    agent.save_session()
+    agent._save_checkpoint("implement", 2)
+
+    assert agent.session_workspace == root.resolve() and agent.executor.workspace == work.resolve()
+    assert get_state_path(agent, "task") == root.resolve() / ".kvist" / "sessions" / "task.json"
+    assert json.loads((root / ".kvist" / "sessions" / "task.json").read_text(encoding="utf-8"))["checkpoint"]["step"] == 2
+    assert json.loads((root / ".kvist" / "active_session.json").read_text(encoding="utf-8"))["session"] == "task"
+    assert not (work / ".kvist" / "sessions").exists()
+    assert not (work / ".kvist" / "active_session.json").exists()
+
+
+def test_the_journal_is_written_in_the_session_root(split_roots):
+    from kernel.session.session_events import read_history
+
+    root, work = split_roots
+    agent = _agent_with_session_root(root, work)
+    agent.new_session("task")
+
+    agent._journal.begin_turn("implement")
+    agent._ui.print_error("the build failed")
+    agent._journal.end_turn()
+
+    journal = root / ".kvist" / "sessions" / "task.events.jsonl"
+    assert [entry["event"]["type"] for entry in read_history(journal, root)["events"]] == ["user", "error", "turn_end"]
+    assert not (work / ".kvist" / "sessions").exists()
+
+
+@pytest.mark.parametrize(
+    ("service", "stamped"),
+    [
+        ({"kind": "executor", "parent_session": "lead", "executor_id": "e2"}, "e2"),
+        ({"kind": "helper", "parent_session": "lead", "agent_id": "h1"}, None),
+        ({"kind": "executor", "parent_session": "lead", "executor_id": ""}, None),
+        (None, None),
+    ],
+)
+def test_an_executors_journal_events_carry_its_executor_id(split_roots, service, stamped):
+    from kernel.session.session_events import read_history
+
+    root, work = split_roots
+    agent = _agent_with_session_root(root, work, session="child", service_session=service)
+
+    agent._journal.begin_turn("implement")
+    agent._ui.print_error("the build failed")
+    agent._journal.end_turn()
+
+    journal = root / ".kvist" / "sessions" / "child.events.jsonl"
+    events = [entry["event"] for entry in read_history(journal, root)["events"]]
+    assert [event["type"] for event in events] == ["user", "error", "turn_end"]
+    assert [event.get("executor_id") for event in events] == [stamped] * 3
+
+
+def test_deleting_a_session_removes_its_attachments_from_the_session_root(split_roots):
+    import io
+
+    from PIL import Image
+
+    from kernel.context.attachments import AttachmentStore
+
+    root, work = split_roots
+    agent = _agent_with_session_root(root, work)
+    agent.new_session("old")
+    picture = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(picture, "PNG")
+    AttachmentStore(root).add_bytes(picture.getvalue(), "shot.png", origin={"kind": "user_message"}, session="old")
+    agent.new_session("current")
+
+    assert agent_logging.delete_session(agent, "old") is True
+
+    assert [attachment.deleted for attachment in AttachmentStore(root).list("old")] == [True]
+
+
+def test_without_a_session_root_the_workspace_is_the_root(agent_factory):
+    agent = agent_factory()
+
+    assert agent.session_workspace == agent.executor.workspace
+    assert get_state_path(agent).parent == agent.executor.workspace / ".kvist" / "sessions"

@@ -225,9 +225,9 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 
 | id | поток | цель | владеет файлами | зависит | статус |
 |---|---|---|---|---|---|
-| T1 | a2 | менеджер worktree | `kernel/bestof/__init__.py`, `kernel/bestof/worktrees.py`, `kernel/tests/test_bestof_worktrees.py` | — | work |
+| T1 | a2 | менеджер worktree | `kernel/bestof/__init__.py`, `kernel/bestof/worktrees.py`, `kernel/tests/test_bestof_worktrees.py`, `pyproject.toml` (одна строка) | — | merged `a490abf` (2 круга) |
 | T2 | a3 | события и протокол | `kernel/protocol/frontend_protocol.py`, `kernel/protocol/event_stream_ui.py`, `kernel/protocol/ui.py`, `kernel/session/session_events.py`, `docs/UI_API.md`, `docs/UI_API.ru.md`, тесты этих модулей | — | merged (2 круга) |
-| T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | work |
+| T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | merged (2 круга) |
 | T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | merged (2 круга) |
 | T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | todo |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | todo |
@@ -304,6 +304,8 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
 `_stamped`, `_compacted(raw, stamp)`, тест компактации со штампом (сабагент проверил, что тест падает
 без передачи штампа). Принято. **Слито: `4e8ec9c`** (полный прогон в `int`: первый — 1 падение
 известного флейка `test_app_screen`, повтор — 5155 passed / 51 skipped; ruff чисто).
+
+**T1 слит: `a490abf`** (в `int`: 5211 passed / 51 skipped, ruff чисто).
 
 ### T4 — glass
 **Круг 1** (коммит `23470b3`, 18 файлов, +3121/−33; cargo test 261 passed / 5 ignored — те же 5,

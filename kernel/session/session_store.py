@@ -49,6 +49,7 @@ from kernel.session.session_events import (
     read_history,
 )
 from kernel.session.session_titler import session_display_title
+from kernel.session.session_usage import UsageTotals, family_totals
 
 SESSION_OPS = (
     "status",
@@ -81,6 +82,7 @@ class SessionStore:
     def __init__(self, workspace: str | Path) -> None:
         resolved = Path(workspace).expanduser().resolve(strict=True)
         self.executor = _WorkspaceHandle(resolved)
+        self.session_workspace = resolved
         self._storage_warnings: list[str] = []
         self.current_session = load_active_session(self)
 
@@ -90,16 +92,22 @@ class SessionStore:
         *,
         with_histories: bool = True,
     ) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
+        # Every document is read before any item is built: a session's total needs its children's.
+        documents: dict[str, dict[str, Any]] = {}
+        journal_bytes: dict[str, int] = {}
         for name in sessions:
             try:
-                document = read_session_document(self, name)
+                documents[name] = read_session_document(self, name)
             except JsonStorageCorruptError:
                 self._storage_warnings.append(
                     f"Session {name!r} is damaged and was hidden from the session list."
                 )
                 continue
+            journal_bytes[name] = self._journal_bytes(name)
+        family = family_totals(documents)
 
+        items: list[dict[str, Any]] = []
+        for name, document in documents.items():
             session_history = document.get("session_history")
             if not isinstance(session_history, list):
                 session_history = []
@@ -119,14 +127,19 @@ class SessionStore:
                     else 0.0
                 ),
                 "has_checkpoint": isinstance(checkpoint, dict),
-                "journal_bytes": self._journal_bytes(name),
+                "journal_bytes": journal_bytes[name],
                 **end_session.notice_fields(document),
             }
-            # A helper's service session: readable and stoppable, never a
-            # conversation the person types into (frontends group it apart).
+            # A child session (helper, best-of executor, council member): readable and
+            # stoppable, never a conversation the person types into (frontends group it apart).
             service = document.get("service")
             if isinstance(service, dict):
                 item["service"] = service
+            own = UsageTotals.from_document(document.get("usage_totals"))
+            if own is not None:
+                item["usage"] = own.to_dict()
+            if name in family:
+                item["usage_total"] = family[name].to_dict()
             if with_histories:
                 item["session_history"] = session_history
                 item["chat_history"] = chat_history

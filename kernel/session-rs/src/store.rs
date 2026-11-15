@@ -16,6 +16,7 @@ use crate::journal::{self, DEFAULT_HISTORY_LIMIT, MAX_HISTORY_LIMIT};
 use crate::json::{Object, Value};
 use crate::pytext;
 use crate::sessions;
+use crate::usage::{self, Usage};
 
 pub const SESSION_OPS: [&str; 11] = [
     "status",
@@ -136,20 +137,32 @@ impl Store {
         })
     }
 
-    fn session_item(&mut self, name: &str, document: &Object, with_histories: bool) -> (f64, Value) {
+    fn session_item(
+        name: &str,
+        document: &Object,
+        journal_bytes: u64,
+        usage_total: Option<&Usage>,
+        with_histories: bool,
+    ) -> (f64, Value) {
         let updated_at = document.get("updated_at").and_then(Value::as_float).unwrap_or(0.0);
         let mut fields = vec![
             ("name".to_string(), Value::from(name)),
             ("title".to_string(), Value::String(display_title(document, name))),
             ("updated_at".to_string(), Value::float(updated_at)),
             ("has_checkpoint".to_string(), Value::Bool(document.get("checkpoint").and_then(Value::as_object).is_some())),
-            ("journal_bytes".to_string(), Value::from(self.journal_bytes(name))),
+            ("journal_bytes".to_string(), Value::from(journal_bytes)),
         ];
         fields.extend(notice_fields(document));
-        // A helper's service session: readable and stoppable, never a
-        // conversation the person types into (frontends group it apart).
+        // A child session (helper, best-of executor, council member): readable and
+        // stoppable, never a conversation the person types into (frontends group it apart).
         if let Some(service) = document.get("service").filter(|service| service.as_object().is_some()) {
             fields.push(("service".to_string(), service.clone()));
+        }
+        if let Some(own) = usage::own_totals(document) {
+            fields.push(("usage".to_string(), own.to_value()));
+        }
+        if let Some(total) = usage_total {
+            fields.push(("usage_total".to_string(), total.to_value()));
         }
         if with_histories {
             fields.push(("session_history".to_string(), list_or_empty(document, "session_history")));
@@ -160,10 +173,8 @@ impl Store {
 
     fn overview(&mut self, with_histories: bool) -> Result<Object> {
         let names = sessions::list(&self.workspace)?;
-        let mut items: Vec<(f64, Value)> = Vec::new();
-        // The newest resumable checkpoint. A launch opens its own session, so
-        // an interrupted run's checkpoint is usually not in the active one.
-        let mut resumable: Option<(f64, &str)> = None;
+        // Every document is read before any item is built: a session's total needs its children's.
+        let mut loaded: Vec<(&str, Object, u64)> = Vec::new();
         for name in &names {
             let document = match sessions::read_document(&self.workspace, name) {
                 Ok(document) => document,
@@ -174,8 +185,18 @@ impl Store {
                 }
                 Err(error) => return Err(error),
             };
-            let item = self.session_item(name, &document, with_histories);
-            if sessions::is_resumable(&document) && resumable.is_none_or(|(stamp, _)| item.0 > stamp) {
+            let journal_bytes = self.journal_bytes(name);
+            loaded.push((name, document, journal_bytes));
+        }
+        let documents: Vec<(&str, &Object)> = loaded.iter().map(|(name, document, _)| (*name, document)).collect();
+        let family = usage::family_totals(&documents);
+        let mut items: Vec<(f64, Value)> = Vec::new();
+        // The newest resumable checkpoint. A launch opens its own session, so
+        // an interrupted run's checkpoint is usually not in the active one.
+        let mut resumable: Option<(f64, &str)> = None;
+        for (name, document, journal_bytes) in &loaded {
+            let item = Store::session_item(name, document, *journal_bytes, family.get(name), with_histories);
+            if sessions::is_resumable(document) && resumable.is_none_or(|(stamp, _)| item.0 > stamp) {
                 resumable = Some((item.0, name));
             }
             items.push(item);

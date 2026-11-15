@@ -76,6 +76,28 @@ def test_a_helper_works_in_its_own_service_session_and_reports_back(agent_factor
     assert load_active_session(main) == marker_before == main.current_session
 
 
+def test_the_main_session_reports_the_total_of_its_helpers_calls(agent_factory):
+    from kernel.agent import agent_model
+    from kernel.session.session_store import run_session_op
+
+    main = _main(agent_factory, ScriptedClient(["The config lives in settings.py."]))
+    agent_model._emit_usage(main, model="m", input_tokens=1000, output_tokens=100, kind="step")
+    main._session_history = [{"goal": "look around", "role": "reader", "result": "ok"}]
+    main.save_session()
+
+    started = main.helpers.start("find where the config lives", role="reader", context="", attachments=[],
+                                 started_by="main")
+    main.helpers.wait(started["agent_id"], 10)
+
+    items = {item["name"]: item for item in run_session_op(main.executor.workspace, "list")["session_items"]}
+    helper_item, main_item = items[started["session"]], items[main.current_session]
+    assert helper_item["service"]["parent_session"] == main.current_session
+    assert helper_item["usage"]["calls"] >= 1
+    assert main_item["usage"]["calls"] == 1
+    assert main_item["usage_total"]["calls"] == 1 + helper_item["usage"]["calls"]
+    assert main_item["usage_total"]["input_tokens"] == 1000 + helper_item["usage"]["input_tokens"]
+
+
 @pytest.mark.parametrize(("verdict", "expected"), [("coder", "coder"), ("chat", "reader")])
 def test_without_a_role_the_router_picks_one_from_the_task_alone(agent_factory, monkeypatch, verdict, expected):
     main = _main(agent_factory, ScriptedClient(["done"]))

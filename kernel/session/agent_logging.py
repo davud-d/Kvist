@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 from kernel.session.durable_json import (
@@ -21,6 +22,7 @@ from kernel.session.durable_json import (
 from kernel.plan import end_session
 from kernel.sandbox.redaction import redact_value
 from kernel.session.session_events import JOURNAL_SUFFIX, delete_journal, journal_size
+from kernel.session.session_usage import UsageTotals
 
 _SESSION_VERSION = 1
 _SESSION_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z", re.ASCII)
@@ -40,12 +42,28 @@ def is_valid_session_name(session_name: object) -> bool:
     )
 
 
+def session_root(self) -> Path:
+    """The folder whose ``.kvist`` holds the sessions of this host.
+
+    An executor of a best-of run works in its own git worktree, but its session belongs
+    beside its parent's, where the parent can read it; everything else works in the workspace.
+    """
+    return getattr(self, "session_workspace", None) or self.executor.workspace
+
+
+def resolve_session_root(session_workspace: str | Path | None, workspace: Path) -> Path:
+    """The session root a host is built with; the workspace itself unless one is named."""
+    if session_workspace is None:
+        return workspace
+    return Path(session_workspace).resolve(strict=True)
+
+
 def get_state_path(self, session_name: str = "default"):
     if not is_valid_session_name(session_name):
         raise ValueError(f"Invalid session name: {session_name!r}")
     return validate_storage_path(
-        self.executor.workspace / ".kvist" / "sessions" / f"{session_name}.json",
-        self.executor.workspace,
+        session_root(self) / ".kvist" / "sessions" / f"{session_name}.json",
+        session_root(self),
     )
 
 
@@ -54,25 +72,25 @@ def get_journal_path(self, session_name: str):
     if not is_valid_session_name(session_name):
         raise ValueError(f"Invalid session name: {session_name!r}")
     return validate_storage_path(
-        self.executor.workspace
+        session_root(self)
         / ".kvist"
         / "sessions"
         / f"{session_name}{JOURNAL_SUFFIX}",
-        self.executor.workspace,
+        session_root(self),
     )
 
 
 def get_active_session_path(self):
     return validate_storage_path(
-        self.executor.workspace / ".kvist" / "active_session.json",
-        self.executor.workspace,
+        session_root(self) / ".kvist" / "active_session.json",
+        session_root(self),
     )
 
 
 def get_sessions_dir(self):
     return validate_storage_directory(
-        self.executor.workspace / ".kvist" / "sessions",
-        self.executor.workspace,
+        session_root(self) / ".kvist" / "sessions",
+        session_root(self),
     )
 
 
@@ -182,6 +200,9 @@ def _session_document(
         "title_manual": bool(getattr(self, "_title_manual", False)),
         **end_session.document_fields(self),
     }
+    totals = getattr(self, "_usage_totals", None)
+    if totals is not None and totals.calls:
+        document["usage_totals"] = totals.to_dict()
     service = getattr(self, "service_session", None)
     if isinstance(service, dict):
         document["service"] = service
@@ -309,12 +330,12 @@ def create_session(self, session: str, fields: dict[str, Any] | None = None) -> 
     created = create_json_object(
         get_state_path(self, session),
         {**_empty_session_document(session), **(fields or {})},
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     if created:
         # A journal left behind by a session of the same name must not be
         # replayed into this one.
-        delete_journal(get_journal_path(self, session), self.executor.workspace)
+        delete_journal(get_journal_path(self, session), session_root(self))
     return created
 
 
@@ -329,7 +350,7 @@ def save_active_session(self, name: str | None = None) -> None:
     _write_json_object(
         get_active_session_path(self),
         {"session": session, "updated_at": time.time()},
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
 
 
@@ -337,7 +358,7 @@ def load_active_session(self) -> str:
     try:
         marker = _read_json_object(
             get_active_session_path(self),
-            boundary=self.executor.workspace,
+            boundary=session_root(self),
         )
     except JsonStorageCorruptError:
         warnings = getattr(self, "_storage_warnings", None)
@@ -361,7 +382,7 @@ def load_active_session(self) -> str:
         (path, info)
         for path, info in list_json_object_entries(
             sessions_dir,
-            boundary=self.executor.workspace,
+            boundary=session_root(self),
         )
         if is_valid_session_name(path.stem)
     ]
@@ -376,7 +397,7 @@ def load_active_session(self) -> str:
         try:
             data = _read_json_object(
                 candidate,
-                boundary=self.executor.workspace,
+                boundary=session_root(self),
             )
             if data:
                 _validated_session_document(data, candidate.stem)
@@ -396,7 +417,7 @@ def list_sessions(self) -> list[str]:
     sessions: list[str] = []
     for path, info in list_json_object_entries(
         sessions_dir,
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     ):
         if (
             info.st_size > 0
@@ -410,8 +431,8 @@ def delete_session(self, name: str) -> bool:
     if name == getattr(self, "current_session", "default"):
         raise ValueError(f"Cannot delete the active session {name!r}")
     path = get_state_path(self, name)
-    removed = delete_json_object(path, boundary=self.executor.workspace)
-    delete_journal(get_journal_path(self, name), self.executor.workspace)
+    removed = delete_json_object(path, boundary=session_root(self))
+    delete_journal(get_journal_path(self, name), session_root(self))
     _delete_session_attachments(self, name)
     if removed:
         # Re-assert the marker so a stale marker pointing at the deleted
@@ -443,7 +464,7 @@ def begin_run(self, user_goal: str, run_id: str) -> None:
     _write_json_object(
         get_state_path(self, session),
         _session_document(self, checkpoint=checkpoint),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     save_active_session(self, session)
 
@@ -459,12 +480,12 @@ def reset_session(self) -> None:
         raise ValueError(f"Session {session!r} is closed and cannot be reset; start a new one.")
     # The journal goes first: a crash in between must leave the conversation
     # without its display log, never a reset session that still shows its old feed.
-    delete_journal(get_journal_path(self, session), self.executor.workspace)
+    delete_journal(get_journal_path(self, session), session_root(self))
     _delete_session_attachments(self, session)
     _write_json_object(
         get_state_path(self, session),
         _empty_session_document(session),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     save_active_session(self, session)
 
@@ -483,7 +504,7 @@ def mark_checkpoint_paused(self) -> None:
             checkpoint["paused_by_user"] = True
         return document
 
-    update_json_object(get_state_path(self, session), update, boundary=self.executor.workspace)
+    update_json_object(get_state_path(self, session), update, boundary=session_root(self))
 
 
 def _delete_session_attachments(self, session: str) -> None:
@@ -491,7 +512,7 @@ def _delete_session_attachments(self, session: str) -> None:
     from kernel.context.attachments import AttachmentError, AttachmentStore
 
     try:
-        AttachmentStore(self.executor.workspace).delete_session(session)
+        AttachmentStore(session_root(self)).delete_session(session)
     except AttachmentError:
         # A damaged index cannot say which files belong to the session; they
         # are left for the age-based cleanup rather than guessed at.
@@ -507,7 +528,7 @@ def peek_checkpoint(
     resolved = session or getattr(self, "current_session", "default")
     data = _read_json_object(
         get_state_path(self, resolved),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     if not data:
         return None
@@ -541,7 +562,7 @@ def save_session(self) -> None:
             self,
             checkpoint=_session_checkpoint(existing),
         ),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     save_active_session(self, session)
 
@@ -559,7 +580,7 @@ def store_session_title(self, session: str, title: str) -> None:
     """
     state_path = get_state_path(self, session)
     try:
-        if not _read_json_object(state_path, boundary=self.executor.workspace):
+        if not _read_json_object(state_path, boundary=session_root(self)):
             return  # Session was deleted (or never saved) before this landed.
     except JsonStorageError:
         return
@@ -575,7 +596,7 @@ def store_session_title(self, session: str, title: str) -> None:
         return existing
 
     try:
-        update_json_object(state_path, update, boundary=self.executor.workspace)
+        update_json_object(state_path, update, boundary=session_root(self))
     except JsonStorageError:
         return
     if session == getattr(self, "current_session", None) and not getattr(
@@ -600,7 +621,7 @@ def rename_session(self, title: str) -> None:
         lambda existing: _session_document(
             self, checkpoint=_session_checkpoint(existing)
         ),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
         empty_as_missing=True,
     )
     save_active_session(self, session)
@@ -645,7 +666,7 @@ def read_session_document(
     state_path = get_state_path(self, resolved_session)
     data = _read_json_object(
         state_path,
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     if not data:
         return {}
@@ -656,7 +677,7 @@ def read_session_document(
         _write_json_object(
             state_path,
             sanitized,
-            boundary=self.executor.workspace,
+            boundary=session_root(self),
         )
     return sanitized
 
@@ -673,6 +694,10 @@ def restore_session_document(self, data: dict[str, Any]) -> bool:
     self._session_title = title if isinstance(title, str) and title.strip() else None
     self._title_manual = bool(data.get("title_manual")) if isinstance(data, dict) else False
     end_session.restore(self, data if isinstance(data, dict) else {})
+    # Before the empty-document exit too: a new session counts from zero.
+    self._usage_totals = (
+        UsageTotals.from_document(data.get("usage_totals")) if isinstance(data, dict) else None
+    ) or UsageTotals()
     if not data:
         return False
 
@@ -843,7 +868,7 @@ def save_checkpoint(
     _write_json_object(
         state_path,
         _session_document(self, checkpoint=checkpoint),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     save_active_session(self, session)
 
@@ -852,7 +877,7 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     session = getattr(self, "current_session", "default")
     session_data = _read_json_object(
         get_state_path(self, session),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     if not session_data:
         return None
@@ -958,6 +983,6 @@ def clear_checkpoint(self) -> None:
     _write_json_object(
         state_path,
         _session_document(self, checkpoint=None),
-        boundary=self.executor.workspace,
+        boundary=session_root(self),
     )
     save_active_session(self, session)

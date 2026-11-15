@@ -254,11 +254,23 @@ class LocalAgent:
         perf_logger: PerfLogger | None = None,
         session: str | None = None,
         service_session: dict[str, Any] | None = None,
+        session_workspace: str | os.PathLike[str] | None = None,
     ) -> None:
         """``session``/``service_session`` make a helper: it works in that
-        service session and never reads or writes the active-session marker."""
+        service session and never reads or writes the active-session marker.
+
+        ``session_workspace`` is the folder whose ``.kvist`` holds this agent's sessions
+        (document, journal, attachments, active marker); it defaults to the executor's
+        workspace. A best-of executor works in its own worktree and keeps its session
+        beside its parent's."""
+        from kernel.session.agent_logging import resolve_session_root
+        from kernel.session.session_usage import UsageTotals
+
         self.client = client
         self.executor = executor
+        self.session_workspace = resolve_session_root(session_workspace, executor.workspace)
+        # Counts every model call of the session; restore_session_document replaces it per session.
+        self._usage_totals = UsageTotals()
         self.config = config or AgentConfig()
         from kernel.vision.vision import describe_images
         self.executor.image_reader = lambda images: describe_images(self, images, self._state.user_goal)
@@ -285,10 +297,13 @@ class LocalAgent:
         self._perf_logger = perf_logger or PerfLogger(executor.workspace)
         # Everything the agent shows is also recorded to the session's event
         # journal, so a frontend can redraw the session later.
+        executor_id = (service_session or {}).get("executor_id")
         self._journal = SessionJournal(
-            executor.workspace,
+            self.session_workspace,
             lambda: get_journal_path(self, self.current_session),
             lambda message: self._ui.debug_print(message),
+            # An executor's events say whose they are once they are replayed in the parent's feed.
+            stamp={"executor_id": executor_id} if isinstance(executor_id, str) and executor_id else None,
         )
         self._ui = JournalingUI(ui, self._journal)
         self._tray = (

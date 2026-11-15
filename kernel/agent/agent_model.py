@@ -1247,10 +1247,6 @@ def _emit_usage(
     normalized_input = max(0, int(input_tokens))
     if kind in _CONTEXT_USAGE_KINDS:
         end_call(self, normalized_input, max(0, int(output_tokens)))
-    callback = getattr(getattr(self, "_ui", None), "print_usage", None)
-    if callback is None:
-        return
-    context = context_usage(self)
     cache = {
         key: max(0, int(value))
         for key, value in (("cache_read_tokens", cache_read_tokens), ("cache_write_tokens", cache_write_tokens))
@@ -1261,6 +1257,18 @@ def _emit_usage(
         max(0, int(output_tokens)), cache.get("cache_read_tokens"), cache.get("cache_write_tokens"),
         usage_source == "estimated",
     )
+    # The session's running totals count every call, with or without a UI that listens.
+    totals = getattr(self, "_usage_totals", None)
+    if totals is not None:
+        totals.add_call(
+            input_tokens=normalized_input, output_tokens=max(0, int(output_tokens)),
+            cache_read_tokens=cache.get("cache_read_tokens"), cache_write_tokens=cache.get("cache_write_tokens"),
+            cost_usd=cost, cost_approx=cost_approx,
+        )
+    callback = getattr(getattr(self, "_ui", None), "print_usage", None)
+    if callback is None:
+        return
+    context = context_usage(self)
     callback(
         {
             **cache,

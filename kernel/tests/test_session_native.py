@@ -380,6 +380,148 @@ def test_a_marker_that_names_no_session_falls_back_identically(tmp_path, binary,
     assert answers[0]["active_session"] == "titled"
 
 
+# --- Child sessions and the totals of a whole session --------------------------------------------
+
+
+def _child(parent: str, kind: str = "executor") -> dict[str, Any]:
+    return {"kind": kind, "parent_session": parent}
+
+
+# Costs picked so that adding them in another order gives another double.
+_COSTS = {"lead": 0.1, "council-a": 0.2, "exec-1": 0.3, "exec-2": 0.7, "exec-2-sub": 1e-7}
+
+
+def seed_family(workspace: Path) -> None:
+    """A lead session with executors, a council member, a grandchild, strays and damaged totals."""
+    sessions = workspace / ".kvist" / "sessions"
+    sessions.mkdir(parents=True)
+    documents = [
+        _document("lead", 10.0, usage_totals={
+            "input_tokens": 1000, "output_tokens": 100, "cache_read_tokens": 400, "calls": 5,
+            "cost_usd": _COSTS["lead"], "cost_approx": False,
+        }),
+        _document("council-a", 20.0, service=_child("lead", "council_member") | {"council_id": "c1", "angle": "risks"},
+                  checkpoint={"goal": "judge", "step": 1}, usage_totals={
+                      "input_tokens": 50, "output_tokens": 5, "cache_write_tokens": 9, "calls": 1, "cost_usd": _COSTS["council-a"],
+                      "cost_approx": True,
+                  }),
+        _document("exec-1", 30.0, service=_child("lead") | {"run_id": "r1", "executor_id": "e1", "style": "careful", "branch": "bo/1"},
+                  checkpoint={"goal": "implement", "step": 4}, usage_totals={
+                      "input_tokens": 200, "output_tokens": 20, "cache_read_tokens": 0, "cache_write_tokens": 0, "calls": 2,
+                      "cost_usd": _COSTS["exec-1"], "cost_approx": False,
+                  }),
+        _document("exec-2", 40.0, service=_child("lead"), usage_totals={"input_tokens": 7, "calls": 1, "cost_usd": _COSTS["exec-2"]}),
+        _document("exec-2-sub", 50.0, service=_child("exec-2", "helper"), usage_totals={
+            "input_tokens": 3, "output_tokens": 1, "calls": 1, "cost_usd": _COSTS["exec-2-sub"], "cost_approx": True,
+        }),
+        _document("unpriced", 60.0, service=_child("lead"), usage_totals={"input_tokens": 11, "calls": 2, "cost_approx": True}),
+        _document("orphan", 70.0, service=_child("nobody"), usage_totals={"input_tokens": 13, "calls": 1}),
+        _document("loop-a", 71.0, service=_child("loop-b"), usage_totals={"input_tokens": 1, "calls": 1, "cost_usd": 0.5}),
+        _document("loop-b", 72.0, service=_child("loop-a"), usage_totals={"input_tokens": 2, "calls": 1, "cost_usd": 0.25}),
+        _document("loop-self", 73.0, service=_child("loop-self"), usage_totals={"input_tokens": 4, "calls": 1}),
+        _document("damaged-totals", 80.0, usage_totals={
+            "input_tokens": -1, "output_tokens": 2.5, "cache_read_tokens": True, "cache_write_tokens": "7", "calls": None,
+            "cost_usd": "free", "cost_approx": 1,
+        }),
+        _document("not-an-object", 81.0, usage_totals=[1, 2]),
+        _document("huge-cost", 82.0, usage_totals={"input_tokens": 1, "cost_usd": 1e400}),
+        _document("quiet", 90.0),
+    ]
+    # The fallback that picks the active session goes by file time: every child is newer than
+    # every conversation, and "quiet" is the newest conversation.
+    for order, document in enumerate(documents):
+        path = sessions / f"{document['session']}.json"
+        _write_json(path, document)
+        stamp = 1_600_000_000 + order + (1000 if "service" in document else 0)
+        os.utime(path, (stamp, stamp))
+
+
+def test_child_sessions_and_session_totals_are_reported_identically(tmp_path, binary):
+    def script(workspace: Path, op: SessionOp) -> list:
+        return [op(workspace, "status"), op(workspace, "list")]
+
+    answers = run_both(tmp_path, binary, script, seed_family)
+
+    for payload in answers:
+        items = {item["name"]: item for item in payload["session_items"]}
+        assert items["council-a"]["service"]["kind"] == "council_member"
+        assert items["exec-1"]["service"]["branch"] == "bo/1"
+        # lead, then its descendants depth first with children in name order.
+        expected_cost = ((((_COSTS["lead"] + _COSTS["council-a"]) + _COSTS["exec-1"]) + _COSTS["exec-2"]) + _COSTS["exec-2-sub"])
+        assert items["lead"]["usage_total"]["cost_usd"] == expected_cost
+        assert items["lead"]["usage_total"]["input_tokens"] == 1000 + 50 + 200 + 7 + 3 + 11
+        assert items["lead"]["usage_total"]["cache_read_tokens"] == 400
+        assert items["lead"]["usage_total"]["cache_write_tokens"] == 9
+        assert items["lead"]["usage_total"]["cost_approx"] is True
+        assert items["exec-2"]["usage_total"]["input_tokens"] == 10
+        looped = {"input_tokens": 3, "output_tokens": 0, "calls": 2, "cost_usd": 0.75, "cost_approx": False}
+        assert items["loop-a"]["usage_total"] == items["loop-b"]["usage_total"] == looped
+        assert items["loop-self"]["usage_total"]["input_tokens"] == 4
+        assert items["damaged-totals"]["usage"] == {"input_tokens": 0, "output_tokens": 0, "calls": 0, "cost_approx": False}
+        assert "usage" not in items["not-an-object"] and "usage_total" not in items["not-an-object"]
+        assert "cost_usd" not in items["huge-cost"]["usage"]
+        assert "usage" not in items["quiet"] and "usage_total" not in items["quiet"]
+        assert items["orphan"]["usage_total"]["input_tokens"] == 13
+
+
+def test_totals_are_written_with_the_same_keys_in_the_same_order_and_the_same_number_text(tmp_path, binary):
+    """``run_both`` compares parsed answers with sorted keys; here the text itself must agree."""
+    texts = []
+    for label, op in (("python", python_op), ("native", native_op(binary))):
+        workspace = tmp_path / label
+        workspace.mkdir()
+        seed_family(workspace)
+        items = op(workspace, "list")["session_items"]
+        texts.append({
+            item["name"]: json.dumps({key: item[key] for key in ("usage", "usage_total") if key in item})
+            for item in items
+        })
+
+    assert texts[0] == texts[1]
+    lead = json.loads(texts[0]["lead"])
+    assert list(lead["usage"]) == ["input_tokens", "output_tokens", "cache_read_tokens", "calls", "cost_usd", "cost_approx"]
+    assert list(lead["usage_total"]) == [
+        "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "calls", "cost_usd", "cost_approx",
+    ]
+    assert json.dumps(lead["usage_total"]["cost_usd"]) == repr(0.1 + 0.2 + 0.3 + 0.7 + 1e-7)
+
+
+def test_children_are_never_active_nor_resumable_in_either_implementation(tmp_path, binary):
+    def script(workspace: Path, op: SessionOp) -> list:
+        return [op(workspace, "list")]
+
+    answers = run_both(tmp_path, binary, script, seed_family)
+
+    # council-a and exec-1 hold checkpoints and are newer than "quiet", yet nobody may resume them.
+    assert answers[0]["active_session"] == "quiet"
+    assert answers[0]["resumable_session"] is None
+
+
+def test_reset_drops_the_totals_in_both_implementations(tmp_path, binary):
+    def script(workspace: Path, op: SessionOp) -> list:
+        return [op(workspace, "switch", "lead"), op(workspace, "reset"), op(workspace, "list")]
+
+    answers = run_both(tmp_path, binary, script, seed_family)
+
+    lead = next(item for item in answers[-1]["session_items"] if item["name"] == "lead")
+    assert "usage" not in lead
+    # The children keep their own totals, so the parent still reports what they spent.
+    assert lead["usage_total"]["input_tokens"] == 50 + 200 + 7 + 3 + 11
+
+
+def test_large_counts_and_long_costs_are_reported_identically(tmp_path, binary):
+    def seed(workspace: Path) -> None:
+        sessions = workspace / ".kvist" / "sessions"
+        sessions.mkdir(parents=True)
+        _write_json(sessions / "big.json", _document("big", 1.0, usage_totals={
+            "input_tokens": 10**12, "output_tokens": 2, "calls": 10**6, "cost_usd": 12345.678901234567,
+        }))
+
+    answers = run_both(tmp_path, binary, lambda workspace, op: [op(workspace, "list")], seed)
+
+    assert answers[0]["session_items"][0]["usage"]["cost_usd"] == 12345.678901234567
+
+
 def test_the_input_history_is_kept_identically(tmp_path, binary):
     def script(workspace: Path, op: SessionOp) -> list:
         answers = [op(workspace, "input-history")]
