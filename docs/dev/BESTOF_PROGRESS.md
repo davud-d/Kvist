@@ -236,7 +236,7 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | todo |
 | T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
-| T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | todo |
+| T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | work |
 | T13 | e3 | остальные фронтенды не ломаются, текстовый итог | по итогам аудита | T7 T8 | todo |
 | T14 | — | живая проверка (сам) | — | T5 T7 T8 T10 | todo |
 
@@ -407,8 +407,9 @@ cargo test 25, clippy чисто. Принято.
 
 ## 8. Следующий шаг
 
-Волна 1 разослана (T1–T4 в работе, sonnet, по worktree). Бриф T5 готов. Дальше: ревью отчётов
-T1–T4 по мере прихода, слияние по одному; после T3 — старт T5; после T1–T3 — брифы T6, T7.
+Слиты T2 (`4e8ec9c`) и T4 (`7b2a63c`). T1 и T3 приняты на ревью и сливаются по одному (полный
+прогон в `int` перед каждым коммитом). T12 (pixel) в работе с `7b2a63c`. Брифы T5, T6, T7 готовы в
+`.claude/bestof-briefs/`; после слияния T1 и T3 — worktree от свежего experimental и старт T5, T6, T7.
 
 ## 9. Живые прогоны (лимит 10)
 

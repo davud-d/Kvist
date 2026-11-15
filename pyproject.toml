@@ -47,6 +47,7 @@ kvist-web-bridge = "kvist_web.bridge_cli:main"
 packages = [
     "kernel",
     "kernel.agent",
+    "kernel.bestof",
     "kernel.plan",
     "kernel.protocol",
     "kernel.sandbox",
