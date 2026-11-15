@@ -7,6 +7,7 @@ import { detectLanguage, setLanguage } from "./i18n.js";
 import { setMathRenderer } from "./markdown.js";
 import { applyPrefs, windowState } from "./theme.js";
 import { loadPrefs, loadTabs, setMode, setPref, store, subscribe } from "./store.js";
+import { mountBestof } from "./views/bestof.js";
 import { mountChat } from "./views/chat.js";
 import { mountDock } from "./views/dock.js";
 import { mountInspector } from "./views/inspector.js";
@@ -60,6 +61,7 @@ async function boot() {
   mountTitlebar($("#titlebar"));
   mountDock($("#dock"));
   mountChat(pane);
+  mountBestof(pane);
   mountInspector($("#inspector"));
   mountOverview($("#overview"), pane);
   wireGlobalKeys();

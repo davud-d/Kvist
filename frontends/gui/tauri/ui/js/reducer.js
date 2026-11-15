@@ -5,6 +5,7 @@
 // The agent is mutated in place. `agent.rev` rises on every change and each
 // feed item has its own `rev`, so a view redraws only what moved.
 
+import { clearScreens, createBestof, foldRun, noteRequest, noteUsage } from "./bestof.js";
 import { parseImageGoal } from "./views/attachments.js";
 
 const MAX_ACTIVITY = 30;
@@ -48,6 +49,8 @@ export function createAgent(id, workspace, session = "") {
     attention: false,
     needsHistory: false,
     command: null,
+    // Best-of run, council, tool mode and money: see bestof.js
+    bestof: createBestof(),
     rev: 0,
   };
 }
@@ -84,6 +87,7 @@ export function beginTurn(agent) {
   agent.turn = { startedAt: now, waitingSince: now, outputAtStart: agent.spend.output };
   agent.state = "running";
   agent.status = { text: "", step: 0 };
+  clearScreens(agent);
   agent.rev++;
 }
 
@@ -92,6 +96,7 @@ export function clearFeed(agent) {
   agent.streams.clear();
   agent.calls.clear();
   agent.changed.clear();
+  agent.bestof = createBestof();
   agent.rev++;
 }
 
@@ -386,6 +391,7 @@ export function reduce(agent, ev, { replay = false } = {}) {
         agent.spend.input += ev.input_tokens ?? 0;
         agent.spend.output += ev.output_tokens ?? 0;
       }
+      noteUsage(agent, ev);
       if (ev.context_limit) agent.context = { tokens: ev.context_tokens ?? 0, limit: ev.context_limit };
       return;
     case "context":
@@ -395,6 +401,7 @@ export function reduce(agent, ev, { replay = false } = {}) {
       // The core sends a dialog again to a frontend that takes over; it is the same dialog.
       agent.dialogs = agent.dialogs.filter((d) => d.request_id !== ev.request_id);
       agent.dialogs.push(ev);
+      noteRequest(agent, ev);
       agent.attention = true;
       return;
     case "input_closed":
@@ -444,8 +451,27 @@ export function reduce(agent, ev, { replay = false } = {}) {
       if (ev.state === "failed") addNote(agent, `${ev.name || "picture"}: ${ev.error}`, "error");
       return;
     case "command_result":
+      // A command that is a turn ends with its `turn_end`; one that failed before its turn began sends none.
+      if (agent.bestof.turnCommand === ev.name) {
+        agent.bestof.turnCommand = null;
+        if (agent.state === "running") reduce(agent, { type: "turn_end" }, { replay });
+      }
       agent.command = { name: ev.name, ok: ev.ok, message: ev.message, effects: ev.effects ?? {} };
       applyEffects(agent, ev.name, ev.effects);
+      return;
+    case "tool_mode":
+    case "bestof_started":
+    case "bestof_status":
+    case "executor_activity":
+    case "bestof_eliminated":
+    case "bestof_verdict":
+    case "bestof_diff":
+    case "bestof_finished":
+    case "council_started":
+    case "council_card":
+    case "council_objection":
+    case "council_verdict":
+      if (!foldRun(agent, ev)) agent.rev--;
       return;
     case "gone":
       agent.state = "gone";
@@ -463,6 +489,8 @@ export function replayHistory(agent, events) {
   for (const entry of events) reduce(agent, entry.event ?? entry, { replay: true });
   agent.streams.clear();
   agent.calls.clear();
+  // A run of the past has nothing left to watch or decide.
+  clearScreens(agent);
 }
 
 /** Short words for the dock: what this agent is doing right now. */

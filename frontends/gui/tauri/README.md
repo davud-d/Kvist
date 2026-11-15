@@ -17,6 +17,27 @@ other one (`docs/UI_API.md`), written in Rust (Tauri 2) with a plain-JavaScript 
 - **Settings** (gear, bottom left) do what the slash commands do (role, effort, style, models, sessions,
   changes, revert, ...), plus the look: five themes, size, animations on or off, window transparency.
 - Plan offers, command approvals and overwrite diffs appear as dialogs, as in the other interfaces.
+- **best-of and council** (`/best-of N <task>`, `/council <question>`), the same screens as in Classic, from the same core events
+  (`docs/UI_API.md` §7). Both commands are whole turns: your line stands in the feed, Stop works, and the input is free again
+  when the result comes (also when the command fails before its turn begins).
+  - **The arena** takes the conversation's place while a run goes on: a card per executor with its style, state, step, tests,
+    size of changes (`+added −removed · files`), money or tokens, its branch and latest call. An executor that is out is
+    muted, with its reason. The cross (or Esc inside the screen) gives the conversation back.
+  - **The executor's log**: a click on a card reads that executor's journal (`--session-op history`, the newest 500 events)
+    and draws it with the conversation's own item views, read only; "Back" returns to the arena. It is replayed into a state
+    of its own, never into the conversation.
+  - **The decision screen** is the core's question with `purpose: "bestof_decision"` for the run on screen: the verdict table,
+    the winner and why, and the buttons the core offered: Accept (`accept`), See the diff (`diff:<id>` of the chosen row),
+    Pick another (`pick:<id>`; on the winner's row `other`), Discard all (`discard`). Closing it answers `null`. After a diff
+    the core asks again and the patch is shown. With no verdict, or another run's, it is the ordinary list.
+  - **The council**: four cards (simplicity, security, development speed, maintenance cost) filled as members answer, their
+    risks under each card, and after the verdict the chosen card is lit with the reason and the dissent.
+  - **The layer's bar** (only while the arena or council is up; an ordinary conversation, header included, shows nothing new): how calls travel (`tool_mode`: native or text tools) and the money: the sum of `cost_usd` of the main
+    stream and of the executors' latest snapshots, "≈" when a price is approximate or some call has none; with no price at
+    all, "total N tok", plus "· M uncached" only when the calls said what the cache served ("≈M" when not all did).
+  - The logic is in `ui/js/bestof.js` (state, money, decision answers) and `bestof-log.js`; the views are
+    `ui/js/views/{arena,execlog,decision,council,bestof}.js`, the words (EN/RU) `bestof-words.js`, tests `tests/bestof.test.mjs`.
+    The stand-in core (`mock-core.js`) plays both commands, so the screens can be tried in a plain browser.
 
 ## Window transparency
 

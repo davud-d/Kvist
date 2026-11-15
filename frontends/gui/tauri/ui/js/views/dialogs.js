@@ -2,8 +2,10 @@
 // approvals of commands and overwrites, menus, lines of text, secrets.
 
 import { answer } from "../actions.js";
+import { decisionOf } from "../bestof.js";
 import { fill, h } from "../dom.js";
 import { localized, t } from "../i18n.js";
+import { decisionDialog } from "./decision.js";
 
 function countdown(request) {
   if (!request.timeout_seconds) return null;
@@ -106,6 +108,8 @@ function textDialog(agent, request) {
 }
 
 function build(agent, request) {
+  const decision = decisionOf(agent, request);
+  if (decision) return decisionDialog(agent, request, decision);
   if (request.subject) return approval(agent, request);
   if (request.kind === "confirm") return confirmDialog(agent, request);
   if (request.kind === "choice") return choiceDialog(agent, request);

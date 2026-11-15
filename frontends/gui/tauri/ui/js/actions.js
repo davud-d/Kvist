@@ -1,6 +1,7 @@
 // What the person can make an agent do. Views call these; they talk to the
 // core through the bridge and feed what comes back into the store.
 
+import { isTurnCommand } from "./bestof.js";
 import * as bridge from "./bridge.js";
 import { localized, t } from "./i18n.js";
 import { addNote, addUser, beginTurn, clearFeed, createAgent, replayHistory } from "./reducer.js";
@@ -163,6 +164,13 @@ export async function runCommand(agent, name, args = []) {
   if (agent.state === "running") {
     toast(t("available between turns"), "error");
     return;
+  }
+  if (isTurnCommand(name)) {
+    // /best-of and /council are whole turns: the person's line stands in the feed and Stop works until the result comes.
+    addUser(agent, [`/${name}`, ...args].join(" "));
+    beginTurn(agent);
+    agent.bestof.turnCommand = name;
+    announce({ kind: "agent", id: agent.id });
   }
   bridge.sendToAgent(agent.id, { type: "command", name, args }).catch((error) => fail(agent, error));
 }

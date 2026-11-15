@@ -15,6 +15,8 @@ const MANIFEST = {
     { name: "models", description: "Choose the models" },
     { name: "session", description: "Switch session" },
     { name: "changes", description: "Show what the agent changed" },
+    { name: "best-of", description: "Several agents try one task", via: "core" },
+    { name: "council", description: "Four angles on one question", via: "core" },
   ],
   api_settings: [],
 };
@@ -138,10 +140,82 @@ export function createMock(emit) {
     }));
   }
 
+  // `/best-of N <task>`: a whole turn that ends in the person's decision (docs/UI_API.md §7), then `command_result`.
+  function bestOf(agent, args) {
+    const run = "run-1";
+    const exec = (id, style) => ({ executor_id: id, style, branch: `kvist/bestof/${run}/${id}`, session: `bo-${id}` });
+    const snap = (id, over) => ({ type: "bestof_status", run_id: run, executor_id: id, style: "", branch: "", state: "running", step: 1, tests: { state: "unknown", summary: "" }, diff: { files: 0, added: 0, removed: 0 }, usage: { input_tokens: 4000, output_tokens: 300, cost_approx: false, cost_usd: 0.012 }, ...over });
+    const tests = (state, summary) => ({ state, summary });
+    const rows = [
+      { executor_id: "e1", style: "senior-dev", outcome: "finalist", tests: tests("passed", "12 passed"), diff: { files: 3, added: 41, removed: 6 }, note: "works, but touches more files" },
+      { executor_id: "e2", style: "minimalist", outcome: "winner", tests: tests("passed", "12 passed"), diff: { files: 1, added: 9, removed: 2 }, note: "smallest change" },
+      { executor_id: "e3", style: "friendly-dev", outcome: "eliminated", tests: tests("failed", "3 failed"), diff: { files: 2, added: 17, removed: 1 }, note: "tests keep failing" },
+    ];
+    const decide = (id) => {
+      pending.set(id, (answer) => {
+        const value = answer.value;
+        const finish = (outcome, message, extra = {}) => script(agent, [[60, { type: "bestof_finished", run_id: run, outcome, message, ...extra }], [30, { type: "turn_end" }], [30, { type: "command_result", name: "best-of", ok: true, message: "Done / Готово", effects: {} }]]);
+        if (typeof value === "string" && value.startsWith("diff:")) {
+          const next = `req-${Math.random().toString(36).slice(2, 8)}`;
+          decide(next);
+          script(agent, [
+            [60, { type: "bestof_diff", run_id: run, executor_id: value.slice(5), patch: "diff --git a/src/parser.py b/src/parser.py\n--- a/src/parser.py\n+++ b/src/parser.py\n@@ -40,3 +40,5 @@\n def parse(line):\n-    return line.split(',')\n+    cells = line.strip().split(',')\n+    return [c.strip() for c in cells]\n", files: ["src/parser.py"] }],
+            [30, decisionRequest(next)],
+          ]);
+        } else if (value === "accept") finish("accepted", "Took the result of minimalist", { executor_id: "e2", commit: "9f3c2ab" });
+        else if (value === "discard") finish("discarded", "Nothing was taken");
+        else if (value === null) finish("cancelled", "No decision for now");
+        else finish("accepted", `Took ${value}`, { executor_id: String(value).replace("pick:", "") });
+      });
+    };
+    const decisionRequest = (id) => ({ type: "input_request", request_id: id, kind: "choice", title: "Which result do we take?", body: "", options: ["accept", "diff", "other", "discard"].map((value) => ({ value, label: value })), current_value: "", help_text: "", purpose: "bestof_decision", run_id: run });
+    const first = `req-${Math.random().toString(36).slice(2, 8)}`;
+    decide(first);
+    script(agent, [
+      [40, { type: "live_start" }],
+      [60, { type: "tool_mode", mode: "native", reason: "probe_ok" }],
+      [40, { type: "bestof_started", run_id: run, task: args.slice(1).join(" ") || "fix the parser", count: 3, base: "1a2b3c4", executors: [exec("e1", "senior-dev"), exec("e2", "minimalist"), exec("e3", "friendly-dev")] }],
+      [500, snap("e1", { step: 2 })],
+      [0, { type: "executor_activity", run_id: run, executor_id: "e1", phase: "step", call_id: "x1", action_type: "read_file", label: "reads src/parser.py", summary: "", output: "" }],
+      [400, { type: "executor_activity", run_id: run, executor_id: "e1", phase: "result", call_id: "x1", action_type: "read_file", label: "reads src/parser.py", ok: true, summary: "84 lines", output: "" }],
+      [300, snap("e2", { step: 3, diff: { files: 1, added: 9, removed: 2 } })],
+      [0, { type: "executor_activity", run_id: run, executor_id: "e2", phase: "step", call_id: "y1", action_type: "run_shell", label: "runs pytest -q", summary: "", output: "" }],
+      [600, snap("e3", { state: "failed", step: 6, tests: tests("failed", "3 failed"), diff: { files: 2, added: 17, removed: 1 } })],
+      [0, { type: "bestof_eliminated", run_id: run, executor_id: "e3", reason: "tests keep failing" }],
+      [500, snap("e1", { state: "finished", step: 9, tests: tests("passed", "12 passed"), diff: { files: 3, added: 41, removed: 6 } })],
+      [200, snap("e2", { state: "finished", step: 7, tests: tests("passed", "12 passed"), diff: { files: 1, added: 9, removed: 2 } })],
+      [200, { type: "bestof_verdict", run_id: run, rows, winner: "e2", reason: "e2 passes all the tests with the smallest change" }],
+      [30, { type: "bestof_finished", run_id: run, outcome: "pending", message: "Waiting for your decision" }],
+      [30, decisionRequest(first)],
+    ]);
+  }
+
+  // `/council <question>`: four members, their cards, objections and a verdict; then `turn_end` and `command_result`.
+  function council(agent, args) {
+    const id = "council-1";
+    const angles = ["simplicity", "security", "speed", "maintenance"];
+    const card = (angle, decision, argument) => ({ type: "council_card", council_id: id, executor_id: angle, angle, decision, argument });
+    script(agent, [
+      [40, { type: "live_start" }],
+      [60, { type: "council_started", council_id: id, question: args.join(" ") || "Which queue should the worker use?", members: angles.map((angle) => ({ executor_id: angle, angle, session: `co-${angle}` })) }],
+      [600, card("simplicity", "A plain list", "It is enough for the load we have.")],
+      [500, card("security", "A bounded queue", "An unbounded list grows without limit under a flood.")],
+      [400, card("speed", "A plain list, bounded later", "Ship the list now and add a limit when it hurts.")],
+      [500, card("maintenance", "A bounded queue from the standard library", "No code of our own to keep alive.")],
+      [300, { type: "council_objection", council_id: id, executor_id: "security", angle: "security", risks: [{ target: "simplicity", risk: "grows without limit" }, { target: "speed", risk: "the limit is added after the first outage" }] }],
+      [300, { type: "council_objection", council_id: id, executor_id: "simplicity", angle: "simplicity", risks: [{ target: "maintenance", risk: "a new dependency for a small need" }] }],
+      [500, { type: "council_verdict", council_id: id, chosen: "maintenance", decision: "A bounded queue from the standard library", reason: "It is safe, small and nothing of our own to maintain.", dissent: [{ executor_id: "speed", angle: "speed", why: "a limit now costs time we do not have" }] }],
+      [40, { type: "turn_end" }],
+      [30, { type: "command_result", name: "council", ok: true, message: "Done / Готово", effects: {} }],
+    ]);
+  }
+
   function command(agent, message) {
     const name = message.name;
     const result = (ok, text, effects = {}) => after(agent, 40, { type: "command_result", name, ok, message: text, effects });
-    if (name === "role") result(true, `Role set to: ${message.args?.[0]} / Роль: ${message.args?.[0]}`, { role: message.args?.[0] });
+    if (name === "best-of") bestOf(agent, message.args ?? []);
+    else if (name === "council") council(agent, message.args ?? []);
+    else if (name === "role") result(true, `Role set to: ${message.args?.[0]} / Роль: ${message.args?.[0]}`, { role: message.args?.[0] });
     else if (name === "effort") result(true, `Effort: ${message.args?.[0]} / Усилие: ${message.args?.[0]}`, { effort: message.args?.[0], advisory: "" });
     else if (name === "style") result(true, "Style set / Стиль выбран", { style: { name: message.args?.[0], applied_to_session: true } });
     else if (name === "verbose") result(true, "Verbose toggled / Лог переключён", { verbose: true });
@@ -173,6 +247,16 @@ export function createMock(emit) {
       }
       if (name === "session_op") {
         if (args.op === "list" || args.op === "status") return { ok: true, active_session: "chat-demo", sessions: ["chat-demo", "older-work"], session_items: [{ name: "chat-demo", title: "Fix the parser", updated_at: "", closed: false }, { name: "older-work", title: "Docs cleanup", updated_at: "", closed: false }] };
+        if (args.op === "history" && /^bo-/.test(args.sessionName ?? "")) {
+          const who = args.sessionName.slice(3);
+          return { ok: true, has_more: false, events: [
+            { event: { type: "user", text: "fix the parser", executor_id: who } },
+            { event: { type: "step", step: 1, call_id: "j1", action_type: "read_file", action_args: { path: "src/parser.py" }, action_description: "reads src/parser.py", user_message: "Reading the parser first.", executor_id: who } },
+            { event: { type: "action_result", step: 1, call_id: "j1", ok: true, summary: "84 lines", output: "", executor_id: who } },
+            { event: { type: "step", step: 2, call_id: "j2", action_type: "run_shell", action_args: { command: ["pytest", "-q"] }, action_description: "runs the tests", user_message: "", executor_id: who } },
+            { event: { type: "action_result", step: 2, call_id: "j2", ok: true, summary: "Command exited with code 0", output: "12 passed in 0.4s\n", exit_code: 0, executor_id: who } },
+          ] };
+        }
         if (args.op === "history") return { ok: true, has_more: false, events: [{ event: { type: "user", text: "Earlier request" } }, { event: { type: "stream_commit", stream_id: "h", text: "Earlier answer." } }, { event: { type: "turn_end" } }] };
         if (args.op === "input-history") return { ok: true, entries: ["fix the parser", "run the tests"] };
         return { ok: true };
