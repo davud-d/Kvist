@@ -3,7 +3,7 @@ const STRINGS = {
     en: {
         tagline: 'your agent, from the couch', quiet: 'All quiet.', waiting: n => `${n} waiting for you!`,
         working: n => `${n} at work…`, winterGreeting: 'Brr… cozy day for code.', winterWaiting: n => `${n} waiting, scarf on!`,
-        projects: 'PROJECTS', inbox: 'NEEDS YOU', noProjects: 'This computer has no projects yet. Add one in Kvist on the computer.',
+        projects: 'PROJECTS', thisFolder: 'THIS FOLDER', inbox: 'NEEDS YOU', noProjects: 'No agent is running on this computer. Start Kvist in a folder there, and it shows up here.',
         newSession: 'New session', noSessions: 'no sessions yet', untitled: 'New session',
         offline: 'Offline', connecting: 'Connecting…', reconnecting: 'Reconnecting…', online: 'Connected',
         idle: 'Idle', running: 'Working', starting: 'Starting', waitingState: 'Needs you', finished: 'Done', failed: 'Failed', stopped: 'Stopped',
@@ -29,7 +29,7 @@ const STRINGS = {
     ru: {
         tagline: 'твой агент с дивана', quiet: 'Тишина.', waiting: n => `Тебя ждут: ${n}!`,
         working: n => `Работает: ${n}…`, winterGreeting: 'Бррр… уютный день для кода.', winterWaiting: n => `Ждут: ${n}, шарф надет!`,
-        projects: 'ПРОЕКТЫ', inbox: 'ЖДУТ ТЕБЯ', noProjects: 'На этом компьютере пока нет проектов. Добавь проект в Kvist на компьютере.',
+        projects: 'ПРОЕКТЫ', thisFolder: 'ЭТА ПАПКА', inbox: 'ЖДУТ ТЕБЯ', noProjects: 'На этом компьютере не работает ни один агент. Запусти Kvist в папке на компьютере, и она появится здесь.',
         newSession: 'Новая сессия', noSessions: 'сессий пока нет', untitled: 'Новая сессия',
         offline: 'Нет связи', connecting: 'Подключаюсь…', reconnecting: 'Переподключаюсь…', online: 'Подключено',
         idle: 'Свободна', running: 'Работает', starting: 'Запуск', waitingState: 'Ждёт тебя', finished: 'Готово', failed: 'Ошибка', stopped: 'Остановлена',

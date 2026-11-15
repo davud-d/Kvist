@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from kernel.config.user_config import load_user_config
 from kernel.tray.tray_link import core_command
@@ -64,10 +65,12 @@ class PhoneLink:
     def __init__(
         self,
         *,
+        workspace: str = "",
         spawn: Callable[[list[str]], None] = _spawn_detached,
         sleep: Callable[[float], None] = time.sleep,
         marker: Path | None = None,
     ) -> None:
+        self._workspace = workspace
         self._spawn = spawn
         self._sleep = sleep
         self._marker = marker
@@ -89,7 +92,7 @@ class PhoneLink:
         marker = self._marker or controller_home() / "controller.starting"
         while True:
             if self.ensure_controller(descriptor, marker):
-                self.hold(descriptor)
+                self.hold(descriptor, self._workspace)
                 self._sleep(RECONNECT_SECONDS)
             else:
                 self._sleep(RETRY_SECONDS)
@@ -128,14 +131,17 @@ class PhoneLink:
         return False
 
     @staticmethod
-    def hold(descriptor: Any) -> None:
-        """Stay connected until the controller goes away; its heartbeat tells a live one from a dead one."""
+    def hold(descriptor: Any, workspace: str = "") -> None:
+        """Stay connected until the controller goes away; its heartbeat tells a live one from a dead one.
+
+        The folder this core works in is open to phones for as long as the connection lasts, and not a minute after."""
         opened = descriptor.open(HEARTBEAT_TIMEOUT_SECONDS)
         if opened is None:
             return
         connection, value = opened
         try:
-            connection.request("GET", "/api/admin/presence", headers={"Authorization": f"Bearer {value.get('admin_token', '')}"})
+            path = "/api/admin/presence" + (f"?workspace={quote(workspace)}" if workspace else "")
+            connection.request("GET", path, headers={"Authorization": f"Bearer {value.get('admin_token', '')}"})
             response = connection.getresponse()
             if response.status != 200:
                 return
@@ -147,7 +153,7 @@ class PhoneLink:
             connection.close()
 
 
-def start(env: dict[str, str] | None = None) -> None:
-    """Called by a core that starts an agent."""
+def start(workspace: str, env: dict[str, str] | None = None) -> None:
+    """Called by a core that starts an agent in ``workspace``."""
     if enabled(env):
-        PhoneLink().start()
+        PhoneLink(workspace=str(Path(workspace).resolve())).start()

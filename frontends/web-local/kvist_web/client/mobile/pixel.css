@@ -195,6 +195,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .card-names { flex: 1; min-width: 0; }
 .card-title { font-size: 16px; font-weight: 800; }
 .card-path { font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-session { width: 100%; margin-top: 14px; }
 .card-empty { color: var(--dim); font-size: 13px; padding: 4px 0; margin: 0 var(--o); }
 .card .card-empty { margin: 0; }
 

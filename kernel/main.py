@@ -5114,7 +5114,7 @@ def main() -> None:
             if all(model_values)
             else None
         )
-        phone_link.start()
+        phone_link.start(args.workspace)
         try:
             launch_multi(
                 args.workspace,
@@ -5235,7 +5235,7 @@ def main() -> None:
         sys.exit(2)
 
     sync_strime_suggestion(config.provider, config.stream)
-    phone_link.start()
+    phone_link.start(str(workspace_path))
 
     # Only an explicit resume continues a previous launch's conversation.
     from kernel.session.durable_json import JsonStorageError

@@ -353,3 +353,171 @@ def test_phone_assets_are_served_to_a_trusted_phone(lan_server, path, kind):
     token = pair(lan_server)["token"]
     status, content_type, body = call(lan_server, "GET", path, token=token)
     assert status == 200 and content_type.startswith(kind) and body
+
+
+# ---- a phone works inside the folders where an agent runs -------------------------------------------------------
+
+class FakeEvents:
+    def __init__(self, envelopes):
+        self._envelopes, self._sent = envelopes, False
+
+    cursor, epoch = 0, "e"
+
+    def read_after(self, cursor, epoch=None, timeout=0):
+        if self._sent:
+            time.sleep(0.1)
+            return SimpleNamespace(reset=False, events=[])
+        self._sent = True
+        return SimpleNamespace(reset=False, events=self._envelopes)
+
+
+def envelope(number, workspace, server_id="local"):
+    return SimpleNamespace(id=number, workspace=workspace, to_dict=lambda: {"id": number, "workspace": workspace, "server_id": server_id, "event": {"type": "x"}})
+
+
+def folder_entry(path):
+    return {"path": path, "sessions": {"session_items": []}}
+
+
+@pytest.fixture
+def scoped(tmp_path):
+    here, other = tmp_path / "project", tmp_path / "home-folder"
+    here.mkdir()
+    other.mkdir()
+    navigation = {
+        "servers": [
+            {"server": {"id": "local"}, "connection": {"state": "connected"}, "workspaces": [folder_entry(str(here)), folder_entry(str(other))]},
+            {"server": {"id": "gpu-box"}, "connection": {"state": "connected"}, "workspaces": [folder_entry("/srv/x")]},
+        ],
+        "inbox": [
+            {"server_id": "local", "workspace": str(here), "session": "a"},
+            {"server_id": "local", "workspace": str(other), "session": "b"},
+            {"server_id": "gpu-box", "workspace": "/srv/x", "session": "c"},
+        ],
+    }
+    opened = []
+    controller = SimpleNamespace(
+        navigation=lambda: navigation,
+        bootstrap=lambda: {"navigation": navigation, "event_stream": {"cursor": 0, "epoch": "e"}},
+        sessions=lambda server, workspace: {"session_items": []},
+        send=lambda *args: {"ok": True},
+        add_workspace=lambda server, path: opened.append(path) or {"workspace": path},
+        events=FakeEvents([envelope(1, str(here)), envelope(2, str(other)), envelope(3, "")]),
+    )
+    devices = DeviceStore(tmp_path / "devices.json")
+    server = ControllerHTTPServer(("127.0.0.1", 0), controller, admin_token="admin", lan=True, devices=devices,
+                                  pairing=Pairing(devices, asker=Owner(True), start=lambda work: work()))
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+    thread.start()
+    server.here, server.other, server.opened = str(here), str(other), opened
+    server.token = devices.approve("phone-aaaa-1111", "Pixel 8")
+    yield server
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2)
+
+
+def phone(server, method, path, body=None):
+    port = server.server_address[1]
+    host = f"192.168.1.20:{port}"
+    basic = "Basic " + base64.b64encode(f"kvist:{server.token}".encode()).decode()
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    try:
+        connection.request("GET", "/m/", headers={"Host": host, "Authorization": basic})
+        page = connection.getresponse()
+        html = page.read().decode()
+        cookie = page.getheader("Set-Cookie").split(";")[0]
+        csrf = html.split('name="kvist-csrf" content="')[1].split('"')[0]
+        headers = {"Host": host, "Authorization": basic, "Cookie": cookie, "X-Kvist-CSRF": csrf, "Origin": f"http://{host}", "Content-Type": "application/json"}
+        connection.request(method, path, body=json.dumps(body).encode() if body is not None else None, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+def open_to_phones(server, folder):
+    server.fixed_folders.add(http_api.resolve_folder(folder))
+
+
+def test_a_phone_sees_only_this_computer_and_only_the_open_folders(scoped):
+    open_to_phones(scoped, scoped.here)
+    status, body = phone(scoped, "GET", "/api/v1/navigation")
+    navigation = json.loads(body)
+    assert status == 200
+    assert [entry["server"]["id"] for entry in navigation["servers"]] == ["local"]
+    assert [folder["path"] for folder in navigation["servers"][0]["workspaces"]] == [scoped.here]
+    assert [item["session"] for item in navigation["inbox"]] == ["a"]
+    boot = json.loads(phone(scoped, "GET", "/api/v1/bootstrap")[1])
+    assert [folder["path"] for folder in boot["navigation"]["servers"][0]["workspaces"]] == [scoped.here]
+
+
+def test_with_no_agent_running_a_phone_sees_nothing(scoped):
+    navigation = json.loads(phone(scoped, "GET", "/api/v1/navigation")[1])
+    assert navigation["servers"][0]["workspaces"] == [] and navigation["inbox"] == []
+
+
+def test_a_phone_cannot_touch_a_folder_where_no_agent_runs(scoped):
+    open_to_phones(scoped, scoped.here)
+    query = "server=local&workspace="
+    assert phone(scoped, "GET", f"/api/v1/sessions?{query}{scoped.here}")[0] == 200
+    assert phone(scoped, "GET", f"/api/v1/sessions?{query}{scoped.other}")[0] == 403
+    assert phone(scoped, "GET", f"/api/v1/history?{query}{scoped.other}&session=s")[0] == 403
+    # a path that only looks like the open folder
+    assert phone(scoped, "GET", f"/api/v1/sessions?{query}{scoped.here}/../home-folder")[0] == 403
+    send = {"server_id": "local", "workspace": scoped.other, "session": "s", "text": "rm -rf"}
+    assert phone(scoped, "POST", "/api/v1/send", send)[0] == 403
+    assert phone(scoped, "POST", "/api/v1/send", {**send, "workspace": scoped.here})[0] == 200
+    assert phone(scoped, "POST", "/api/v1/send", {**send, "workspace": scoped.here, "server_id": "gpu-box"})[0] == 403
+
+
+def test_a_phone_cannot_add_a_folder_or_a_computer(scoped):
+    open_to_phones(scoped, scoped.here)
+    assert phone(scoped, "POST", "/api/v1/workspaces", {"server_id": "local", "path": "/"})[0] == 403
+    assert phone(scoped, "POST", "/api/v1/servers", {"id": "x", "host": "example"})[0] == 403
+    assert phone(scoped, "POST", "/api/v1/servers/connect", {"server_id": "x"})[0] == 403
+    assert phone(scoped, "POST", "/api/v1/config-sync", {"server_id": "x", "credentials": []})[0] == 403
+    assert phone(scoped, "GET", "/api/v1/ssh-aliases")[0] == 403
+
+
+def test_the_folder_of_a_running_core_is_open_for_exactly_as_long_as_it_stays_connected(scoped, monkeypatch):
+    monkeypatch.setattr(http_api, "PRESENCE_BEAT_SECONDS", 0.05)
+    assert phone(scoped, "GET", f"/api/v1/sessions?server=local&workspace={scoped.here}")[0] == 403
+    connection = http.client.HTTPConnection("127.0.0.1", scoped.server_address[1], timeout=3)
+    connection.request("GET", f"/api/admin/presence?workspace={scoped.here}",
+                       headers={"Host": f"127.0.0.1:{scoped.server_address[1]}", "Authorization": "Bearer admin"})
+    response = connection.getresponse()
+    assert response.read(1) == b"\n"
+    assert scoped.opened == [scoped.here]
+    assert phone(scoped, "GET", f"/api/v1/sessions?server=local&workspace={scoped.here}")[0] == 200
+    assert phone(scoped, "GET", f"/api/v1/sessions?server=local&workspace={scoped.other}")[0] == 403
+    response.close()
+    connection.close()
+    deadline = time.monotonic() + 3
+    while scoped.phone_scope() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert phone(scoped, "GET", f"/api/v1/sessions?server=local&workspace={scoped.here}")[0] == 403
+
+
+def test_the_live_stream_leaves_out_other_folders(scoped):
+    open_to_phones(scoped, scoped.here)
+    port = scoped.server_address[1]
+    host = f"192.168.1.20:{port}"
+    basic = "Basic " + base64.b64encode(f"kvist:{scoped.token}".encode()).decode()
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    connection.request("GET", "/m/", headers={"Host": host, "Authorization": basic})
+    page = connection.getresponse()
+    page.read()
+    cookie = page.getheader("Set-Cookie").split(";")[0]
+    connection.request("GET", "/api/v1/events?after=0", headers={"Host": host, "Authorization": basic, "Cookie": cookie})
+    stream = connection.getresponse()
+    seen = []
+    for _ in range(12):
+        line = stream.fp.readline().decode()
+        if line.startswith("data:"):
+            seen.append(json.loads(line[5:])["id"])
+        if len(seen) == 2:
+            break
+    stream.close()
+    connection.close()
+    assert seen == [1, 3]

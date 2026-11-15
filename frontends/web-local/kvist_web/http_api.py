@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hmac
 import json
+import logging
 import mimetypes
 import os
 import threading
@@ -23,10 +24,33 @@ from .protocol import WEB_PROTOCOL_VERSION
 from .security import BrowserAuth, BrowserSession, redact
 
 
+_LOG = logging.getLogger("kvist.web.http")
 MAX_BODY = 30 * 1024 * 1024
 # A phone that is not trusted yet may send this much, no more.
 MAX_PAIR_BODY = 4096
 PRESENCE_BEAT_SECONDS = 5.0
+# A phone works inside the folders where an agent runs, nowhere else: it cannot add a folder or another
+# computer, and it cannot reach the settings that copy credentials to one.
+PHONE_FORBIDDEN = frozenset({"/api/workspaces", "/api/servers", "/api/servers/connect", "/api/config-sync", "/api/ssh-aliases"})
+SCOPED_ROUTES = frozenset({
+    "/api/sessions", "/api/history", "/api/changes", "/api/command", "/api/send", "/api/stop", "/api/control", "/api/respond", "/api/read",
+})
+
+
+def resolve_folder(path: object) -> str:
+    return str(Path(str(path)).expanduser().resolve())
+
+
+def restrict_navigation(navigation: dict[str, Any], scope: set[str]) -> dict[str, Any]:
+    """The navigation a phone may see: this computer, and only the folders in scope."""
+    servers = []
+    for entry in navigation["servers"]:
+        if entry["server"]["id"] != "local":
+            continue
+        folders = [folder for folder in entry["workspaces"] if resolve_folder(folder["path"]) in scope]
+        servers.append({**entry, "workspaces": folders})
+    inbox = [item for item in navigation.get("inbox", []) if item["server_id"] == "local" and resolve_folder(item["workspace"]) in scope]
+    return {**navigation, "servers": servers, "inbox": inbox}
 API_PREFIX = f"/api/v{WEB_PROTOCOL_VERSION}"
 # Python before 3.14 knows .woff2 only through the system mime.types, which may be absent.
 mimetypes.add_type("font/woff2", ".woff2")
@@ -53,16 +77,27 @@ class Presence:
         self._lock = threading.Lock()
         self._count = 0
         self._idle_since = time.monotonic()
+        self._folders: dict[str, int] = {}
 
-    def enter(self) -> None:
+    def enter(self, folder: str = "") -> None:
         with self._lock:
             self._count += 1
+            if folder:
+                self._folders[folder] = self._folders.get(folder, 0) + 1
 
-    def leave(self) -> None:
+    def leave(self, folder: str = "") -> None:
         with self._lock:
             self._count -= 1
+            if folder:
+                self._folders[folder] -= 1
+                if self._folders[folder] <= 0:
+                    del self._folders[folder]
             if self._count == 0:
                 self._idle_since = time.monotonic()
+
+    def folders(self) -> set[str]:
+        with self._lock:
+            return set(self._folders)
 
     def idle_seconds(self) -> float:
         with self._lock:
@@ -91,6 +126,8 @@ class ControllerHTTPServer(ThreadingHTTPServer):
         self.devices = devices
         self.pairing = pairing
         self.presence = Presence()
+        # Folders open to phones whatever the agents do: the one a person started `kvist-web --lan` in.
+        self.fixed_folders: set[str] = set()
         self.public_origin = f"http://{address[0]}:{address[1]}"
         self.allowed_hosts = (
             {"127.0.0.1", "localhost", "::1"}
@@ -98,6 +135,12 @@ class ControllerHTTPServer(ThreadingHTTPServer):
             else {address[0]}
         )
         super().__init__(address, ControllerHandler)
+
+    def phone_scope(self) -> set[str] | None:
+        """The folders a phone may use, or None when this server is not serving phones."""
+        if not self.lan:
+            return None
+        return self.fixed_folders | self.presence.folders()
 
     def host_allowed(self, hostname: str | None) -> bool:
         # On a local network the computer's address is not known in advance (DHCP, several adapters), so
@@ -144,10 +187,17 @@ class ControllerHandler(BaseHTTPRequestHandler):
             return
         try:
             route = _api_route(parsed.path)
+            self._enforce_scope(route, parse_qs(parsed.query))
             if route == "/api/bootstrap":
-                self._json(self.server.controller.bootstrap())
+                value = self.server.controller.bootstrap()
+                scope = self.server.phone_scope()
+                if scope is not None:
+                    value = {**value, "navigation": restrict_navigation(value["navigation"], scope)}
+                self._json(value)
             elif route == "/api/navigation":
-                self._json(self.server.controller.navigation())
+                value = self.server.controller.navigation()
+                scope = self.server.phone_scope()
+                self._json(value if scope is None else restrict_navigation(value, scope))
             elif route == "/api/ssh-aliases":
                 from .ssh.config import ssh_aliases
                 self._json(ssh_aliases())
@@ -184,6 +234,8 @@ class ControllerHandler(BaseHTTPRequestHandler):
                 self._sse(parsed)
             else:
                 self._error(HTTPStatus.NOT_FOUND, "Not found.")
+        except PermissionError as error:
+            self._error(HTTPStatus.FORBIDDEN, str(error))
         except Exception as error:
             self._error(HTTPStatus.BAD_REQUEST, redact(error))
 
@@ -213,6 +265,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json()
             route = _api_route(parsed.path)
+            self._enforce_scope(route, body)
             controller = self.server.controller
             if route == "/api/servers":
                 result = controller.add_server(body)
@@ -294,6 +347,8 @@ class ControllerHandler(BaseHTTPRequestHandler):
                 self._error(HTTPStatus.NOT_FOUND, "Not found.")
                 return
             self._json(result)
+        except PermissionError as error:
+            self._error(HTTPStatus.FORBIDDEN, str(error))
         except Exception as error:
             self._error(HTTPStatus.BAD_REQUEST, redact(error))
 
@@ -377,8 +432,11 @@ class ControllerHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
                     continue
+                scope = self.server.phone_scope()
                 for envelope in replay.events:
                     cursor = envelope.id
+                    if scope is not None and envelope.workspace and resolve_folder(envelope.workspace) not in scope:
+                        continue
                     encoded = json.dumps(
                         envelope.to_dict(), ensure_ascii=False, separators=(",", ":")
                     )
@@ -459,6 +517,30 @@ class ControllerHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return False
 
+    def _enforce_scope(self, route: str, fields: dict[str, Any]) -> None:
+        """A phone is held to the folders where an agent runs; anything else is refused before it reaches the controller."""
+        scope = self.server.phone_scope()
+        if scope is None:
+            return
+        if route in PHONE_FORBIDDEN:
+            raise PermissionError("The phone cannot do this; do it on the computer.")
+        if route not in SCOPED_ROUTES:
+            return
+        # GET fields are lists (a query string), POST fields are plain values.
+        def field(*names: str) -> str:
+            for name in names:
+                value = fields.get(name)
+                if isinstance(value, list):
+                    value = value[0] if value else ""
+                if value:
+                    return str(value)
+            return ""
+
+        if field("server_id", "server") not in ("local", ""):
+            raise PermissionError("The phone works with this computer only.")
+        if resolve_folder(field("workspace")) not in scope:
+            raise PermissionError("This folder is not open to the phone: no agent runs in it.")
+
     def _pair_request(self) -> None:
         address = self.client_address[0]
         if not is_private_host(address):
@@ -485,6 +567,18 @@ class ControllerHandler(BaseHTTPRequestHandler):
             return
         self._json({"ok": True, **self.server.pairing.status(_one(parse_qs(parsed.query), "request_id", ""))})
 
+    def _register_folder(self, query: dict[str, list[str]]) -> str:
+        """The folder the core that connected works in becomes open to phones for as long as it stays connected."""
+        folder = _one(query, "workspace", "")
+        if not folder:
+            return ""
+        try:
+            self.server.controller.add_workspace("local", folder)
+        except (OSError, ValueError) as error:
+            _LOG.warning("cannot open %s to phones: %s", folder, error)
+            return ""
+        return resolve_folder(folder)
+
     def _presence(self) -> None:
         if self.headers.get("Authorization") != f"Bearer {self.server.admin_token}":
             self._error(HTTPStatus.UNAUTHORIZED, "Not authorized.")
@@ -495,7 +589,8 @@ class ControllerHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
-        self.server.presence.enter()
+        folder = self._register_folder(parse_qs(urlparse(self.path).query))
+        self.server.presence.enter(folder)
         try:
             while True:
                 self.wfile.write(b"\n")
@@ -505,7 +600,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
             # The core closed the connection or died: this is how presence ends, not a failure.
             pass
         finally:
-            self.server.presence.leave()
+            self.server.presence.leave(folder)
 
     def _json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

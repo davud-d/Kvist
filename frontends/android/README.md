@@ -27,6 +27,8 @@ phone app (WebView, Kotlin)
 - The app opens no address but the trusted computer. A computer's page cannot reach the app's message channel
   (it is bound to the app's own origin). When the app starts it reopens the trusted computer by itself, wherever
   the router put it now, and never makes a window appear on the computer unasked.
+- The phone sees only the folder(s) where Kvist runs on the computer, and only while it runs there; it cannot
+  add a folder or another computer. With one folder there is nothing to choose.
 - Works with a computer running Linux, macOS or Windows. The question is a window of that desktop.
 
 ## Use it

@@ -85,5 +85,30 @@ def test_start_does_nothing_when_off(monkeypatch):
     started = []
     monkeypatch.setattr(PhoneLink, "start", lambda self: started.append(1))
     monkeypatch.setenv("KVIST_PHONE", "0")
-    phone_link.start()
+    phone_link.start("/tmp")
     assert started == []
+
+
+def test_a_core_tells_the_controller_which_folder_it_works_in(tmp_path):
+    requests = []
+
+    class Connection:
+        def request(self, method, path, headers):
+            requests.append((method, path, headers))
+
+        def getresponse(self):
+            return type("Response", (), {"status": 200, "read": lambda self, size: b""})()
+
+        def close(self):
+            pass
+
+    class Described:
+        def open(self, timeout):
+            return Connection(), {"admin_token": "t"}
+
+    PhoneLink.hold(Described(), "/work/my project")
+    assert requests[0][1] == "/api/admin/presence?workspace=/work/my%20project"
+    assert requests[0][2] == {"Authorization": "Bearer t"}
+    requests.clear()
+    PhoneLink.hold(Described())
+    assert requests[0][1] == "/api/admin/presence"

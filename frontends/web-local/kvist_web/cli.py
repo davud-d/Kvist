@@ -11,7 +11,7 @@ import webbrowser
 from pathlib import Path
 
 from .controller import WebController
-from .http_api import ControllerHTTPServer
+from .http_api import ControllerHTTPServer, resolve_folder
 from .instance import InstanceDescriptor, controller_home
 from .installers import installer_for
 from . import lan
@@ -131,6 +131,10 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit("Kvist web is already running.") from None
         raise SystemExit(f"error: cannot listen on {args.host}:{args.port}: {error}") from error
     port = server.server_address[1]
+    if args.lan and not args.auto_exit:
+        # Started by hand: the folder it was started in is the one for phones. A controller a core started
+        # shows the folders of the agents that run, and none of its own.
+        server.fixed_folders.add(resolve_folder(args.workspace))
     descriptor.write(args.host, port, token)
     _LOG.info(
         "controller started",

@@ -58,6 +58,13 @@ switch sessions, stop the agent, answer requests, type `/` commands, change mode
   id, host name, operating system (`linux`, `macos`, `windows` and a readable name), user name and port. That
   is what the phone lists. Anyone on the same network can read it; it is the price of a list with names.
   If the port is taken, discovery is off and entering the address still works.
+- **Folders.** A phone works in the folder where Kvist was started and nowhere else. Each core tells the
+  controller its folder when it connects and the folder is open to phones exactly as long as that core stays
+  connected (a controller started by hand with `--lan` opens the folder it was started in). Every request that
+  names a folder is checked against that set (403 otherwise), the navigation and the live stream leave the others
+  out, and a phone cannot add a folder or another computer (`/workspaces`, `/servers`, `/config-sync`). So an
+  agent once run in a home folder does not make that folder reachable later. With one folder the phone shows it
+  at once, with a large "new session" button.
 - **Host check.** Private IP literals only, never names, so a DNS-rebinding page cannot reach the controller.
   Without `--lan` the check is what it always was.
 - **Limits.** Plain HTTP inside the local network: do not leave it on for a network you do not trust. A
