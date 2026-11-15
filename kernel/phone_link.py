@@ -55,7 +55,12 @@ def _spawn_detached(argv: list[str]) -> None:
     else:
         options["start_new_session"] = True
     # The controller asks the owner in a window of the desktop, so it keeps this process's environment (DISPLAY and the like).
-    subprocess.Popen(argv, **options)
+    env = dict(os.environ)
+    # A one-file program started from inside itself shares its parent's unpacked files and loses them the moment
+    # the process that unpacked them exits (closing Kvist): the controller would stay up and serve nothing. This
+    # makes it a program of its own, with files of its own.
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    subprocess.Popen(argv, env=env, **options)
 
 
 class PhoneLink:

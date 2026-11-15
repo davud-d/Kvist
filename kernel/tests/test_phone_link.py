@@ -112,3 +112,14 @@ def test_a_core_tells_the_controller_which_folder_it_works_in(tmp_path):
     requests.clear()
     PhoneLink.hold(Described())
     assert requests[0][1] == "/api/admin/presence"
+
+
+def test_the_controller_is_started_as_a_program_of_its_own(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(phone_link.subprocess, "Popen", lambda argv, **kwargs: seen.update(argv=argv, **kwargs))
+    monkeypatch.setenv("DISPLAY", ":0")
+    phone_link._spawn_detached(["kvist-core", "--web-controller"])
+    # Without this a one-file build shares its parent's unpacked files and loses them when the parent exits.
+    assert seen["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    # a window can still be shown on the desktop
+    assert seen["env"]["DISPLAY"] == ":0"
