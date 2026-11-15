@@ -36,6 +36,7 @@ LLM_PROVIDER_KEY = "llm_provider"
 LLM_MODELS_KEY = "llm_models"
 ROLE_SELECTION_KEY = "role_selection"
 REASONING_EFFORT_KEY = "reasoning_effort"
+REASONING_EFFORT_ENV = "KVIST_REASONING_EFFORT"
 TITLE_MODEL_KEY = "title_model"
 API_SETTINGS_KEY = "api_settings"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
@@ -565,6 +566,10 @@ def get_saved_reasoning_effort(config_path: Path | None = None) -> str:
     Kept as a plain string here to avoid importing the level scale into the
     config layer; callers normalize it (reasoning_effort.normalize_effort).
     """
+    # A host that runs Kvist for someone else (the cloud) sets the level in the environment: it has no config to edit.
+    from_environment = os.environ.get(REASONING_EFFORT_ENV, "").strip().casefold()
+    if from_environment:
+        return from_environment
     payload = load_user_config(config_path)
     value = payload.get(REASONING_EFFORT_KEY)
     if isinstance(value, str) and value.strip():

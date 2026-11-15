@@ -378,6 +378,15 @@ def test_reasoning_effort_round_trips_through_user_config(tmp_path):
     assert get_saved_reasoning_effort(path) == "xhigh"
 
 
+def test_effort_from_the_environment_wins_over_the_saved_one(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    save_reasoning_effort("high", path)
+    monkeypatch.setenv("KVIST_REASONING_EFFORT", " Low ")
+    assert get_saved_reasoning_effort(path) == "low"
+    monkeypatch.setenv("KVIST_REASONING_EFFORT", "")
+    assert get_saved_reasoning_effort(path) == "high"
+
+
 def test_agent_config_defaults_to_medium():
     assert AgentConfig().reasoning_effort == "medium"
 

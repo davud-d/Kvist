@@ -48,6 +48,8 @@ OMNIROUTE_API_KEY_KEY = "omniroute_api_key"
 OMNIROUTE_BASE_URL_KEY = "omniroute_base_url"
 # Extra HTTP headers for the gateway, as a JSON object (the form a plain environment variable can carry).
 OMNIROUTE_HEADERS_KEY = "omniroute_headers"
+# A host that runs Kvist for someone else sets this to stream the gateway's answers (live file writes need it).
+OMNIROUTE_STREAM_ENV = "OMNIROUTE_STREAM"
 OMNIROUTE_DEFAULT_BASE_URL = "http://localhost:20128/v1"
 OPENROUTER_API_KEY_KEY = "openrouter_api_key"
 OPENROUTER_BASE_URL_KEY = "openrouter_base_url"
@@ -1148,6 +1150,8 @@ def provider_supports_streaming(provider: str) -> bool:
         from kernel.config.user_config import get_custom_provider_by_name
         info = get_custom_provider_by_name(extract_custom_provider_name(normalized))
         return bool(info.get("streaming", False)) if info else False
+    if normalized == OMNIROUTE_PROVIDER:
+        return os.environ.get(OMNIROUTE_STREAM_ENV, "").strip().casefold() in ("1", "true", "yes")
     return normalized in (
         CHATGPT_PROVIDER,
         OPENAI_PROVIDER,

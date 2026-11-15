@@ -312,6 +312,17 @@ def test_openrouter_supports_streaming():
     assert llm_clients.provider_supports_streaming("freeflow") is False
 
 
+def test_omniroute_streams_only_when_the_host_asks_for_it(monkeypatch):
+    monkeypatch.setenv("OMNIROUTE_STREAM", "1")
+    assert llm_clients.provider_supports_streaming("omniroute") is True
+    # The switch is for the gateway provider alone.
+    assert llm_clients.provider_supports_streaming("freeflow") is False
+    monkeypatch.setenv("OMNIROUTE_STREAM", "0")
+    assert llm_clients.provider_supports_streaming("omniroute") is False
+    monkeypatch.delenv("OMNIROUTE_STREAM")
+    assert llm_clients.provider_supports_streaming("omniroute") is False
+
+
 # ── Custom provider tests ────────────────────────────────────────────────────
 
 
