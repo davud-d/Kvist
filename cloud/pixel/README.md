@@ -20,7 +20,7 @@ unchanged because the cloud relays Kvist's events as they are (`cloud/docs/ARCHI
 | A session per folder | **A task** (a session) in a project; the rail lists them, newest first |
 | Window controls, resize edges | Gone (it is a web page); a language switch instead |
 | Core's models, role, effort, style | The person's **model key** (provider + key, checked on save) |
-| Settings: sessions, revert, export… | **Account**: key, plan and billing, sign out; and how the page looks |
+| Settings: sessions, revert, export… | **Account**: key (for "Other": extra headers and a streaming switch, on by default, which is what shows a file while the model writes it), renaming a task (`/rename`), how hard the model thinks (`/effort`, kept on the server, applied from the next message), plan and billing, sign out; and how the page looks |
 | Inspector: helpers, screen, jobs, context | **Hours**, **Server**, **Screen**, files/context, helpers, jobs |
 | — | Title strip: **hours left** and the **server's state** (asleep, ready, working…) |
 

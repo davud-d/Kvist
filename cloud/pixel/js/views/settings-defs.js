@@ -1,11 +1,12 @@
 // What the settings popover offers, as data. In the cloud there is no core to configure per session:
 // the model is the person's own key, the plan and hours are the account's, and the rest is how this page looks.
 
+import { EFFORT_LEVELS, effortNow, setEffort } from "../actions.js";
 import { account, signOut } from "../cloud.js";
 import { chooseLanguage, lang, t } from "../i18n.js";
-import { setPref } from "../store.js";
+import { active, setPref } from "../store.js";
 import { THEMES } from "../theme.js";
-import { openKeyDialog } from "./settings-dialogs.js";
+import { openKeyDialog, openRename } from "./settings-dialogs.js";
 
 function keyLabel() {
   const key = account.key;
@@ -21,6 +22,8 @@ export const SETTINGS = [
     section: "account",
     rows: [
       { id: "key", label: keyLabel, kind: "action", set: () => openKeyDialog(), local: true },
+      { id: "effort", label: "effort", kind: "segment", options: () => EFFORT_LEVELS, get: () => effortNow(), set: (_, v) => v !== effortNow() && setEffort(v), local: true, compact: true, words: { false: "off" } },
+      { id: "rename", label: "rename", kind: "action", set: () => openRename(active()), local: true, when: () => Boolean(active()?.session) },
       { id: "plan", label: "manage plan", kind: "action", set: () => location.assign("/dashboard"), local: true },
       { id: "signout", label: "sign out", kind: "action", set: () => signOut(), local: true },
     ],

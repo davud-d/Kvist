@@ -107,8 +107,16 @@ class KeyIn(InputModel):
     model: str = Field(default="", max_length=200)
     # "other" only: extra HTTP headers a gateway asks for (OpenCode Go wants a session id, for example).
     headers: dict[str, str] = Field(default_factory=dict, max_length=16)
+    # "other" only: stream the answers, so a file shows as the model writes it. Some gateways cannot.
+    stream: bool = True
 
 
+class EffortIn(InputModel):
+    level: str = Field(max_length=8)
+
+
+# Kvist's own scale (kernel/llm/reasoning_effort.py); "" puts it back to the core's default.
+EFFORT_LEVELS = ("false", "low", "medium", "high", "xhigh", "max")
 MAX_HEADERS = 8
 HEADER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$")
 # What the request or the key itself decides: setting these would only break the call or smuggle a second login.
@@ -249,9 +257,13 @@ def kvist_environment(user: User, key: str, headers: dict[str, str] | None = Non
         env[provider.base_url_env] = user.model_base_url
         if headers:
             env["OMNIROUTE_HEADERS"] = json.dumps(headers)
+        if user.model_stream:
+            env["OMNIROUTE_STREAM"] = "1"
     if provider.needs_model:
         env["AGENT_FAST_MODEL"] = user.model_name
         env["AGENT_SMART_MODEL"] = user.model_name
+    if user.effort:
+        env["KVIST_REASONING_EFFORT"] = user.effort
     return env
 
 
@@ -271,6 +283,8 @@ def key_summary(user: User) -> dict[str, object]:
         "base_url": user.model_base_url,
         "model": user.model_name,
         "headers": user.model_header_names.split(",") if user.model_header_names else [],
+        "stream": user.model_stream,
+        "effort": user.effort,
         "set": has_model_access(user),
         "chatgpt_state": user.chatgpt_state,
         "chatgpt_email": user.chatgpt_email,
@@ -380,9 +394,23 @@ async def save_key(
     user.model_name = model
     user.model_headers_enc = vault.encrypt(json.dumps(headers)) if headers else ""
     user.model_header_names = ",".join(headers)
+    user.model_stream = payload.stream if provider.needs_base_url else True
     record_step(db, "key_valid", user_id=user.id)
     db.commit()
     return {"ok": True, "code": "", "key": key_summary(user)}
+
+
+@router.put("/api/effort")
+def set_effort(
+    payload: EffortIn, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    """Applies from the next start of Kvist: a core that is running keeps the level it began with."""
+    level = payload.level.strip().casefold()
+    if level and level not in EFFORT_LEVELS:
+        raise ApiError(400, "bad_effort", "Pick one of the listed levels. / Выбери один из уровней списка.")
+    user.effort = level
+    db.commit()
+    return key_summary(user)
 
 
 @router.delete("/api/model-key")
@@ -394,5 +422,6 @@ def delete_key(user: User = Depends(current_user), db: Session = Depends(get_db)
     user.model_name = ""
     user.model_headers_enc = ""
     user.model_header_names = ""
+    user.model_stream = True
     db.commit()
     return key_summary(user)

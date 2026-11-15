@@ -227,6 +227,7 @@
     "baseUrl": "Base URL",
     "baseUrlPlaceholder": "https://…/v1",
     "modelName": "Model",
+    "stream": "Show the answer as it is written (a file appears while the model types it). Switch off if your gateway fails on streaming.",
     "headersTitle": "Extra headers (only if your gateway asks for them)",
     "headersHint": "One per line, as Name: value. {session} becomes a fresh id for each request. The values are kept secret.",
     "headersPlaceholder": "x-opencode-session: {session}",

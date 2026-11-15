@@ -90,6 +90,10 @@ class User(Base):
     # encrypted JSON object; the names alone (comma-separated) are kept readable so the page can list them.
     model_headers_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
     model_header_names: Mapped[str] = mapped_column(String(600), default="", server_default="")
+    # "Other" only: ask the gateway to stream its answers, which is what shows a file being written live.
+    model_stream: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    # How hard the model thinks (Kvist's /effort scale); empty means the core's own default.
+    effort: Mapped[str] = mapped_column(String(8), default="", server_default="")
     locale: Mapped[str] = mapped_column(String(5), default="en")
     # Admin rights given from the panel; the owners in ADMIN_GITHUB_LOGINS need no row.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -197,6 +201,8 @@ class Task(Base):
     # None for the tasks from before projects existed: each had a folder of its own.
     project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     goal: Mapped[str] = mapped_column(Text)
+    # What the person named it; empty means the page shows the first line of the goal.
+    title: Mapped[str] = mapped_column(String(120), default="", server_default="")
     repo_url: Mapped[str] = mapped_column(String(500), default="")
     status: Mapped[str] = mapped_column(String(20), default=TaskStatus.QUEUED, index=True)
     # Why it is paused or failed: hours_exhausted, provider_unavailable, invalid_key, ...

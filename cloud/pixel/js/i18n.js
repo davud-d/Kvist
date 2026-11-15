@@ -183,6 +183,10 @@ const RU = {
   "extra headers hint": "По одному в строке, в виде Имя: значение. {session} заменяется свежим идентификатором на каждый запрос. Значения хранятся в секрете.",
   "extra headers saved": "Сохранены заголовки: {names}",
   "bad headers": "Проверь заголовки: имя, двоеточие, значение в каждой строке.",
+  "effort from next message": "применится со следующего сообщения",
+  "stream answers": "Показывать ответ по мере написания (файл появляется, пока модель его печатает). Выключи, если шлюз ломается на потоковом режиме.",
+  "rename usage": "Напиши название после команды: /rename Новое название",
+  "rename needs task": "Название можно дать, когда задача уже начата.",
   "save": "Сохранить",
   "checking key": "Проверяю ключ…",
   "key ok": "Ключ работает",
@@ -232,6 +236,14 @@ const RU = {
 
 // Keys that are codes or labels rather than English sentences need their English words.
 const EN = {
+  "extra headers": "Extra headers (only if your gateway asks for them)",
+  "extra headers hint": "One per line, as Name: value. {session} becomes a fresh id for each request. The values are kept secret.",
+  "extra headers saved": "Saved headers: {names}",
+  "bad headers": "Check the headers: a name, a colon and a value on each line.",
+  "stream answers": "Show the answer as it is written (a file appears while the model types it). Switch off if your gateway fails on streaming.",
+  "effort from next message": "applies from the next message",
+  "rename usage": "Write the name after the command: /rename New name",
+  "rename needs task": "A task can be named once it has started.",
   "warn no plan": "The trial has not started: the agent cannot run without it.",
   "warn no hours": "Your hours are used up: the agent will not start until you buy more.",
   "warn low hours": "Few hours left:",

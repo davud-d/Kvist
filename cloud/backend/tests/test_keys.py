@@ -173,7 +173,7 @@ def test_saved_key_is_encrypted_and_shown_by_last4(client_factory, engine):
     assert response.json()["ok"] is True
     assert client.get("/api/model-key").json() == {
         "provider": "deepseek", "label": "DeepSeek", "last4": "cdef", "base_url": "", "model": "", "headers": [],
-        "set": True, "chatgpt_state": "", "chatgpt_email": "",
+        "stream": True, "effort": "", "set": True, "chatgpt_state": "", "chatgpt_email": "",
     }
     from kvist_cloud.db import make_session_factory
 
@@ -233,6 +233,62 @@ def test_header_rules(headers):
     with pytest.raises(ApiError) as refused:
         clean_headers(headers)
     assert refused.value.code == "bad_headers"
+
+
+def test_effort_is_kept_per_account_and_handed_to_kvist(client_factory, engine):
+    from conftest import dev_login
+
+    from kvist_cloud.db import make_session_factory
+
+    client = client_factory(lambda request: httpx.Response(200, json={"is_available": True}), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    client.post("/api/model-key", json={"provider": "deepseek", "key": KEY})
+    assert client.get("/api/model-key").json()["effort"] == ""
+    assert client.put("/api/effort", json={"level": " High "}).json()["effort"] == "high"
+    assert client.get("/api/model-key").json()["effort"] == "high"
+    with make_session_factory(engine)() as session:
+        user = session.scalars(select(User)).one()
+        assert kvist_environment(user, KEY)["KVIST_REASONING_EFFORT"] == "high"
+    assert client.put("/api/effort", json={"level": "extreme"}).status_code == 400
+    assert client.get("/api/model-key").json()["effort"] == "high"
+    assert client.put("/api/effort", json={"level": ""}).json()["effort"] == ""
+    with make_session_factory(engine)() as session:
+        assert "KVIST_REASONING_EFFORT" not in kvist_environment(session.scalars(select(User)).one(), KEY)
+
+
+def test_effort_survives_removing_the_key(client_factory):
+    from conftest import dev_login
+
+    client = client_factory(lambda request: httpx.Response(200, json={"is_available": True}), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    client.put("/api/effort", json={"level": "low"})
+    client.delete("/api/model-key")
+    assert client.get("/api/model-key").json()["effort"] == "low"
+
+
+def test_streaming_is_on_for_other_unless_switched_off_and_never_asked_of_the_rest(client_factory, engine):
+    from conftest import dev_login
+
+    from kvist_cloud.db import make_session_factory
+
+    client = client_factory(
+        lambda request: httpx.Response(200, json={"data": [{"id": "m1"}]}), AUTH_DEV_LOGIN="true"
+    )
+    dev_login(client)
+    other = {"provider": "other", "key": KEY, "base_url": GATEWAY, "model": "m1"}
+
+    def environment() -> dict:
+        with make_session_factory(engine)() as session:
+            return kvist_environment(session.scalars(select(User)).one(), KEY)
+
+    assert client.post("/api/model-key", json=other).json()["key"]["stream"] is True
+    assert environment()["OMNIROUTE_STREAM"] == "1"
+    assert client.post("/api/model-key", json={**other, "stream": False}).json()["key"]["stream"] is False
+    assert "OMNIROUTE_STREAM" not in environment()
+    # A provider with a fixed address streams by itself; the switch is not offered, so it is not kept.
+    client.post("/api/model-key", json={"provider": "deepseek", "key": KEY, "stream": False})
+    assert client.get("/api/model-key").json()["stream"] is True
+    assert "OMNIROUTE_STREAM" not in environment()
 
 
 def test_good_headers_are_kept_as_given():

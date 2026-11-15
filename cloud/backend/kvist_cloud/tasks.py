@@ -154,6 +154,7 @@ def task_view(db: Session, task: Task) -> dict[str, object]:
         "machine_id": task.machine_id,
         "project_id": task.project_id,
         "goal": task.goal,
+        "title": task.title,
         "repo_url": task.repo_url,
         "status": task.status,
         "reason": task.status_reason,
@@ -254,6 +255,11 @@ class TaskIn(InputModel):
 
 class MessageIn(InputModel):
     text: str = Field(min_length=1, max_length=GOAL_LIMIT)
+
+
+class TitleIn(InputModel):
+    title: str = Field(max_length=300)
+
 
 
 class InputIn(InputModel):
@@ -388,6 +394,23 @@ def get_session(
 @router.get("/api/tasks/{task_id}")
 def get_task(task_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, object]:
     return task_payload(db, owned_task(db, user, task_id))
+
+
+MAX_TITLE = 120
+
+
+@router.patch("/api/tasks/{task_id}")
+def rename_task(
+    task_id: int, payload: TitleIn, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    """The person's own name for the task; empty goes back to the first line of the goal."""
+    task = owned_task(db, user, task_id)
+    title = " ".join(payload.title.split())
+    if len(title) > MAX_TITLE:
+        raise ApiError(400, "title_too_long", "Make the name shorter. / Сделай название короче.")
+    task.title = title
+    db.commit()
+    return task_payload(db, task)
 
 
 @router.get("/api/tasks/{task_id}/events")

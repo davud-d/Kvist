@@ -1,6 +1,7 @@
 // The settings popover: it grows out of the gear at the bottom left (a zoom
 // from that corner) and closes the same way. Rows come from settings-defs.js.
 
+import { onAccount } from "../cloud.js";
 import { fill, h } from "../dom.js";
 import { t } from "../i18n.js";
 import { animate, finished } from "../motion.js";
@@ -80,7 +81,13 @@ export function toggleSettings(anchor) {
   const outside = (event) => {
     if (!el.contains(event.target) && !anchor.contains(event.target)) closeSettings();
   };
-  const off = subscribe(() => paint(body));
+  // The account changes under it too (the chosen effort is saved on the server).
+  const stopStore = subscribe(() => paint(body));
+  const stopAccount = onAccount(() => paint(body));
+  const off = () => {
+    stopStore();
+    stopAccount();
+  };
   popover = { el, off, outside };
   document.addEventListener("pointerdown", outside, true);
   el.addEventListener("keydown", (event) => event.key === "Escape" && closeSettings());

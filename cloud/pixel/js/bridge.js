@@ -6,7 +6,7 @@
 // A task has one goal and cannot be given a second one, so an agent in this page is a *draft* until its
 // first goal is sent, and a task from then on. A draft needs no server at all.
 
-import { account, api, ApiError, firstLine, isPlumbing, listItem, loginUrl, refreshHours, refreshTasks, tasksOf, WORKING } from "./cloud.js";
+import { account, api, ApiError, firstLine, isPlumbing, listItem, loginUrl, refreshHours, refreshTasks, tasksOf, titleOf, WORKING } from "./cloud.js";
 import { t } from "./i18n.js";
 
 const listeners = new Set();
@@ -32,7 +32,7 @@ const hello = (agent) => ({
   models: account.key?.model ? { fast: account.key.model, smart: account.key.model } : {},
   // The runner starts every cloud core with --role universal (runner/task.py), so there is no routing to wait for.
   role: "universal",
-  effort: "",
+  effort: account.key?.effort || "medium",
   session: String(agents.get(agent)?.taskId ?? ""),
 });
 
@@ -83,6 +83,8 @@ function handle(agent, taskId, entry, data) {
       return;
     }
     if (isPlumbing(data.event, entry.announced)) return;
+    // A name the person gave stays; the title the core makes up is only for tasks that have none.
+    if (data.event.type === "session_title" && account.tasks.find((item) => item.id === taskId)?.title) return;
     emit(agent, SESSION_EVENTS.has(data.event.type) ? { ...data.event, session: String(taskId) } : data.event);
   } else if (data.type === "task") {
     onTask(agent, entry, data.task);
@@ -102,6 +104,7 @@ function onTask(agent, entry, task) {
     entry.announced = true;
     emit(agent, hello(agent));
   }
+  if (task.title) emit(agent, { type: "session_title", session: String(task.id), title: task.title });
   emit(agent, taskEvent(task));
   if (!WORKING.has(task.status)) refreshHours();
 }
@@ -150,7 +153,7 @@ async function startTask(id, text) {
   entry.taskId = task.id;
   seen.set(task.id, 0);
   account.tasks.unshift(task);
-  emit(id, { type: "session", session: String(task.id), title: firstLine(task.goal) });
+  emit(id, { type: "session", session: String(task.id), title: titleOf(task) });
   connect(id, task.id);
   refreshTasks();
   refreshHours();

@@ -2,7 +2,7 @@
 // bridge and feed what comes back into the store.
 
 import * as bridge from "./bridge.js";
-import { account, cannotRun, projectUrl, sessionUrl } from "./cloud.js";
+import { account, api, cannotRun, projectUrl, refreshKey, refreshTasks, sessionUrl, titleOf } from "./cloud.js";
 import { t } from "./i18n.js";
 import { addNote, beginTurn, clearFeed, createAgent, replayHistory } from "./reducer.js";
 import { addAgent, announce, dispatch, removeAgent, setActive, setPref, store } from "./store.js";
@@ -158,6 +158,18 @@ function explain(problem) {
 export async function sendGoal(agent, text) {
   const line = text.trim();
   if (!line || agent.state === "gone") return false;
+  // The one slash command with a meaning here; anything else is words for the agent, as in the desktop app.
+  const effort = line.match(/^\/effort(?:\s+(\S+))?$/i);
+  if (effort) {
+    await effortCommand(effort[1]?.toLowerCase());
+    return true;
+  }
+  const rename = line.match(/^\/rename(?:\s+(.+))?$/i);
+  if (rename) {
+    if (!rename[1]) toast(t("rename usage"), "error");
+    else await renameTask(agent, rename[1]);
+    return true;
+  }
   // A task lives in a project (a folder on the server); a draft with none cannot start.
   const problem = !agent.session && !agent.workspace ? "no_project" : cannotRun(account);
   if (problem) {
@@ -176,6 +188,50 @@ export async function sendGoal(agent, text) {
   if (agent.state !== "running") beginTurn(agent);
   announce({ kind: "agent", id: agent.id });
   return true;
+}
+
+// Kvist's scale of how hard the model thinks; the server keeps the person's choice and starts every core with it.
+export const EFFORT_LEVELS = ["false", "low", "medium", "high", "xhigh", "max"];
+export const effortNow = () => account.key?.effort || "medium";
+
+export async function setEffort(level) {
+  try {
+    await api("/api/effort", { method: "PUT", body: { level } });
+    await refreshKey();
+    toast(`${t("effort")}: ${level} — ${t("effort from next message")}`);
+  } catch (error) {
+    toast(error.localized ?? String(error), "error");
+  }
+}
+
+/** `/effort` alone says where it stands; `/effort high` sets it. */
+async function effortCommand(level) {
+  if (!level) {
+    toast(`${t("effort")}: ${effortNow()} · ${EFFORT_LEVELS.join(" / ")}`);
+    return;
+  }
+  if (!EFFORT_LEVELS.includes(level)) {
+    toast(`${t("effort")}: ${EFFORT_LEVELS.join(" / ")}`, "error");
+    return;
+  }
+  await setEffort(level);
+}
+
+/** Gives the task a name of the person's own; an empty name goes back to the first line of the goal. */
+export async function renameTask(agent, title) {
+  const task = account.tasks.find((item) => String(item.id) === agent.session);
+  if (!task) {
+    toast(t("rename needs task"), "error");
+    return;
+  }
+  try {
+    const renamed = await api(`/api/tasks/${task.id}`, { method: "PATCH", body: { title } });
+    Object.assign(task, renamed);
+    dispatch(agent.id, { type: "session_title", session: agent.session, title: titleOf(renamed) });
+    await refreshTasks();
+  } catch (error) {
+    toast(error.localized ?? String(error), "error");
+  }
 }
 
 /** The only commands the cloud has: another task, and continuing a paused one. */

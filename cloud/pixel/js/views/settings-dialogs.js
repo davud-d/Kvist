@@ -2,6 +2,7 @@
 // with one cheap request through the server, and the answer is said in plain words next to the field.
 // The server keeps the key encrypted and shows only its last four characters, ever again.
 
+import { renameTask } from "../actions.js";
 import { account, api, refreshKey } from "../cloud.js";
 import { fill, h } from "../dom.js";
 import { t } from "../i18n.js";
@@ -17,6 +18,21 @@ function readDraft() {
     // Storage blocked or the entry is not JSON: start without a draft.
     return {};
   }
+}
+
+/** The name the task shows in the rail and above the conversation; leave it empty to go back to the first line. */
+export function openRename(agent) {
+  const input = h("input", { class: "field", type: "text", maxlength: 120, spellcheck: "false", value: agent.title ?? "" });
+  const go = () => {
+    renameTask(agent, input.value);
+    modal.close();
+  };
+  input.addEventListener("keydown", (event) => event.key === "Enter" && go());
+  const modal = openModal({
+    title: t("rename"),
+    content: [input, h("div", { class: "dialog-buttons" }, h("button", { class: "btn primary", type: "button", onclick: go }, t("ok")), h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("cancel")))],
+  });
+  input.focus();
 }
 
 export function openKeyDialog() {
@@ -35,6 +51,9 @@ export function openKeyDialog() {
   const model = h("input", { class: "field", type: "text", placeholder: t("model name"), spellcheck: "false", value: account.key?.model ?? draft.model ?? "" });
   // One "Name: value" per line. Not in the draft: a value may be a secret.
   const headers = h("textarea", { class: "field", rows: 3, spellcheck: "false", placeholder: "x-opencode-session: {session}" });
+  // Streaming shows a file as the model writes it; a few gateways cannot do it, then this is switched off.
+  const stream = h("input", { type: "checkbox", id: "key-stream", checked: account.key?.stream !== false });
+  const streamRow = () => h("label", { class: "dim", for: "key-stream" }, stream, ` ${t("stream answers")}`);
   const parseHeaders = () => {
     const found = {};
     for (const line of headers.value.split("\n")) {
@@ -98,7 +117,7 @@ export function openKeyDialog() {
     // A sign-in has no key to paste and nothing to save: its own button does the work.
     const signIn = Boolean(current?.sign_in);
     key.style.display = save.style.display = signIn ? "none" : "";
-    fill(extra, signIn ? chatgptRows() : [current?.needs_base_url ? base : null, current?.needs_model ? model : null, current?.needs_base_url ? headersBlock() : null].filter(Boolean));
+    fill(extra, signIn ? chatgptRows() : [current?.needs_base_url ? base : null, current?.needs_model ? model : null, current?.needs_base_url ? headersBlock() : null, current?.needs_base_url ? streamRow() : null].filter(Boolean));
   };
 
   save.addEventListener("click", async () => {
@@ -111,7 +130,7 @@ export function openKeyDialog() {
     save.disabled = true;
     status.textContent = t("checking key");
     try {
-      const result = await api("/api/model-key", { method: "POST", body: { provider: choice.provider, key: key.value.trim(), base_url: base.value.trim(), model: model.value.trim(), headers: extraHeaders } });
+      const result = await api("/api/model-key", { method: "POST", body: { provider: choice.provider, key: key.value.trim(), base_url: base.value.trim(), model: model.value.trim(), headers: extraHeaders, stream: stream.checked } });
       if (!result.ok) {
         status.textContent = t(result.code);
         return undefined;

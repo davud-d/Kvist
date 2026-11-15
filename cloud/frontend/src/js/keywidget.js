@@ -76,6 +76,8 @@ export function keyWidget({ providers, saved, onValid }) {
   // Extra headers a gateway asks for, one "Name: value" per line. Not kept in the draft: a value may be a secret.
   const headersInput = h("textarea.input", { rows: 3, spellcheck: "false", autocomplete: "off", autocapitalize: "off",
     placeholder: t("onboarding.headersPlaceholder"), id: "model-headers" });
+  // Streaming shows a file as the model writes it; a few gateways cannot do it, then this is switched off.
+  const streamInput = h("input", { type: "checkbox", id: "model-stream", checked: saved.stream !== false });
   const modelList = h("datalist", { id: "model-catalog" });
   const modelInput = h("input.input", { type: "text", spellcheck: "false", autocapitalize: "off", id: "model-name",
     list: "model-catalog", autocomplete: "off" });
@@ -133,7 +135,7 @@ export function keyWidget({ providers, saved, onValid }) {
       if (mine !== sequence) return;
       const result = await api("/api/model-key", {
         method: "POST",
-        body: { provider, key, base_url: baseInput.value.trim(), model: modelInput.value.trim(), headers },
+        body: { provider, key, base_url: baseInput.value.trim(), model: modelInput.value.trim(), headers, stream: streamInput.checked },
       });
       if (mine !== sequence) return;
       if (!result.ok) {
@@ -168,6 +170,7 @@ export function keyWidget({ providers, saved, onValid }) {
   baseInput.addEventListener("change", check);
   modelInput.addEventListener("change", check);
   headersInput.addEventListener("change", check);
+  streamInput.addEventListener("change", check);
 
   function tiles() {
     return h("fieldset.tiles", { style: "border:0;padding:0;margin:0" },
@@ -259,6 +262,8 @@ export function keyWidget({ providers, saved, onValid }) {
               ? h("details", {}, h("summary", { text: t("onboarding.headersTitle") }),
                   h("label.field", { for: "model-headers" }, h("span.small", { text: t("onboarding.headersHint") }),
                     headersInput)) : null,
+            chosen.needs_base_url
+              ? h("label.row", { for: "model-stream" }, streamInput, h("span.small", { text: t("onboarding.stream") })) : null,
             h("label.field", { for: "model-key" }, h("span", { text: t("onboarding.keyLabel") }),
               h("span.keyrow", {}, keyInput, pasteButton)),
             hint));

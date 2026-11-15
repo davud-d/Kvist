@@ -37,12 +37,15 @@ export function repoLabel(url) {
   return parts.slice(-2).join("/");
 }
 
+/** The name the person gave it, or the first line of what they asked. */
+export const titleOf = (task) => task.title || firstLine(task.goal);
+
 /** A task as the rail lists it. The id is the session name, so it stays stable across reloads. */
 export function listItem(task) {
   return {
     name: String(task.id),
     public_id: task.public_id,
-    title: firstLine(task.goal),
+    title: titleOf(task),
     updated_at: task.finished_at ?? task.started_at ?? task.created_at ?? "",
     closed: FINISHED.has(task.status),
   };

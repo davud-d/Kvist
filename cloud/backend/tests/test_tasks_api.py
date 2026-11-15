@@ -171,6 +171,21 @@ def test_someone_elses_task_is_not_found(client_factory, engine):
     assert client.get(f"/api/tasks/{foreign}").status_code == 404
     assert client.get(f"/api/tasks/{foreign}/events").status_code == 404
     assert client.post(f"/api/tasks/{foreign}/cancel").status_code == 404
+    assert client.patch(f"/api/tasks/{foreign}", json={"title": "mine now"}).status_code == 404
+    with session_scope(make_session_factory(engine)) as db:
+        assert db.get(Task, foreign).title == ""
+
+
+def test_a_task_can_be_renamed_and_the_name_cleared(client_factory, engine):
+    client = signed_in(client_factory, engine)
+    task_id = client.post("/api/tasks", json={"goal": "explain the project"}).json()["id"]
+    assert client.get(f"/api/tasks/{task_id}").json()["title"] == ""
+    renamed = client.patch(f"/api/tasks/{task_id}", json={"title": "  Docs   pass\n"})
+    assert renamed.json()["title"] == "Docs pass"
+    assert client.get("/api/tasks").json()[0]["title"] == "Docs pass"
+    assert client.patch(f"/api/tasks/{task_id}", json={"title": "x" * 121}).json()["error"]["code"] == "title_too_long"
+    assert client.get(f"/api/tasks/{task_id}").json()["title"] == "Docs pass"
+    assert client.patch(f"/api/tasks/{task_id}", json={"title": ""}).json()["title"] == ""
 
 
 def test_cancel_before_the_runner_has_it(client_factory, engine):
