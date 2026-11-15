@@ -234,7 +234,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             let mut chunk = [0u8; 256];
-            socket.read(&mut chunk).unwrap();
+            let _read = socket.read(&mut chunk).unwrap();
             socket.write_all(b"HTTP/1.0 403 Forbidden\r\n\r\nno").unwrap();
         });
         assert!(open_stream(&host, "/stream").is_err());

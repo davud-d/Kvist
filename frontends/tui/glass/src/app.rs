@@ -16,11 +16,14 @@ use ratatui::layout::Rect;
 use serde_json::{Value, json};
 
 use crate::anim::{self, Ease, Tween};
+use crate::arena::{Arena, Council};
 use crate::attach::{self, Attachment};
 use crate::code::CodeBlock;
 use crate::backdrop::{LEVELS, WebFrame};
 use crate::core::{self, Core, History, Message};
+use crate::decision::{Decision, Page};
 use crate::dialog::{Ask, Body, Choice};
+use crate::execlog::{ExecLog, LogState};
 use crate::diff;
 use crate::edit;
 use crate::kitty::Gpu;
@@ -34,6 +37,7 @@ use crate::pictures::{
 use crate::probe::Caps;
 use crate::protocol;
 use crate::screen::{Feed, load_image};
+use crate::screens;
 use crate::slash::{self, Command, Enter};
 use crate::strings::{self, strings};
 use crate::term;
@@ -69,6 +73,9 @@ const MULTI_CLICK: Duration = Duration::from_millis(400);
 const DRAG_SCROLL: Duration = Duration::from_millis(45);
 /// Seconds the caustics of a pool keep drifting.
 const CAUSTIC_LIFE: f32 = 2.5;
+/// Core commands that are whole turns: the core streams the turn's events, then `turn_end`, then
+/// `command_result`. The input stays shut and Esc stops the turn until the result comes.
+const TURN_COMMANDS: [&str; 2] = ["best-of", "council"];
 
 pub enum Phase {
     Splash,
@@ -84,6 +91,15 @@ pub enum Modal {
     Browser,
     /// An attached picture opened to full size, by the N of its marker.
     Image(u32),
+    /// The question a best-of run ends with: the verdict table and four actions.
+    Decision(Decision),
+}
+
+/// What stands in the conversation's place.
+pub enum Pane<'a> {
+    Log(&'a ExecLog),
+    Arena(&'a Arena),
+    Council(&'a Council),
 }
 
 pub struct Toast {
@@ -140,6 +156,10 @@ pub struct App {
     pub agent: Agent,
     /// The slash command the core is running.
     command: Option<String>,
+    /// An executor's journal opened from the arena, read only.
+    log: Option<ExecLog>,
+    /// The arena's row the keys are on.
+    pub arena_row: usize,
     /// The journal of the session just switched to, on its way.
     replay: Option<Receiver<Result<History, String>>>,
     pub toast: Option<Toast>,
@@ -217,6 +237,9 @@ pub struct App {
     quit: bool,
     /// What the program exits with: 0, or 64 to start another interface.
     exit_code: u8,
+    /// Everything sent to the core, for tests that have no core to receive it.
+    #[cfg(test)]
+    sent: Vec<Value>,
 }
 
 impl App {
@@ -244,6 +267,8 @@ impl App {
             core_error: None,
             agent: Agent::default(),
             command: None,
+            log: None,
+            arena_row: 0,
             replay: None,
             toast: None,
             input: String::new(),
@@ -298,6 +323,8 @@ impl App {
             layout: Layout::default(),
             quit: false,
             exit_code: 0,
+            #[cfg(test)]
+            sent: Vec::new(),
         }
     }
 
@@ -334,6 +361,10 @@ impl App {
                 self.dialog_rect = layout::dialog(&self.grid, view::ask_width(ask), view::ask_height(ask, self.grid.cols));
             }
             Some(Modal::Models(_)) => self.dialog_rect = layout::dialog(&self.grid, layout::DIALOG_WIDTH, view::MODELS_HEIGHT),
+            Some(Modal::Decision(decision)) => {
+                let width = layout::dialog(&self.grid, screens::DECISION_WIDTH, 1).width;
+                self.dialog_rect = layout::dialog(&self.grid, screens::DECISION_WIDTH, screens::decision_height(decision, width));
+            }
             _ => {}
         }
     }
@@ -358,6 +389,7 @@ impl App {
     fn tick(&mut self, now: Instant, pictures: &mut Pictures) {
         self.poll_core(now);
         self.poll_replay(now);
+        self.poll_log(now);
         self.poll_input_history();
         self.sync_menu(now);
         self.sync_strip(now);
@@ -376,6 +408,58 @@ impl App {
         if self.toast.as_ref().is_some_and(|t| now.saturating_duration_since(t.at) > TOAST) {
             self.toast = None;
         }
+    }
+
+    /// The screen that stands in the conversation's place: an executor's log
+    /// over the arena, the arena, or the council.
+    pub fn pane(&self) -> Option<Pane<'_>> {
+        if let Some(log) = &self.log {
+            return Some(Pane::Log(log));
+        }
+        if let Some(arena) = &self.session.arena {
+            return Some(Pane::Arena(arena));
+        }
+        self.session.council.as_ref().map(Pane::Council)
+    }
+
+    /// Reads the journal that is on its way; a log of a run that has gone is dropped.
+    fn poll_log(&mut self, now: Instant) {
+        if self.session.arena.is_none() {
+            self.log = None;
+        }
+        if let Some(log) = self.log.as_mut() {
+            log.poll(now);
+        }
+    }
+
+    /// Opens the read-only log of the arena's executor at `index`.
+    fn open_log(&mut self, index: usize, now: Instant) {
+        let Some(executor) = self.session.arena.as_ref().and_then(|arena| arena.executors.get(index)) else { return };
+        if executor.session.is_empty() {
+            return self.notify(strings().log_no_session.to_string(), true, now);
+        }
+        self.log = Some(ExecLog::open(&executor.id, &executor.style, &executor.session, self.core.as_ref()));
+        self.scroll = 0;
+    }
+
+    fn close_log(&mut self) {
+        self.log = None;
+        self.scroll = 0;
+    }
+
+    /// Reads the open log again: its executor may have worked on since.
+    fn refresh_log(&mut self, now: Instant) {
+        let Some(id) = self.log.as_ref().map(|log| log.id.clone()) else { return };
+        let Some(index) = self.session.arena.as_ref().and_then(|arena| arena.executors.iter().position(|e| e.id == id)) else { return };
+        self.open_log(index, now);
+    }
+
+    /// Takes the arena or the council off the screen and gives the conversation back.
+    fn dismiss_pane(&mut self) {
+        self.session.clear_screens();
+        self.log = None;
+        self.arena_row = 0;
+        self.scroll = 0;
     }
 
     /// Nothing can be typed: the session is closed, another frontend drives it, or the server is out of reach.
@@ -639,6 +723,8 @@ impl App {
             }
         }
         self.session.settle();
+        // A run of the past has nothing left to watch or decide; its words are in the conversation.
+        self.session.clear_screens();
         if !self.session.files.is_empty() || !self.session.helpers.is_empty() {
             self.left_in.go(1.0, now, 480, Ease::Burst);
         }
@@ -666,7 +752,7 @@ impl App {
         if let Some(reason) = gone {
             self.core = None;
             self.command = None;
-            if matches!(self.modal, Some(Modal::Ask(_))) {
+            if matches!(self.modal, Some(Modal::Ask(_) | Modal::Decision(_))) {
                 self.close_modal(now);
             }
             self.notify(format!("{}: {reason}", strings().core_gone), true, now);
@@ -738,7 +824,19 @@ impl App {
         }
     }
 
+    /// Shows `modal` as the open dialog; one that follows another does not slide in again.
+    fn open_dialog(&mut self, modal: Modal, now: Instant) {
+        let opening = !matches!(self.modal, Some(Modal::Ask(_) | Modal::Decision(_))) || self.modal_p.target() == 0.0;
+        self.modal = Some(modal);
+        if opening {
+            self.modal_p.go(1.0, now, 200, Ease::OutCubic);
+        }
+    }
+
     fn on_request(&mut self, event: &Value, now: Instant) {
+        if let Some(decision) = self.session.arena.as_mut().and_then(|arena| Decision::from_request(event, arena)) {
+            return self.open_dialog(Modal::Decision(decision), now);
+        }
         let Some(mut ask) = Ask::from_request(event) else {
             // A dialog this interface cannot draw must still be answered, or
             // the core waits for ever.
@@ -754,20 +852,19 @@ impl App {
         {
             ask.text = plan;
         }
-        let opening = !matches!(self.modal, Some(Modal::Ask(_))) || self.modal_p.target() == 0.0;
-        self.modal = Some(Modal::Ask(Some(ask)));
-        if opening {
-            self.modal_p.go(1.0, now, 200, Ease::OutCubic);
-        }
+        self.open_dialog(Modal::Ask(Some(ask)), now);
     }
 
     fn on_command_result(&mut self, event: &Value, now: Instant) {
-        self.command = None;
+        // A command that failed before its turn began sends no `turn_end`.
+        if self.command.take().is_some_and(|name| TURN_COMMANDS.contains(&name.as_str())) {
+            self.session.apply(CoreEvent::TurnEnd, now);
+        }
         let ok = event.get("ok").and_then(Value::as_bool).unwrap_or(false);
         if event.get("name").and_then(Value::as_str) == Some("catalog") && ok {
             return self.open_catalog(event.get("effects"), now);
         }
-        if matches!(self.modal, Some(Modal::Ask(_) | Modal::Models(_))) {
+        if matches!(self.modal, Some(Modal::Ask(_) | Modal::Models(_) | Modal::Decision(_))) {
             self.close_modal(now);
         }
         let effects = event.get("effects");
@@ -859,6 +956,8 @@ impl App {
     }
 
     fn send(&mut self, message: &Value, now: Instant) {
+        #[cfg(test)]
+        self.sent.push(message.clone());
         let Some(core) = self.core.as_mut() else {
             self.notify(strings().no_core.to_string(), true, now);
             return;
@@ -879,8 +978,18 @@ impl App {
             self.notify(strings().core_busy.to_string(), true, now);
             return;
         }
+        self.start_command(name, args, now);
+    }
+
+    fn start_command(&mut self, name: &str, args: &[&str], now: Instant) {
         self.command = Some(name.to_string());
         self.send(&json!({"type": "command", "name": name, "args": args}), now);
+        if TURN_COMMANDS.contains(&name) {
+            let typed = std::iter::once(format!("/{name}")).chain(args.iter().map(|arg| arg.to_string())).collect::<Vec<_>>().join(" ");
+            self.session.submit(typed, now);
+            self.scroll = 0;
+            self.input_pos.go(1.0, now, 540, Ease::Burst);
+        }
     }
 
     /// Sends a dialog's answer. A command may ask again, so its pane stays
@@ -915,6 +1024,7 @@ impl App {
             || tweens.iter().any(|t| t.running(now))
             || view::revealing(self, now)
             || self.image_pending
+            || self.log.as_ref().is_some_and(|log| matches!(log.state, LogState::Loading))
             || !self.code.is_empty()
             || self.develop_step(now) < DEVELOP_STEPS
             || self.pour.as_ref().is_some_and(|pour| pour.moving(now))
@@ -992,7 +1102,7 @@ impl App {
             let stage = (open * 2.0).round() as u8;
             cards.push(CardSpec { slot: SLOT_MENU, style: CardStyle::Menu(stage), rect: menu, dx: 0.0, dy: (1.0 - open) * 0.8 * ch });
         }
-        if let Some(Modal::Ask(_) | Modal::Models(_)) = self.modal
+        if let Some(Modal::Ask(_) | Modal::Models(_) | Modal::Decision(_)) = self.modal
             && modal > 0.05
         {
             let dy = ((1.0 - modal) * 1.4).round() * ch;
@@ -1071,6 +1181,7 @@ impl App {
         }
         match self.modal {
             Some(Modal::Ask(_)) => self.ask_key(key, now),
+            Some(Modal::Decision(_)) => self.decision_key(key, now),
             Some(Modal::Models(_)) => self.models_key(key, now),
             Some(Modal::Browser | Modal::Image(_)) => {
                 match key.code {
@@ -1131,8 +1242,11 @@ impl App {
             KeyCode::Char('v') if ctrl && !self.input_locked() => return self.paste_from_clipboard(now),
             KeyCode::Esc if self.pour.is_some() => return self.drain_water(now),
             KeyCode::Esc if self.diff_in.target() > 0.0 => return self.close_diff(now),
+            KeyCode::Esc if self.log.is_some() => return self.close_log(),
             KeyCode::Esc if self.session.busy => return self.stop(now),
             KeyCode::Esc if self.helpers_in.target() > 0.0 => return self.toggle_helpers(None, now),
+            KeyCode::Esc if self.pane().is_some() => return self.dismiss_pane(),
+            KeyCode::Char('r') if ctrl && self.log.is_some() => return self.refresh_log(now),
             _ => {}
         }
         if self.input_locked() {
@@ -1155,6 +1269,9 @@ impl App {
                 }
                 _ => {}
             }
+        }
+        if !ctrl && !alt && self.input.is_empty() && self.pane_key(key.code, now) {
+            return;
         }
         match key.code {
             KeyCode::Char('u') if ctrl => {
@@ -1190,6 +1307,88 @@ impl App {
             KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(8),
             KeyCode::Char(c) if !ctrl => self.insert(&c.to_string(), now),
             _ => {}
+        }
+    }
+
+    /// Up, Down and Enter on the arena or its log while the input is empty;
+    /// true when the key was theirs.
+    fn pane_key(&mut self, code: KeyCode, now: Instant) -> bool {
+        let rows = self.session.arena.as_ref().map_or(0, |arena| arena.executors.len());
+        match (self.log.is_some(), code) {
+            (true, KeyCode::Up) => self.scroll += 1,
+            (true, KeyCode::Down) => self.scroll = self.scroll.saturating_sub(1),
+            (false, KeyCode::Up) if rows > 0 => self.arena_row = self.arena_row.min(rows - 1).saturating_sub(1),
+            (false, KeyCode::Down) if rows > 0 => self.arena_row = (self.arena_row + 1).min(rows - 1),
+            (false, KeyCode::Enter) if rows > 0 => self.open_log(self.arena_row.min(rows - 1), now),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Keys of the decision dialog: rows, actions, the patch, and a letter for each action.
+    fn decision_key(&mut self, key: KeyEvent, now: Instant) {
+        let card = self.dialog_rect;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let Some(Modal::Decision(decision)) = self.modal.as_mut() else { return };
+        if decision.waiting {
+            return;
+        }
+        let patch_page = decision.page == Page::Patch;
+        let most = screens::patch_max_scroll(decision, card, strings());
+        let reply = match key.code {
+            KeyCode::Esc => {
+                let cancel = decision.cancel();
+                self.send(&cancel, now);
+                return self.close_modal(now);
+            }
+            KeyCode::Enter => decision.accept(),
+            KeyCode::Tab if decision.patch.is_some() => {
+                decision.page = if patch_page { Page::Table } else { Page::Patch };
+                None
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown if patch_page => {
+                let step: i32 = match key.code {
+                    KeyCode::Up => -1,
+                    KeyCode::Down => 1,
+                    KeyCode::PageUp => -10,
+                    _ => 10,
+                };
+                decision.scroll = (decision.scroll as i32 + step).clamp(0, most as i32) as usize;
+                None
+            }
+            KeyCode::Up => {
+                decision.step_row(-1);
+                None
+            }
+            KeyCode::Down => {
+                decision.step_row(1);
+                None
+            }
+            KeyCode::Left => {
+                decision.step_action(-1);
+                None
+            }
+            KeyCode::Right => {
+                decision.step_action(1);
+                None
+            }
+            KeyCode::Char(c) if !ctrl => decision.hotkey(c).map(|action| decision.reply(action)),
+            _ => None,
+        };
+        if let Some(reply) = reply {
+            self.answer_decision(reply, now);
+        }
+    }
+
+    /// Sends the decision. The core may ask again (after the diff), so while a
+    /// command runs the dialog waits for the next question or the command's end.
+    fn answer_decision(&mut self, reply: Value, now: Instant) {
+        self.send(&reply, now);
+        if self.command.is_none() {
+            return self.close_modal(now);
+        }
+        if let Some(Modal::Decision(decision)) = self.modal.as_mut() {
+            decision.waiting = true;
         }
     }
 
@@ -1476,6 +1675,8 @@ impl App {
         self.strip_in = Tween::settled(0.0);
         self.scroll = 0;
         self.helper_focus = None;
+        self.log = None;
+        self.arena_row = 0;
         self.code.clear();
         self.input_pos.go(0.0, now, 540, Ease::Burst);
         self.left_in = Tween::settled(0.0);
@@ -1636,6 +1837,9 @@ impl App {
             MouseEventKind::Moved => match (hit, self.modal.as_mut()) {
                 (Some(Hit::Choice(row)), Some(Modal::Ask(Some(ask)))) => ask.select_row(row),
                 (Some(Hit::ModelRow(row)), Some(Modal::Models(Some(picker)))) => picker.select_row(row),
+                (Some(Hit::Verdict(row)), Some(Modal::Decision(decision))) if !decision.waiting => {
+                    decision.step_row(row as i32 - decision.row as i32)
+                }
                 (Some(Hit::Command(row)), None) => self.pick = row,
                 _ => {}
             },
@@ -1777,6 +1981,11 @@ impl App {
                 picker.step(delta);
                 picker.follow(view::models_list_rows(card));
             }
+            Some(Modal::Decision(decision)) if decision.page == Page::Patch => {
+                let most = screens::patch_max_scroll(decision, card, strings());
+                decision.scroll = (decision.scroll as i32 + delta * 3).clamp(0, most as i32) as usize;
+            }
+            Some(Modal::Decision(decision)) => decision.step_row(delta),
             Some(_) => {}
             None if self.layout.diff.is_some_and(|panel| contains(panel, self.last_mouse)) => {
                 let rows = self.diff_rows();
@@ -1813,7 +2022,23 @@ impl App {
                     self.answer(reply, now);
                 }
             }
-            Some(Modal::Ask(None) | Modal::Models(None)) => {}
+            Some(Modal::Decision(decision)) if !decision.waiting => {
+                let reply = match hit {
+                    Some(Hit::Verdict(row)) => {
+                        decision.step_row(row as i32 - decision.row as i32);
+                        None
+                    }
+                    Some(Hit::Action(index)) => {
+                        decision.action = index.min(decision.actions.len().saturating_sub(1));
+                        decision.accept()
+                    }
+                    _ => None,
+                };
+                if let Some(reply) = reply {
+                    self.answer_decision(reply, now);
+                }
+            }
+            Some(Modal::Ask(None) | Modal::Models(None) | Modal::Decision(_)) => {}
             Some(Modal::Models(Some(picker))) => match hit {
                 Some(Hit::ModelRow(row)) => {
                     picker.select_row(row);
@@ -1830,6 +2055,10 @@ impl App {
                 Some(Hit::Thumb) => self.open_browser(now),
                 Some(Hit::Attachment(id)) => self.open_image(id, now),
                 Some(Hit::File(index)) => self.open_diff(index, now),
+                Some(Hit::Executor(index)) => {
+                    self.arena_row = index;
+                    self.open_log(index, now);
+                }
                 Some(Hit::DiffClose) => self.close_diff(now),
                 Some(Hit::Helper(id)) => self.toggle_helpers(Some(id), now),
                 Some(Hit::HelpersTitle | Hit::HelpersClose) => self.toggle_helpers(None, now),
@@ -2689,5 +2918,370 @@ mod tests {
         assert!(matches!(app.modal, Some(Modal::Image(1))));
         app.click(None, now + Duration::from_secs(2));
         assert_eq!(app.modal_p.target(), 0.0);
+    }
+
+    // -- best-of and council, from the events the core is to send --
+
+    fn feed(app: &mut App, events: &[Value]) {
+        let now = Instant::now();
+        for event in events {
+            app.on_core(event, now);
+        }
+    }
+
+    fn status(id: &str, state: &str, step: u32, tests: Value, usage: Value) -> Value {
+        json!({"type": "bestof_status", "run_id": "r1", "executor_id": id, "style": format!("style-{id}"), "branch": format!("kvist/bestof/r1/{id}"),
+            "state": state, "step": step, "tests": tests, "diff": {"files": 2, "added": 30, "removed": 4}, "usage": usage})
+    }
+
+    fn started() -> Value {
+        json!({"type": "bestof_started", "run_id": "r1", "task": "fix the parser", "count": 3, "base": "abc123", "executors": [
+            {"executor_id": "e1", "style": "style-e1", "branch": "kvist/bestof/r1/e1", "session": "s-e1"},
+            {"executor_id": "e2", "style": "style-e2", "branch": "kvist/bestof/r1/e2", "session": "s-e2"},
+            {"executor_id": "e3", "style": "style-e3", "branch": "kvist/bestof/r1/e3", "session": "s-e3"}]})
+    }
+
+    fn verdict() -> Value {
+        let row = |id: &str, outcome: &str, tests: &str| {
+            json!({"executor_id": id, "style": format!("style-{id}"), "outcome": outcome,
+                "tests": {"state": tests, "summary": ""}, "diff": {"files": 1, "added": 5, "removed": 1}, "note": format!("note {id}")})
+        };
+        json!({"type": "bestof_verdict", "run_id": "r1", "winner": "e2", "reason": "e2 passes every test.",
+            "rows": [row("e1", "finalist", "passed"), row("e2", "winner", "passed"), row("e3", "eliminated", "failed")]})
+    }
+
+    fn decision_request() -> Value {
+        json!({"type": "input_request", "request_id": "q1", "kind": "choice", "title": "Which result?", "body": "text of the verdict",
+            "purpose": "bestof_decision", "run_id": "r1",
+            "options": [{"value": "accept", "label": "Accept"}, {"value": "diff", "label": "Diff"}, {"value": "other", "label": "Other"}, {"value": "discard", "label": "Discard"}]})
+    }
+
+    /// A run that has reached the question: three executors, one of them out, the verdict, the dialog.
+    fn decision_app() -> App {
+        let mut app = main_app();
+        feed(
+            &mut app,
+            &[
+                started(),
+                status("e1", "finished", 8, json!({"state": "passed", "summary": "12 passed"}), json!({"input_tokens": 1000, "output_tokens": 100, "cost_usd": 0.25, "cost_approx": false})),
+                status("e2", "finished", 6, json!({"state": "passed", "summary": "12 passed"}), json!({"input_tokens": 900, "output_tokens": 90, "cost_usd": 0.125, "cost_approx": false})),
+                status("e3", "running", 3, json!({"state": "failed", "summary": "2 failed"}), json!({"input_tokens": 500, "output_tokens": 50, "cost_approx": false})),
+                json!({"type": "executor_activity", "run_id": "r1", "executor_id": "e3", "phase": "step", "call_id": "c1", "action_type": "run_shell", "label": "runs pytest"}),
+                json!({"type": "bestof_eliminated", "run_id": "r1", "executor_id": "e3", "reason": "tests keep failing"}),
+                verdict(),
+                decision_request(),
+            ],
+        );
+        app.modal_p = Tween::settled(1.0);
+        app.relayout(Instant::now());
+        app
+    }
+
+    fn last_value(app: &App) -> Value {
+        app.sent.last().cloned().unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn a_best_of_run_builds_the_arena_and_ends_in_the_decision_dialog() {
+        let mut app = decision_app();
+        let arena = app.session.arena.as_ref().expect("an arena");
+        assert_eq!((arena.run_id.as_str(), arena.task.as_str(), arena.executors.len()), ("r1", "fix the parser", 3));
+        assert_eq!(arena.executors[0].state, crate::arena::ExecState::Finished);
+        assert_eq!((arena.executors[0].step, arena.executors[0].diff.added), (8, 30));
+        assert_eq!(arena.executors[0].tests.summary, "12 passed");
+        let out = &arena.executors[2];
+        assert_eq!((out.state, out.reason.as_str()), (crate::arena::ExecState::Eliminated, "tests keep failing"));
+        assert_eq!(out.last.as_ref().map(|call| call.label.as_str()), Some("runs pytest"));
+        assert_eq!(arena.verdict.as_ref().map(|v| v.winner.as_str()), Some("e2"));
+        // The arena stands in the conversation's place, and the question is the verdict table.
+        assert!(matches!(app.pane(), Some(Pane::Arena(_))));
+        let Some(Modal::Decision(decision)) = &app.modal else { panic!("the decision dialog") };
+        assert_eq!((decision.request_id.as_str(), decision.row, decision.page), ("q1", 1, Page::Table));
+        assert_eq!(decision.actions.len(), 4);
+
+        feed(&mut app, &[json!({"type": "bestof_finished", "run_id": "r1", "outcome": "accepted", "executor_id": "e2", "commit": "abc1234", "message": "Committed"})]);
+        let finished = app.session.arena.as_ref().and_then(|a| a.finished.as_ref()).expect("the closing line");
+        assert_eq!((finished.id.as_str(), finished.commit.as_str()), ("e2", "abc1234"));
+    }
+
+    #[test]
+    fn each_decision_sends_exactly_the_reply_the_core_reads() {
+        let now = Instant::now();
+        // Accept: Enter on the button the dialog opens on.
+        let mut app = decision_app();
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(last_value(&app), json!({"request_id": "q1", "value": "accept"}));
+        assert_eq!(app.modal_p.target(), 0.0, "no command is running: the dialog closes");
+
+        // The diff of the row the person is on.
+        let mut app = decision_app();
+        typing(&mut app, "d");
+        assert_eq!(last_value(&app), json!({"request_id": "q1", "value": "diff:e2"}));
+
+        // Another row, then "pick another".
+        let mut app = decision_app();
+        press(&mut app, KeyCode::Down);
+        typing(&mut app, "p");
+        assert_eq!(last_value(&app), json!({"request_id": "q1", "value": "pick:e3"}));
+
+        // The buttons by arrows: the fourth is "discard".
+        let mut app = decision_app();
+        for _ in 0..3 {
+            press(&mut app, KeyCode::Right);
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(last_value(&app), json!({"request_id": "q1", "value": "discard"}));
+
+        // By the mouse: draw once, click the second button ("see the diff") of the row the table opens on.
+        let mut app = decision_app();
+        draw_once(&mut app, now);
+        click_on(&mut app, |h| matches!(h, Hit::Action(1)), now);
+        assert_eq!(last_value(&app), json!({"request_id": "q1", "value": "diff:e2"}));
+
+        // Esc is no decision for now.
+        let mut app = decision_app();
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(last_value(&app), json!({"request_id": "q1", "value": null}));
+        assert_eq!(app.sent.len(), 1, "exactly one reply");
+    }
+
+    #[test]
+    fn after_diff_the_core_asks_again_and_the_patch_is_shown_once() {
+        let mut app = decision_app();
+        app.command = Some("best-of".into());
+        typing(&mut app, "d");
+        assert!(matches!(&app.modal, Some(Modal::Decision(d)) if d.waiting), "the dialog waits for the next question");
+        feed(
+            &mut app,
+            &[
+                json!({"type": "bestof_diff", "run_id": "r1", "executor_id": "e2", "files": ["a.py"],
+                    "patch": "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old line\n+new line\n[... 40 characters omitted ...]"}),
+                decision_request(),
+            ],
+        );
+        let Some(Modal::Decision(decision)) = &app.modal else { panic!("the dialog") };
+        assert!(!decision.waiting);
+        assert_eq!(decision.page, Page::Patch);
+        assert_eq!(decision.patch.as_ref().map(|p| p.id.as_str()), Some("e2"));
+        press(&mut app, KeyCode::Tab);
+        assert!(matches!(&app.modal, Some(Modal::Decision(d)) if d.page == Page::Table));
+        // The dialog is drawn on either page.
+        for _ in 0..2 {
+            app.relayout(Instant::now());
+            let mut buffer = ratatui::buffer::Buffer::empty(app.grid.full());
+            view::draw(&app, &mut buffer, Instant::now());
+            press(&mut app, KeyCode::Tab);
+        }
+    }
+
+    #[test]
+    fn a_decision_for_another_run_or_with_no_verdict_is_an_ordinary_list() {
+        let mut app = main_app();
+        feed(&mut app, &[started(), decision_request()]);
+        assert!(matches!(app.modal, Some(Modal::Ask(Some(_)))), "no verdict yet: a plain list");
+        let mut app = main_app();
+        feed(&mut app, &[started(), verdict(), json!({"type": "input_request", "request_id": "q2", "kind": "choice", "options": [{"value": "x"}]})]);
+        assert!(matches!(app.modal, Some(Modal::Ask(Some(_)))), "a question without the purpose is not the decision");
+    }
+
+    #[test]
+    fn a_best_of_command_is_a_turn_that_ends_and_leaves_the_input_free() {
+        let mut app = main_app();
+        let now = Instant::now();
+        app.start_command("best-of", &["3", "fix", "the", "parser"], now);
+        assert_eq!(last_value(&app), json!({"type": "command", "name": "best-of", "args": ["3", "fix", "the", "parser"]}));
+        assert!(app.session.busy, "Esc can stop it");
+        assert!(matches!(app.session.items.first(), Some(Item::User(text)) if text == "/best-of 3 fix the parser"));
+
+        // Esc twice stops the turn the usual way.
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(last_value(&app), json!({"type": "cancel"}));
+
+        feed(&mut app, &[started(), json!({"type": "turn_end"})]);
+        assert!(!app.session.busy);
+        assert!(app.command.is_some(), "the result has not come");
+        feed(&mut app, &[json!({"type": "command_result", "name": "best-of", "ok": true, "message": "Done / Готово"})]);
+        assert!(app.command.is_none() && !app.session.busy);
+        // Typing and sending work again.
+        typing(&mut app, "hello");
+        assert_eq!(app.input, "hello");
+        assert!(!app.input_locked());
+    }
+
+    #[test]
+    fn a_best_of_command_that_fails_at_once_does_not_leave_the_turn_running() {
+        let mut app = main_app();
+        app.start_command("best-of", &["x"], Instant::now());
+        assert!(app.session.busy);
+        feed(&mut app, &[json!({"type": "command_result", "name": "best-of", "ok": false, "message": "Usage / Использование"})]);
+        assert!(!app.session.busy && app.command.is_none());
+        assert!(app.toast.as_ref().is_some_and(|toast| toast.error));
+    }
+
+    #[test]
+    fn arrows_and_enter_choose_an_executor_and_esc_gives_the_conversation_back() {
+        let mut app = main_app();
+        feed(&mut app, &[started(), json!({"type": "turn_end"})]);
+        assert_eq!(app.arena_row, 0);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.arena_row, 2, "the last row holds");
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.arena_row, 1);
+        // A typed character is the person's own input; the arrows are the arena's only while the input is empty.
+        typing(&mut app, "x");
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.arena_row, 1);
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Esc);
+        assert!(app.pane().is_none() && app.session.arena.is_none());
+    }
+
+    #[test]
+    fn a_click_on_an_executors_row_opens_its_log_and_esc_goes_back() {
+        let mut app = main_app();
+        app.grid = Grid { cols: 120, rows: 40, cw: 10, ch: 20 };
+        let now = Instant::now();
+        feed(&mut app, &[started(), status("e2", "running", 2, json!({"state": "running", "summary": ""}), json!({"input_tokens": 1, "output_tokens": 1, "cost_approx": false}))]);
+        app.input_rise = Tween::settled(1.0);
+        draw_once(&mut app, now);
+        click_on(&mut app, |h| matches!(h, Hit::Executor(1)), now);
+        let log = app.log.as_ref().expect("the log of the second executor");
+        assert_eq!(log.id, "e2");
+        assert!(matches!(log.state, LogState::Failed(_)), "this test has no core to read the journal from");
+        assert!(matches!(app.pane(), Some(Pane::Log(_))));
+        // Esc is "back", even while a turn runs; it does not stop the turn.
+        app.session.busy = true;
+        press(&mut app, KeyCode::Esc);
+        assert!(app.log.is_none() && matches!(app.pane(), Some(Pane::Arena(_))));
+        assert!(app.stop_armed.is_none());
+    }
+
+    #[test]
+    fn a_council_fills_its_cards_marks_the_chosen_one_and_lists_the_dissent() {
+        let mut app = main_app();
+        feed(
+            &mut app,
+            &[
+                json!({"type": "council_started", "council_id": "c1", "question": "Which queue?", "members": [
+                    {"executor_id": "m1", "angle": "simplicity", "session": "s1"}, {"executor_id": "m2", "angle": "security", "session": "s2"},
+                    {"executor_id": "m3", "angle": "speed", "session": "s3"}, {"executor_id": "m4", "angle": "maintenance", "session": "s4"}]}),
+                json!({"type": "council_card", "council_id": "c1", "executor_id": "m1", "angle": "simplicity", "decision": "Use a list", "argument": "It is enough"}),
+                json!({"type": "council_card", "council_id": "c1", "executor_id": "m2", "angle": "security", "decision": "Use a bounded queue", "argument": "No unbounded growth"}),
+                json!({"type": "council_objection", "council_id": "c1", "executor_id": "m2", "angle": "security", "risks": [{"target": "m1", "risk": "grows without limit"}]}),
+            ],
+        );
+        let council = app.session.council.as_ref().expect("a council");
+        assert_eq!(council.cards.len(), 4);
+        assert_eq!(council.cards[0].decision.as_deref(), Some("Use a list"));
+        assert_eq!(council.cards[2].decision, None, "the third card has not arrived");
+        assert_eq!(council.cards[1].risks.len(), 1);
+        assert!(council.cards.iter().all(|card| !council.chosen(card)));
+
+        feed(
+            &mut app,
+            &[json!({"type": "council_verdict", "council_id": "c1", "chosen": "m2", "decision": "Use a bounded queue", "reason": "Safe and small.",
+                "dissent": [{"executor_id": "m1", "angle": "simplicity", "why": "a list is enough"}]})],
+        );
+        let council = app.session.council.as_ref().unwrap();
+        assert_eq!(council.cards.iter().map(|card| council.chosen(card)).collect::<Vec<_>>(), [false, true, false, false]);
+        assert!(matches!(app.pane(), Some(Pane::Council(_))));
+        // The screen draws without a panic at a narrow and a wide window.
+        for cols in [70, 120] {
+            app.grid = Grid { cols, rows: 40, cw: 10, ch: 20 };
+            app.relayout(Instant::now());
+            let mut buffer = ratatui::buffer::Buffer::empty(app.grid.full());
+            view::draw(&app, &mut buffer, Instant::now());
+        }
+        press(&mut app, KeyCode::Esc);
+        assert!(app.pane().is_none());
+    }
+
+    #[test]
+    fn the_status_line_adds_up_the_main_stream_and_the_executors_and_names_the_tool_mode() {
+        let mut app = main_app();
+        feed(
+            &mut app,
+            &[
+                json!({"type": "tool_mode", "mode": "native", "reason": "probe_ok"}),
+                json!({"type": "usage", "input_tokens": 2000, "output_tokens": 100, "cost_usd": 0.5, "cost_approx": false}),
+            ],
+        );
+        assert_eq!(app.session.tool_mode.as_deref(), Some("native"));
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("$0.50"));
+        // A run's executors count by their latest snapshot, which replaces the one before.
+        let usage = |cost: f64, approx: bool| json!({"input_tokens": 10, "output_tokens": 1, "cost_usd": cost, "cost_approx": approx});
+        feed(&mut app, &[started(), status("e1", "running", 1, json!({"state": "unknown", "summary": ""}), usage(0.25, false))]);
+        feed(&mut app, &[status("e1", "running", 2, json!({"state": "unknown", "summary": ""}), usage(0.5, false))]);
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("$1.00"));
+        // One approximate price makes the sum approximate, and so does a call with no price at all.
+        feed(&mut app, &[status("e2", "running", 1, json!({"state": "unknown", "summary": ""}), usage(0.25, true))]);
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("≈$1.25"));
+        feed(&mut app, &[status("e3", "running", 1, json!({"state": "unknown", "summary": ""}), json!({"input_tokens": 7, "output_tokens": 1, "cost_approx": false}))]);
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("≈$1.25"));
+        assert!(view::status_info(&app).iter().any(|(text, _)| text.contains('$')));
+        // The cost stays in the total when the run is dismissed.
+        press(&mut app, KeyCode::Esc);
+        assert!(app.session.arena.is_none());
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("≈$1.25"));
+    }
+
+    #[test]
+    fn without_any_price_the_status_line_counts_tokens_and_what_the_cache_did_not_serve() {
+        let mut app = main_app();
+        feed(
+            &mut app,
+            &[
+                json!({"type": "usage", "input_tokens": 10000, "output_tokens": 500, "cache_read_tokens": 8000, "cost_approx": false}),
+                json!({"type": "usage", "input_tokens": 5000, "output_tokens": 500}),
+            ],
+        );
+        // The second call did not say what the cache served: the uncached part is an upper bound.
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("total 16.0k tok · ≈7.0k uncached"));
+        assert_eq!(app.session.total_spend().label(true).as_deref(), Some("всего 16,0 тыс. ток · ≈7,0 тыс. некэш."));
+        assert!(view::status_info(&app).iter().any(|(text, _)| text.contains("16")));
+        feed(&mut app, &[json!({"type": "usage", "input_tokens": 1000, "output_tokens": 0, "cache_read_tokens": 1000})]);
+        assert_eq!(app.session.total_spend().label(false).as_deref(), Some("total 17.0k tok · ≈7.0k uncached"));
+        // Nobody said: no uncached part at all.
+        let mut silent = main_app();
+        feed(&mut silent, &[json!({"type": "usage", "input_tokens": 10000, "output_tokens": 500}), json!({"type": "usage", "input_tokens": 5000, "output_tokens": 500})]);
+        assert_eq!(silent.session.total_spend().label(false).as_deref(), Some("total 16.0k tok"));
+        // Nothing reported: nothing shown.
+        assert!(view::status_info(&main_app()).is_empty());
+    }
+
+    #[test]
+    fn the_arena_and_the_decision_dialog_are_drawn_on_the_screen() {
+        let mut app = decision_app();
+        app.grid = Grid { cols: 130, rows: 44, cw: 10, ch: 20 };
+        app.input_rise = Tween::settled(1.0);
+        app.input_pos = Tween::settled(1.0);
+        let now = Instant::now();
+        let shown = screen_text(&mut app, now + Duration::from_secs(2));
+        for part in ["style-e1", "style-e2", "tests keep failing", "note e2", "e2 passes every test."] {
+            assert!(shown.contains(part), "{part} on screen");
+        }
+        app.modal = None;
+        let arena_only = screen_text(&mut app, now + Duration::from_secs(2));
+        assert!(arena_only.contains("style-e3") && !arena_only.contains("note e2"));
+    }
+
+    #[test]
+    fn a_session_switched_to_does_not_bring_back_a_finished_run_as_a_screen() {
+        let mut app = app();
+        let history = History {
+            events: vec![
+                json!({"type": "user", "text": "/best-of 2 fix"}),
+                started(),
+                verdict(),
+                json!({"type": "bestof_finished", "run_id": "r1", "outcome": "discarded", "message": "Thrown away"}),
+                json!({"type": "turn_end"}),
+            ],
+            has_more: false,
+        };
+        app.show_history(history, Instant::now());
+        assert!(app.session.arena.is_none() && app.pane().is_none());
     }
 }

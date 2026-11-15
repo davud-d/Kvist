@@ -23,7 +23,7 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 25] = [
+pub const COMMANDS: [Command; 27] = [
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
     Command { needs_argument: true, ..command("rename", "Set the active session's title", "Задать название сессии") },
@@ -34,6 +34,14 @@ pub const COMMANDS: [Command; 25] = [
     command("style", "Working style of the agent and the chat", "Стиль работы агента и чата"),
     command("verbose", "Toggle verbose mode (on | off)", "Подробный режим (on | off)"),
     command("changes", "Files the agent changed, across sessions", "Файлы, которые изменил агент"),
+    Command {
+        needs_argument: true,
+        ..command("best-of", "N agents try one task apart: /best-of 3 <task>", "N агентов решают одну задачу порознь: /best-of 3 <задача>")
+    },
+    Command {
+        needs_argument: true,
+        ..command("council", "Four angles on one question: /council <question>", "Четыре стороны одного вопроса: /council <вопрос>")
+    },
     command("context", "Context size of the model and how much is used", "Размер контекста и сколько занято"),
     command("memory", "What Kvist remembers: inspect, why, forget, pause", "Что помнит Kvist: inspect, why, forget, pause"),
     command("doctor", "Check modules, frontends, provider, keys and settings", "Проверить модули, интерфейсы, провайдера, ключи и настройки"),

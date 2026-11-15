@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::arena::{Arena, ArenaDiff, Council, CouncilVerdict, Finished, Member, Risk, Spend, Started, Status, Usage, Verdict};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolKind {
     Read,
@@ -58,6 +60,24 @@ pub enum CoreEvent {
     SessionEnded { notice: String },
     Error(String),
     TurnEnd,
+    /// One model call's tokens and price (`usage`).
+    Spent(Usage),
+    /// How the model's calls travel: `native` or `text` (`tool_mode`).
+    ToolMode(String),
+    BestofStarted(Started),
+    BestofStatus(Status),
+    /// An executor's call started (`executor_activity`, phase `step`).
+    ExecutorStep { run_id: String, id: String, call: String, kind: ToolKind, label: String },
+    /// An executor's call ended (`executor_activity`, phase `result`).
+    ExecutorResult { run_id: String, id: String, call: String, ok: bool, summary: String },
+    BestofEliminated { run_id: String, id: String, reason: String },
+    BestofVerdict(Verdict),
+    BestofDiff(ArenaDiff),
+    BestofFinished(Finished),
+    CouncilStarted { council_id: String, question: String, members: Vec<Member> },
+    CouncilCard { council_id: String, id: String, angle: String, decision: String, argument: String },
+    CouncilObjection { council_id: String, id: String, angle: String, risks: Vec<Risk> },
+    CouncilVerdict(CouncilVerdict),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +137,12 @@ pub struct Session {
     pub files: Vec<FileChange>,
     pub helpers: Vec<Helper>,
     pub browser: Option<Browser>,
+    /// The best-of run on screen, from its start until the person dismisses it.
+    pub arena: Option<Arena>,
+    pub council: Option<Council>,
+    /// Tokens and money of the main stream and of the runs already dismissed.
+    pub spend: Spend,
+    pub tool_mode: Option<String>,
     pub busy: bool,
     pub thinking_since: Option<Instant>,
     /// Set once the session is closed: the notice and when it arrived.
@@ -136,6 +162,25 @@ impl Session {
     fn begin_turn(&mut self, now: Instant) {
         self.busy = true;
         self.thinking_since = Some(now);
+        self.clear_screens();
+    }
+
+    /// Takes the arena and the council off the screen. What the executors
+    /// spent stays in the total.
+    pub fn clear_screens(&mut self) {
+        if let Some(arena) = self.arena.take() {
+            self.spend.merge(&arena.spend());
+        }
+        self.council = None;
+    }
+
+    /// Everything spent in this session: the main stream, and the executors of a run still on screen.
+    pub fn total_spend(&self) -> Spend {
+        let mut total = self.spend.clone();
+        if let Some(arena) = &self.arena {
+            total.merge(&arena.spend());
+        }
+        total
     }
 
     pub fn apply(&mut self, event: CoreEvent, now: Instant) {
@@ -156,12 +201,12 @@ impl Session {
             CoreEvent::Step { call, kind, label } if self.early.contains(&call) => {
                 self.early.retain(|c| *c != call);
                 for item in self.items.iter_mut() {
-                    if let Item::Tool { call: c, kind: k, label: l, .. } = item {
-                        if *c == call {
-                            *k = kind;
-                            *l = label;
-                            break;
-                        }
+                    if let Item::Tool { call: c, kind: k, label: l, .. } = item
+                        && *c == call
+                    {
+                        *k = kind;
+                        *l = label;
+                        break;
                     }
                 }
                 self.thinking_since = None;
@@ -198,6 +243,75 @@ impl Session {
                 self.early.clear();
                 self.thinking_since = None;
             }
+            CoreEvent::Spent(usage) => self.spend.add(&usage),
+            CoreEvent::ToolMode(mode) => self.tool_mode = Some(mode),
+            other => self.apply_run(other),
+        }
+    }
+
+    /// The best-of and council events. Those of a run other than the one on screen are not news.
+    fn apply_run(&mut self, event: CoreEvent) {
+        match event {
+            CoreEvent::BestofStarted(started) => {
+                self.clear_screens();
+                self.arena = Some(Arena::new(started));
+            }
+            CoreEvent::BestofStatus(status) => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == status.run_id) {
+                    arena.status(status);
+                }
+            }
+            CoreEvent::ExecutorStep { run_id, id, call, kind, label } => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == run_id) {
+                    arena.call_started(&id, call, kind, label);
+                }
+            }
+            CoreEvent::ExecutorResult { run_id, id, call, ok, summary } => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == run_id) {
+                    arena.call_finished(&id, &call, ok, summary);
+                }
+            }
+            CoreEvent::BestofEliminated { run_id, id, reason } => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == run_id) {
+                    arena.eliminate(&id, reason);
+                }
+            }
+            CoreEvent::BestofVerdict(verdict) => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == verdict.run_id) {
+                    arena.verdict = Some(verdict);
+                }
+            }
+            CoreEvent::BestofDiff(diff) => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == diff.run_id) {
+                    arena.diff = Some(diff);
+                    arena.diff_fresh = true;
+                }
+            }
+            CoreEvent::BestofFinished(finished) => {
+                if let Some(arena) = self.arena.as_mut().filter(|a| a.run_id == finished.run_id) {
+                    arena.finished = Some(finished);
+                }
+            }
+            CoreEvent::CouncilStarted { council_id, question, members } => {
+                self.clear_screens();
+                self.council = Some(Council::new(council_id, question, members));
+            }
+            CoreEvent::CouncilCard { council_id, id, angle, decision, argument } => {
+                if let Some(council) = self.council.as_mut().filter(|c| c.id == council_id) {
+                    council.card(&id, &angle, decision, argument);
+                }
+            }
+            CoreEvent::CouncilObjection { council_id, id, angle, risks } => {
+                if let Some(council) = self.council.as_mut().filter(|c| c.id == council_id) {
+                    council.objection(&id, &angle, risks);
+                }
+            }
+            CoreEvent::CouncilVerdict(verdict) => {
+                if let Some(council) = self.council.as_mut().filter(|c| c.id == verdict.council_id) {
+                    council.verdict = Some(verdict);
+                }
+            }
+            _ => {}
         }
     }
 

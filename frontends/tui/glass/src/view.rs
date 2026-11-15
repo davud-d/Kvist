@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::anim::Ease;
-use crate::app::{App, Modal, Phase};
+use crate::app::{App, Modal, Pane, Phase};
 use crate::dialog::{Answer, Ask, Body};
 use crate::diff;
 use crate::layout::{self, BROWSER_ASPECT, MARGIN_X};
@@ -16,6 +16,7 @@ use crate::model::{CallState, Helper, HelperState, Item, ToolKind};
 use crate::markdown;
 use crate::math;
 use crate::models::{ModelPicker, Role, Row};
+use crate::screens;
 use crate::slash;
 use crate::strings::{self, strings};
 use crate::text::{self, Line, Painter};
@@ -71,6 +72,12 @@ pub enum Hit {
     ModelRow(usize),
     /// The smart/fast switch of the model picker.
     Role(Role),
+    /// An executor's row of the best-of arena, by its index.
+    Executor(usize),
+    /// A row of the decision dialog's verdict table.
+    Verdict(usize),
+    /// A button of the decision dialog, by its place.
+    Action(usize),
 }
 
 impl Hit {
@@ -134,7 +141,10 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
     draw_browser_label(&mut p, app, now, &mut drawn);
     draw_helpers(&mut p, app, now, ms, &mut drawn);
     draw_diff(&mut p, app, now, &mut drawn);
-    drawn.reading = draw_transcript(&mut p, app, now, ms, &mut drawn);
+    drawn.reading = match app.pane() {
+        Some(_) => draw_pane(&mut p, app, ms, &mut drawn),
+        None => draw_transcript(&mut p, app, now, ms, &mut drawn),
+    };
     draw_input(&mut p, app, now, &mut drawn);
     draw_strip(&mut p, app, now, &mut drawn);
     draw_menu(&mut p, app, now, &mut drawn);
@@ -150,6 +160,9 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
     match &app.modal {
         Some(Modal::Ask(ask)) => draw_ask(&mut p, app, ask.as_ref(), modal, ms, &mut drawn),
         Some(Modal::Models(picker)) => draw_models(&mut p, app, picker.as_ref(), modal, ms, &mut drawn),
+        Some(Modal::Decision(decision)) => {
+            screens::draw_decision(&mut p, app.dialog_rect, decision, app.hover, modal, strings(), ms, &mut drawn.hits)
+        }
         // Only once it has landed: while it grows or shrinks the title would
         // hang where the browser is not.
         Some(Modal::Browser) if app.modal_p.target() == 1.0 && !app.modal_p.running(now) => {
@@ -336,7 +349,7 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
 }
 
 /// "+12 −3", leaving out a side that is zero.
-fn counts(added: u32, removed: u32) -> Line {
+pub(crate) fn counts(added: u32, removed: u32) -> Line {
     let mut line = Vec::new();
     if added > 0 {
         line.push(span(format!("+{added}"), MOSS));
@@ -489,7 +502,10 @@ fn helper_doing(helper: &Helper) -> &str {
 }
 
 /// Builds every line of the conversation for a column `width` wide.
-fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Line>, Vec<markdown::Formula>, Vec<(usize, usize, usize)>) {
+/// The lines, the display formulas in them, and the code blocks' (first line, line count, block index).
+type Transcript = (Vec<Line>, Vec<markdown::Formula>, Vec<(usize, usize, usize)>);
+
+fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcript {
     let mut lines: Vec<Line> = Vec::new();
     // (first line, line count, block index) of every code block
     let mut blocks: Vec<(usize, usize, usize)> = Vec::new();
@@ -498,7 +514,7 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Lin
     let last_index = app.session.items.len().saturating_sub(1);
     for (index, item) in app.session.items.iter().enumerate() {
         let is_tool = matches!(item, Item::Tool { .. });
-        if !lines.is_empty() && !(is_tool && previous_tool) {
+        if !lines.is_empty() && (!is_tool || !previous_tool) {
             lines.push(Vec::new());
         }
         previous_tool = is_tool;
@@ -578,7 +594,7 @@ fn push_blocks(app: &App, wanted: impl Fn(&crate::code::CodeBlock) -> bool, widt
     blocks.len() > before
 }
 
-fn tool_line(kind: ToolKind, label: &str, state: &CallState, width: usize, ms: u128) -> Line {
+pub(crate) fn tool_line(kind: ToolKind, label: &str, state: &CallState, width: usize, ms: u128) -> Line {
     let icon = match kind {
         ToolKind::Read => theme::I_EYE,
         ToolKind::Search => theme::I_SEARCH,
@@ -668,6 +684,45 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
         })
         .collect();
     drawn.text = Some(TextView { x: card.x as i32 + 3, top: card.y as i32 + 1, first: start, rows: shown });
+    Some(card)
+}
+
+/// A best-of arena, an executor's log or a council in the conversation's
+/// place: the same glass card, filled with the screen's lines.
+fn draw_pane(p: &mut Painter, app: &App, ms: u128, drawn: &mut Drawn) -> Option<Rect> {
+    let area = app.layout.transcript;
+    if area.height < 4 {
+        return None;
+    }
+    let width = area.width.saturating_sub(6) as usize;
+    let s = strings();
+    let sheet = match app.pane()? {
+        Pane::Log(log) => screens::log_sheet(log, width, s, ms),
+        Pane::Arena(arena) => screens::arena_sheet(arena, app.arena_row, app.session.busy, width, s, ms),
+        Pane::Council(council) => screens::council_sheet(council, width, s, ms),
+    };
+    let avail = (area.height - 2) as usize;
+    let scroll = app.scroll.min(sheet.lines.len().saturating_sub(avail));
+    let end = sheet.lines.len() - scroll;
+    let start = end.saturating_sub(avail);
+    let height = (end - start) as u16 + 2;
+    let card = Rect::new(area.x, area.bottom() - height, area.width, height);
+    for (first, count, index) in &sheet.rows {
+        let (top, bottom) = ((*first).max(start), (*first + *count).min(end));
+        if top >= bottom {
+            continue;
+        }
+        let row = Rect::new(card.x + 1, card.y + 1 + (top - start) as u16, card.width - 2, (bottom - top) as u16);
+        if app.hover == Some(Hit::Executor(*index)) {
+            for y in row.top()..row.bottom() {
+                p.fill(row.x as i32, y as i32, row.width as i32, HOVER);
+            }
+        }
+        drawn.hits.push((row, Hit::Executor(*index)));
+    }
+    for (i, line) in sheet.lines[start..end].iter().enumerate() {
+        p.line(card.x as i32 + 3, card.y as i32 + 1 + i as i32, line);
+    }
     Some(card)
 }
 
@@ -900,8 +955,16 @@ fn draw_status(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     p.text(provider_x, y, &provider, st(lit(Hit::Provider)));
     drawn.hits.push((Rect::new(provider_x.max(0) as u16, y as u16, text::width(&provider) as u16 - 2, 1), Hit::Provider));
 
+    let info = status_info(app);
+    let info_w = text::line_width(&info) as i32;
+    let mut edge = provider_x;
+    if info_w > 0 && provider_x - info_w - 3 > left_end + 3 {
+        edge = provider_x - info_w - 3;
+        p.line(edge, y, &info);
+    }
+
     let Some(toast) = &app.toast else { return };
-    let room = (provider_x - left_end - 6).max(0) as usize;
+    let room = (edge - left_end - 6).max(0) as usize;
     let age = now.saturating_duration_since(toast.at).as_secs_f32();
     let fade = ((age - 3.5) / 1.0).clamp(0.0, 1.0);
     let (icon, color) = if toast.error { (theme::I_ERROR, ROSEHIP) } else { (theme::I_CHECK, MOSS) };
@@ -909,6 +972,28 @@ fn draw_status(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let line = vec![span(icon, theme::mix(color, NIGHT, fade)), span(format!(" {body}"), theme::mix(FOG, NIGHT, fade))];
     let x = left_end + 3 + (room as i32 - text::line_width(&line) as i32).max(0) / 2;
     p.line(x, y, &line);
+}
+
+/// How the model's calls travel, and what the session has cost so far; what
+/// the core has not reported is left out.
+pub(crate) fn status_info(app: &App) -> Line {
+    let s = strings();
+    let mut info: Line = Vec::new();
+    if let Some(mode) = &app.session.tool_mode {
+        let word = match mode.as_str() {
+            "native" => s.tools_native,
+            "text" => s.tools_text,
+            other => other,
+        };
+        info.push(span(word, DUSK));
+    }
+    if let Some(spend) = app.session.total_spend().label(s.ru) {
+        if !info.is_empty() {
+            info.push(span("  ", DUSK));
+        }
+        info.push(span(spend, MIST));
+    }
+    info
 }
 
 /// The path whole if it fits in `max` columns, else "…/" and as many of its

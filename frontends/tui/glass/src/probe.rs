@@ -149,7 +149,7 @@ fn readable(timeout: Duration) -> io::Result<bool> {
 
 fn has_device_attributes(reply: &[u8]) -> bool {
     let Some(start) = find(reply, b"\x1b[?") else { return false };
-    reply[start + 3..].iter().any(|&b| b == b'c')
+    reply[start + 3..].contains(&b'c')
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {

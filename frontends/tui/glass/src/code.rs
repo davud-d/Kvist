@@ -79,6 +79,7 @@ impl CodeBlock {
     }
 
     /// Lines arriving and lines leaving.
+    #[cfg(test)]
     pub fn counts(&self) -> (u32, u32) {
         let lines = |text: &str| text.lines().count() as u32;
         if self.tool == "replace_in_file" {

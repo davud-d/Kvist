@@ -8,13 +8,16 @@
 
 mod anim;
 mod app;
+mod arena;
 mod attach;
 mod backdrop;
 mod code;
 mod core;
+mod decision;
 mod dialog;
 mod diff;
 mod edit;
+mod execlog;
 mod farewell;
 mod highlight;
 mod kitty;
@@ -27,6 +30,7 @@ mod pictures;
 mod probe;
 mod protocol;
 mod screen;
+mod screens;
 mod slash;
 mod strings;
 mod term;

@@ -3,6 +3,10 @@
 
 use serde_json::Value;
 
+use crate::arena::{
+    ArenaDiff, CouncilVerdict, DiffStat, Dissent, ExecState, ExecutorInfo, Finish, Finished, Member, Outcome, Risk, Started,
+    Status, TestState, Tests, Usage, Verdict, VerdictRow,
+};
 use crate::model::{CoreEvent, HelperState, ToolKind};
 
 /// Steps that are the turn's ending rather than work; their words arrive
@@ -70,6 +74,170 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         "session" if event.get("closed").and_then(Value::as_bool) == Some(true) => {
             vec![CoreEvent::SessionEnded { notice: text("closed_notice") }]
         }
+        "usage" => vec![CoreEvent::Spent(usage(event))],
+        "tool_mode" if !text("mode").is_empty() => vec![CoreEvent::ToolMode(text("mode"))],
+        "bestof_started" => vec![CoreEvent::BestofStarted(started(event))],
+        "bestof_status" => vec![CoreEvent::BestofStatus(status(event))],
+        "executor_activity" => executor_activity(event),
+        "bestof_eliminated" => {
+            vec![CoreEvent::BestofEliminated { run_id: text("run_id"), id: text("executor_id"), reason: text("reason") }]
+        }
+        "bestof_verdict" => vec![CoreEvent::BestofVerdict(verdict(event))],
+        "bestof_diff" => vec![CoreEvent::BestofDiff(ArenaDiff {
+            run_id: text("run_id"),
+            id: text("executor_id"),
+            patch: text("patch"),
+            files: strings_of(event.get("files")),
+        })],
+        "bestof_finished" => vec![CoreEvent::BestofFinished(Finished {
+            run_id: text("run_id"),
+            outcome: Finish::parse(&text("outcome")),
+            id: text("executor_id"),
+            commit: text("commit"),
+            message: text("message"),
+        })],
+        "council_started" => vec![CoreEvent::CouncilStarted {
+            council_id: text("council_id"),
+            question: text("question"),
+            members: items(event, "members").map(|m| Member { id: field(m, "executor_id"), angle: field(m, "angle") }).collect(),
+        }],
+        "council_card" => vec![CoreEvent::CouncilCard {
+            council_id: text("council_id"),
+            id: text("executor_id"),
+            angle: text("angle"),
+            decision: text("decision"),
+            argument: text("argument"),
+        }],
+        "council_objection" => vec![CoreEvent::CouncilObjection {
+            council_id: text("council_id"),
+            id: text("executor_id"),
+            angle: text("angle"),
+            risks: items(event, "risks").map(|r| Risk { target: field(r, "target"), risk: field(r, "risk") }).collect(),
+        }],
+        "council_verdict" => vec![CoreEvent::CouncilVerdict(CouncilVerdict {
+            council_id: text("council_id"),
+            chosen: text("chosen"),
+            decision: text("decision"),
+            reason: text("reason"),
+            dissent: items(event, "dissent").map(dissent).collect(),
+        })],
+        _ => Vec::new(),
+    }
+}
+
+fn field(value: &Value, key: &str) -> String {
+    value.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+}
+
+/// The objects of an array field; a missing or malformed field has none.
+fn items<'a>(event: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
+    event.get(key).and_then(Value::as_array).into_iter().flatten()
+}
+
+fn strings_of(value: Option<&Value>) -> Vec<String> {
+    value.and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect()
+}
+
+fn number(value: &Value, key: &str) -> u32 {
+    value.get(key).and_then(Value::as_u64).map_or(0, |n| n.min(u64::from(u32::MAX)) as u32)
+}
+
+/// A call's tokens and price; a price the core left out stays unknown.
+fn usage(value: &Value) -> Usage {
+    let tokens = |key: &str| value.get(key).and_then(Value::as_u64).unwrap_or(0);
+    Usage {
+        input: tokens("input_tokens"),
+        output: tokens("output_tokens"),
+        cache_read: value.get("cache_read_tokens").and_then(Value::as_u64),
+        cost: value.get("cost_usd").and_then(Value::as_f64),
+        approx: value.get("cost_approx").and_then(Value::as_bool).unwrap_or(false),
+    }
+}
+
+/// `{state, summary}`; a bare string is only a summary.
+fn tests(value: Option<&Value>) -> Tests {
+    match value {
+        Some(object @ Value::Object(_)) => Tests {
+            state: match field(object, "state").as_str() {
+                "running" => TestState::Running,
+                "passed" => TestState::Passed,
+                "failed" => TestState::Failed,
+                _ => TestState::Unknown,
+            },
+            summary: field(object, "summary"),
+        },
+        Some(Value::String(summary)) => Tests { state: TestState::Unknown, summary: summary.clone() },
+        _ => Tests::default(),
+    }
+}
+
+fn diff_stat(value: Option<&Value>) -> DiffStat {
+    value.map_or_else(DiffStat::default, |v| DiffStat { files: number(v, "files"), added: number(v, "added"), removed: number(v, "removed") })
+}
+
+fn started(event: &Value) -> Started {
+    Started {
+        run_id: field(event, "run_id"),
+        task: field(event, "task"),
+        count: number(event, "count"),
+        base: field(event, "base"),
+        executors: items(event, "executors")
+            .map(|e| ExecutorInfo { id: field(e, "executor_id"), style: field(e, "style"), branch: field(e, "branch"), session: field(e, "session") })
+            .collect(),
+    }
+}
+
+fn status(event: &Value) -> Status {
+    Status {
+        run_id: field(event, "run_id"),
+        id: field(event, "executor_id"),
+        style: field(event, "style"),
+        branch: field(event, "branch"),
+        state: ExecState::parse(&field(event, "state")),
+        step: number(event, "step"),
+        tests: tests(event.get("tests")),
+        diff: diff_stat(event.get("diff")),
+        usage: event.get("usage").filter(|u| u.is_object()).map(usage),
+    }
+}
+
+fn verdict(event: &Value) -> Verdict {
+    Verdict {
+        run_id: field(event, "run_id"),
+        rows: items(event, "rows")
+            .map(|row| VerdictRow {
+                id: field(row, "executor_id"),
+                style: field(row, "style"),
+                outcome: Outcome::parse(&field(row, "outcome")),
+                tests: tests(row.get("tests")),
+                diff: diff_stat(row.get("diff")),
+                note: field(row, "note"),
+            })
+            .collect(),
+        winner: field(event, "winner"),
+        reason: field(event, "reason"),
+    }
+}
+
+fn dissent(entry: &Value) -> Dissent {
+    let angle = field(entry, "angle");
+    Dissent { who: if angle.is_empty() { field(entry, "executor_id") } else { angle }, why: field(entry, "why") }
+}
+
+fn executor_activity(event: &Value) -> Vec<CoreEvent> {
+    let run_id = field(event, "run_id");
+    let id = field(event, "executor_id");
+    let call = field(event, "call_id");
+    let action = field(event, "action_type");
+    match field(event, "phase").as_str() {
+        "step" => vec![CoreEvent::ExecutorStep { run_id, id, call, kind: kind(&action), label: label(event, &action) }],
+        "result" => vec![CoreEvent::ExecutorResult {
+            run_id,
+            id,
+            call,
+            ok: event.get("ok").and_then(Value::as_bool).unwrap_or(false),
+            summary: field(event, "summary"),
+        }],
         _ => Vec::new(),
     }
 }
@@ -280,6 +448,147 @@ mod tests {
                 text: "x = 1\n".into()
             }]
         );
+    }
+
+    fn started_event() -> Value {
+        json!({"type": "bestof_started", "run_id": "r1", "task": "fix it", "count": 2, "base": "abc123",
+            "executors": [
+                {"executor_id": "e1", "style": "senior-dev", "branch": "kvist/bestof/r1/e1", "session": "s-e1"},
+                {"executor_id": "e2", "style": "minimalist", "branch": "kvist/bestof/r1/e2", "session": "s-e2"}]})
+    }
+
+    #[test]
+    fn a_started_run_lists_its_executors() {
+        let [CoreEvent::BestofStarted(started)] = &translate(&started_event())[..] else { panic!("one event") };
+        assert_eq!((started.run_id.as_str(), started.count, started.base.as_str()), ("r1", 2, "abc123"));
+        assert_eq!(started.executors.len(), 2);
+        assert_eq!(started.executors[1], ExecutorInfo { id: "e2".into(), style: "minimalist".into(), branch: "kvist/bestof/r1/e2".into(), session: "s-e2".into() });
+        // Nothing but its type: every field has an empty reading.
+        let [CoreEvent::BestofStarted(bare)] = &translate(&json!({"type": "bestof_started"}))[..] else { panic!("one event") };
+        assert!(bare.executors.is_empty() && bare.run_id.is_empty() && bare.count == 0);
+    }
+
+    #[test]
+    fn a_status_snapshot_reads_tests_diff_and_usage_with_what_the_core_left_out() {
+        let status = json!({"type": "bestof_status", "run_id": "r1", "executor_id": "e1", "style": "senior-dev",
+            "branch": "b", "state": "running", "step": 4,
+            "tests": {"state": "passed", "summary": "12 passed"},
+            "diff": {"files": 2, "added": 30, "removed": 4},
+            "usage": {"input_tokens": 1000, "output_tokens": 200, "cost_approx": false}});
+        let [CoreEvent::BestofStatus(status)] = &translate(&status)[..] else { panic!("one event") };
+        assert_eq!(status.state, Some(ExecState::Running));
+        assert_eq!(status.tests, Tests { state: TestState::Passed, summary: "12 passed".into() });
+        assert_eq!(status.diff, DiffStat { files: 2, added: 30, removed: 4 });
+        assert_eq!(status.usage, Some(Usage { input: 1000, output: 200, cache_read: None, cost: None, approx: false }));
+
+        let priced = json!({"type": "bestof_status", "run_id": "r1", "executor_id": "e1", "state": "finished", "step": 9,
+            "tests": {"state": "failed", "summary": ""}, "diff": {"files": 0, "added": 0, "removed": 0},
+            "usage": {"input_tokens": 10, "output_tokens": 2, "cache_read_tokens": 4, "cost_usd": 0.5, "cost_approx": true}});
+        let [CoreEvent::BestofStatus(priced)] = &translate(&priced)[..] else { panic!("one event") };
+        assert_eq!(priced.usage, Some(Usage { input: 10, output: 2, cache_read: Some(4), cost: Some(0.5), approx: true }));
+
+        let unknown = json!({"type": "bestof_status", "run_id": "r1", "executor_id": "e1", "state": "levitating"});
+        let [CoreEvent::BestofStatus(unknown)] = &translate(&unknown)[..] else { panic!("one event") };
+        assert_eq!((unknown.state, unknown.usage.as_ref(), unknown.tests.state), (None, None, TestState::Unknown));
+    }
+
+    #[test]
+    fn an_executors_calls_arrive_as_they_start_and_end_and_a_result_without_ok_is_not_ok() {
+        let step = json!({"type": "executor_activity", "run_id": "r1", "executor_id": "e1", "phase": "step", "call_id": "c1",
+            "action_type": "run_shell", "label": "runs the tests", "summary": "", "output": ""});
+        assert_eq!(
+            translate(&step),
+            vec![CoreEvent::ExecutorStep { run_id: "r1".into(), id: "e1".into(), call: "c1".into(), kind: ToolKind::Shell, label: "runs the tests".into() }]
+        );
+        let done = json!({"type": "executor_activity", "run_id": "r1", "executor_id": "e1", "phase": "result", "call_id": "c1",
+            "action_type": "run_shell", "label": "runs the tests", "ok": true, "summary": "exit 0", "output": "48 passed"});
+        assert_eq!(
+            translate(&done),
+            vec![CoreEvent::ExecutorResult { run_id: "r1".into(), id: "e1".into(), call: "c1".into(), ok: true, summary: "exit 0".into() }]
+        );
+        let no_ok = json!({"type": "executor_activity", "run_id": "r1", "executor_id": "e1", "phase": "result", "call_id": "c1", "action_type": "run_shell"});
+        assert!(matches!(&translate(&no_ok)[..], [CoreEvent::ExecutorResult { ok: false, .. }]));
+        assert!(translate(&json!({"type": "executor_activity", "phase": "later"})).is_empty());
+    }
+
+    #[test]
+    fn an_elimination_a_verdict_and_a_patch_are_read() {
+        assert_eq!(
+            translate(&json!({"type": "bestof_eliminated", "run_id": "r1", "executor_id": "e2", "reason": "tests failed"})),
+            vec![CoreEvent::BestofEliminated { run_id: "r1".into(), id: "e2".into(), reason: "tests failed".into() }]
+        );
+        let verdict = json!({"type": "bestof_verdict", "run_id": "r1", "winner": "e1", "reason": "It passes everything.", "rows": [
+            {"executor_id": "e1", "style": "senior-dev", "outcome": "winner", "tests": {"state": "passed", "summary": "12 passed"},
+             "diff": {"files": 2, "added": 30, "removed": 4}, "note": "clean"},
+            {"executor_id": "e2", "style": "minimalist", "outcome": "eliminated", "tests": {"state": "failed", "summary": "2 failed"},
+             "diff": {"files": 1, "added": 3, "removed": 0}, "note": ""}]});
+        let [CoreEvent::BestofVerdict(verdict)] = &translate(&verdict)[..] else { panic!("one event") };
+        assert_eq!((verdict.winner.as_str(), verdict.rows.len()), ("e1", 2));
+        assert_eq!(verdict.rows[0].outcome, Some(Outcome::Winner));
+        assert_eq!(verdict.rows[1].tests, Tests { state: TestState::Failed, summary: "2 failed".into() });
+        assert_eq!(verdict.rows[0].diff, DiffStat { files: 2, added: 30, removed: 4 });
+
+        let patch = json!({"type": "bestof_diff", "run_id": "r1", "executor_id": "e1", "patch": "@@ -1 +1 @@\n-a\n+b", "files": ["a.py", "b.py"]});
+        assert_eq!(
+            translate(&patch),
+            vec![CoreEvent::BestofDiff(ArenaDiff { run_id: "r1".into(), id: "e1".into(), patch: "@@ -1 +1 @@\n-a\n+b".into(), files: vec!["a.py".into(), "b.py".into()] })]
+        );
+    }
+
+    #[test]
+    fn a_finished_run_without_an_executor_or_a_commit_reads_them_empty() {
+        let accepted = json!({"type": "bestof_finished", "run_id": "r1", "outcome": "accepted", "executor_id": "e1", "commit": "abc1234", "message": "Committed"});
+        assert_eq!(
+            translate(&accepted),
+            vec![CoreEvent::BestofFinished(Finished { run_id: "r1".into(), outcome: Some(Finish::Accepted), id: "e1".into(), commit: "abc1234".into(), message: "Committed".into() })]
+        );
+        let discarded = json!({"type": "bestof_finished", "run_id": "r1", "outcome": "discarded", "message": "Thrown away"});
+        assert_eq!(
+            translate(&discarded),
+            vec![CoreEvent::BestofFinished(Finished { run_id: "r1".into(), outcome: Some(Finish::Discarded), id: String::new(), commit: String::new(), message: "Thrown away".into() })]
+        );
+    }
+
+    #[test]
+    fn the_council_events_are_read() {
+        let started = json!({"type": "council_started", "council_id": "c1", "question": "Which queue?", "members": [
+            {"executor_id": "m1", "angle": "simplicity", "session": "s1"}, {"executor_id": "m2", "angle": "security", "session": "s2"}]});
+        assert_eq!(
+            translate(&started),
+            vec![CoreEvent::CouncilStarted {
+                council_id: "c1".into(),
+                question: "Which queue?".into(),
+                members: vec![Member { id: "m1".into(), angle: "simplicity".into() }, Member { id: "m2".into(), angle: "security".into() }]
+            }]
+        );
+        let card = json!({"type": "council_card", "council_id": "c1", "executor_id": "m1", "angle": "simplicity", "decision": "Use a list", "argument": "It is enough"});
+        assert_eq!(
+            translate(&card),
+            vec![CoreEvent::CouncilCard { council_id: "c1".into(), id: "m1".into(), angle: "simplicity".into(), decision: "Use a list".into(), argument: "It is enough".into() }]
+        );
+        let objection = json!({"type": "council_objection", "council_id": "c1", "executor_id": "m2", "angle": "security",
+            "risks": [{"target": "m1", "risk": "unbounded"}]});
+        assert_eq!(
+            translate(&objection),
+            vec![CoreEvent::CouncilObjection { council_id: "c1".into(), id: "m2".into(), angle: "security".into(), risks: vec![Risk { target: "m1".into(), risk: "unbounded".into() }] }]
+        );
+        let verdict = json!({"type": "council_verdict", "council_id": "c1", "chosen": "m1", "decision": "Use a list", "reason": "Simplest.",
+            "dissent": [{"executor_id": "m2", "angle": "security", "why": "unbounded"}, {"executor_id": "m3", "why": "slow"}]});
+        let [CoreEvent::CouncilVerdict(verdict)] = &translate(&verdict)[..] else { panic!("one event") };
+        assert_eq!(verdict.chosen, "m1");
+        assert_eq!(verdict.dissent, vec![Dissent { who: "security".into(), why: "unbounded".into() }, Dissent { who: "m3".into(), why: "slow".into() }]);
+        let [CoreEvent::CouncilCard { argument, .. }] = &translate(&json!({"type": "council_card", "council_id": "c1", "executor_id": "m1"}))[..] else { panic!("one event") };
+        assert!(argument.is_empty());
+    }
+
+    #[test]
+    fn usage_and_tool_mode_come_through_and_a_price_the_core_left_out_stays_unknown() {
+        let call = json!({"type": "usage", "input_tokens": 1200, "output_tokens": 80, "usage_source": "provider", "kind": "step", "step": 1});
+        assert_eq!(translate(&call), vec![CoreEvent::Spent(Usage { input: 1200, output: 80, cache_read: None, cost: None, approx: false })]);
+        let priced = json!({"type": "usage", "input_tokens": 1200, "output_tokens": 80, "cache_read_tokens": 1000, "cost_usd": 0.01, "cost_approx": true});
+        assert_eq!(translate(&priced), vec![CoreEvent::Spent(Usage { input: 1200, output: 80, cache_read: Some(1000), cost: Some(0.01), approx: true })]);
+        assert_eq!(translate(&json!({"type": "tool_mode", "mode": "native", "reason": "probe_ok"})), vec![CoreEvent::ToolMode("native".into())]);
+        assert!(translate(&json!({"type": "tool_mode", "reason": "probe_ok"})).is_empty());
     }
 
     #[test]

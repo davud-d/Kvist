@@ -226,6 +226,11 @@ struct CardKey {
     rect: (u16, u16, u16, u16),
 }
 
+/// (frame version, width, height, dimmed, develop step) of a thumbnail's picture.
+type ThumbKey = (u64, u32, u32, bool, u8);
+/// (tex, cols, rows, em, dimmed) of a formula's picture.
+type FormulaKey = (String, u16, u16, u32, bool);
+
 pub struct Pictures {
     pub gpu: Gpu,
     canvas: Option<Arc<Canvas>>,
@@ -233,7 +238,7 @@ pub struct Pictures {
     backdrop: Option<BackdropIds>,
     web_ids: Option<WebIds>,
     /// When the browser card's picture was last made, and its key.
-    last_thumb: Option<(Instant, (u64, u32, u32, bool, u8))>,
+    last_thumb: Option<(Instant, ThumbKey)>,
     /// Uploads of an older browser frame, freed once nothing shows them.
     stale_web: Vec<u32>,
     stale_canvas: Vec<u32>,
@@ -241,9 +246,9 @@ pub struct Pictures {
     /// The picture of the pool now shown, by what it was drawn from.
     water: Option<(u64, u32)>,
     /// (frame version, width, height, dimmed) -> picture.
-    thumbs: HashMap<(u64, u32, u32, bool, u8), (u32, u64)>,
+    thumbs: HashMap<ThumbKey, (u32, u64)>,
     /// Formula pictures by (tex, cols, rows, em, dimmed); `None` is a formula that would not draw.
-    formulas: HashMap<(String, u16, u16, u32, bool), (Option<u32>, u64)>,
+    formulas: HashMap<FormulaKey, (Option<u32>, u64)>,
     formula_slots: usize,
     frame: u64,
 }

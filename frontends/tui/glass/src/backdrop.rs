@@ -67,8 +67,8 @@ fn edge_color(image: &RgbImage) -> [u8; 3] {
         if x >= BAND && x + BAND < w && y >= BAND && y + BAND < h {
             continue;
         }
-        for c in 0..3 {
-            sum[c] += pixel.0[c] as u64;
+        for (c, total) in sum.iter_mut().enumerate() {
+            *total += pixel.0[c] as u64;
         }
         count += 1;
     }

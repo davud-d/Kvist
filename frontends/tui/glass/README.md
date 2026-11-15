@@ -150,6 +150,52 @@ the place of the browser and helpers cards while it is open. Diffs come from the
 core with each write, so a file changed in a session saved before the core sent
 them shows the counts only.
 
+## best-of and council
+
+`/best-of N <task>` and `/council <question>` are core commands, but they are
+whole turns: the core sends the turn's events, then `turn_end`, then
+`command_result`. While the turn runs, Esc Esc stops it as usual; when it ends
+the input is free again. Both are in the `/` list (Enter completes the name,
+then you type the arguments).
+
+**The best-of arena** takes the conversation's place while a run goes on. A
+"best-of" title and a line about what it is; then two lines per executor: its
+style, state, step, tests (an icon and a short summary), the size of its changes
+(`+added −removed · files`), money or tokens; and its branch with its latest
+call. An executor that is out is muted, with its reason under it. ↑/↓ choose a
+row (while the input is empty) and the pointer lights it; Enter or a click opens
+the executor's **read-only log**: its session, steps and results (the same
+`--session-op history` that `/session` uses). In the log Esc goes back, ↑/↓ and
+PgUp/PgDn scroll, and Ctrl+R reads the journal again (the executor may have gone
+on). When the run is over a closing line stands under the table, and Esc takes
+the arena away and gives the conversation back.
+
+**The decision screen** is the core's question with `purpose: "bestof_decision"`:
+the verdict table (style, outcome, tests, changes, note), the winner and why,
+and four actions: "Accept" (`accept`, always the winner), "See the diff"
+(`diff:<id>` of the row you are on), "Pick another" (`pick:<id>` of the row; on
+the winner's row it is `other`, and the core asks who) and "Discard all"
+(`discard`). ↑/↓ choose the row, ←/→ the action, Enter does it, and the letters
+`a`, `d`, `p`, `x` (or `ф`, `в`, `з`, `ч`) do it at once; Esc means "not
+deciding for now". When `bestof_diff` arrives the patch is shown file by file in
+the same look as the side panel's diff; Tab switches between the table and the
+patch, the wheel and ↑/↓ scroll. With no verdict, or for another run, the
+question stays an ordinary list.
+
+**The council**: four cards (an angle and a line about it: simplicity,
+security, development speed, maintenance cost) fill in as `council_card` events arrive; under a
+card are the risks from `council_objection`, with whom each is aimed at. After
+`council_verdict` the chosen card is lit, with the reason and those who
+disagree, with their arguments below. Esc takes the screen away.
+
+**The status row**, on the right: how calls travel (`native` / `text`, from
+`tool_mode`) and the money: the sum of `cost_usd` of the main stream and of the
+executors' latest snapshots; "≈" when a price is approximate or some call has
+none. With no price at all (a subscription) it reads "total N tok · M uncached"
+(uncached = `input_tokens − cache_read_tokens`). If some call did not say what
+the cache served, the uncached number is an upper bound and carries "≈"; if none
+did, the uncached part is left out. The numbers come only from events.
+
 ## How it is drawn
 
 - `video.rs` decodes the looping clip to 960×540 RGB at 24 fps on a separate
