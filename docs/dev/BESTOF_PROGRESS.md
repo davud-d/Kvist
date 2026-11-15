@@ -8,7 +8,9 @@
 
 1. `git -C <repo> log --oneline -15`, `git worktree list`, `git branch --list 'bo/*'`
    (`<repo>` — корень основного checkout, рабочая директория сессии).
-2. Прочитать §4 (задачи и статусы), §6 (журнал ревью), §8 (следующий шаг).
+2. Прочитать §5 (задачи и статусы), §6 (журнал ревью), §8 (следующий шаг). Самая свежая
+   копия этого файла — в `<repo>/.claude/worktrees/int` (там же правится); в `experimental` —
+   последняя закоммиченная.
 3. Работа идёт так: задача → worktree `bo/<id>` → сабагент (sonnet) → ревью →
    слияние через `bo/int` (порядок ниже) → строка в §6 и статус в §4.
 4. Живые прогоны: счётчик в §9. Лимит 10 на всю работу.
@@ -178,6 +180,18 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 - **D-20 Тесты в worktree** — только с `PYTHONPATH=<wt>` (editable finder в venv).
 - **D-21 Потолок вывода claude 5** не правится: источника в репозитории нет, выдумывать нельзя.
   В финальном отчёте как оставшийся долг.
+- **D-22 Брифы** лежат в `<repo>/.claude/bestof-briefs/` (вне git: в них абсолютные пути машины,
+  а репозиторий публичный — правило low-profile privacy).
+- **D-23 Git внутри песочницы исполнителя недоступен — и так и остаётся.** У git worktree файл
+  `.git` указывает в `.git/worktrees/<name>` основного репозитория, вне workspace исполнителя;
+  `terminal_git._git_metadata_directory` на это отвечает жёстким отказом (защита от выхода из
+  workspace), а bwrap основной `.git` не монтирует. Ослаблять проверку нельзя: исполнитель с
+  записью в основной `.git` мог бы подложить хук/конфиг пользователю. Рассмотренные замены:
+  `git clone --local` (жёсткие ссылки на объекты → исполнитель может испортить объекты основного
+  репозитория через общий inode), `--no-hardlinks` (копия всего `.git` на каждого исполнителя),
+  `--shared` (нужен ro-bind объектов — правка песочницы). Выбран git worktree по ТЗ: diff, итог и
+  коммиты делает оркестратор вне песочницы; в тексте задачи исполнителя сказано, что git в его
+  папке недоступен, а изменения записывает среда.
 
 ## 4. Контракт событий v1 (аддитивно, protocol_version = 1)
 
@@ -207,10 +221,10 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 
 | id | поток | цель | владеет файлами | зависит | статус |
 |---|---|---|---|---|---|
-| T1 | a2 | менеджер worktree | `kernel/bestof/__init__.py`, `kernel/bestof/worktrees.py`, `kernel/tests/test_bestof_worktrees.py` | — | todo |
-| T2 | a3 | события и протокол | `kernel/protocol/frontend_protocol.py`, `kernel/protocol/event_stream_ui.py`, `kernel/protocol/ui.py`, `kernel/session/session_events.py`, `docs/UI_API.md`, `docs/UI_API.ru.md`, тесты этих модулей | — | todo |
-| T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | todo |
-| T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | todo |
+| T1 | a2 | менеджер worktree | `kernel/bestof/__init__.py`, `kernel/bestof/worktrees.py`, `kernel/tests/test_bestof_worktrees.py` | — | work |
+| T2 | a3 | события и протокол | `kernel/protocol/frontend_protocol.py`, `kernel/protocol/event_stream_ui.py`, `kernel/protocol/ui.py`, `kernel/session/session_events.py`, `docs/UI_API.md`, `docs/UI_API.ru.md`, тесты этих модулей | — | work |
+| T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | work |
+| T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | work |
 | T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | todo |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | todo |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | todo |
@@ -264,12 +278,14 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 
 ## 7. Брифы
 
-Брифы целиком — `docs/dev/bestof-briefs/<id>.md`, коммитятся вместе с прогрессом; сабагент
-получает тот же текст.
+Брифы целиком — `<repo>/.claude/bestof-briefs/{common,<id>}.md` (D-22); сабагент получает
+те же файлы. Сабагенту даются: `common.md` (hard rules целиком, конвенции, формат отчёта) и
+бриф задачи (цель, разрешённые/запрещённые файлы, решения, тесты, критерии приёмки).
 
 ## 8. Следующий шаг
 
-Создать `bo/int` и worktree T1–T4, разослать брифы волны 1.
+Волна 1 разослана (T1–T4 в работе, sonnet, по worktree). Бриф T5 готов. Дальше: ревью отчётов
+T1–T4 по мере прихода, слияние по одному; после T3 — старт T5; после T1–T3 — брифы T6, T7.
 
 ## 9. Живые прогоны (лимит 10)
 
