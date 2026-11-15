@@ -17,7 +17,7 @@ back, and repeats until done. Several frontends drive the same Python core.
   `prompts/` (data), `tests/`.
 - `kernel/session-rs/` — Rust crate `kvist-session`: `--session-op` without starting Python (Linux/macOS/BSD/Windows, optional;
   `kernel/session/native.py` hands requests to it, Python serves them when it is missing).
-- `frontends/` — `tui/{classic,ink,opencode,glass}`, `gui/{electron,tauri}`, `ide/{vscode,jetbrains}`, `zed`,
+- `frontends/` — `tui/{classic,ink,opencode,glass}`, `gui/{electron,tauri}`, `ide/{vscode,jetbrains}`, `android` (phone window onto a computer's `kvist-web --lan`), `zed`,
   `voice`, `kvide`, `tray`. Ink's TS modules are also imported by VS Code and OpenCode: check both sides.
 - `scripts/` (installers, e2e smokes), `docs/` (`UI_API.md` = frontend protocol, `SKILLS.md`, `remote.md`),
   `branding/`, `site/`.
@@ -55,6 +55,7 @@ cd kernel/session-rs && cargo test && cargo build --release   # then test_sessio
 cd frontends/tui/ink && npm install && npm run build && npm test && npm run typecheck
 cd frontends/ide/vscode && npm test && npm run typecheck
 cd frontends/gui/electron && npm test
+cd frontends/android && ./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 21, ANDROID_HOME
 cd frontends/gui/electron-legacy && npm test
 cd frontends/gui/tauri && node --test "tests/*.test.mjs" && (cd src-tauri && cargo test)
 ```

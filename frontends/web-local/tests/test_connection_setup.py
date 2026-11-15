@@ -261,7 +261,7 @@ def test_manual_connect_route_enables_setup_and_correlates_browser_logs():
         calls.append((args, kwargs))
         return {'state':'connected', 'logs':[]}
     handler = ControllerHandler.__new__(ControllerHandler)
-    handler.server = SimpleNamespace(server_address=('127.0.0.1',9672), allowed_hosts={'127.0.0.1'}, external_token='', auth=auth, controller=SimpleNamespace(connect_server=connect))
+    handler.server = SimpleNamespace(server_address=('127.0.0.1',9672), host_allowed=lambda name: name == '127.0.0.1', external_token='', auth=auth, controller=SimpleNamespace(connect_server=connect))
     handler.command = 'POST'
     handler.path = '/api/v1/servers/connect'
     handler.request_version = 'HTTP/1.1'

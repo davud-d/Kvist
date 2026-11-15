@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#17142a">
+  <title>Kvist</title>
+  <link rel="stylesheet" href="/assets/mobile/pixel.css">
+</head>
+<body>
+  <canvas id="snow" aria-hidden="true" hidden></canvas>
+  <section id="connect" class="screen">
+    <header class="top">
+      <img id="mascot" class="sprite big" alt="" width="96" height="96">
+      <div class="top-text">
+        <h1 class="wordmark">KVIST</h1>
+        <p id="tagline" class="dim"></p>
+      </div>
+    </header>
+    <p id="bubble" class="bubble speech"></p>
+
+    <main id="computers" class="list"></main>
+
+    <section id="hint" class="card" hidden>
+      <p id="hint-run" class="card-empty"></p>
+      <pre id="hint-command" class="subject-code">kvist-web --lan</pre>
+      <p id="hint-network" class="card-empty"></p>
+    </section>
+
+    <section id="code-sheet" class="sheet" hidden>
+      <h3 id="code-title" class="sheet-title"></h3>
+      <p id="code-hint" class="sheet-text"></p>
+      <input id="code" class="field" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="14">
+      <p id="code-error" class="failed" hidden></p>
+      <div class="actions">
+        <button id="code-cancel" class="btn" type="button"></button>
+        <button id="code-go" class="btn primary" type="button"></button>
+      </div>
+    </section>
+
+    <section id="manual" class="sheet" hidden>
+      <input id="manual-address" class="field" type="text" inputmode="url" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false">
+      <div class="actions">
+        <button id="manual-go" class="btn primary" type="button"></button>
+      </div>
+    </section>
+
+    <div class="actions row-actions">
+      <button id="rescan" class="btn" type="button"></button>
+      <button id="show-manual" class="btn" type="button"></button>
+    </div>
+  </section>
+  <script type="module" src="/assets/connect.js"></script>
+</body>
+</html>

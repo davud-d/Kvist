@@ -13,6 +13,7 @@ from .controller import WebController
 from .http_api import ControllerHTTPServer
 from .instance import InstanceDescriptor, controller_home
 from .installers import installer_for
+from . import lan
 from .logging_setup import configure_logging
 
 
@@ -48,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stop", action="store_true")
     parser.add_argument("--allow-remote", action="store_true", help="Allow a non-loopback bind.")
     parser.add_argument("--access-token", default="", help="Required for a non-loopback bind.")
+    parser.add_argument(
+        "--lan", action="store_true",
+        help="Serve the phone app on the local network: pairing code, discovery beacon, private addresses only.",
+    )
+    parser.add_argument("--new-code", action="store_true", help="With --lan: replace the pairing code.")
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -81,9 +87,23 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print("Kvist web is not running.")
         return
+    if args.new_code and not args.lan:
+        raise SystemExit("error: --new-code works only together with --lan")
+    if args.lan:
+        # A specific --host is kept, so the phone can be served on one adapter only.
+        if args.host == DEFAULT_HOST:
+            args.host = "0.0.0.0"
+        args.allow_remote = True
+        args.no_open = True
+        args.access_token = lan.load_code(rotate=args.new_code)
     if descriptor.health():
         value = descriptor.read()
         url = f"http://{value['host']}:{value['port']}"
+        if args.lan:
+            raise SystemExit(
+                f"error: Kvist web is already running at {url}; "
+                "stop it with `kvist-web --stop`, then start it again with --lan"
+            )
         if not args.no_open:
             webbrowser.open(url)
         print(f"Kvist web is already running at {url}.")
@@ -100,6 +120,7 @@ def main(argv: list[str] | None = None) -> None:
             controller,
             admin_token=token,
             external_token=args.access_token,
+            lan=args.lan,
         )
     except OSError as error:
         if descriptor.health():
@@ -115,15 +136,36 @@ def main(argv: list[str] | None = None) -> None:
     if not args.no_open:
         threading.Timer(0.15, lambda: webbrowser.open(url)).start()
     print(f"Kvist web is running at {url}")
+    beacon = _start_beacon(args) if args.lan else None
     try:
         server.serve_forever(poll_interval=0.4)
     except KeyboardInterrupt:
         pass
     finally:
+        if beacon:
+            beacon.close()
         server.server_close()
         controller.close()
         descriptor.clear_if_owner()
         _LOG.info("controller stopped", extra={"component": "web"})
+
+
+def _start_beacon(args: argparse.Namespace) -> lan.Beacon | None:
+    russian = os.environ.get("LANG", "").lower().startswith("ru")
+    print(lan.banner(args.access_token, args.port, lan.local_address(), russian))
+    beacon = lan.Beacon(args.port)
+    try:
+        beacon.start()
+    except OSError as error:
+        # Pairing by address still works, so this is a warning and not a failure.
+        _LOG.warning("discovery beacon is off: %s", error, extra={"component": "lan"})
+        print(
+            f"Автопоиск выключен ({error}); введи адрес в приложении вручную."
+            if russian else
+            f"Discovery is off ({error}); enter the address in the app by hand."
+        )
+        return None
+    return beacon
 
 
 def _loopback(host: str) -> bool:

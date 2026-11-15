@@ -31,6 +31,25 @@ unless both `--allow-remote` and `--access-token VALUE` are supplied. In that
 mode the browser uses HTTP Basic authentication; the value is the password.
 The token is never put in a URL.
 
+## Phone on the local network
+
+```bash
+kvist-web --lan                 # serves on 0.0.0.0:9671, prints a pairing code
+kvist-web --lan --new-code      # replaces the code (every paired phone has to pair again)
+```
+
+`--lan` is for the Android app (`frontends/android`) and for a phone browser at `http://<computer>:9671/m/`,
+a pixel interface of its own (`client/mobile/`) over the same API. It is opt-in and never starts by itself:
+
+- The code (12 characters, saved with private permissions in `~/.kvist/web/lan-code`) is the access token,
+  sent as the Basic password on every request.
+- A discovery beacon answers a UDP probe on port 9672 with the computer's name and port, and only to private
+  addresses. If the port is taken, discovery is off and pairing by address still works.
+- The Host check accepts private IP literals (not names), so a DNS-rebinding page cannot reach it. Without
+  `--lan` the check is exactly what it was.
+- Traffic is plain HTTP in the local network. Anyone there who knows the code drives the agent on this
+  computer; do not use it on a network you do not trust.
+
 ## Architecture
 
 ```text

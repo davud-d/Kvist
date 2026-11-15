@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .controller import WebController
+from .lan import is_private_host
 from .protocol import WEB_PROTOCOL_VERSION
 from .security import BrowserAuth, BrowserSession, redact
 
@@ -48,11 +49,13 @@ class ControllerHTTPServer(ThreadingHTTPServer):
         *,
         admin_token: str,
         external_token: str = "",
+        lan: bool = False,
     ) -> None:
         self.controller = controller
         self.auth = BrowserAuth()
         self.admin_token = admin_token
         self.external_token = external_token
+        self.lan = lan
         self.public_origin = f"http://{address[0]}:{address[1]}"
         self.allowed_hosts = (
             {"127.0.0.1", "localhost", "::1"}
@@ -60,6 +63,13 @@ class ControllerHTTPServer(ThreadingHTTPServer):
             else {address[0]}
         )
         super().__init__(address, ControllerHandler)
+
+    def host_allowed(self, hostname: str | None) -> bool:
+        # On a local network the computer's address is not known in advance (DHCP, several adapters), so
+        # any private IP literal is accepted; a name never is, which is what a rebinding page would use.
+        if self.lan and is_private_host(hostname):
+            return True
+        return hostname in self.allowed_hosts
 
 
 class ControllerHandler(BaseHTTPRequestHandler):
@@ -80,6 +90,9 @@ class ControllerHandler(BaseHTTPRequestHandler):
             return
         if parsed.path in {"/", "/index.html"}:
             self._index()
+            return
+        if parsed.path in {"/m", "/m/"}:
+            self._index("mobile/index.html")
             return
         if parsed.path.startswith("/assets/"):
             self._asset(parsed.path.removeprefix("/assets/"))
@@ -240,9 +253,9 @@ class ControllerHandler(BaseHTTPRequestHandler):
         except Exception as error:
             self._error(HTTPStatus.BAD_REQUEST, redact(error))
 
-    def _index(self) -> None:
+    def _index(self, page: str = "index.html") -> None:
         session = self.server.auth.create()
-        template = (client_root() / "index.html").read_text(encoding="utf-8")
+        template = (client_root() / page).read_text(encoding="utf-8")
         content = template.replace("{{KVIST_CSRF}}", session.csrf).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -355,7 +368,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
             return False
         return (
             parsed.scheme == "http"
-            and parsed.hostname in self.server.allowed_hosts
+            and self.server.host_allowed(parsed.hostname)
             and parsed.port == self.server.server_address[1]
         )
 
@@ -367,7 +380,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
             return False
         port = parsed.port or 80
         return (
-            parsed.hostname in self.server.allowed_hosts
+            self.server.host_allowed(parsed.hostname)
             and port == self.server.server_address[1]
         )
 

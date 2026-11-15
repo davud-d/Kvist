@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="kvist-csrf" content="{{KVIST_CSRF}}">
+  <meta name="theme-color" content="#17142a">
+  <title>Kvist</title>
+  <link rel="icon" href="/assets/kvist-mark.svg">
+  <link rel="stylesheet" href="/assets/mobile/pixel.css">
+</head>
+<body>
+  <canvas id="snow" aria-hidden="true" hidden></canvas>
+
+  <div id="boot" class="boot" role="status">
+    <img class="sprite big" src="/assets/mobile/sprites/squirrel-1.png" alt="" width="96" height="96">
+    <p id="boot-text"></p>
+    <button id="boot-retry" class="btn primary" hidden>OK</button>
+  </div>
+
+  <section id="home" class="screen">
+    <header class="top">
+      <img id="home-mascot" class="sprite big" alt="" width="96" height="96">
+      <div class="top-text">
+        <h1 class="wordmark">KVIST</h1>
+        <p id="tagline" class="dim"></p>
+      </div>
+      <span id="link" class="light" role="status"></span>
+    </header>
+    <p id="bubble" class="bubble speech"></p>
+    <main id="home-list" class="list"></main>
+    <a id="switch" class="btn small switch" href="kvist-app://switch" hidden></a>
+  </section>
+
+  <section id="chat" class="screen chat" hidden>
+    <header class="top slim">
+      <button id="back" class="btn icon" type="button">◀</button>
+      <div class="top-text">
+        <h2 id="chat-title" class="chat-title"></h2>
+        <p id="chat-state" class="chat-state"></p>
+      </div>
+      <button id="pause" class="btn small" type="button" hidden></button>
+      <img id="chat-mascot" class="sprite" alt="" width="48" height="48">
+    </header>
+    <p id="status" class="status" hidden></p>
+    <main id="feed" class="feed" aria-live="polite"></main>
+    <section id="request" class="sheet" aria-label="Kvist" hidden></section>
+    <form id="composer" class="composer">
+      <textarea id="prompt" rows="1" spellcheck="false" autocomplete="off"></textarea>
+      <button id="send" class="btn primary icon" type="submit" data-mode="send" disabled>▶</button>
+    </form>
+    <div id="closed" class="closed" hidden>
+      <p id="closed-text"></p>
+      <button id="new-after-close" class="btn primary" type="button"></button>
+    </div>
+  </section>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/assets/mobile/app.js"></script>
+</body>
+</html>
