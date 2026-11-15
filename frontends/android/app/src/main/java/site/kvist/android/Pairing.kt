@@ -21,6 +21,14 @@ sealed interface Answer {
     data object Expired : Answer
 }
 
+sealed interface Trust {
+    data object Yes : Trust
+    data object No : Trust
+
+    /** The computer did not answer as a Kvist does; [reason] is what the network said. */
+    data class Unreachable(val reason: String) : Trust
+}
+
 sealed interface Asked {
     data class Id(val value: String) : Asked
 
@@ -62,7 +70,7 @@ object Pairing {
                 else -> Asked.Failed("HTTP $status")
             }
         } catch (error: IOException) {
-            Asked.Failed(error.message ?: error.javaClass.simpleName)
+            Asked.Failed(reasonOf(error))
         } catch (error: JSONException) {
             Asked.Failed("unreadable answer")
         }
@@ -75,16 +83,19 @@ object Pairing {
         Answer.Pending
     }
 
-    /** Blocking: does the computer still trust this phone? True for yes, false for no, null when it cannot be reached. */
-    fun trusted(host: String, port: Int, token: String): Boolean? = try {
-        when (call(host, port, "GET", "/", token = token).first) {
-            HttpURLConnection.HTTP_OK -> true
-            HttpURLConnection.HTTP_UNAUTHORIZED -> false
-            else -> null
+    /** Blocking: does the computer still trust this phone? */
+    fun trusted(host: String, port: Int, token: String): Trust = try {
+        when (val status = call(host, port, "GET", "/", token = token).first) {
+            HttpURLConnection.HTTP_OK -> Trust.Yes
+            HttpURLConnection.HTTP_UNAUTHORIZED -> Trust.No
+            else -> Trust.Unreachable("HTTP $status")
         }
     } catch (error: IOException) {
-        null
+        Trust.Unreachable(reasonOf(error))
     }
+
+    /** What a person can read to the one who helps: the kind of failure and the network's own words. */
+    fun reasonOf(error: IOException): String = "${error.javaClass.simpleName}: ${error.message ?: "no message"}"
 
     private fun call(host: String, port: Int, method: String, path: String, body: String? = null, token: String? = null): Pair<Int, String> {
         val connection = URL("http://$host:$port$path").openConnection() as HttpURLConnection

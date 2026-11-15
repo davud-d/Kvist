@@ -221,6 +221,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .inbox { background: var(--surface-2); }
 
 a.btn { text-decoration: none; }
+.detail { margin: -14px 6px 18px 46px; font-size: 11px; color: var(--dim); overflow-wrap: anywhere; }
 .computer { min-height: 64px; }
 .computer-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .computer-sub { font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

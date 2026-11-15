@@ -162,7 +162,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
             self._json({"ok": True, "service": "kvist-web", "lan": self.server.lan})
             return
         if not self._valid_host():
-            self._error(HTTPStatus.MISDIRECTED_REQUEST, "Request host was rejected.")
+            self._refuse_host()
             return
         if parsed.path == "/pair/status" and self.server.pairing is not None:
             self._pair_status(parsed)
@@ -242,7 +242,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         if not self._valid_host():
-            self._error(HTTPStatus.MISDIRECTED_REQUEST, "Request host was rejected.")
+            self._refuse_host()
             return
         if parsed.path == "/pair/request" and self.server.pairing is not None:
             self._pair_request()
@@ -541,6 +541,12 @@ class ControllerHandler(BaseHTTPRequestHandler):
         if resolve_folder(field("workspace")) not in scope:
             raise PermissionError("This folder is not open to the phone: no agent runs in it.")
 
+    def _refuse_host(self) -> None:
+        # The usual cause is a phone that reaches this computer by an address that is not a private one (a VPN
+        # address, a name); the log is the only place anyone can see it.
+        _LOG.info("refused a request for host %r from %s", self.headers.get("Host", ""), self.client_address[0], extra={"component": "web"})
+        self._error(HTTPStatus.MISDIRECTED_REQUEST, "Request host was rejected.")
+
     def _pair_request(self) -> None:
         address = self.client_address[0]
         if not is_private_host(address):
@@ -559,6 +565,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
             reason = error.reason if isinstance(error, PairingError) else "bad_request"
             self._json({"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST if reason == "bad_request" else HTTPStatus.TOO_MANY_REQUESTS)
             return
+        _LOG.info("a phone at %s asks to be trusted", address, extra={"component": "web"})
         self._json({"ok": True, "request_id": request_id})
 
     def _pair_status(self, parsed) -> None:

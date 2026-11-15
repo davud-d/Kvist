@@ -100,9 +100,13 @@ class MainActivity : ComponentActivity() {
 
     // ---- pages ---------------------------------------------------------------------------------------
 
-    private fun showConnect(error: String? = null) {
+    private fun showConnect(error: String? = null, detail: String? = null) {
         current = null
-        val query = if (error == null) "" else "?err=$error"
+        val query = when {
+            error == null -> ""
+            detail == null -> "?err=$error"
+            else -> "?err=$error&detail=${Uri.encode(detail)}"
+        }
         webView.loadUrl("$ASSET_ORIGIN/assets/connect.html$query")
     }
 
@@ -148,7 +152,7 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-            if (request.isForMainFrame && request.url.host == current?.host) showConnect("unreachable")
+            if (request.isForMainFrame && request.url.host == current?.host) showConnect("unreachable", error.description.toString())
         }
 
         override fun onPageFinished(view: WebView, url: String) {
@@ -206,17 +210,17 @@ class MainActivity : ComponentActivity() {
         val saved = store.load()
         if (host.isEmpty()) return failed("unreachable")
         if (saved != null && saved.id == id) {
-            when (Pairing.trusted(host, port, saved.token)) {
-                true -> return opened(Saved(id, name, host, port, saved.token))
-                null -> return failed("unreachable")
-                false -> if (request.optBoolean("auto")) return failed("forgotten")
+            when (val trust = Pairing.trusted(host, port, saved.token)) {
+                Trust.Yes -> return opened(Saved(id, name, host, port, saved.token))
+                is Trust.Unreachable -> return failed("unreachable").put("detail", "$host:$port ${trust.reason}")
+                Trust.No -> if (request.optBoolean("auto")) return failed("forgotten")
             }
         } else if (request.optBoolean("auto")) {
             return failed("forgotten")
         }
         return when (val asked = Pairing.ask(host, port, store.deviceId(), Build.MODEL)) {
             is Asked.Refused -> failed(asked.reason)
-            is Asked.Failed -> failed("unreachable").put("detail", asked.reason)
+            is Asked.Failed -> failed("unreachable").put("detail", "$host:$port ${asked.reason}")
             is Asked.Id -> waitForOwner(Saved(id, name, host, port, ""), asked.value)
         }
     }

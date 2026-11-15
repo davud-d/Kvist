@@ -20,6 +20,7 @@ const $ = id => document.getElementById(id);
 const native = window.KvistNative;
 const mascot = createMascot($('mascot'), { winter });
 const failure = new URLSearchParams(location.search).get('err');
+const failureDetail = new URLSearchParams(location.search).get('detail');
 const OS_TAGS = { linux: 'LINUX', macos: 'MACOS', windows: 'WIN' };
 
 let scanning = false;
@@ -27,7 +28,12 @@ let asking = false;
 let autoTried = false;
 
 const send = message => native.postMessage(JSON.stringify(message));
-const say = text => { $('bubble').textContent = text; };
+const say = (text, detail = '') => {
+    $('bubble').textContent = text;
+    // The network's own words, small: what a person reads out to whoever is helping.
+    $('detail').textContent = detail;
+    $('detail').hidden = !detail;
+};
 const part = (tag, cls, text) => { const node = document.createElement(tag); node.className = cls; node.textContent = text; return node; };
 
 function computerRow(computer) {
@@ -55,7 +61,8 @@ function showComputers(computers) {
     $('computers').replaceChildren(...computers.map(computerRow));
     $('hint').hidden = computers.length > 0;
     // Why the app is here (the computer forgot this phone) outlasts the result of the search.
-    say(failure === 'forgotten' ? t('forgotten') : computers.length ? t('foundN', computers.length) : t('nothing'));
+    const why = failure === 'forgotten' ? t('forgotten') : failure === 'unreachable' ? t('unreachable') : '';
+    say(why || (computers.length ? t('foundN', computers.length) : t('nothing')), failure === 'unreachable' ? failureDetail || '' : '');
     // The same computer under a new address (the router handed out another one): no need to ask again.
     const known = computers.find(computer => computer.saved);
     if (known && !failure && !autoTried) {
@@ -97,7 +104,7 @@ function onMessage(message) {
     } else if (message.type === 'pair-failed') {
         asking = false;
         mascot.setMood('idle');
-        say(t(FAILURES[message.reason] || 'unreachable'));
+        say(t(FAILURES[message.reason] || 'unreachable'), message.detail || '');
     }
 }
 
