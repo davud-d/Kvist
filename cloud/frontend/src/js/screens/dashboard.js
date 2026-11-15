@@ -5,7 +5,7 @@ import { choosePayment } from "../paydialog.js";
 import { api } from "../api.js";
 import { h, modal, replace, skeleton } from "../dom.js";
 import { exportButton } from "../exporter.js";
-import { dateTime, hoursMinutes, percentLeft, shortDate } from "../format.js";
+import { dateTime, hoursMinutes, percentLeft, runoutForecast, shortDate } from "../format.js";
 import { locale, t } from "../i18n.js";
 import { emptyBox, errorBox, liveRegion, machinePill, manualAccessBox, taskPill } from "../ui.js";
 import { workspaceLink } from "../workspace.js";
@@ -37,7 +37,21 @@ function disputeDialog(row, onSent) {
   });
 }
 
-function hoursCard(view, config, refresh, announce) {
+// What the pace means for the next charge, in one line under the balance.
+function forecastLine(forecast) {
+  if (!forecast) return null;
+  if (forecast.tone === "empty") return h("p.small.dim", {}, t("dashboard.runout.empty"));
+  return h("p.small.dim", {}, t(`dashboard.runout.${forecast.tone}`, {
+    // "lower" points at the next charge, a day rather than a moment; the rest are moments.
+    date: forecast.tone === "lower"
+      ? shortDate(new Date(forecast.at).toISOString(), locale())
+      : dateTime(new Date(forecast.at).toISOString(), locale()),
+    used: hoursMinutes(forecast.projected, t),
+    total: hoursMinutes(forecast.total, t),
+  }));
+}
+
+function hoursCard(view, config, refresh, announce, forecast) {
   const total = view.plan_seconds;
   const buy = h("button.btn.ghost", { type: "button",
     text: t("dashboard.buyHoursCharge", { h: config.hour_pack.hours,
@@ -65,6 +79,7 @@ function hoursCard(view, config, refresh, announce) {
     h("p", {}, t("dashboard.hoursLeft", { left: hoursMinutes(view.balance_seconds, t), total: hoursMinutes(total, t) })),
     h("div.bar", { role: "img", "aria-label": `${percentLeft(view.balance_seconds, total)}%` },
       h("i", { style: `width:${percentLeft(view.balance_seconds, total)}%` })),
+    forecastLine(forecast),
     view.purchased_seconds > 0
       ? h("p.small", {}, t("dashboard.purchased", { h: hoursMinutes(view.purchased_seconds, t) }))
       : null,
@@ -186,6 +201,19 @@ export async function dashboardScreen(root, { navigate }) {
         emptyBox(t("dashboard.noPlan"), h("a.btn", { href: "/start", "data-link": "" }, t("dashboard.startTrial"))));
       return;
     }
+    // What the tasks of this period used, for the pace under the balance. A cheaper paid plan exists
+    // below only Pro and Max, so only they get the downgrade hint.
+    const used = (ledgerView.feed || [])
+      .filter((row) => row.kind === "usage")
+      .reduce((sum, row) => sum - Number(row.seconds || 0), 0);
+    const forecast = runoutForecast({
+      balanceSeconds: view.balance_seconds,
+      usedSeconds: used,
+      planSeconds: view.plan_seconds,
+      periodStart: view.period_start,
+      periodEnd: view.period_end,
+      lowerable: view.plan === "pro" || view.plan === "max",
+    });
     replace(root, h("div.stack-lg", {},
       h("h1.h2", {}, t("dashboard.title")),
       view.trial_reminder
@@ -193,7 +221,7 @@ export async function dashboardScreen(root, { navigate }) {
             h("p", {}, t("dashboard.trialBanner", { price: view.price_after_trial_usd })),
             h("p", {}, h("a.inline", { href: "/settings", "data-link": "" }, t("dashboard.toSettings"))))
         : null,
-      view.own_machine ? remoteCard(view, machines, reload) : hoursCard(view, config, reload, announce),
+      view.own_machine ? remoteCard(view, machines, reload) : hoursCard(view, config, reload, announce, forecast),
       machineCard(machines, view.own_machine, reload),
       tasksCard(tasks, navigate),
       feedCard(ledgerView.feed, reload),

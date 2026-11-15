@@ -317,6 +317,13 @@
     "startTrial": "Choose a plan",
     "hoursTitle": "Hours",
     "hoursLeft": "{left} left of {total}",
+    "runout": {
+      "plenty": "At this pace the hours last to the next charge and beyond: by this count the balance runs out around {date}.",
+      "tight": "At this pace the hours run out around {date}, a couple of hours before the next charge. You can always buy more.",
+      "early": "At this pace the hours run out around {date}, well before the next charge. You can buy more at any time, and if you keep hitting the limit mid-task, look at a bigger plan or a custom one from the administrator.",
+      "lower": "At this pace the hours last the whole period: about {used} of {total} by {date}. A lower plan may suit you better.",
+      "empty": "The hours are used up. Buy more to keep working."
+    },
     "purchased": "Of which purchased: {h}",
     "periodEnds": "Until {date}",
     "buyHours": "Buy {h} h for ${p}",
