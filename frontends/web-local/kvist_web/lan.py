@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-"""LAN mode of ``kvist-web``: a pairing code, a discovery beacon and the host check for private addresses.
+"""LAN mode of ``kvist-web``: who this computer is, the discovery beacon and the host check for private addresses.
 
-The phone app runs no agent. It finds a computer on the same router, pairs with the code printed
-there and then shows that computer's web interface. Everything here stays inside the local network:
-the beacon answers only private addresses, and the host check accepts only IP literals of private
-ranges, so a DNS-rebinding page cannot reach the controller by a name.
+The phone app runs no agent. It finds a computer on the same router, asks to be trusted (the computer
+asks its owner once) and then drives that computer's web interface. Everything here stays inside the
+local network: the beacon answers only private addresses, and the host check accepts only IP literals of
+private ranges, so a DNS-rebinding page cannot reach the controller by a name.
 """
 from __future__ import annotations
 
+import getpass
 import ipaddress
 import json
 import logging
 import os
-import secrets
+import platform
 import socket
 import threading
+import uuid
 from pathlib import Path
 
 from .instance import controller_home
@@ -23,39 +25,57 @@ _LOG = logging.getLogger("kvist.web.lan")
 
 BEACON_PORT = 9672
 PROBE = b"KVIST-DISCOVER/1"
-# No 0/O, 1/I/L: the code is read off a screen and typed on a phone.
-_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-CODE_LENGTH = 12
+BEACON_VERSION = 2
 
 
-def code_path() -> Path:
-    return controller_home() / "lan-code"
+def computer_id_path() -> Path:
+    return controller_home() / "computer-id"
 
 
-def normalize_code(text: str) -> str:
-    return "".join(char for char in text.upper() if char.isalnum())
-
-
-def format_code(code: str) -> str:
-    return "-".join(code[start:start + 4] for start in range(0, len(code), 4))
-
-
-def load_code(path: Path | None = None, *, rotate: bool = False) -> str:
-    """Return the saved pairing code, creating it on first use or when ``rotate`` asks for a new one."""
-    path = path or code_path()
-    if not rotate:
-        try:
-            saved = normalize_code(path.read_text(encoding="utf-8"))
-        except OSError:
-            saved = ""
-        if len(saved) == CODE_LENGTH:
-            return saved
-    code = "".join(secrets.choice(_ALPHABET) for _ in range(CODE_LENGTH))
+def computer_id(path: Path | None = None) -> str:
+    """A stable name for this computer, so a phone knows it again after the router gives it a new address."""
+    path = path or computer_id_path()
+    try:
+        saved = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        saved = ""
+    if len(saved) == 32:
+        return saved
+    fresh = uuid.uuid4().hex
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        stream.write(code)
-    return code
+    path.write_text(fresh, encoding="utf-8")
+    return fresh
+
+
+def os_info() -> tuple[str, str]:
+    """('linux' | 'macos' | 'windows', a name for a person: 'Ubuntu 24.04', 'macOS 15.1', 'Windows 11')."""
+    system = platform.system()
+    if system == "Windows":
+        return "windows", f"Windows {platform.release()}".strip()
+    if system == "Darwin":
+        return "macos", f"macOS {platform.mac_ver()[0]}".strip()
+    try:
+        pretty = platform.freedesktop_os_release().get("PRETTY_NAME", "")
+    except OSError:
+        pretty = ""
+    return "linux", pretty or "Linux"
+
+
+def user_name() -> str:
+    try:
+        return getpass.getuser()
+    except (OSError, KeyError, ImportError):
+        # No passwd entry (a container, a service account): the environment may still know.
+        return os.environ.get("USERNAME") or os.environ.get("USER") or ""
+
+
+def identity(http_port: int, *, host: str | None = None) -> dict[str, object]:
+    """What the beacon tells a phone: enough to recognise the computer, nothing to act on."""
+    kind, label = os_info()
+    return {
+        "service": "kvist-web", "version": BEACON_VERSION, "id": computer_id(),
+        "name": host or socket.gethostname(), "os": kind, "os_name": label, "user": user_name(), "port": http_port,
+    }
 
 
 def is_private_host(name: str | None) -> bool:
@@ -79,35 +99,29 @@ def local_address() -> str | None:
         probe.close()
 
 
-def banner(code: str, port: int, address: str | None, russian: bool) -> str:
-    where = f"http://{address}:{port}" if address else f"http://<IP>:{port}"
+def banner(who: dict[str, object], address: str | None, russian: bool) -> str:
+    where = f"http://{address}:{who['port']}" if address else f"http://<IP>:{who['port']}"
+    label = f"{who['name']} ({who['os_name']}, {who['user']})"
     if russian:
         return (
-            "Kvist открыт в локальной сети.\n"
-            "  Телефон: открой приложение Kvist, выбери этот компьютер и введи код.\n"
-            f"  Код:   {format_code(code)}\n"
-            f"  Адрес: {where}  (для ручного ввода)\n"
-            "Любой, кто в этой сети знает код, управляет агентом на этом компьютере.\n"
-            "Новый код: kvist-web --lan --new-code"
+            f"Kvist виден телефонам в локальной сети как {label}.\n"
+            "  Новый телефон спросит разрешения здесь, на компьютере, один раз.\n"
+            f"  Адрес для ручного ввода: {where}\n"
+            "Доверенный телефон управляет агентом на этом компьютере. Забыть все телефоны: kvist-web --forget-phones"
         )
     return (
-        "Kvist is open to your local network.\n"
-        "  Phone:   open the Kvist app, pick this computer and enter the code.\n"
-        f"  Code:    {format_code(code)}\n"
-        f"  Address: {where}  (for manual entry)\n"
-        "Anyone on this network who knows the code drives the agent on this computer.\n"
-        "New code: kvist-web --lan --new-code"
+        f"Kvist is visible to phones on the local network as {label}.\n"
+        "  A new phone asks for permission here, on this computer, once.\n"
+        f"  Address for manual entry: {where}\n"
+        "A trusted phone drives the agent on this computer. Forget every phone: kvist-web --forget-phones"
     )
 
 
 class Beacon:
-    """Answers a discovery probe with the controller's name and port; reveals nothing else."""
+    """Answers a discovery probe with who this computer is; reveals nothing else."""
 
-    def __init__(self, http_port: int, name: str | None = None, port: int = BEACON_PORT) -> None:
-        self._reply = json.dumps(
-            {"service": "kvist-web", "version": 1, "name": name or socket.gethostname(), "port": http_port},
-            separators=(",", ":"),
-        ).encode("utf-8")
+    def __init__(self, http_port: int, port: int = BEACON_PORT, who: dict[str, object] | None = None) -> None:
+        self._reply = json.dumps(who or identity(http_port), separators=(",", ":")).encode("utf-8")
         self._port = port
         self._stop = threading.Event()
         self._socket: socket.socket | None = None
@@ -117,7 +131,10 @@ class Beacon:
         """Bind the beacon port; raises ``OSError`` when it is taken (discovery is then off, pairing by address still works)."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
+            # Two users on one computer each run a beacon: both must hear the broadcast (macOS needs REUSEPORT for that).
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
             sock.bind(("0.0.0.0", self._port))
         except OSError:
             sock.close()

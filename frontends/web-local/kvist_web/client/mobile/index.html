@@ -40,12 +40,14 @@
         <p id="chat-state" class="chat-state"></p>
       </div>
       <button id="pause" class="btn small" type="button" hidden></button>
+      <button id="more" class="btn small" type="button">⋯</button>
       <img id="chat-mascot" class="sprite" alt="" width="48" height="48">
     </header>
     <p id="status" class="status" hidden></p>
     <main id="feed" class="feed" aria-live="polite"></main>
     <section id="request" class="sheet" aria-label="Kvist" hidden></section>
     <form id="composer" class="composer">
+      <button id="slash" class="btn icon" type="button">/</button>
       <textarea id="prompt" rows="1" spellcheck="false" autocomplete="off"></textarea>
       <button id="send" class="btn primary icon" type="submit" data-mode="send" disabled>▶</button>
     </form>
@@ -55,6 +57,7 @@
     </div>
   </section>
 
+  <div id="menu" class="menu" hidden></div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script type="module" src="/assets/mobile/app.js"></script>
 </body>

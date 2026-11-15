@@ -8,6 +8,7 @@ import { createMascot } from './mascot.js';
 import { startSnow } from './snow.js';
 import { createFeed } from './feed.js';
 import { renderRequest } from './request.js';
+import { createControls } from './controls.js';
 import { counts, renderHome, stateWord } from './home.js';
 
 // The phone's Kvist: a pixel interface over the same HTTP/SSE contract as the browser one. It shows and
@@ -41,6 +42,16 @@ const chatMascot = createMascot($('#chat-mascot'), { winter });
 const feedBox = $('#feed'), prompt = $('#prompt'), sheet = $('#request');
 const feed = createFeed(feedBox, { onRetry: block => retry(block) });
 if (winter) startSnow($('#snow'));
+
+// The core's own words about the open session: models, reasoning and role, kept current by command_result.
+const controls = createControls({
+    selection: () => app.selection,
+    hello: () => ({ ...app.feedState.meta.hello, ...(app.feedState.meta.model && { model: app.feedState.meta.model }) }),
+    busy: () => BUSY.has(app.execution),
+    createSession: () => (app.selection ? createSession({ serverId: app.selection.serverId, workspace: app.selection.workspace }) : Promise.resolve()),
+    stop: () => (app.selection ? api.stop(app.selection) : Promise.resolve()),
+    toast: message => toast(message),
+});
 
 let localCounter = 0;
 const nextLocalId = () => `m${Date.now()}-${localCounter++}`;
@@ -213,6 +224,7 @@ function onLive(envelope) {
     const event = envelope.event;
     if (!app.selection || !sameSelection(app.selection, { serverId: envelope.server_id, workspace: envelope.workspace, session: envelope.session })) return;
     reconcile(event);
+    if (event.type === 'command_result') toast(event.message || t('commandDone'));
     if (reducesLive(envelope)) apply(event, { ts: envelope.ts });
     if (envelope.durable === true) guard(recover());
 }
@@ -347,8 +359,18 @@ $('#composer').addEventListener('submit', event => {
         return;
     }
     const text = prompt.value.trim();
-    if (text) guard(send(text));
+    if (!text) return;
+    const command = controls.typed(text);
+    if (command) {
+        prompt.value = '';
+        autosize();
+        guard(command);
+        return;
+    }
+    guard(send(text));
 });
+$('#more').onclick = () => controls.main();
+$('#slash').onclick = () => controls.main();
 prompt.addEventListener('input', () => { autosize(); paintComposer(); });
 $('#back').onclick = () => history.back();
 $('#pause').onclick = () => { if (app.selection) guard(api.control(app.selection, 'pause')); };

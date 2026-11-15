@@ -9,13 +9,15 @@ class DiscoveryTest {
 
     @Test
     fun readsAKvistReply() {
-        val computer = parse("""{"service":"kvist-web","version":1,"name":"studio","port":9671}""")
-        assertEquals(Computer("studio", "192.168.1.23", 9671), computer)
+        val computer = parse("""{"service":"kvist-web","version":2,"id":"abc","name":"studio","os":"macos","os_name":"macOS 15.1","user":"ana","port":9671}""")
+        assertEquals(Computer("abc", "studio", "192.168.1.23", 9671, "macos", "macOS 15.1", "ana"), computer)
     }
 
     @Test
-    fun aMissingNameFallsBackToTheAddress() {
-        assertEquals("192.168.1.23", parse("""{"service":"kvist-web","port":9671}""")?.name)
+    fun aMissingNameAndIdFallBackToTheAddress() {
+        val computer = parse("""{"service":"kvist-web","port":9671}""")
+        assertEquals("192.168.1.23", computer?.name)
+        assertEquals("192.168.1.23", computer?.id)
     }
 
     @Test

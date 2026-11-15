@@ -5,13 +5,24 @@ import org.junit.Test
 
 class PairingTest {
     @Test
-    fun theCodeIsReadAsTypedOnAPhone() {
-        assertEquals("K7QD4M2X9RTB", Pairing.normalize("k7qd-4m2x 9rtb"))
+    fun theHeaderCarriesTheTokenAsTheBasicPassword() {
+        // "kvist:abc123" in base64; the computer reads the part after the colon.
+        assertEquals("Basic a3Zpc3Q6YWJjMTIz", Pairing.authHeader("abc123"))
     }
 
     @Test
-    fun theHeaderCarriesTheCodeAsTheBasicPassword() {
-        // "kvist:K7QD4M2X9RTB" in base64; the server reads the part after the colon.
-        assertEquals("Basic a3Zpc3Q6SzdRRDRNMlg5UlRC", Pairing.authHeader("K7QD4M2X9RTB"))
+    fun readsEveryAnswerTheComputerCanGive() {
+        assertEquals(Answer.Allowed("tok"), Pairing.parseAnswer("""{"ok":true,"state":"approved","token":"tok"}"""))
+        assertEquals(Answer.Pending, Pairing.parseAnswer("""{"ok":true,"state":"pending"}"""))
+        assertEquals(Answer.Denied, Pairing.parseAnswer("""{"ok":true,"state":"denied"}"""))
+        assertEquals(Answer.Unavailable, Pairing.parseAnswer("""{"ok":true,"state":"unavailable"}"""))
+        assertEquals(Answer.Expired, Pairing.parseAnswer("""{"ok":true,"state":"expired"}"""))
+    }
+
+    @Test
+    fun anApprovalWithoutATokenIsNotAnApproval() {
+        // The token travels once; a second reading of the same answer has none.
+        assertEquals(Answer.Expired, Pairing.parseAnswer("""{"ok":true,"state":"approved"}"""))
+        assertEquals(Answer.Expired, Pairing.parseAnswer("not json"))
     }
 }

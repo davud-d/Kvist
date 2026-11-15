@@ -48,25 +48,43 @@ class InstanceDescriptor:
             self.path.unlink(missing_ok=True)
 
     def health(self) -> bool:
+        return self._health() is not None
+
+    def lan(self) -> bool:
+        """Whether the running controller serves phones on the local network."""
+        payload = self._health()
+        return bool(payload and payload.get("lan") is True)
+
+    def _health(self) -> dict[str, Any] | None:
         value = self.read()
         if not value:
-            return False
+            return None
         try:
             connection = self._connection(value, timeout=1.0)
             try:
                 connection.request("GET", "/health")
                 response = connection.getresponse()
                 if response.status != 200:
-                    return False
+                    return None
                 raw = response.read(65537)
                 if len(raw) > 65536:
-                    return False
+                    return None
                 payload = json.loads(raw)
             finally:
                 connection.close()
         except (OSError, ValueError, TypeError, KeyError, http.client.HTTPException):
-            return False
-        return isinstance(payload, dict) and payload.get("service") == "kvist-web"
+            return None
+        return payload if isinstance(payload, dict) and payload.get("service") == "kvist-web" else None
+
+    def open(self, timeout: float) -> tuple[http.client.HTTPConnection, dict[str, Any]] | None:
+        """A connection to the running controller and its descriptor, or None when none is written."""
+        value = self.read()
+        if not value:
+            return None
+        try:
+            return self._connection(value, timeout), value
+        except ValueError:
+            return None
 
     def stop(self) -> bool:
         value = self.read()

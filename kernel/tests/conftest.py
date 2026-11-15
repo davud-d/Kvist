@@ -239,6 +239,12 @@ def _never_start_the_tray(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _never_open_the_computer_to_phones(monkeypatch):
+    """A test that builds an agent must not start the web controller for phones (a port, a beacon, a window)."""
+    monkeypatch.setenv("KVIST_PHONE", "0")
+
+
+@pytest.fixture(autouse=True)
 def _close_cached_sqlite_connections():
     """The memory and skill-storage stores keep one connection per path open for the thread's life.
 

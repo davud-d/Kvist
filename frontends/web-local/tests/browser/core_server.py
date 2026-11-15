@@ -90,7 +90,7 @@ def isolate(root: Path) -> Path:
     dead = 'http://127.0.0.1:9'
     os.environ.update(HOME=str(home), USERPROFILE=str(home), HTTP_PROXY=dead, HTTPS_PROXY=dead,
                       http_proxy=dead, https_proxy=dead, NO_PROXY='127.0.0.1,localhost',
-                      no_proxy='127.0.0.1,localhost', AGENT_API_INTERVAL='0', PYTHONUNBUFFERED='1')
+                      no_proxy='127.0.0.1,localhost', AGENT_API_INTERVAL='0', PYTHONUNBUFFERED='1', KVIST_PHONE='0')
     return home
 
 

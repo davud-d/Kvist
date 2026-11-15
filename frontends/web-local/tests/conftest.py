@@ -19,3 +19,9 @@ def isolated_home(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setattr(Path, "home", lambda: home)
     return home
+
+
+@pytest.fixture(autouse=True)
+def _never_open_the_computer_to_phones(monkeypatch):
+    """A core a test starts must not bring up the controller for phones (a port, a beacon, a window)."""
+    monkeypatch.setenv("KVIST_PHONE", "0")

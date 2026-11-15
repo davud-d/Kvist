@@ -157,6 +157,8 @@ kvist_web = [
     "client/mobile/home.js",
     "client/mobile/request.js",
     "client/mobile/i18n.js",
+    "client/mobile/controls.js",
+    "client/mobile/menu.js",
     "client/mobile/mascot.js",
     "client/mobile/season.js",
     "client/mobile/snow.js",

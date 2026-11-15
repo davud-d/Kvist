@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from .http_api import ControllerHTTPServer
 from .instance import InstanceDescriptor, controller_home
 from .installers import installer_for
 from . import lan
+from .devices import DeviceStore
+from .pairing import Pairing
 from .logging_setup import configure_logging
 
 
@@ -51,9 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--access-token", default="", help="Required for a non-loopback bind.")
     parser.add_argument(
         "--lan", action="store_true",
-        help="Serve the phone app on the local network: pairing code, discovery beacon, private addresses only.",
+        help="Serve phones on the local network: discovery beacon, private addresses only, a phone is trusted once the owner allows it.",
     )
-    parser.add_argument("--new-code", action="store_true", help="With --lan: replace the pairing code.")
+    parser.add_argument("--auto-exit", action="store_true", help="With --lan: stop when no agent has been running for a minute.")
+    parser.add_argument("--forget-phones", action="store_true", help="Stop trusting every phone.")
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -87,56 +91,59 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print("Kvist web is not running.")
         return
-    if args.new_code and not args.lan:
-        raise SystemExit("error: --new-code works only together with --lan")
+    if args.forget_phones:
+        print(f"Forgot {DeviceStore().forget_all()} phone(s).")
+        return
+    if args.auto_exit and not args.lan:
+        raise SystemExit("error: --auto-exit works only together with --lan")
     if args.lan:
-        # A specific --host is kept, so the phone can be served on one adapter only.
+        # A specific --host is kept, so phones can be served on one adapter only.
         if args.host == DEFAULT_HOST:
             args.host = "0.0.0.0"
-        args.allow_remote = True
         args.no_open = True
-        args.access_token = lan.load_code(rotate=args.new_code)
     if descriptor.health():
         value = descriptor.read()
         url = f"http://{value['host']}:{value['port']}"
-        if args.lan:
+        if args.lan and not descriptor.lan():
             raise SystemExit(
-                f"error: Kvist web is already running at {url}; "
+                f"error: Kvist web is already running at {url} without --lan; "
                 "stop it with `kvist-web --stop`, then start it again with --lan"
             )
+        if args.lan:
+            print(f"Kvist web is already visible to phones ({url}).")
+            return
         if not args.no_open:
             webbrowser.open(url)
         print(f"Kvist web is already running at {url}.")
         return
-    if not _loopback(args.host) and not (args.allow_remote and args.access_token):
+    if not args.lan and not _loopback(args.host) and not (args.allow_remote and args.access_token):
         raise SystemExit(
             "error: non-loopback bind requires both --allow-remote and --access-token"
         )
     controller = WebController(args.workspace)
     token = descriptor.token()
+    russian = os.environ.get("LANG", "").lower().startswith("ru")
+    devices = DeviceStore() if args.lan else None
     try:
-        server = ControllerHTTPServer(
-            (args.host, args.port),
-            controller,
-            admin_token=token,
-            external_token=args.access_token,
-            lan=args.lan,
-        )
+        server = _listen(args, controller, token, devices, Pairing(devices, russian=russian) if devices else None)
     except OSError as error:
         if descriptor.health():
             raise SystemExit("Kvist web is already running.") from None
         raise SystemExit(f"error: cannot listen on {args.host}:{args.port}: {error}") from error
-    descriptor.write(args.host, args.port, token)
+    port = server.server_address[1]
+    descriptor.write(args.host, port, token)
     _LOG.info(
         "controller started",
         extra={"component": "web", "workspace": args.workspace, "connection": args.host},
     )
     controller.restore_remote_connections()
-    url = f"http://{args.host}:{args.port}"
+    url = f"http://{args.host}:{port}"
     if not args.no_open:
         threading.Timer(0.15, lambda: webbrowser.open(url)).start()
     print(f"Kvist web is running at {url}")
-    beacon = _start_beacon(args) if args.lan else None
+    beacon = _start_beacon(port, russian) if args.lan else None
+    if args.auto_exit:
+        threading.Thread(target=_exit_when_idle, args=(server,), name="kvist-auto-exit", daemon=True).start()
     try:
         server.serve_forever(poll_interval=0.4)
     except KeyboardInterrupt:
@@ -150,10 +157,40 @@ def main(argv: list[str] | None = None) -> None:
         _LOG.info("controller stopped", extra={"component": "web"})
 
 
-def _start_beacon(args: argparse.Namespace) -> lan.Beacon | None:
-    russian = os.environ.get("LANG", "").lower().startswith("ru")
-    print(lan.banner(args.access_token, args.port, lan.local_address(), russian))
-    beacon = lan.Beacon(args.port)
+# Several users of one computer each run a controller: the next free port is theirs.
+PORT_TRIES = 10
+IDLE_EXIT_SECONDS = 60.0
+
+
+def _listen(args, controller, token, devices, pairing) -> ControllerHTTPServer:
+    ports = range(args.port, args.port + PORT_TRIES) if args.lan else (args.port,)
+    error: OSError | None = None
+    for port in ports:
+        try:
+            return ControllerHTTPServer(
+                (args.host, port), controller, admin_token=token, external_token=args.access_token,
+                lan=args.lan, devices=devices, pairing=pairing,
+            )
+        except OSError as caught:
+            error = caught
+    assert error is not None
+    raise error
+
+
+def _exit_when_idle(server: ControllerHTTPServer) -> None:
+    """The cores that started this controller keep a connection to it; when the last one is gone it has no reason to stay."""
+    while True:
+        time.sleep(5.0)
+        if server.presence.idle_seconds() > IDLE_EXIT_SECONDS:
+            _LOG.info("no agent is running, stopping", extra={"component": "web"})
+            server.shutdown()
+            return
+
+
+def _start_beacon(port: int, russian: bool) -> lan.Beacon | None:
+    who = lan.identity(port)
+    print(lan.banner(who, lan.local_address(), russian))
+    beacon = lan.Beacon(port, who=who)
     try:
         beacon.start()
     except OSError as error:

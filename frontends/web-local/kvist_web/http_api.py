@@ -1,6 +1,8 @@
 """HTTP/SSE boundary. OS processes and SSH stay behind WebController."""
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import mimetypes
 import os
@@ -14,12 +16,17 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .controller import WebController
+from .devices import DeviceStore
 from .lan import is_private_host
+from .pairing import Pairing, PairingError
 from .protocol import WEB_PROTOCOL_VERSION
 from .security import BrowserAuth, BrowserSession, redact
 
 
 MAX_BODY = 30 * 1024 * 1024
+# A phone that is not trusted yet may send this much, no more.
+MAX_PAIR_BODY = 4096
+PRESENCE_BEAT_SECONDS = 5.0
 API_PREFIX = f"/api/v{WEB_PROTOCOL_VERSION}"
 # Python before 3.14 knows .woff2 only through the system mime.types, which may be absent.
 mimetypes.add_type("font/woff2", ".woff2")
@@ -39,6 +46,29 @@ def client_root() -> Path:
     return root
 
 
+class Presence:
+    """Cores that keep a connection open to say "an agent runs here"; the controller exits when none is left."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count = 0
+        self._idle_since = time.monotonic()
+
+    def enter(self) -> None:
+        with self._lock:
+            self._count += 1
+
+    def leave(self) -> None:
+        with self._lock:
+            self._count -= 1
+            if self._count == 0:
+                self._idle_since = time.monotonic()
+
+    def idle_seconds(self) -> float:
+        with self._lock:
+            return time.monotonic() - self._idle_since if self._count == 0 else 0.0
+
+
 class ControllerHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -50,12 +80,17 @@ class ControllerHTTPServer(ThreadingHTTPServer):
         admin_token: str,
         external_token: str = "",
         lan: bool = False,
+        devices: DeviceStore | None = None,
+        pairing: Pairing | None = None,
     ) -> None:
         self.controller = controller
         self.auth = BrowserAuth()
         self.admin_token = admin_token
         self.external_token = external_token
         self.lan = lan
+        self.devices = devices
+        self.pairing = pairing
+        self.presence = Presence()
         self.public_origin = f"http://{address[0]}:{address[1]}"
         self.allowed_hosts = (
             {"127.0.0.1", "localhost", "::1"}
@@ -81,10 +116,16 @@ class ControllerHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/health":
-            self._json({"ok": True, "service": "kvist-web"})
+            self._json({"ok": True, "service": "kvist-web", "lan": self.server.lan})
             return
         if not self._valid_host():
             self._error(HTTPStatus.MISDIRECTED_REQUEST, "Request host was rejected.")
+            return
+        if parsed.path == "/pair/status" and self.server.pairing is not None:
+            self._pair_status(parsed)
+            return
+        if parsed.path == "/api/admin/presence":
+            self._presence()
             return
         if not self._external_authorized():
             return
@@ -150,6 +191,9 @@ class ControllerHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self._valid_host():
             self._error(HTTPStatus.MISDIRECTED_REQUEST, "Request host was rejected.")
+            return
+        if parsed.path == "/pair/request" and self.server.pairing is not None:
+            self._pair_request()
             return
         if parsed.path == "/api/admin/stop":
             if self.headers.get("Authorization") != f"Bearer {self.server.admin_token}":
@@ -384,23 +428,26 @@ class ControllerHandler(BaseHTTPRequestHandler):
             and port == self.server.server_address[1]
         )
 
+    def _supplied_token(self) -> str:
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            return header[7:]
+        if header.startswith("Basic "):
+            try:
+                return base64.b64decode(header[6:]).decode("utf-8").partition(":")[2]
+            except ValueError:
+                return ""
+        return ""
+
     def _external_authorized(self) -> bool:
         expected = self.server.external_token
-        if not expected:
+        devices = self.server.devices
+        if not expected and devices is None:
             return True
-        header = self.headers.get("Authorization", "")
-        supplied = ""
-        if header.startswith("Bearer "):
-            supplied = header[7:]
-        elif header.startswith("Basic "):
-            try:
-                import base64
-
-                decoded = base64.b64decode(header[6:]).decode("utf-8")
-                supplied = decoded.partition(":")[2]
-            except Exception:
-                supplied = ""
-        if __import__("hmac").compare_digest(supplied, expected):
+        supplied = self._supplied_token()
+        if expected and hmac.compare_digest(supplied, expected):
+            return True
+        if devices is not None and supplied and devices.verify(supplied) is not None:
             return True
         body = b'{"ok":false,"error":"Access token required."}'
         self.send_response(HTTPStatus.UNAUTHORIZED)
@@ -411,6 +458,54 @@ class ControllerHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         return False
+
+    def _pair_request(self) -> None:
+        address = self.client_address[0]
+        if not is_private_host(address):
+            self._error(HTTPStatus.FORBIDDEN, "Only the local network may ask.")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if not 0 < length <= MAX_PAIR_BODY:
+            self._error(HTTPStatus.BAD_REQUEST, "bad_request")
+            return
+        try:
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise ValueError("not an object")
+            request_id = self.server.pairing.request(body.get("device_id"), body.get("name"), address)
+        except (ValueError, PairingError) as error:
+            reason = error.reason if isinstance(error, PairingError) else "bad_request"
+            self._json({"ok": False, "error": reason}, HTTPStatus.BAD_REQUEST if reason == "bad_request" else HTTPStatus.TOO_MANY_REQUESTS)
+            return
+        self._json({"ok": True, "request_id": request_id})
+
+    def _pair_status(self, parsed) -> None:
+        if not is_private_host(self.client_address[0]):
+            self._error(HTTPStatus.FORBIDDEN, "Only the local network may ask.")
+            return
+        self._json({"ok": True, **self.server.pairing.status(_one(parse_qs(parsed.query), "request_id", ""))})
+
+    def _presence(self) -> None:
+        if self.headers.get("Authorization") != f"Bearer {self.server.admin_token}":
+            self._error(HTTPStatus.UNAUTHORIZED, "Not authorized.")
+            return
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        self.server.presence.enter()
+        try:
+            while True:
+                self.wfile.write(b"\n")
+                self.wfile.flush()
+                time.sleep(PRESENCE_BEAT_SECONDS)
+        except OSError:
+            # The core closed the connection or died: this is how presence ends, not a failure.
+            pass
+        finally:
+            self.server.presence.leave()
 
     def _json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

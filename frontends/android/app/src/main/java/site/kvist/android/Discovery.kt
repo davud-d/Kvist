@@ -9,7 +9,16 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 
-data class Computer(val name: String, val host: String, val port: Int)
+/** What a computer says about itself: enough for a person to pick the right one from a list. */
+data class Computer(
+    val id: String,
+    val name: String,
+    val host: String,
+    val port: Int,
+    val os: String,
+    val osName: String,
+    val user: String,
+)
 
 /**
  * Finds computers running `kvist-web --lan` on the same router. The phone sends a short probe to the
@@ -32,7 +41,15 @@ object Discovery {
         if (json.optString("service") != "kvist-web") return null
         val port = json.optInt("port", -1)
         if (port !in 1..65535) return null
-        return Computer(json.optString("name").ifBlank { sender }, sender, port)
+        return Computer(
+            id = json.optString("id").ifBlank { sender },
+            name = json.optString("name").ifBlank { sender },
+            host = sender,
+            port = port,
+            os = json.optString("os"),
+            osName = json.optString("os_name"),
+            user = json.optString("user"),
+        )
     }
 
     /** The broadcast address of the subnet an IPv4 address lives in. */
@@ -68,7 +85,7 @@ object Discovery {
                     continue
                 }
                 val sender = packet.address.hostAddress ?: continue
-                parseReply(packet.data, packet.length, sender)?.let { found[it.host] = it }
+                parseReply(packet.data, packet.length, sender)?.let { found[it.id] = it }
             }
         }
         return found.values.toList()

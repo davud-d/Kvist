@@ -34,21 +34,34 @@ The token is never put in a URL.
 ## Phone on the local network
 
 ```bash
-kvist-web --lan                 # serves on 0.0.0.0:9671, prints a pairing code
-kvist-web --lan --new-code      # replaces the code (every paired phone has to pair again)
+kvist-web --lan                 # serves phones on 0.0.0.0:9671 (the next free port if it is taken)
+kvist-web --forget-phones       # every phone has to ask again
 ```
 
-`--lan` is for the Android app (`frontends/android`) and for a phone browser at `http://<computer>:9671/m/`,
-a pixel interface of its own (`client/mobile/`) over the same API. It is opt-in and never starts by itself:
+You normally do not run this yourself: **a core that starts an agent brings it up** (`kernel/phone_link.py`),
+keeps one connection open to it, and the controller stops a minute after the last agent is gone
+(`--auto-exit`). Off with `KVIST_PHONE=0` or `"phone_access": false` in `~/.kvist/config.json`. If a
+controller without `--lan` already owns the port (for example the autostart service), phones do not see this
+computer until that one is restarted with `--lan`.
 
-- The code (12 characters, saved with private permissions in `~/.kvist/web/lan-code`) is the access token,
-  sent as the Basic password on every request.
-- A discovery beacon answers a UDP probe on port 9672 with the computer's name and port, and only to private
-  addresses. If the port is taken, discovery is off and pairing by address still works.
-- The Host check accepts private IP literals (not names), so a DNS-rebinding page cannot reach it. Without
-  `--lan` the check is exactly what it was.
-- Traffic is plain HTTP in the local network. Anyone there who knows the code drives the agent on this
-  computer; do not use it on a network you do not trust.
+The phone app (`frontends/android`, or a phone browser at `http://<computer>:9671/m/`) gets a pixel interface
+of its own (`client/mobile/`) over the same API, so a trusted phone can do what the browser can: start and
+switch sessions, stop the agent, answer requests, type `/` commands, change model, reasoning and role.
+
+- **Trust.** The first time, the phone taps the computer in its list, and **this computer asks its owner in a
+  window of the desktop** (zenity, yad or kdialog on Linux, a dialog on macOS, a message box on Windows; with
+  no desktop session it cannot ask and the phone is told so). On "Allow" the phone gets a token of its own,
+  stored hashed in `~/.kvist/web/devices.json`; every later request carries it as the Basic password. One
+  question at a time, and 30 seconds of silence after a refusal, so nobody on the network can bury the owner
+  in windows.
+- **Discovery.** A beacon answers a UDP probe on port 9672, only from private addresses, with the computer's
+  id, host name, operating system (`linux`, `macos`, `windows` and a readable name), user name and port. That
+  is what the phone lists. Anyone on the same network can read it; it is the price of a list with names.
+  If the port is taken, discovery is off and entering the address still works.
+- **Host check.** Private IP literals only, never names, so a DNS-rebinding page cannot reach the controller.
+  Without `--lan` the check is what it always was.
+- **Limits.** Plain HTTP inside the local network: do not leave it on for a network you do not trust. A
+  trusted phone drives the agent on this computer, commands included.
 
 ## Architecture
 

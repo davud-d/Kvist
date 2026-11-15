@@ -817,6 +817,7 @@ from kernel.session.agent_logging import (
     list_sessions,
 )
 from kernel.session.session_titler import session_display_title
+from kernel import phone_link
 from kernel.tray import tray_bar
 from kernel.tray.tray_link import mark_terminal_host
 from kernel.sandbox.permission_command import AUTO_MODE_STARTUP_WARNING
@@ -5113,6 +5114,7 @@ def main() -> None:
             if all(model_values)
             else None
         )
+        phone_link.start()
         try:
             launch_multi(
                 args.workspace,
@@ -5233,6 +5235,7 @@ def main() -> None:
         sys.exit(2)
 
     sync_strime_suggestion(config.provider, config.stream)
+    phone_link.start()
 
     # Only an explicit resume continues a previous launch's conversation.
     from kernel.session.durable_json import JsonStorageError

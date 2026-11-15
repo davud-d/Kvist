@@ -3,9 +3,9 @@ import { lang, t } from '/assets/mobile/i18n.js';
 import { createMascot } from '/assets/mobile/mascot.js';
 import { startSnow } from '/assets/mobile/snow.js';
 
-// The connect screen of the Android app: it finds the computers that run `kvist-web --lan`, takes the
-// code from the person and hands both to the app, which opens that computer's page. The app (Kotlin)
-// owns the network; this page only draws. `window.KvistNative` exists only inside the app.
+// The connect screen of the Android app: it lists the computers that run Kvist on this network (system,
+// host name, user), and a tap asks that computer to trust this phone: the computer asks its owner, once.
+// The app (Kotlin) owns the network; this page only draws. `window.KvistNative` exists only inside the app.
 
 const WINTER_BG = '#0e1a33';
 const winter = isWinter(new Date(), location.search);
@@ -20,29 +20,32 @@ const $ = id => document.getElementById(id);
 const native = window.KvistNative;
 const mascot = createMascot($('mascot'), { winter });
 const failure = new URLSearchParams(location.search).get('err');
+const OS_TAGS = { linux: 'LINUX', macos: 'MACOS', windows: 'WIN' };
 
-let saved = null;
-let chosen = null;
 let scanning = false;
+let asking = false;
 let autoTried = false;
 
 const send = message => native.postMessage(JSON.stringify(message));
 const say = text => { $('bubble').textContent = text; };
+const part = (tag, cls, text) => { const node = document.createElement(tag); node.className = cls; node.textContent = text; return node; };
 
 function computerRow(computer) {
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'session';
-    const dot = document.createElement('span');
-    dot.className = 'dot finished';
-    const name = document.createElement('span');
-    name.className = 'session-title';
-    name.textContent = computer.name;
-    const address = document.createElement('span');
-    address.className = 'session-state';
-    address.textContent = computer.saved ? t('savedMark') : computer.host;
-    row.append(dot, name, address);
-    row.onclick = () => choose(computer);
+    row.className = 'session computer';
+    const lines = document.createElement('span');
+    lines.className = 'computer-lines';
+    lines.append(
+        part('span', 'session-title', computer.name),
+        part('span', 'computer-sub', [computer.os_name, computer.user].filter(Boolean).join(' · ')),
+    );
+    row.append(
+        part('span', `os-tag ${computer.os}`, OS_TAGS[computer.os] || '?'),
+        lines,
+        part('span', 'session-state', computer.saved ? t('savedMark') : computer.host),
+    );
+    row.onclick = () => pair(computer, false);
     return row;
 }
 
@@ -51,90 +54,74 @@ function showComputers(computers) {
     mascot.setMood('idle');
     $('computers').replaceChildren(...computers.map(computerRow));
     $('hint').hidden = computers.length > 0;
-    say(computers.length ? t('foundN', computers.length) : t('nothing'));
+    // Why the app is here (the computer forgot this phone) outlasts the result of the search.
+    say(failure === 'forgotten' ? t('forgotten') : computers.length ? t('foundN', computers.length) : t('nothing'));
     // The same computer under a new address (the router handed out another one): no need to ask again.
     const known = computers.find(computer => computer.saved);
-    if (known && failure !== 'code' && !autoTried) {
+    if (known && !failure && !autoTried) {
         autoTried = true;
-        pair(known, '');
+        pair(known, true);
     }
 }
 
 function scan() {
-    if (scanning) return;
+    if (scanning || asking) return;
     scanning = true;
     $('computers').replaceChildren();
     $('hint').hidden = true;
-    $('code-sheet').hidden = true;
     say(t('scanning'));
     mascot.setMood('work');
     send({ op: 'scan' });
 }
 
-function choose(computer) {
-    chosen = computer;
+// `auto`: the app is reopening a computer it already knows, so it only uses the token it has and never makes
+// a window appear on that computer.
+function pair(computer, auto) {
+    if (asking) return;
+    asking = true;
     $('manual').hidden = true;
-    $('code-title').textContent = t('codeTitle', computer.name);
-    $('code-error').hidden = true;
-    $('code').value = '';
-    $('code-sheet').hidden = false;
-    $('code').focus();
+    say(auto ? t('connecting') : t('asking', computer.name));
+    mascot.setMood('wait');
+    send({ op: 'pair', id: computer.id || '', name: computer.name, host: computer.host, port: computer.port, auto });
 }
 
-function pair(computer, code) {
-    say(t('connecting'));
-    mascot.setMood('work');
-    send({ op: 'pair', host: computer.host, port: computer.port, name: computer.name, code });
-}
-
-function shown(message) {
-    $('code-error').textContent = message;
-    $('code-error').hidden = false;
-}
+const FAILURES = {
+    denied: 'denied', unavailable: 'unavailable', busy: 'busy', cooldown: 'cooldown', forgotten: 'forgotten', expired: 'expired',
+};
 
 function onMessage(message) {
     if (message.type === 'saved') {
-        saved = message.saved;
-        if (saved && failure === 'unreachable') say(t('lostSaved', saved.name));
         scan();
     } else if (message.type === 'found') {
         showComputers(message.computers);
     } else if (message.type === 'pair-failed') {
+        asking = false;
         mascot.setMood('idle');
-        const text = message.reason === 'code' ? t('wrongCode') : t('unreachable');
-        if (!$('code-sheet').hidden) shown(text);
-        else say(text);
+        say(t(FAILURES[message.reason] || 'unreachable'));
     }
 }
 
 function submitManual() {
     const [host, port] = $('manual-address').value.trim().split(':');
-    if (!host) return;
-    $('manual').hidden = true;
-    choose({ name: host, host, port: Number(port) || 9671 });
+    if (host) pair({ id: '', name: host, host, port: Number(port) || 9671 }, false);
 }
 
 $('tagline').textContent = t('tagline');
 $('hint-run').textContent = t('hintRun');
 $('hint-network').textContent = t('hintNetwork');
-$('code-hint').textContent = t('codeHint');
-$('code-cancel').textContent = t('cancel');
-$('code-go').textContent = t('connect');
 $('rescan').textContent = t('rescan');
 $('show-manual').textContent = t('manual');
 $('manual-go').textContent = t('connect');
 $('manual-address').placeholder = t('address');
+$('hint-command').textContent = t('hintCommand');
 
 $('rescan').onclick = scan;
-$('show-manual').onclick = () => { $('code-sheet').hidden = true; $('manual').hidden = !$('manual').hidden; };
+$('show-manual').onclick = () => { $('manual').hidden = !$('manual').hidden; };
 $('manual-go').onclick = submitManual;
-$('code-cancel').onclick = () => { $('code-sheet').hidden = true; };
-$('code-go').onclick = () => { if (chosen) pair(chosen, $('code').value); };
-$('code').addEventListener('input', () => { $('code').value = $('code').value.toUpperCase(); });
-$('code').addEventListener('keydown', event => { if (event.key === 'Enter') $('code-go').click(); });
 
 if (native) {
     native.onmessage = event => onMessage(JSON.parse(event.data));
+    if (failure === 'forgotten') say(t('forgotten'));
     send({ op: 'saved' });
 } else {
     say('Open this page in the Kvist app.');
