@@ -308,6 +308,216 @@ class HelperActivityEvent:
                 "summary": self.summary, "output": self.output}
 
 
+# --- best-of and council --------------------------------------------------------
+# Several executors work on one task in their own child sessions; these events are
+# what the main session shows of them. The executors' own events never enter the
+# main stream: only the snapshots (``bestof_status``) and calls (``executor_activity``)
+# below do. ``executors``, ``rows``, ``members``, ``risks`` and ``dissent`` are lists of
+# already normalized dicts; ``EventStreamUI`` builds them from the orchestrator's payload.
+
+
+@dataclass(slots=True)
+class BestofStartedEvent:
+    """A best-of run begins: ``executors`` are ``{executor_id, style, branch, session}``."""
+
+    run_id: str
+    task: str
+    count: int
+    base: str
+    executors: list[dict]
+    type: ClassVar[str] = "bestof_started"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "run_id": self.run_id, "task": self.task, "count": self.count,
+                "base": self.base, "executors": self.executors}
+
+
+@dataclass(slots=True)
+class BestofStatusEvent:
+    """One executor's current state; a snapshot that replaces the previous one (live only).
+
+    ``state``: waiting, running, finished, failed, stopped, eliminated, lost.
+    ``tests`` is ``{state: unknown|running|passed|failed, summary}``, ``diff`` is
+    ``{files, added, removed}``, ``usage`` is ``{input_tokens, output_tokens, cost_approx}``
+    plus ``cache_read_tokens`` and ``cost_usd`` when known.
+    """
+
+    run_id: str
+    executor_id: str
+    style: str
+    branch: str
+    state: str
+    step: int
+    tests: dict
+    diff: dict
+    usage: dict
+    type: ClassVar[str] = "bestof_status"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "run_id": self.run_id, "executor_id": self.executor_id, "style": self.style,
+                "branch": self.branch, "state": self.state, "step": self.step, "tests": self.tests,
+                "diff": self.diff, "usage": self.usage}
+
+
+@dataclass(slots=True)
+class ExecutorActivityEvent:
+    """One call of a best-of executor as it happens (live only), like ``helper_activity``.
+
+    ``phase`` is ``step`` when the call starts, ``result`` when it ends; ``ok``,
+    ``summary`` and ``output`` come with ``result``.
+    """
+
+    run_id: str
+    executor_id: str
+    phase: str
+    call_id: str
+    action_type: str
+    label: str = ""
+    ok: bool | None = None
+    summary: str = ""
+    output: str = ""
+    type: ClassVar[str] = "executor_activity"
+
+    def to_dict(self) -> dict:
+        payload = {"type": self.type, "run_id": self.run_id, "executor_id": self.executor_id, "phase": self.phase,
+                   "call_id": self.call_id, "action_type": self.action_type, "label": self.label,
+                   "summary": self.summary, "output": self.output}
+        if self.ok is not None:
+            payload["ok"] = self.ok
+        return payload
+
+
+@dataclass(slots=True)
+class BestofEliminatedEvent:
+    """An executor dropped out of the comparison, and why."""
+
+    run_id: str
+    executor_id: str
+    reason: str
+    type: ClassVar[str] = "bestof_eliminated"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "run_id": self.run_id, "executor_id": self.executor_id, "reason": self.reason}
+
+
+@dataclass(slots=True)
+class BestofVerdictEvent:
+    """The outcome of the check: one row per executor.
+
+    A row is ``{executor_id, style, outcome, tests, diff, note}`` where ``outcome`` is
+    winner, finalist, eliminated or failed.
+    """
+
+    run_id: str
+    rows: list[dict]
+    winner: str
+    reason: str
+    type: ClassVar[str] = "bestof_verdict"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "run_id": self.run_id, "rows": self.rows, "winner": self.winner,
+                "reason": self.reason}
+
+
+@dataclass(slots=True)
+class BestofDiffEvent:
+    """An executor's patch against the base, for review (live only; redacted and cut with a marker)."""
+
+    run_id: str
+    executor_id: str
+    patch: str
+    files: list[str]
+    type: ClassVar[str] = "bestof_diff"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "run_id": self.run_id, "executor_id": self.executor_id, "patch": self.patch,
+                "files": self.files}
+
+
+@dataclass(slots=True)
+class BestofFinishedEvent:
+    """How a best-of run ended: accepted, discarded, cancelled, failed, or pending (waiting for the person).
+
+    ``executor_id`` and ``commit`` are left out when there is no chosen executor or no commit.
+    """
+
+    run_id: str
+    outcome: str
+    message: str
+    executor_id: str = ""
+    commit: str = ""
+    type: ClassVar[str] = "bestof_finished"
+
+    def to_dict(self) -> dict:
+        payload = {"type": self.type, "run_id": self.run_id, "outcome": self.outcome, "message": self.message}
+        if self.executor_id:
+            payload["executor_id"] = self.executor_id
+        if self.commit:
+            payload["commit"] = self.commit
+        return payload
+
+
+@dataclass(slots=True)
+class CouncilStartedEvent:
+    """A council begins: ``members`` are ``{executor_id, angle, session}``."""
+
+    council_id: str
+    question: str
+    members: list[dict]
+    type: ClassVar[str] = "council_started"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "council_id": self.council_id, "question": self.question,
+                "members": self.members}
+
+
+@dataclass(slots=True)
+class CouncilCardEvent:
+    """One member's decision and the argument for it."""
+
+    council_id: str
+    executor_id: str
+    angle: str
+    decision: str
+    argument: str
+    type: ClassVar[str] = "council_card"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "council_id": self.council_id, "executor_id": self.executor_id,
+                "angle": self.angle, "decision": self.decision, "argument": self.argument}
+
+
+@dataclass(slots=True)
+class CouncilObjectionEvent:
+    """One member's objections to the others' cards: ``risks`` are ``{target, risk}``."""
+
+    council_id: str
+    executor_id: str
+    angle: str
+    risks: list[dict]
+    type: ClassVar[str] = "council_objection"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "council_id": self.council_id, "executor_id": self.executor_id,
+                "angle": self.angle, "risks": self.risks}
+
+
+@dataclass(slots=True)
+class CouncilVerdictEvent:
+    """The council's choice; ``dissent`` lists members who disagreed, as ``{executor_id, angle, why}``."""
+
+    council_id: str
+    chosen: str
+    decision: str
+    reason: str
+    dissent: list[dict]
+    type: ClassVar[str] = "council_verdict"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "council_id": self.council_id, "chosen": self.chosen,
+                "decision": self.decision, "reason": self.reason, "dissent": self.dissent}
+
+
 @dataclass(slots=True)
 class ImageJobEvent:
     """A picture from ``generate_image`` is being drawn in the background, or could not be made (live only).
@@ -913,6 +1123,9 @@ class InputRequestEvent:
     subject: dict | None = None  # {kind: "command", command, reason} or {kind: "overwrite", path, diff}
     remember_pattern: str | None = None  # non-null = user may choose "don't ask again for this pattern"
     timeout_seconds: float | None = None  # non-null = unanswered after this long counts as "no" (auto mode)
+    # What the dialog decides (e.g. "bestof_decision") and the run it belongs to; sent only when non-empty.
+    purpose: str = ""
+    run_id: str = ""
     type: ClassVar[str] = "input_request"
 
     def to_dict(self) -> dict:
@@ -932,6 +1145,10 @@ class InputRequestEvent:
             payload["remember_pattern"] = self.remember_pattern
         if self.timeout_seconds is not None:
             payload["timeout_seconds"] = self.timeout_seconds
+        if self.purpose:
+            payload["purpose"] = self.purpose
+        if self.run_id:
+            payload["run_id"] = self.run_id
         return payload
 
 
@@ -1048,6 +1265,8 @@ class FrontendChannel:
         subject: dict | None = None,
         remember_pattern: str | None = None,
         timeout: float | None = None,
+        purpose: str = "",
+        run_id: str = "",
     ) -> InputResponse:
         request_id = uuid.uuid4().hex
         waiter = _Waiter(event=threading.Event())
@@ -1071,6 +1290,8 @@ class FrontendChannel:
                 subject=subject,
                 remember_pattern=remember_pattern,
                 timeout_seconds=timeout,
+                purpose=purpose,
+                run_id=run_id,
             )
         )
 

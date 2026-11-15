@@ -14,6 +14,17 @@ from kernel.protocol.frontend_protocol import (
     CallStreamEvent,
     ActionResultEvent,
     ArtifactEvent,
+    BestofDiffEvent,
+    BestofEliminatedEvent,
+    BestofFinishedEvent,
+    BestofStartedEvent,
+    BestofStatusEvent,
+    BestofVerdictEvent,
+    CouncilCardEvent,
+    CouncilObjectionEvent,
+    CouncilStartedEvent,
+    CouncilVerdictEvent,
+    ExecutorActivityEvent,
     HelperActivityEvent,
     HelperEvent,
     ImageJobEvent,
@@ -54,6 +65,8 @@ from kernel.sandbox.redaction import redact_text, redact_value
 
 
 _OUTPUT_TAIL_CHARS = 4000
+# A patch is read, not skimmed, so it gets more room than a command's tail.
+_PATCH_CHARS = 20_000
 
 
 class _JobOutput:
@@ -413,6 +426,97 @@ class EventStreamUI:
             summary=redact_text(str(payload.get("summary") or "")), output=redact_text(str(payload.get("output") or "")),
         ))
 
+    def print_bestof_started(self, payload: dict) -> None:
+        self._channel.emit(BestofStartedEvent(
+            run_id=str(payload["run_id"]), task=redact_text(str(payload.get("task") or "")),
+            count=int(payload["count"]), base=str(payload.get("base") or ""),
+            executors=[{"executor_id": str(item["executor_id"]), "style": redact_text(str(item.get("style") or "")),
+                        "branch": str(item.get("branch") or ""), "session": str(item.get("session") or "")}
+                       for item in payload.get("executors") or []],
+        ))
+
+    def print_bestof_status(self, payload: dict) -> None:
+        self._channel.emit(BestofStatusEvent(
+            run_id=str(payload["run_id"]), executor_id=str(payload["executor_id"]),
+            style=redact_text(str(payload.get("style") or "")), branch=str(payload.get("branch") or ""),
+            state=str(payload["state"]), step=int(payload.get("step") or 0),
+            tests=_tests_of(payload.get("tests")), diff=_diff_of(payload.get("diff")),
+            usage=_usage_of(payload.get("usage")),
+        ))
+
+    def print_executor_activity(self, payload: dict) -> None:
+        ok = payload.get("ok")
+        self._channel.emit(ExecutorActivityEvent(
+            run_id=str(payload["run_id"]), executor_id=str(payload["executor_id"]), phase=str(payload["phase"]),
+            call_id=str(payload.get("call_id") or ""), action_type=str(payload.get("action_type") or ""),
+            label=redact_text(str(payload.get("label") or "")), ok=None if ok is None else bool(ok),
+            summary=redact_text(str(payload.get("summary") or "")), output=redact_text(str(payload.get("output") or "")),
+        ))
+
+    def print_bestof_eliminated(self, payload: dict) -> None:
+        self._channel.emit(BestofEliminatedEvent(
+            run_id=str(payload["run_id"]), executor_id=str(payload["executor_id"]),
+            reason=redact_text(str(payload.get("reason") or "")),
+        ))
+
+    def print_bestof_verdict(self, payload: dict) -> None:
+        self._channel.emit(BestofVerdictEvent(
+            run_id=str(payload["run_id"]),
+            rows=[{"executor_id": str(row["executor_id"]), "style": redact_text(str(row.get("style") or "")),
+                   "outcome": str(row["outcome"]), "tests": _tests_of(row.get("tests")),
+                   "diff": _diff_of(row.get("diff")), "note": redact_text(str(row.get("note") or ""))}
+                  for row in payload.get("rows") or []],
+            winner=str(payload.get("winner") or ""), reason=redact_text(str(payload.get("reason") or "")),
+        ))
+
+    def print_bestof_diff(self, payload: dict) -> None:
+        self._channel.emit(BestofDiffEvent(
+            run_id=str(payload["run_id"]), executor_id=str(payload["executor_id"]),
+            patch=_cut_patch(redact_text(str(payload.get("patch") or ""))),
+            files=[str(path) for path in payload.get("files") or []],
+        ))
+
+    def print_bestof_finished(self, payload: dict) -> None:
+        self._channel.emit(BestofFinishedEvent(
+            run_id=str(payload["run_id"]), outcome=str(payload["outcome"]),
+            message=redact_text(str(payload.get("message") or "")),
+            executor_id=str(payload.get("executor_id") or ""), commit=str(payload.get("commit") or ""),
+        ))
+
+    def print_council_started(self, payload: dict) -> None:
+        self._channel.emit(CouncilStartedEvent(
+            council_id=str(payload["council_id"]), question=redact_text(str(payload.get("question") or "")),
+            members=[{"executor_id": str(item["executor_id"]), "angle": redact_text(str(item.get("angle") or "")),
+                      "session": str(item.get("session") or "")}
+                     for item in payload.get("members") or []],
+        ))
+
+    def print_council_card(self, payload: dict) -> None:
+        self._channel.emit(CouncilCardEvent(
+            council_id=str(payload["council_id"]), executor_id=str(payload["executor_id"]),
+            angle=redact_text(str(payload.get("angle") or "")),
+            decision=redact_text(str(payload.get("decision") or "")),
+            argument=redact_text(str(payload.get("argument") or "")),
+        ))
+
+    def print_council_objection(self, payload: dict) -> None:
+        self._channel.emit(CouncilObjectionEvent(
+            council_id=str(payload["council_id"]), executor_id=str(payload["executor_id"]),
+            angle=redact_text(str(payload.get("angle") or "")),
+            risks=[{"target": str(item.get("target") or ""), "risk": redact_text(str(item.get("risk") or ""))}
+                   for item in payload.get("risks") or []],
+        ))
+
+    def print_council_verdict(self, payload: dict) -> None:
+        self._channel.emit(CouncilVerdictEvent(
+            council_id=str(payload["council_id"]), chosen=str(payload.get("chosen") or ""),
+            decision=redact_text(str(payload.get("decision") or "")),
+            reason=redact_text(str(payload.get("reason") or "")),
+            dissent=[{"executor_id": str(item["executor_id"]), "angle": redact_text(str(item.get("angle") or "")),
+                      "why": redact_text(str(item.get("why") or ""))}
+                     for item in payload.get("dissent") or []],
+        ))
+
     def print_image_job(self, payload: dict) -> None:
         self._channel.emit(ImageJobEvent(
             image_id=str(payload["image_id"]), state=str(payload["state"]), name=redact_text(str(payload["name"])),
@@ -559,6 +663,30 @@ class EventStreamUI:
             [{"value": value, "label": label} for value, label in options],
         )
 
+    def ask_decision(
+        self,
+        title: str,
+        options: list[tuple[str, str]],
+        *,
+        body: str = "",
+        purpose: str = "",
+        run_id: str = "",
+    ) -> str | None:
+        """Ask the person to decide something the core waits on, e.g. which best-of result to take.
+
+        Like ``ask_choice`` but the request also carries ``body`` (what is being
+        decided), ``purpose`` (what the answer is used for) and ``run_id``, so a
+        frontend can tell this dialog from a plain choice and tie it to its run.
+        """
+        return self._channel.request(
+            "choice",
+            redact_text(title),
+            body=redact_text(body),
+            options=[{"value": value, "label": label} for value, label in options],
+            purpose=purpose,
+            run_id=run_id,
+        ).value
+
     def prompt_text(
         self,
         title: str,
@@ -587,6 +715,36 @@ class EventStreamUI:
         """Yes/no gate for a destructive step; anything but an explicit yes is no."""
         response = self._channel.request("confirm", title, body=redact_text(body))
         return response.approved is True
+
+
+def _tests_of(raw: dict | None) -> dict:
+    raw = raw or {}
+    return {"state": str(raw.get("state") or "unknown"), "summary": redact_text(str(raw.get("summary") or ""))}
+
+
+def _diff_of(raw: dict | None) -> dict:
+    raw = raw or {}
+    return {"files": int(raw.get("files") or 0), "added": int(raw.get("added") or 0),
+            "removed": int(raw.get("removed") or 0)}
+
+
+def _usage_of(raw: dict | None) -> dict:
+    """Token counts always; cache reads and the price only when known, as in ``usage``."""
+    raw = raw or {}
+    usage: dict = {"input_tokens": int(raw.get("input_tokens") or 0), "output_tokens": int(raw.get("output_tokens") or 0)}
+    if raw.get("cache_read_tokens") is not None:
+        usage["cache_read_tokens"] = int(raw["cache_read_tokens"])
+    if raw.get("cost_usd") is not None:
+        usage["cost_usd"] = float(raw["cost_usd"])
+    usage["cost_approx"] = bool(raw.get("cost_approx"))
+    return usage
+
+
+def _cut_patch(patch: str) -> str:
+    """Keep the start of an oversized patch, with a marker saying how much was left out."""
+    if len(patch) <= _PATCH_CHARS:
+        return patch
+    return patch[:_PATCH_CHARS] + f"\n[... {len(patch) - _PATCH_CHARS} characters omitted ...]\n"
 
 
 def _normalize_option(option: str | dict[str, str]) -> dict[str, str]:

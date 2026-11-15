@@ -219,7 +219,12 @@ def _stats_of(entries: list[_Entry]) -> _Stats:
     )
 
 
-def _compacted(raw: bytes) -> tuple[bytes, _Stats]:
+def _stamped(event: dict[str, Any], stamp: dict[str, str]) -> dict[str, Any]:
+    """Add the journal's stamp keys to an event; keys the event already has win."""
+    return {**event, **{key: value for key, value in stamp.items() if key not in event}}
+
+
+def _compacted(raw: bytes, stamp: dict[str, str] | None = None) -> tuple[bytes, _Stats]:
     """Drop the oldest whole turns until the journal is back under its keep size.
 
     The newest turn always survives. Turn 0 is the journal's own notice saying
@@ -249,7 +254,7 @@ def _compacted(raw: bytes) -> tuple[bytes, _Stats]:
     lines: list[bytes] = []
     if omitted + dropped and kept:
         notice = {"type": "journal_notice", "omitted_turns": omitted + dropped}
-        lines.append(_encode(kept[0].seq - 1, 0, notice))
+        lines.append(_encode(kept[0].seq - 1, 0, _stamped(notice, stamp or {})))
     lines.extend(entry.line + b"\n" for entry in kept)
     stats.turns = len(order) - dropped
     return b"".join(lines), stats
@@ -300,10 +305,14 @@ class SessionJournal:
         workspace: Path,
         current_path: Callable[[], Path],
         report: Callable[[str], None],
+        stamp: dict[str, str] | None = None,
     ) -> None:
         self._workspace = workspace
         self._current_path = current_path
         self._report = report
+        # Keys added to every event this journal writes (a child session's ``executor_id``),
+        # so the owner of the main session can tell whose events a journal holds.
+        self._stamp = dict(stamp or {})
         self._lock = threading.RLock()
         self._stats: dict[Path, _Stats] = {}
         self._active = False
@@ -487,7 +496,7 @@ class SessionJournal:
         result: list[_Stats] = []
 
         def update(raw: bytes) -> bytes:
-            compacted, stats = _compacted(raw)
+            compacted, stats = _compacted(raw, self._stamp)
             result.append(stats)
             return compacted
 
@@ -516,7 +525,7 @@ class SessionJournal:
 
     def _write(self, path: Path, payload: dict[str, Any], *, sync: bool = False) -> None:
         stats = self._stats_for(path)
-        line = _encode(stats.next_seq, self._turn, payload)
+        line = _encode(stats.next_seq, self._turn, _stamped(payload, self._stamp))
         if not self._admits(payload["type"], len(line)):
             self._dropped += 1
             return
@@ -606,6 +615,48 @@ class JournalingUI:
     def print_helper_activity(self, payload: dict) -> None:
         # Live only: the helper's own service session journals this activity.
         self._forward("print_helper_activity", payload)
+
+    # Best-of and council: what the person decided on is journaled; progress snapshots,
+    # the executors' calls and patches are live only (the executors' own child sessions
+    # journal their work). Every method is explicit so that nothing depends on the
+    # ``__getattr__`` fall-through to decide whether an event is recorded.
+
+    def _record_and_forward(self, name: str, payload: dict) -> None:
+        getattr(self._events, name)(payload)
+        self._forward(name, payload)
+
+    def print_bestof_started(self, payload: dict) -> None:
+        self._record_and_forward("print_bestof_started", payload)
+
+    def print_bestof_status(self, payload: dict) -> None:
+        self._forward("print_bestof_status", payload)
+
+    def print_executor_activity(self, payload: dict) -> None:
+        self._forward("print_executor_activity", payload)
+
+    def print_bestof_eliminated(self, payload: dict) -> None:
+        self._record_and_forward("print_bestof_eliminated", payload)
+
+    def print_bestof_verdict(self, payload: dict) -> None:
+        self._record_and_forward("print_bestof_verdict", payload)
+
+    def print_bestof_diff(self, payload: dict) -> None:
+        self._forward("print_bestof_diff", payload)
+
+    def print_bestof_finished(self, payload: dict) -> None:
+        self._record_and_forward("print_bestof_finished", payload)
+
+    def print_council_started(self, payload: dict) -> None:
+        self._record_and_forward("print_council_started", payload)
+
+    def print_council_card(self, payload: dict) -> None:
+        self._record_and_forward("print_council_card", payload)
+
+    def print_council_objection(self, payload: dict) -> None:
+        self._record_and_forward("print_council_objection", payload)
+
+    def print_council_verdict(self, payload: dict) -> None:
+        self._record_and_forward("print_council_verdict", payload)
 
     def print_image_job(self, payload: dict) -> None:
         # Live only: the finished picture is journaled as an artifact.

@@ -83,6 +83,16 @@ class AgentUI(Protocol):
     # ``first_line``), and ``print_route(role: str, source: str)`` receives the
     # role a turn runs under, once per turn. The classic terminal omits both.
 
+    # Optional capabilities of the best-of and council modes, probed with ``getattr``
+    # and left out by UIs that cannot show them: ``print_bestof_started``,
+    # ``print_bestof_status``, ``print_executor_activity``, ``print_bestof_eliminated``,
+    # ``print_bestof_verdict``, ``print_bestof_diff``, ``print_bestof_finished``,
+    # ``print_council_started``, ``print_council_card``, ``print_council_objection`` and
+    # ``print_council_verdict`` each take one ``payload: dict`` (see ``docs/UI_API.md``).
+    # ``ask_decision(title, options, *, body="", purpose="", run_id="")`` asks like
+    # ``ask_choice`` (``options`` are ``(value, label)`` pairs) and also sends what is
+    # being decided; a caller falls back to ``ask_choice`` when it is missing.
+
     def render_user_markdown(self, message: str, fallback_style: str = "") -> Any:
         """Return a renderable for ``message`` (frontend-specific)."""
         ...
