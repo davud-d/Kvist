@@ -12,6 +12,12 @@ from typing import Any
 
 from kernel.vision.vision import anthropic_content
 
+# The key an assistant message carries its signed thinking blocks under:
+# {"provider", "model", "blocks"}. Only this module's caller, an Anthropic
+# request, ever reads it.
+THINKING_KEY = "anthropic_thinking"
+_THINKING_TYPES = ("thinking", "redacted_thinking")
+
 
 def tools_to_anthropic(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     converted: list[dict[str, Any]] = []
@@ -64,8 +70,21 @@ def _tool_input(arguments: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _assistant_blocks(item: dict[str, Any]) -> list[dict[str, Any]]:
-    blocks: list[dict[str, Any]] = []
+def _signed_blocks(item: dict[str, Any], model: str | None) -> list[dict[str, Any]]:
+    """The turn's thinking blocks, when this request is to the model that wrote them.
+
+    The signature ties a block to the model and to everything before it, so
+    another model's blocks are left out rather than sent to be refused.
+    """
+    held = item.get(THINKING_KEY)
+    if not held or model is None or held.get("model") != model:
+        return []
+    return [dict(block) for block in held["blocks"]]
+
+
+def _assistant_blocks(item: dict[str, Any], model: str | None) -> list[dict[str, Any]]:
+    # Thinking blocks come first and word for word: a changed byte is a 400.
+    blocks: list[dict[str, Any]] = _signed_blocks(item, model)
     text = item.get("content")
     if isinstance(text, str) and text:
         blocks.append({"type": "text", "text": text})
@@ -94,12 +113,39 @@ def _is_results_message(message: dict[str, Any]) -> bool:
     )
 
 
-def history_to_anthropic(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _answer_with_thinking(item: dict[str, Any], model: str | None) -> Any:
+    """The content of an assistant turn without calls, behind its thinking blocks if it has any."""
+    content = anthropic_content(item.get("content", ""))
+    thinking = _signed_blocks(item, model)
+    if not thinking:
+        return content
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}] if content else []
+    return [*thinking, *content]
+
+
+def replays_tool_use_without_thinking(messages: list[dict[str, Any]]) -> bool:
+    """Whether a replayed assistant turn that called a tool lacks its thinking block.
+
+    With thinking on, Anthropic refuses such a history, so the caller turns
+    thinking off for that request instead.
+    """
+    for message in messages:
+        content = message["content"]
+        if message["role"] != "assistant" or not isinstance(content, list):
+            continue
+        if any(block.get("type") == "tool_use" for block in content) and content[0].get("type") not in _THINKING_TYPES:
+            return True
+    return False
+
+
+def history_to_anthropic(items: list[dict[str, Any]], model: str | None = None) -> list[dict[str, Any]]:
     """Non-system chat messages as Anthropic messages.
 
     Results of parallel calls arrive as consecutive ``role: tool`` messages;
     Anthropic wants them together in one user message, right after the
-    assistant turn that made the calls.
+    assistant turn that made the calls. ``model`` is the one the request goes
+    to: an assistant turn's signed thinking blocks are replayed only to it.
     """
     messages: list[dict[str, Any]] = []
     for item in items:
@@ -115,7 +161,9 @@ def history_to_anthropic(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             else:
                 messages.append({"role": "user", "content": [result]})
         elif role == "assistant" and item.get("tool_calls"):
-            messages.append({"role": "assistant", "content": _assistant_blocks(item)})
+            messages.append({"role": "assistant", "content": _assistant_blocks(item, model)})
+        elif role == "assistant":
+            messages.append({"role": role, "content": _answer_with_thinking(item, model)})
         else:
             messages.append({"role": role, "content": anthropic_content(item.get("content", ""))})
     return messages

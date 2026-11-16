@@ -16,12 +16,15 @@ from kernel.agent.native_tools import (
     NativeTurn,
     READONLY_TOOLS,
     ToolCall,
+    assistant_message,
     calls_from_turn,
+    close_open_calls,
     compact_history,
     native_role_prompt,
     opening_note,
     tools_for_role,
 )
+from kernel.llm.anthropic_wire import THINKING_KEY
 from kernel.protocol.parser import CommandValidationError, build_command
 from kernel.protocol.protocol import ActionType
 
@@ -228,6 +231,55 @@ def test_compaction_elides_oldest_tool_output_first():
     assert elided == 1
     assert messages[2]["content"] == ELIDED_OUTPUT
     assert messages[3]["content"].startswith("y")
+
+
+_HELD = {"provider": "anthropic", "model": "claude-sonnet-5-5", "blocks": [{"type": "redacted_thinking", "data": "x"}]}
+
+
+def _messages_with_blocks() -> list[dict]:
+    return [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "a", "type": "function", "function": {"name": "f", "arguments": "{}"}}], THINKING_KEY: _HELD},
+        {"role": "tool", "tool_call_id": "a", "content": "x " * 500},
+    ]
+
+
+def test_eliding_an_output_drops_every_stored_thinking_block():
+    messages = _messages_with_blocks()
+
+    assert compact_history(messages, lambda text: len(text.split()), budget=100) == 1
+
+    assert all(THINKING_KEY not in message for message in messages)
+
+
+def test_a_conversation_that_fits_keeps_its_thinking_blocks():
+    messages = _messages_with_blocks()
+
+    assert compact_history(messages, lambda text: len(text.split()), budget=10_000) == 0
+
+    assert messages[2][THINKING_KEY] == _HELD
+
+
+def test_a_turn_with_blocks_puts_them_on_its_message_under_the_key_with_their_origin():
+    turn = NativeTurn(content="", thinking_blocks=_HELD["blocks"], thinking_origin=("anthropic", "claude-sonnet-5-5"))
+
+    assert assistant_message(turn)[THINKING_KEY] == _HELD
+    assert THINKING_KEY not in assistant_message(NativeTurn(content="", thinking_blocks=_HELD["blocks"]))
+    assert THINKING_KEY not in assistant_message(NativeTurn(content=""))
+
+
+def test_open_calls_of_the_last_turn_are_answered_and_answered_ones_are_left():
+    calls = [{"id": name, "type": "function", "function": {"name": "f", "arguments": "{}"}} for name in ("a", "b", "c")]
+    messages = [
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "", "tool_calls": calls},
+        {"role": "tool", "tool_call_id": "b", "content": "done"},
+    ]
+
+    assert close_open_calls(messages, "lost") == 2
+    assert [(m["tool_call_id"], m["content"]) for m in messages[2:]] == [("b", "done"), ("a", "lost"), ("c", "lost")]
+    assert close_open_calls(messages, "lost") == 0
 
 
 def test_probe_decides_support_once_per_process(agent_factory):

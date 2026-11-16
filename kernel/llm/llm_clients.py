@@ -1674,12 +1674,44 @@ def _with_prompt_cache(
     return cached_system, [*messages[:-1], {**last, "content": blocks}]
 
 
-def _replays_tool_use(messages: list[dict[str, Any]]) -> bool:
-    return any(
-        isinstance(message["content"], list)
-        and any(block.get("type") == "tool_use" for block in message["content"])
-        for message in messages
+def _signed_thinking(blocks: Any) -> list[dict[str, str]]:
+    """The thinking blocks of a reply as they must go back: text and signature, or the opaque data.
+
+    A block without its signature (a gateway that drops it) cannot be replayed,
+    so it is not kept.
+    """
+    kept: list[dict[str, str]] = []
+    for block in blocks or []:
+        kind = getattr(block, "type", None)
+        if kind == "thinking" and getattr(block, "signature", None):
+            kept.append({"type": "thinking", "thinking": block.thinking, "signature": block.signature})
+        elif kind == "redacted_thinking" and getattr(block, "data", None):
+            kept.append({"type": "redacted_thinking", "data": block.data})
+    return kept
+
+
+# Models that answered a forced tool_choice with a 400. Learned from the
+# refusal, not from a list of ids, and kept for the process.
+_FORCED_CHOICE_REFUSED: set[str] = set()
+
+
+def _forced_choice(request_kwargs: dict[str, Any]) -> bool:
+    return (request_kwargs.get("tool_choice") or {}).get("type") in ("any", "tool")
+
+
+def _refuses_forced_choice(error: Exception, request_kwargs: dict[str, Any]) -> bool:
+    import anthropic
+
+    return (
+        _forced_choice(request_kwargs)
+        and isinstance(error, anthropic.BadRequestError)
+        and "tool_choice" in str(error).casefold()
     )
+
+
+def _allow_model_to_choose(request_kwargs: dict[str, Any]) -> None:
+    _FORCED_CHOICE_REFUSED.add(request_kwargs["model"])
+    request_kwargs["tool_choice"] = {"type": "auto"}
 
 
 class _AnthropicCompletionsNamespace:
@@ -1715,7 +1747,7 @@ class _AnthropicCompletionsNamespace:
                 system = str(item.get("content", ""))
             else:
                 chat_items.append(item)
-        user_messages = history_to_anthropic(chat_items)
+        user_messages = history_to_anthropic(chat_items, model=model)
 
         if not user_messages:
             # If all messages were system, create a minimal user message
@@ -1774,18 +1806,21 @@ class _AnthropicCompletionsNamespace:
             if "top_p" in kwargs:
                 request_kwargs["top_p"] = float(kwargs["top_p"])
         if tools:
-            from kernel.llm.anthropic_wire import tool_choice_to_anthropic
+            from kernel.llm.anthropic_wire import replays_tool_use_without_thinking, tool_choice_to_anthropic
 
-            if "thinking" in request_kwargs and _replays_tool_use(request_kwargs["messages"]):
+            if "thinking" in request_kwargs and replays_tool_use_without_thinking(request_kwargs["messages"]):
                 # With thinking on, Anthropic wants the signed thinking block of
-                # every replayed tool_use turn; the history keeps only the text,
-                # so those steps run without it instead of failing with a 400.
+                # every replayed tool_use turn. A history that lost one (an old
+                # session, blocks dropped after an edit of the prefix) runs this
+                # step without thinking instead of failing with a 400.
                 del request_kwargs["thinking"]
             choice = tool_choice_to_anthropic(
                 kwargs.get("tool_choice"), thinking="thinking" in request_kwargs
             )
             if choice is not None:
                 request_kwargs["tool_choice"] = choice
+            if _forced_choice(request_kwargs) and model in _FORCED_CHOICE_REFUSED:
+                request_kwargs["tool_choice"] = {"type": "auto"}
         if "stop" in kwargs and kwargs["stop"]:
             request_kwargs["stop_sequences"] = (
                 [kwargs["stop"]] if isinstance(kwargs["stop"], str) else list(kwargs["stop"])
@@ -1795,10 +1830,16 @@ class _AnthropicCompletionsNamespace:
             _fit_nonstreaming(request_kwargs)
 
         client = self._owner._create_client()
+        if stream:
+            return self._stream_response(client, request_kwargs)
         try:
-            if stream:
-                return self._stream_response(client, request_kwargs)
-            response = client.messages.create(**request_kwargs)
+            try:
+                response = client.messages.create(**request_kwargs)
+            except Exception as error:
+                if not _refuses_forced_choice(error, request_kwargs):
+                    raise
+                _allow_model_to_choose(request_kwargs)
+                response = client.messages.create(**request_kwargs)
             return self._owner._normalize_response(response)
         except Exception as error:
             # Map Anthropic exceptions to OpenAI types for uniform error handling
@@ -1810,39 +1851,54 @@ class _AnthropicCompletionsNamespace:
         Usage is split across two events: message_start carries the input and
         cache counters, message_delta the output count, which is cumulative
         (each event restates the total so far), so it is assigned, never added.
-        It goes out as a final choices-less chunk, the shape OpenAI streams use.
+        It goes out as a final choices-less chunk, the shape OpenAI streams use;
+        the same chunk carries the signed thinking blocks, taken from the message
+        the SDK assembled (it is the one that collects each block's signature).
         """
         start_usage: Any = None
         output_tokens: Any = None
         tool_args: dict[int, bool] = {}
-        try:
-            with client.messages.stream(**request_kwargs) as stream:
-                for event in stream:
-                    event_type = getattr(event, "type", None)
-                    if event_type == "message_start":
-                        start_usage = getattr(getattr(event, "message", None), "usage", None)
-                        output_tokens = getattr(start_usage, "output_tokens", None)
-                    elif event_type == "message_delta":
-                        delta_output = getattr(getattr(event, "usage", None), "output_tokens", None)
-                        if delta_output is not None:
-                            output_tokens = delta_output
-                    chunk = self._owner._normalize_stream_chunk(event, tool_args)
-                    if chunk is not None:
-                        yield chunk
-        except Exception as error:
-            raise self._owner._map_error(error) from error
-        if start_usage is not None:
-            from types import SimpleNamespace
+        thinking: list[dict[str, str]] = []
+        started = False
+        while True:
+            try:
+                with client.messages.stream(**request_kwargs) as stream:
+                    for event in stream:
+                        started = True
+                        event_type = getattr(event, "type", None)
+                        if event_type == "message_start":
+                            start_usage = getattr(getattr(event, "message", None), "usage", None)
+                            output_tokens = getattr(start_usage, "output_tokens", None)
+                        elif event_type == "message_delta":
+                            delta_output = getattr(getattr(event, "usage", None), "output_tokens", None)
+                            if delta_output is not None:
+                                output_tokens = delta_output
+                        chunk = self._owner._normalize_stream_chunk(event, tool_args)
+                        if chunk is not None:
+                            yield chunk
+                    final_message = getattr(stream, "get_final_message", None)
+                    if final_message is not None:
+                        thinking = _signed_thinking(final_message().content)
+                break
+            except Exception as error:
+                # A refusal comes before the first event, so asking again repeats nothing.
+                if not started and _refuses_forced_choice(error, request_kwargs):
+                    _allow_model_to_choose(request_kwargs)
+                    continue
+                raise self._owner._map_error(error) from error
+        if start_usage is None and not thinking:
+            return
+        from types import SimpleNamespace
 
-            yield SimpleNamespace(
-                choices=[],
-                usage=_anthropic_usage_counts(
-                    getattr(start_usage, "input_tokens", None),
-                    getattr(start_usage, "cache_read_input_tokens", None),
-                    getattr(start_usage, "cache_creation_input_tokens", None),
-                    output_tokens,
-                ),
+        usage = None
+        if start_usage is not None:
+            usage = _anthropic_usage_counts(
+                getattr(start_usage, "input_tokens", None),
+                getattr(start_usage, "cache_read_input_tokens", None),
+                getattr(start_usage, "cache_creation_input_tokens", None),
+                output_tokens,
             )
+        yield SimpleNamespace(choices=[], usage=usage, thinking_blocks=thinking)
 
 
 def _finish_reason(stop_reason: Any) -> Any:
@@ -1953,7 +2009,9 @@ class AnthropicCompatibleClient:
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=text, tool_calls=tool_calls or None),
+                    message=SimpleNamespace(
+                        content=text, tool_calls=tool_calls or None, thinking_blocks=_signed_thinking(blocks)
+                    ),
                     finish_reason=_finish_reason(stop_reason),
                     last_call_open=last_call_open,
                 )

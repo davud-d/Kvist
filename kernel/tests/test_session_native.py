@@ -212,6 +212,11 @@ def seed_workspace(workspace: Path) -> None:
     (sessions / "titled.events.jsonl").write_text("".join(journal), encoding="utf-8")
     (sessions / "closed-ru.events.jsonl").write_text(_event(1, 1, type="session_ended"), encoding="utf-8")
     (sessions / "ghost.events.jsonl").write_text(_event(1, 1, type="user", text="orphan"), encoding="utf-8")
+    # The conversation of a native run, kept for /resume: it goes with its session, like the journal.
+    conversation = json.dumps({"i": 0, "run_id": "r1", "provider": "anthropic", "model": "m", "tools": "t",
+                               "message": {"role": "user", "content": "hello"}}, separators=(",", ":")) + "\n"
+    for name in ("goal-first", "interrupted", "titled", "ghost"):
+        (sessions / f"{name}.native.jsonl").write_text(conversation, encoding="utf-8")
     _write_json(workspace / ".kvist" / "active_session.json", {"session": "titled", "updated_at": 5.0})
 
     attachments = workspace / ".kvist" / "attachments"
@@ -362,6 +367,28 @@ def test_a_workspace_with_every_kind_of_session_is_changed_identically(tmp_path,
         assert not (kvist / "attachments" / "att_0000000000000000").exists()
         assert (kvist / "attachments" / "att_0000000000000002").is_dir()
         assert not (kvist / "sessions" / "ghost.events.jsonl").exists()
+        # Deleted (goal-first, and ghost which has no document) or reset (interrupted): the conversation goes too.
+        for gone in ("goal-first", "ghost", "interrupted"):
+            assert not (kvist / "sessions" / f"{gone}.native.jsonl").exists(), gone
+        assert (kvist / "sessions" / "titled.native.jsonl").exists()
+
+
+def test_a_new_session_does_not_continue_the_conversation_left_under_its_name(tmp_path, binary):
+    def seed(workspace: Path) -> None:
+        sessions = workspace / ".kvist" / "sessions"
+        sessions.mkdir(parents=True)
+        (sessions / "alpha.native.jsonl").write_text('{"i":0}\n', encoding="utf-8")
+        (sessions / "beta.native.jsonl").write_text('{"i":0}\n', encoding="utf-8")
+
+    def script(workspace: Path, op: SessionOp) -> list:
+        return [op(workspace, "create", "alpha"), op(workspace, "status")]
+
+    run_both(tmp_path, binary, script, seed)
+
+    for label in ("python", "native"):
+        sessions = tmp_path / label / "work" / ".kvist" / "sessions"
+        assert not (sessions / "alpha.native.jsonl").exists()
+        assert (sessions / "beta.native.jsonl").exists()
 
 
 @pytest.mark.parametrize("marker", ["{broken", {"session": "gone"}, {"session": 7}, []])

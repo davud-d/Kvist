@@ -13,6 +13,9 @@ use crate::json::{self, Object, Value};
 use crate::pytext;
 
 pub const JOURNAL_SUFFIX: &str = ".events.jsonl";
+/// The conversation of a session's native run, kept for `/resume`. Only the core
+/// writes and reads it; this program removes it with its session.
+pub const NATIVE_SUFFIX: &str = ".native.jsonl";
 pub const DEFAULT_HISTORY_LIMIT: i64 = 500;
 pub const MAX_HISTORY_LIMIT: i64 = 5_000;
 
@@ -128,6 +131,10 @@ pub fn delete_journal(path: &Path, workspace: &Path) -> Result<bool> {
         return Ok(false);
     }
     durable::delete_private_file(path, workspace)
+}
+
+pub fn delete_native_conversation(path: &Path, workspace: &Path) -> Result<bool> {
+    delete_journal(path, workspace)
 }
 
 #[cfg(test)]

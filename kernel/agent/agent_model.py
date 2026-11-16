@@ -33,6 +33,7 @@ from kernel.context.context_budget import (
 )
 from kernel.context.context_utils import trim_history
 from kernel.llm.llm_clients import (
+    AnthropicCompatibleClient,
     fallback_candidates_for_model,
     FREEFLOW_PROVIDER,
     is_custom_provider,
@@ -60,6 +61,7 @@ from kernel.agent.native_tools import (
     compact_history,
     decode_arguments,
     native_role_prompt,
+    request_messages,
 )
 from kernel.llm.pricing import call_cost
 from kernel.llm.reasoning_effort import (
@@ -811,9 +813,20 @@ def call_native_action_model(
 def _request_native_turn(
     self, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
 ) -> NativeTurn:
+    origin = (self.config.provider, model)
+    safe = request_messages(messages, origin=origin, send_blocks=isinstance(self.client, AnthropicCompatibleClient))
+    turn = _send_native_turn(self, model, safe, tools)
+    if turn.thinking_blocks:
+        turn.thinking_origin = origin
+    return turn
+
+
+def _send_native_turn(
+    self, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+) -> NativeTurn:
     request: dict[str, Any] = {
         "model": model,
-        "messages": redact_value(messages),
+        "messages": messages,
         "tools": tools,
         "timeout": self.config.api_timeout,
     }
@@ -929,6 +942,7 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         content=getattr(message, "content", None) or "",
         reasoning=reasoning or safe_extract_reasoning_delta(message),
         echo_reasoning=isinstance(reasoning, str) and bool(reasoning),
+        thinking_blocks=_signed_blocks_of(message),
         tool_calls=calls,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -936,6 +950,12 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         cache_write_tokens=cache_write,
         usage_source=_usage_source_of(input_tokens, output_tokens),
     )
+
+
+def _signed_blocks_of(carrier: Any) -> list[dict[str, str]]:
+    """The signed thinking blocks an Anthropic adapter attached to a message or the stream's last chunk."""
+    blocks = getattr(carrier, "thinking_blocks", None)
+    return blocks if isinstance(blocks, list) else []
 
 
 _STREAM_LOSES_ARGUMENTS: set[tuple[str, str]] = set()
@@ -960,6 +980,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     after_calls: list[str] = []
     reasoning: list[str] = []
     echo_reasoning = False
+    thinking_blocks: list[dict[str, str]] = []
     input_tokens: int | None = None
     output_tokens: int | None = None
     cache_read: int | None = None
@@ -989,6 +1010,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 cache_read, cache_write = chunk_read, chunk_write
             if completion_count is not None:
                 output_tokens = completion_count
+            thinking_blocks = _signed_blocks_of(chunk) or thinking_blocks
             choices = getattr(chunk, "choices", None)
             if choices and getattr(choices[0], "finish_reason", None) == "length":
                 cut_off = True
@@ -1057,6 +1079,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
         text_after_calls="".join(after_calls),
         reasoning="".join(reasoning),
         echo_reasoning=echo_reasoning,
+        thinking_blocks=thinking_blocks,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cache_read_tokens=cache_read,

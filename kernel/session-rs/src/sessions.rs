@@ -8,7 +8,7 @@ use crate::attachments;
 use crate::config;
 use crate::durable;
 use crate::error::{OpError, Result};
-use crate::journal::{self, JOURNAL_SUFFIX};
+use crate::journal::{self, JOURNAL_SUFFIX, NATIVE_SUFFIX};
 use crate::json::{Object, Value};
 use crate::pytext;
 use crate::redaction;
@@ -52,6 +52,14 @@ pub fn journal_path(workspace: &Path, name: &str) -> Result<PathBuf> {
         return Err(invalid_name(name));
     }
     durable::validate_storage_path(&sessions_folder(workspace).join(format!("{name}{JOURNAL_SUFFIX}")), workspace)
+}
+
+/// The session's native-run conversation; its lifecycle is the session's own.
+fn native_path(workspace: &Path, name: &str) -> Result<PathBuf> {
+    if !is_valid_name(name) {
+        return Err(invalid_name(name));
+    }
+    durable::validate_storage_path(&sessions_folder(workspace).join(format!("{name}{NATIVE_SUFFIX}")), workspace)
 }
 
 fn active_session_path(workspace: &Path) -> Result<PathBuf> {
@@ -250,8 +258,9 @@ pub fn create(workspace: &Path, session: &str) -> Result<bool> {
     let created = durable::create_json_object(&path, &empty_document(session)?, workspace)?;
     if created {
         // A journal left behind by a session of the same name must not be
-        // replayed into this one.
+        // replayed into this one, nor a conversation continued.
         journal::delete_journal(&journal_path(workspace, session)?, workspace)?;
+        journal::delete_native_conversation(&native_path(workspace, session)?, workspace)?;
     }
     Ok(created)
 }
@@ -263,6 +272,7 @@ pub fn delete(workspace: &Path, name: &str, current: &str) -> Result<bool> {
     }
     let removed = durable::delete_json_object(&state_path(workspace, name)?, workspace)?;
     journal::delete_journal(&journal_path(workspace, name)?, workspace)?;
+    journal::delete_native_conversation(&native_path(workspace, name)?, workspace)?;
     attachments::delete_session(workspace, name)?;
     if removed {
         // Re-assert the marker so a stale marker pointing at the deleted
@@ -285,6 +295,7 @@ pub fn reset(workspace: &Path, session: &str) -> Result<()> {
     // The journal goes first: a crash in between must leave the conversation
     // without its display log, never a reset session that still shows its old feed.
     journal::delete_journal(&journal_path(workspace, session)?, workspace)?;
+    journal::delete_native_conversation(&native_path(workspace, session)?, workspace)?;
     attachments::delete_session(workspace, session)?;
     durable::write_json_object(&state_path(workspace, session)?, &empty_document(session)?, workspace)?;
     save_active(workspace, session)
@@ -345,6 +356,15 @@ mod tests {
         for name in ["", "-a", "_a", "A", "a.b", "a b", "сессия", &"a".repeat(65)] {
             assert!(!is_valid_name(name), "{name:?}");
         }
+    }
+
+    #[test]
+    fn a_conversation_file_sits_beside_the_journal_and_takes_only_valid_names() {
+        let workspace = Path::new("/nonexistent-workspace");
+        assert!(native_path(workspace, "Bad Name").is_err());
+        assert!(native_path(workspace, "a.native").is_err());
+        assert_eq!(NATIVE_SUFFIX, ".native.jsonl");
+        assert_ne!(NATIVE_SUFFIX, JOURNAL_SUFFIX);
     }
 
     #[test]

@@ -469,6 +469,18 @@ Semantics (identical to the terminal `/session` and `/new` commands):
   the conversation it is called on. A closed session is refused
   (`{"ok": false}`): emptying it would reopen it.
 
+**The native conversation file.** Beside the journal, a run that talks to the
+model through its tool channel keeps its conversation in
+`.kvist/sessions/<name>.native.jsonl`: one JSON line per message, appended as
+the run goes, so `/resume` of the same run on the same provider and model
+continues it, including the signed thinking blocks of Anthropic models. It is
+the core's own file: a frontend never reads it, and it is not part of any event
+or `--session-op` answer (`protocol_version` stays 1, nothing is added to the
+payloads). It goes with its session: `delete` and `reset` remove it, and
+`create` removes one left under the same name, exactly as for the journal. It
+is redacted like the rest of the session and capped at 8 MiB, the oldest whole
+exchanges being cut out after the first two messages.
+
 **Child sessions (`service`).** A session that another agent opened for its own
 work carries a `service` object in its `status`/`list` item. It always has
 `kind` and `parent_session` (the session that started it) and, by kind:

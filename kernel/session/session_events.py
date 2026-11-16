@@ -16,6 +16,7 @@ never reaches a model prompt, and losing it never loses the conversation.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import threading
@@ -26,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kernel.llm.anthropic_wire import THINKING_KEY
 from kernel.session.durable_json import (
     JsonStorageError,
     append_private_bytes,
@@ -34,9 +36,10 @@ from kernel.session.durable_json import (
     update_private_bytes,
 )
 from kernel.protocol.event_stream_ui import EventStreamUI
-from kernel.sandbox.redaction import redact_text
+from kernel.sandbox.redaction import redact_text, redact_value
 
 JOURNAL_SUFFIX = ".events.jsonl"
+NATIVE_SUFFIX = ".native.jsonl"
 
 # One string inside an event (a written file, a command's arguments, a thought).
 MAX_FIELD_CHARS = 20_000
@@ -198,6 +201,182 @@ def delete_journal(path: Path, workspace: Path) -> bool:
     if not os.path.lexists(path):
         return False
     return delete_private_file(path, boundary=workspace)
+
+
+# --- Native conversation ------------------------------------------------------
+#
+# Unlike the journal this file is read back by the agent: it is the conversation
+# an interrupted native run was having, so /resume can continue it, signed
+# thinking blocks included. It holds one run's messages, appended as they come,
+# and goes with its session.
+
+# The system prompt and the task are what every later message hangs on; a
+# trimmed file keeps them and cuts whole exchanges out after them.
+_NATIVE_HEAD_MESSAGES = 2
+_TRIMMED = b'{"trimmed":true}\n'
+
+
+def digest_of(value: Any) -> str:
+    """SHA-256 of the canonical JSON of ``value``: the identity of a block or a tool list."""
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _native_line(
+    index: int, message: dict[str, Any], run_id: str, provider: str, model: str, tools: str
+) -> bytes:
+    """One message as a line of the file, redacted like everything else on disk.
+
+    A thinking block is stored redacted too, beside the digest of the original:
+    a block that redaction changed no longer matches it and is not replayed.
+    """
+    stored = redact_value({key: value for key, value in message.items() if key != THINKING_KEY})
+    held = message.get(THINKING_KEY)
+    if held is not None:
+        stored[THINKING_KEY] = {
+            "provider": held["provider"],
+            "model": held["model"],
+            "blocks": redact_value(held["blocks"]),
+            "digests": [digest_of(block) for block in held["blocks"]],
+        }
+    record = {"i": index, "run_id": run_id, "provider": provider, "model": model, "tools": tools, "message": stored}
+    return (json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def write_native_messages(
+    path: Path,
+    workspace: Path,
+    *,
+    run_id: str,
+    provider: str,
+    model: str,
+    tools: str,
+    messages: list[dict[str, Any]],
+    start: int,
+) -> None:
+    """Record ``messages[start:]``; from 0 the file starts over, as an earlier run's conversation is no use.
+
+    ``tools`` is the digest of the tool list the messages were sent with: a
+    block is signed over it, so it is checked again when the file is read.
+    """
+    data = b"".join(
+        _native_line(index, messages[index], run_id, provider, model, tools) for index in range(start, len(messages))
+    )
+    if start == 0:
+        update_private_bytes(path, lambda _current: data, boundary=workspace)
+        return
+    if append_private_bytes(path, data, boundary=workspace, sync=True) > MAX_SESSION_BYTES:
+        update_private_bytes(path, _trimmed_native, boundary=workspace)
+
+
+def _trimmed_native(raw: bytes) -> bytes:
+    """Cut the oldest whole exchanges out of the conversation, after its head, until it is small enough.
+
+    What is left starts at an assistant message, so no tool result is left
+    without the call it answers.
+    """
+    lines = [line for line in raw.splitlines(keepends=True) if line.strip() and line != _TRIMMED]
+    head, rest = lines[:_NATIVE_HEAD_MESSAGES], lines[_NATIVE_HEAD_MESSAGES:]
+    total = sum(map(len, lines))
+    while rest and (total > KEEP_SESSION_BYTES or _native_role(rest[0]) != "assistant"):
+        total -= len(rest.pop(0))
+    return b"".join([*head, _TRIMMED, *rest]) if rest else b"".join(head)
+
+
+def _native_role(line: bytes) -> str | None:
+    try:
+        return json.loads(line)["message"]["role"]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def read_native_conversation(
+    path: Path,
+    workspace: Path,
+    *,
+    run_id: str,
+    provider: str,
+    model: str,
+    tools: str,
+) -> list[dict[str, Any]] | None:
+    """The conversation of run ``run_id``, or None when the file holds no usable one.
+
+    Only a conversation whose last message was written for this provider and
+    model is returned; any other is better started anew than continued under a
+    model that did not write it. The file is read up to its first damaged line
+    or skipped message. A block is returned only when its digest still matches,
+    the tool list is the one it was signed over and nothing was trimmed before
+    it; a turn that fails this takes every earlier turn's blocks with it, since
+    only a leading series of blocks may be left out.
+    """
+    records, trimmed = _native_records(read_private_bytes(path, boundary=workspace) or b"", run_id)
+    if not records or (records[-1]["provider"], records[-1]["model"]) != (provider, model):
+        return None
+    stale = [index for index, record in enumerate(records) if not _blocks_hold(record, tools, trimmed)]
+    last_stale = max(stale, default=-1)
+    messages: list[dict[str, Any]] = []
+    for index, record in enumerate(records):
+        message = record["message"]
+        held = message.pop(THINKING_KEY, None)
+        if held is not None and index > last_stale:
+            message[THINKING_KEY] = {"provider": held["provider"], "model": held["model"], "blocks": held["blocks"]}
+        messages.append(message)
+    return messages
+
+
+def _native_records(raw: bytes, run_id: str) -> tuple[list[dict[str, Any]], bool]:
+    """The file's records of ``run_id`` up to the first damaged or out-of-order one, and whether it was trimmed."""
+    records: list[dict[str, Any]] = []
+    trimmed = False
+    after_trim = False
+    for line in raw.splitlines():
+        if line == _TRIMMED.strip():
+            trimmed = after_trim = True
+            continue
+        record = _parse_native_record(line, run_id)
+        if record is None:
+            break
+        in_order = record["i"] == (records[-1]["i"] + 1 if records else 0)
+        if not (in_order or (after_trim and record["i"] > records[-1]["i"])):
+            break
+        after_trim = False
+        records.append(record)
+    return records, trimmed
+
+
+def _parse_native_record(line: bytes, run_id: str) -> dict[str, Any] | None:
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.get("run_id") != run_id:
+        return None
+    if type(record.get("i")) is not int or not isinstance(record.get("message"), dict):
+        return None
+    if not isinstance(record["message"].get("role"), str):
+        return None
+    if not all(isinstance(record.get(key), str) for key in ("provider", "model", "tools")):
+        return None
+    return record
+
+
+def _blocks_hold(record: dict[str, Any], tools: str, trimmed: bool) -> bool:
+    """Whether a record's thinking blocks are still the provider's, signed over what is sent now."""
+    held = record["message"].get(THINKING_KEY)
+    if held is None:
+        return True
+    if not isinstance(held, dict) or trimmed or record["tools"] != tools:
+        return False
+    blocks, digests = held.get("blocks"), held.get("digests")
+    if not all(isinstance(held.get(key), str) for key in ("provider", "model")):
+        return False
+    if not isinstance(blocks, list) or not isinstance(digests, list) or len(blocks) != len(digests):
+        return False
+    return all(digest_of(block) == digest for block, digest in zip(blocks, digests))
+
+
+def delete_native_conversation(path: Path, workspace: Path) -> bool:
+    return delete_journal(path, workspace)
 
 
 # --- Compaction ---------------------------------------------------------------

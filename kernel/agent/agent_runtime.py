@@ -73,7 +73,9 @@ from kernel.agent.native_tools import (
     NativeTurn,
     assistant_message,
     calls_from_turn,
+    close_open_calls,
     decode_arguments,
+    drop_thinking_blocks,
     opening_note,
     tool_definition,
     tool_message,
@@ -100,7 +102,9 @@ from kernel.bestof import offer as bestof_offer
 from kernel.bestof.judge import JUDGE_ACTIONS, JUDGE_ROLE, run_judge_action
 from kernel.plugins.resources import CleanupReport, Owner, StopOutcome
 from kernel.agent.task_control import PAUSED
-from kernel.session.agent_logging import mark_checkpoint_paused
+from kernel.session.agent_logging import get_native_path, mark_checkpoint_paused, session_root
+from kernel.session.durable_json import JsonStorageError
+from kernel.session.session_events import digest_of, read_native_conversation, write_native_messages
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -859,7 +863,13 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
 
     state = self._state
     role = state.current_agent_role
+    previous_tools = state.native_tool_defs
     state.native_tool_defs = _native_tool_defs(self, role)
+    if previous_tools and previous_tools != state.native_tool_defs:
+        # A skill or server added tools: the thinking blocks are signed over the list that is gone.
+        drop_thinking_blocks(state.native_messages)
+    if not state.native_messages:
+        _restore_native_conversation(self)
     if not state.native_messages:
         state.native_messages = [
             {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},
@@ -874,8 +884,100 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     if state.job_note and state.job_note != state.job_note_sent:
         state.native_messages.append({"role": "user", "content": state.job_note})
         state.job_note_sent = state.job_note
+    _persist_native_conversation(self)
     _note_run_context(self, action="calling tools")
     return call_native_action_model(self, state.native_messages, state.native_tool_defs)
+
+
+@dataclass(slots=True)
+class _NativeLog:
+    """How much of the run's native conversation is on disk."""
+
+    run_id: str
+    saved: int = 0
+    failed: bool = False
+
+
+def _persist_native_conversation(self) -> None:
+    """Append the messages the session file does not have yet.
+
+    A failing disk costs the run its /resume of this conversation, never the run
+    itself, so the first failure is said once and the rest of the run stops trying.
+    """
+    state = self._state
+    run_id = getattr(self, "_run_id", None)
+    if not run_id or not state.native_messages:
+        return
+    log = getattr(self, "_native_log", None)
+    if log is None or log.run_id != run_id:
+        log = self._native_log = _NativeLog(run_id)
+    if log.failed:
+        return
+    start = log.saved if log.saved <= len(state.native_messages) else 0
+    if start == len(state.native_messages):
+        return
+    try:
+        write_native_messages(
+            get_native_path(self, getattr(self, "current_session", "default")),
+            session_root(self),
+            run_id=run_id,
+            provider=self.config.provider,
+            model=state.selected_action_model,
+            tools=digest_of(state.native_tool_defs),
+            messages=state.native_messages,
+            start=start,
+        )
+    except (JsonStorageError, OSError) as error:
+        log.failed = True
+        self._ui.debug_print(f"[native conversation] not saved, /resume will rebuild it: {redact_text(str(error))}")
+        return
+    log.saved = len(state.native_messages)
+
+
+_INTERRUPTED_CALL = (
+    "No result was recorded: the run was interrupted while this response's calls ran. "
+    "The call may or may not have taken effect; check the workspace before repeating it."
+)
+
+
+def _restore_native_conversation(self) -> None:
+    """Continue the conversation an interrupted run was having, when the file holds this run's on this model.
+
+    Anything else leaves the messages empty and the caller builds them anew,
+    as for a run that has no conversation to continue.
+    """
+    state = self._state
+    run_id = getattr(self, "_run_id", None)
+    if not run_id:
+        return
+    try:
+        messages = read_native_conversation(
+            get_native_path(self, getattr(self, "current_session", "default")),
+            session_root(self),
+            run_id=run_id,
+            provider=self.config.provider,
+            model=state.selected_action_model,
+            tools=digest_of(state.native_tool_defs),
+        )
+    except (JsonStorageError, OSError) as error:
+        self._ui.debug_print(f"[native conversation] unreadable, rebuilding it: {redact_text(str(error))}")
+        return
+    last = messages[-1] if messages else None
+    # A conversation that ended on a plain answer has nothing left to continue.
+    if last is None or (last["role"] == "assistant" and not last.get("tool_calls")):
+        return
+    close_open_calls(messages, _INTERRUPTED_CALL)
+    said = "\n".join(str(message.get("content")) for message in messages if message["role"] == "user")
+    news = [update for update in state.task_updates if update not in said]
+    if news:
+        messages.append(
+            {"role": "user", "content": "User follow-ups for this active task (in order; later instructions take precedence):\n"
+             + "\n\n".join(news)}
+        )
+    state.native_messages = messages
+    state.native_note_sent = state.pending_instruction if state.pending_instruction in said else ""
+    # The file is rewritten whole once: what it holds past the part just read may be damaged.
+    self._native_log = _NativeLog(run_id)
 
 
 def _run_turn(
@@ -889,6 +991,7 @@ def _run_turn(
     """
     if turn is not None:
         self._state.native_messages.append(assistant_message(turn))
+        _persist_native_conversation(self)
         _warn_unparsed_history_arguments(self, turn)
     if any(call.name == end_session.ACTION for call in response.calls):
         # The tool speaks: words the model wrote beside it never reach the person.
@@ -907,6 +1010,7 @@ def _run_turn(
     if turn is not None:
         for item, answer in zip(planned, answers):
             self._state.native_messages.append(tool_message(item.request.call_id, answer))
+        _persist_native_conversation(self)
     # A response whose calls all failed to parse ran nothing, but it still
     # costs a step: otherwise a model repeating a broken call never meets
     # the budget.

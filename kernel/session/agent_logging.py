@@ -21,7 +21,13 @@ from kernel.session.durable_json import (
 )
 from kernel.plan import end_session
 from kernel.sandbox.redaction import redact_value
-from kernel.session.session_events import JOURNAL_SUFFIX, delete_journal, journal_size
+from kernel.session.session_events import (
+    JOURNAL_SUFFIX,
+    NATIVE_SUFFIX,
+    delete_journal,
+    delete_native_conversation,
+    journal_size,
+)
 from kernel.session.session_usage import UsageTotals
 
 _SESSION_VERSION = 1
@@ -76,6 +82,19 @@ def get_journal_path(self, session_name: str):
         / ".kvist"
         / "sessions"
         / f"{session_name}{JOURNAL_SUFFIX}",
+        session_root(self),
+    )
+
+
+def get_native_path(self, session_name: str):
+    """The conversation of the session's native run, kept for /resume; its lifecycle is the session's own."""
+    if not is_valid_session_name(session_name):
+        raise ValueError(f"Invalid session name: {session_name!r}")
+    return validate_storage_path(
+        session_root(self)
+        / ".kvist"
+        / "sessions"
+        / f"{session_name}{NATIVE_SUFFIX}",
         session_root(self),
     )
 
@@ -334,8 +353,9 @@ def create_session(self, session: str, fields: dict[str, Any] | None = None) -> 
     )
     if created:
         # A journal left behind by a session of the same name must not be
-        # replayed into this one.
+        # replayed into this one, nor a conversation continued.
         delete_journal(get_journal_path(self, session), session_root(self))
+        delete_native_conversation(get_native_path(self, session), session_root(self))
     return created
 
 
@@ -433,6 +453,7 @@ def delete_session(self, name: str) -> bool:
     path = get_state_path(self, name)
     removed = delete_json_object(path, boundary=session_root(self))
     delete_journal(get_journal_path(self, name), session_root(self))
+    delete_native_conversation(get_native_path(self, name), session_root(self))
     _delete_session_attachments(self, name)
     if removed:
         # Re-assert the marker so a stale marker pointing at the deleted
@@ -481,6 +502,7 @@ def reset_session(self) -> None:
     # The journal goes first: a crash in between must leave the conversation
     # without its display log, never a reset session that still shows its old feed.
     delete_journal(get_journal_path(self, session), session_root(self))
+    delete_native_conversation(get_native_path(self, session), session_root(self))
     _delete_session_attachments(self, session)
     _write_json_object(
         get_state_path(self, session),

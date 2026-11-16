@@ -14,11 +14,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from kernel.llm.anthropic_wire import THINKING_KEY
 from kernel.memory.schema import KINDS as MEMORY_KINDS
 from kernel.memory.schema import OPERATIONS as MEMORY_OPS
 from kernel.memory.schema import RELATIONS as MEMORY_RELATIONS
 from kernel.protocol.frontend_protocol import UsageSource
 from kernel.protocol.protocol import ToolCallRequest
+from kernel.sandbox.redaction import redact_value
 
 _STRING: dict[str, Any] = {"type": "string"}
 _STRINGS: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
@@ -528,6 +530,10 @@ class NativeTurn:
     # provider can say the call never closed even though its arguments parse.
     cut_off: bool = False
     last_call_open: bool = False
+    # An Anthropic reply's signed thinking blocks, verbatim, and the (provider, model)
+    # that wrote them: only that pair may be sent them back (anthropic_wire.THINKING_KEY).
+    thinking_blocks: list[dict[str, str]] = field(default_factory=list)
+    thinking_origin: tuple[str, str] | None = None
 
 
 def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:
@@ -667,11 +673,63 @@ def assistant_message(turn: NativeTurn) -> dict[str, Any]:
         ]
     if turn.echo_reasoning and turn.reasoning:
         message["reasoning_content"] = turn.reasoning
+    if turn.thinking_blocks and turn.thinking_origin is not None:
+        provider, model = turn.thinking_origin
+        message[THINKING_KEY] = {"provider": provider, "model": model, "blocks": turn.thinking_blocks}
     return message
 
 
 def tool_message(call_id: str, content: str) -> dict[str, Any]:
     return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+
+def drop_thinking_blocks(messages: list[dict[str, Any]]) -> int:
+    """Forget every stored thinking block; returns how many turns held some.
+
+    A block's signature binds it to what came before it, so once an earlier
+    message or the tool list changes, no later block can be replayed. Dropping
+    all of them is always accepted; blocks of the turns that follow accumulate anew.
+    """
+    dropped = 0
+    for message in messages:
+        if message.pop(THINKING_KEY, None) is not None:
+            dropped += 1
+    return dropped
+
+
+def request_messages(
+    messages: list[dict[str, Any]], *, origin: tuple[str, str], send_blocks: bool
+) -> list[dict[str, Any]]:
+    """The conversation as one request carries it: redacted, thinking blocks aside.
+
+    A block is the provider's own answer and goes back byte for byte, so it
+    skips redaction. It is sent only by an Anthropic client and only to the
+    (provider, model) that wrote it; every other request loses the key here,
+    in the one place all of them pass.
+    """
+    safe = redact_value([{key: value for key, value in message.items() if key != THINKING_KEY} for message in messages])
+    if not send_blocks:
+        return safe
+    for index, message in enumerate(messages):
+        held = message.get(THINKING_KEY)
+        if held is not None and (held["provider"], held["model"]) == origin:
+            safe[index] = {**safe[index], THINKING_KEY: held}
+    return safe
+
+
+def close_open_calls(messages: list[dict[str, Any]], note: str) -> int:
+    """Answer the calls of the last assistant turn that no tool message answers; returns how many.
+
+    A run cut off while its calls ran leaves them without results, which an
+    API rejects. ``note`` says what became of them.
+    """
+    last = next((index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "assistant"), None)
+    if last is None:
+        return 0
+    answered = {message.get("tool_call_id") for message in messages[last + 1 :] if message.get("role") == "tool"}
+    open_calls = [call["id"] for call in messages[last].get("tool_calls") or () if call["id"] not in answered]
+    messages.extend(tool_message(call_id, note) for call_id in open_calls)
+    return len(open_calls)
 
 
 def compact_history(
@@ -684,7 +742,8 @@ def compact_history(
     Only tool results are shortened: the structure the API validates (every
     call answered, reasoning kept on the turn that made it) stays whole, and
     the calls themselves still say what was looked at. Returns how many
-    outputs were elided.
+    outputs were elided. An elided output edits the prefix the stored thinking
+    blocks are signed over, so any elision drops all of them.
     """
     total = sum(_message_tokens(message, count_tokens) for message in messages)
     elided = 0
@@ -697,6 +756,8 @@ def compact_history(
         message["content"] = ELIDED_OUTPUT
         total += _message_tokens(message, count_tokens)
         elided += 1
+    if elided:
+        drop_thinking_blocks(messages)
     return elided
 
 
