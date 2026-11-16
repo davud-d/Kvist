@@ -103,6 +103,30 @@
 }
 .chip[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--paper); }
 
+/* The way out to the repository, drawn as the GitHub mark and sitting at the
+   right end of the header. The mark is a solid silhouette, so it is painted as
+   an inverted block like .btn and the step numbers — a white square with a
+   black octocat on the dark page, black with a white one in the light theme.
+   A black glyph on a black header would be no icon at all. No accent slot is
+   spent: --paper, --ink, --tx and --line-2 only. */
+.gh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--paper);
+  border-radius: var(--r-1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .gh:hover { background: transparent; color: var(--tx); border-color: var(--line-2); }
+}
+.gh svg { width: 16px; height: 16px; fill: currentColor; }
+
 /* -- language bar ---------------------------------------------------------- */
 
 /* Fixed to the bottom rather than inserted above the header: appearing after
