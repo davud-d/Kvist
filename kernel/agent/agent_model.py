@@ -551,10 +551,27 @@ def resolve_action_model(self) -> str:
     return preferred_model or self._select_action_model_for_run()
 
 
+def text_system_prompt(self, role: str, model: str) -> str:
+    """The text protocol's system prompt, built once per run, role and model.
+
+    A provider's prompt cache needs the same bytes at every step, and the
+    builder reads the instruction file, the style files and the plan phase
+    afresh on each call. An edit to KVIST.md or a style file mid-run therefore
+    takes effect with the next run, and the plan section is the one the run
+    started with, as in the native channel, which builds its prompt once.
+    """
+    state = self._state
+    key = (role, model)
+    if getattr(state, "text_system_key", None) != key:
+        state.text_system_prompt = build_role_system_prompt(self, role)
+        state.text_system_key = key
+    return state.text_system_prompt
+
+
 def call_action_model(self, prompt: str) -> str:
     preferred_model = resolve_action_model(self)
     role = getattr(self._state, "current_agent_role", "coder")
-    system_prompt = build_role_system_prompt(self, role)
+    system_prompt = text_system_prompt(self, role, preferred_model)
     self._retries_exhausted = False
     started = time.monotonic()
     try:

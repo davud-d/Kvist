@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from kernel.context.language_utils import choose_localized_text
+from kernel.llm.prompt_prefix import split_style_tail
 from kernel.llm.provider_registry import ANYMODEL_PROVIDER, KIMI_PROVIDER, MANUAL_OPENAI_PROVIDERS
 from kernel.providers.anymodel_pricing import coefficient_labels
 from kernel.sandbox.redaction import redact_text
@@ -1625,20 +1626,39 @@ def _is_anthropic_direct(base_url: str) -> bool:
     return urlparse(target).hostname == _ANTHROPIC_DIRECT_HOST
 
 
+def _cached_system_blocks(system: str) -> list[dict[str, Any]]:
+    """The system prompt as text blocks, each ending in a breakpoint.
+
+    A prompt with a style tail becomes two blocks, the part every style shares
+    and the tail: runs that differ only in style then read the same cache entry
+    for the shared part. A prompt without a tail, or one that is all tail
+    (an empty text block is rejected), stays a single block.
+    """
+    shared, tail = split_style_tail(system)
+    if not tail or not shared.strip():
+        return [{"type": "text", "text": system, "cache_control": _CACHE_BREAKPOINT}]
+    return [
+        {"type": "text", "text": shared, "cache_control": _CACHE_BREAKPOINT},
+        {"type": "text", "text": tail, "cache_control": _CACHE_BREAKPOINT},
+    ]
+
+
 def _with_prompt_cache(
     system: str | None, messages: list[dict[str, Any]]
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Mark the stable prefix of a request for Anthropic prompt caching.
 
-    One breakpoint ends the system prompt, which is the same on every step of
-    a run. A second ends the last message, but only when the conversation has
-    more than one: a lone, changing user message would pay the 1.25x cache
-    write on every call and never be read back. Content blocks are copied,
-    never mutated, because they may be the caller's own history objects.
+    The request carries at most four breakpoints: the last tool (set by the
+    caller), the shared part of the system prompt, its end, and the last
+    message. The system prompt is the same on every step of a run. The last
+    message is marked only when the conversation has more than one: a lone,
+    changing user message would pay the 1.25x cache write on every call and
+    never be read back. Content blocks are copied, never mutated, because they
+    may be the caller's own history objects.
     """
     cached_system: Any = system
     if system:
-        cached_system = [{"type": "text", "text": system, "cache_control": _CACHE_BREAKPOINT}]
+        cached_system = _cached_system_blocks(system)
     if len(messages) < 2:
         return cached_system, messages
 
@@ -1724,9 +1744,10 @@ class _AnthropicCompletionsNamespace:
 
             request_kwargs["tools"] = tools_to_anthropic(tools)
             if direct:
-                # Third breakpoint (system, last tool, last message: three of the
-                # four allowed). Tools render before the system prompt, so this
-                # one covers the tool list alone and survives a system change.
+                # The fourth breakpoint, with the shared system part, the end of
+                # system and the last message. Tools render before the system
+                # prompt, so this one covers the tool list alone and survives a
+                # system change.
                 request_kwargs["tools"][-1]["cache_control"] = _CACHE_BREAKPOINT
 
         effort = kwargs.get("reasoning_effort")

@@ -223,6 +223,10 @@ class RunState:
     # Fixed at the run's first native step; later only skill tools are appended (agent_runtime._native_tool_defs).
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
+    # The text protocol's system prompt, built at the run's first text step and
+    # sent byte for byte on every later one; the key is what it was built for.
+    text_system_prompt: str = ""
+    text_system_key: tuple[str, str] | None = None
     # Legacy inspection-nudge counter, no longer used to direct the workflow.
     inspection_note_streak: int = 0
     # (provider, model) pairs already warned about this run for a dropped
