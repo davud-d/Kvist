@@ -23,8 +23,6 @@ from kernel.protocol.protocol import AgentCommand
 # Roles whose runs change files; a reader or a chat reply has nothing to plan.
 PLAN_ROLES = frozenset({"coder", "devops", "universal"})
 PLAN_ACTIONS = frozenset({"offer_plan", "propose_plan", "edit_plan", "cancel_plan"})
-# Tools the model no longer sees while it is making the plan.
-_HIDDEN_WHILE_PLANNING = frozenset({"write_file", "append_file", "replace_in_file", "delegate_task", "offer_plan"})
 
 OUTCOME_DECLINED = "declined"
 OUTCOME_NOT_ACCEPTED = "not_accepted"
@@ -61,17 +59,19 @@ def offer_available(agent: Any) -> bool:
     )
 
 
-def tools_for_phase(tools: list[dict[str, Any]], agent: Any) -> list[dict[str, Any]]:
-    """The role's tool definitions narrowed to what the plan phase allows."""
-    planning = agent._state.plan_phase == PLAN_PLANNING
-    hidden: set[str] = set()
-    if not offer_available(agent):
-        hidden.add("offer_plan")
-    if planning:
-        hidden |= _HIDDEN_WHILE_PLANNING
-    else:
-        hidden.add("propose_plan")
-    return [tool for tool in tools if tool["function"]["name"] not in hidden]
+def tools_for_run(tools: list[dict[str, Any]], agent: Any) -> list[dict[str, Any]]:
+    """The role's tool definitions for the whole run, fixed when the run takes its first native step.
+
+    The plan tools are present when this run can enter plan mode at all (a plan
+    is offerable now, or a phase was already started before a resume) and stay
+    present whatever the phase becomes. A tool list that changes between steps
+    changes the prompt prefix the provider caches, so what a phase forbids is
+    turned away when called (``rejection_reason``, the read-only refusals), not
+    taken from the list.
+    """
+    if offer_available(agent) or agent._state.plan_phase:
+        return list(tools)
+    return [tool for tool in tools if tool["function"]["name"] not in {"offer_plan", "propose_plan"}]
 
 
 def rejection_reason(agent: Any, command: AgentCommand) -> str:

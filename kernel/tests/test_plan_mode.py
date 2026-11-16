@@ -205,26 +205,27 @@ def _tool_names(agent):
     from kernel.agent.agent_model import _load_role_prompt
     from kernel.agent.native_tools import tools_for_role
 
-    tools = plan_mode.tools_for_phase(tools_for_role(_load_role_prompt("coder")), agent)
+    tools = plan_mode.tools_for_run(tools_for_role(_load_role_prompt("coder")), agent)
     return {tool["function"]["name"] for tool in tools}
 
 
-def test_tools_follow_the_phase(tmp_path):
+def test_a_run_that_can_plan_carries_every_plan_tool_whatever_the_phase_is_at_its_start(tmp_path):
+    # Before the change the phase hid tools; now it only turns calls away (test_plan_tools_constant).
+    fresh = _tool_names(_agent(tmp_path))
     agent = _agent(tmp_path)
-    before = _tool_names(agent)
     agent._state.plan_phase = PLAN_PLANNING
-    planning = _tool_names(agent)
+    resumed_planning = _tool_names(agent)
     agent._state.plan_phase = PLAN_APPROVED
-    after = _tool_names(agent)
+    resumed_approved = _tool_names(agent)
 
-    assert "offer_plan" in before and "propose_plan" not in before and "write_file" in before
-    assert "propose_plan" in planning and "read_file" in planning
-    assert not planning & {"write_file", "append_file", "replace_in_file", "delegate_task", "offer_plan"}
-    assert "write_file" in after and not after & {"offer_plan", "propose_plan"}
+    assert fresh == resumed_planning == resumed_approved
+    assert {"offer_plan", "propose_plan", "write_file", "read_file"} <= fresh
 
 
 def test_tools_leave_out_the_offer_when_nobody_can_answer(tmp_path):
-    assert "offer_plan" not in _tool_names(_agent(tmp_path, NullUI()))
+    headless = _tool_names(_agent(tmp_path, NullUI()))
+
+    assert not headless & {"offer_plan", "propose_plan"}
 
 
 def test_the_plan_guidance_is_in_the_system_prompt_only_where_a_plan_can_happen(tmp_path):

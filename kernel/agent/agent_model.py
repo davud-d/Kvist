@@ -69,6 +69,8 @@ from kernel.llm.reasoning_effort import (
     strip_reasoning_kwargs,
 )
 from kernel.context.system_context import workspace_instructions_context
+from kernel.llm.prompt_prefix import SELECTED_STYLE_MARKER
+from kernel.session.agent_logging import session_root
 from kernel.sandbox.redaction import redact_text, redact_value
 from kernel.protocol.render_throttle import ThrottledRenderer
 
@@ -383,16 +385,15 @@ def _read_style_prompt(self, style_type: str) -> str:
         return ""
 
 
-def _style_context(self, role: str) -> str:
-    """Shared voice, this session's style, and its conversational accent.
+def _style_sections(self, role: str) -> tuple[str, str]:
+    """The voice every style shares, and this session's style with its conversational accent.
 
     Read per call, like the style files. Chat inherits only the working
     style's voice section, never its instructions for carrying out work.
-    Sits after the role prompt and before workspace instructions.
     """
     common = (_STYLES_DIR / "common.txt").read_text(encoding="utf-8").strip()
     prompt = _read_style_prompt(self, "chat" if role == "chat" else "agents")
-    parts = [common, prompt]
+    parts = [prompt]
     if role == "chat":
         working_style = _read_style_prompt(self, "agents")
         _, _, voice = working_style.partition("== HOW IT SOUNDS ==")
@@ -404,7 +405,13 @@ def _style_context(self, role: str) -> str:
                 "It shapes explanation, not access or permission to act.\n\n"
                 + voice
             )
-    return "## RESPONSE STYLE\n\n" + "\n\n".join(part for part in parts if part)
+    return "## RESPONSE STYLE\n\n" + common, "\n\n".join(part for part in parts if part)
+
+
+def _style_context(self, role: str) -> str:
+    """The shared voice followed by the style, as one block (the reporter's prompt)."""
+    shared, selected = _style_sections(self, role)
+    return f"{shared}\n\n{selected}" if selected else shared
 
 
 def _load_plan_mode_section() -> str:
@@ -467,9 +474,10 @@ def _load_extensions_section() -> str:
 def build_role_system_prompt(
     self, role: str, *, native_tools: bool = False, offer_end_session: bool = True
 ) -> str:
-    """The constitution, the role prompt, the user's response style, then this
-    workspace's own instruction file — narrowing, each read per call so edits
-    land on the next step.
+    """The constitution, the role prompt, this workspace's own instruction file,
+    then the user's response style — each read per call so edits land on the
+    next step. The style comes last so runs that differ only in style share
+    the longest prefix (``prompt_prefix.split_style_tail`` finds the boundary).
 
     ``native_tools`` swaps the role prompt's text-mode protocol sections for the
     tool-call channel (``native_tools.native_role_prompt``). ``offer_end_session``
@@ -489,14 +497,20 @@ def build_role_system_prompt(
         base = f"{base}\n\n{_load_plan_mode_section()}"
     if role != "chat":
         base = f"{base}\n\n{_load_extensions_section()}"
-    style = _style_context(self, role)
-    if style:
-        base = f"{base}\n\n{style}"
     from kernel.vision.vision import vision_instruction
     base = f"{base}\n\n{vision_instruction(self)}"
-    project = workspace_instructions_context(self.executor.workspace, role)
+    # Read from the session root, not the executor's workspace: a best-of executor
+    # works in a git worktree that has no instruction file, and every executor
+    # has to carry the same text.
+    project = workspace_instructions_context(session_root(self), role)
     if project:
         base = f"{base}\n\n{project}"
+    # The style is the only thing best-of executors differ in, so it goes last
+    # and everything before it stays byte-identical for the provider's prompt cache.
+    shared_style, selected_style = _style_sections(self, role)
+    base = f"{base}\n\n{shared_style}"
+    if selected_style:
+        base = f"{base}\n\n{SELECTED_STYLE_MARKER}\n\n{selected_style}"
     # Last: a fast model weighs the end of a long prompt most, and this section has to
     # outrank the style rules of the final answer that come before it.
     if role != "chat" and self.config.voice_mode:

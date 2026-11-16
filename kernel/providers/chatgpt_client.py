@@ -10,6 +10,7 @@ from typing import Any
 
 from kernel.lazy import lazy_import
 from kernel.llm.llm_clients import OpenAI
+from kernel.llm.prompt_prefix import split_style_tail
 from kernel.providers import chatgpt_auth as auth
 
 httpx = lazy_import("httpx")
@@ -82,9 +83,11 @@ def _usage(response: Any) -> NS | None:
 
 
 def _prompt_cache_key(account_id: str, request: dict) -> str:
-    # Growing history must not change the routing key for its reusable prefix.
+    # Growing history must not change the routing key for its reusable prefix, and neither
+    # may the working style: runs that differ only in it must land on the same machine.
+    shared, _style = split_style_tail(request.get("instructions", ""))
     prefix = {"account": account_id, "model": request["model"],
-              "instructions": request.get("instructions", ""), "tools": request.get("tools", [])}
+              "instructions": shared, "tools": request.get("tools", [])}
     digest = hashlib.sha256(json.dumps(prefix, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     return "kvist-" + digest[:58]
 

@@ -56,6 +56,8 @@ git -C <repo> merge --ff-only bo/int   # experimental уходит вперёд 
   аккаунта (HTTP 429 у сабагентов, это не лимит живых прогонов Kvist). Незакоммиченная работа
   осталась в их worktree; после сброса лимита они возобновлены с места остановки. Если лимит
   срабатывает снова — ждать сброса и возобновлять тех же сабагентов, новых не запускать.
+- Инцидент 2: лимит аккаунта сработал во время волны 2 (T6, T7 остановлены посреди работы);
+  после сброса возобновлены с места остановки.
 
 ## 2. Сверка known_state с кодом
 
@@ -186,6 +188,29 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
   В финальном отчёте как оставшийся долг.
 - **D-22 Брифы** лежат в `<repo>/.claude/bestof-briefs/` (вне git: в них абсолютные пути машины,
   а репозиторий публичный — правило low-profile privacy).
+- **D-24 Факты API anthropic для T10/T11** (источник: справочник claude-api Anthropic в этой сессии;
+  поля сверены с типами установленного SDK `anthropic` 1.8.0, где есть `ThinkingBlock{thinking,signature}`,
+  `RedactedThinkingBlock{data}`, `SignatureDelta`, `prefix_mismatch_behavior`):
+  - кэш: ≤ 4 меток на запрос; порядок префикса tools → system → messages; минимальный префикс 512 ток.
+    (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.x), 1024 (Opus 4.8, Sonnet 5/4.6/4.5), 2048 (Opus 4.7),
+    4096 (Opus 4.6/4.5, Haiku 4.5) — короче молча не кэшируется; каждая метка ищет прошлую запись
+    не дальше 20 позиций назад (серия подряд `tool_use` или `tool_result` — одна позиция); запись
+    читаема только после начала стрима первого ответа (отсюда сдвиг старта исполнителей); TTL 5 мин
+    по умолчанию, `"1h"` по выбору; смена tools сбрасывает всё, смена system — system и messages;
+    перестановка/добавление/удаление меток `cache_control` ничего не ломает;
+  - thinking на Opus 5.5 / Sonnet 5.5 / Fable 5.1+: всегда включён (`disabled` и `budget_tokens` → 400 на
+    Opus 5.5; у Sonnet 5.5 выключение — `between_tools`); принудительный `tool_choice` `any`/`tool` → 400;
+    по умолчанию `display: "omitted"` (текст пуст, подпись есть); блоки отправлять **неизменными** —
+    изменённый текст/подпись → всегда 400; подпись связывает префикс (system, набор tools, все
+    сообщения до блока): правка ранних сообщений или смена набора tools делает недействительными все
+    последующие блоки (400 на «enforced»-аккаунтах — у Opus 5.5 это аккаунты от 2026-08-31; у
+    остальных записывается); допустимо: дописывать в конец, убрать ведущую серию блоков (с самых
+    старых), хвостовую серию или все; смена модели — API сам выбрасывает чужие блоки (без оплаты),
+    но по ТЗ (d1) мы их и не шлём; бета `thinking-binding-controls-2026-08-01` +
+    `thinking.block_binding.prefix_mismatch_behavior: "error"|"drop_block"`.
+  - следствия для Kvist: `compact_history` (урезание старых выводов) и дописывание tools скилла посреди
+    прогона — это правки префикса → перед такой правкой хранимые thinking-блоки выбрасываются все;
+    `redact_value` перед отправкой не должен трогать блоки.
 - **D-23 Git внутри песочницы исполнителя недоступен — и так и остаётся.** У git worktree файл
   `.git` указывает в `.git/worktrees/<name>` основного репозитория, вне workspace исполнителя;
   `terminal_git._git_metadata_directory` на это отвечает жёстким отказом (защита от выхода из
@@ -229,14 +254,14 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T2 | a3 | события и протокол | `kernel/protocol/frontend_protocol.py`, `kernel/protocol/event_stream_ui.py`, `kernel/protocol/ui.py`, `kernel/session/session_events.py`, `docs/UI_API.md`, `docs/UI_API.ru.md`, тесты этих модулей | — | merged (2 круга) |
 | T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | merged (2 круга) |
 | T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | merged (2 круга) |
-| T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | work |
+| T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged (2 круга) |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | work |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | work |
 | T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | todo |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | todo |
 | T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
-| T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | work |
+| T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | merged `7a573a5` (2 круга) |
 | T13 | e3 | остальные фронтенды не ломаются, текстовый итог | по итогам аудита | T7 T8 | todo |
 | T14 | — | живая проверка (сам) | — | T5 T7 T8 T10 | todo |
 
@@ -355,6 +380,29 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
 в фазе захвата, пока слой виден (диалоги, настройки и обзор сохраняют свой Esc) — паузы хода нет
 (проверено вручную посреди прогона на mock); фон слоя по правилу `.feed-wrap` с `--glass`. node 58/58.
 Осталось (принято): `:has()` в WebKitGTK окна Tauri не проверен — в ручные проверки.
+
+### T5 — префикс кэша, стиль в конце, постоянные tools
+**Круг 1** (коммит `315297f`, 10 файлов, +491/−41; полный набор 5247 passed / 80 skipped, ruff чисто).
+- Обман: нет. `test_tools_follow_the_phase` заменён на проверку постоянного набора — старый тест
+  закреплял скрытие по фазе, что противоречит D-08; assert в `test_tools_leave_out_the_offer_…` расширен.
+- Процесс: **две правки через python-heredoc** (`agent_model.py`, `plan_mode.py`) — нарушение hard rule,
+  сабагент сообщил сам; третью заблокировала автоматика. Содержимое обеих проверено по diff построчно.
+- Качество: порядок секций по D-05 (vision → KVIST.md из корня сессий → `## RESPONSE STYLE` + common →
+  маркер + стиль → voice); `split_style_tail` берёт последний маркер в начале строки; набор tools
+  фиксируется на первом нативном шаге, скиллы/MCP дописываются в конец; ключ chatgpt от общей части.
+- Слабые места:
+  1. маркер `## SELECTED STYLE` второго уровня выводит стиль из секции, на которую ссылается защита
+     от джейлбрейка (`coder_prompt.txt:7` и др.) → **доработка**: `### SELECTED STYLE` + тест.
+  2. отключённый посреди прогона скилл остаётся в списке → **отклонено**: ошибка резолвера, редко.
+  3. отказ `delegate_task` проверен по частям → **отклонено**: достаточно.
+  4. пересборка промпта при откате native→text меняет секцию плана → **передано в T10**.
+  5. voice в хвосте → **отклонено**: у исполнителей один конфиг.
+  6. стиль без файла → **отклонено**: T6 проверяет файлы стилей.
+  7. живой кэш не измерен → **в T14**.
+
+**Круг 2** (коммит `403d836`): `SELECTED_STYLE_MARKER = "### SELECTED STYLE"` (третий уровень —
+стиль внутри `## RESPONSE STYLE`), тест «между `## RESPONSE STYLE` и стилем нет `\n## `» для coder,
+reader, chat. Полный набор у сабагента 5250 passed / 80 skipped. Принято.
 
 ### T4 — glass, продолжение
 **Круг 2** (коммит `d8d6cc4`): «некэш.» — точно, «≈» при частично неизвестном кэше, нет при

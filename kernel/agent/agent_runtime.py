@@ -823,11 +823,20 @@ def _leave_native_tools(self, error: Exception) -> None:
     self._ui.debug_print(f"[native tools] {redact_text(str(error))}")
 
 
-def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
-    from kernel.agent.agent_model import _load_role_prompt, build_role_system_prompt, call_native_action_model
+def _native_tool_defs(self, role: str) -> list[dict[str, Any]]:
+    """The tools of this run's native turn: fixed at its first step, skill tools added after them.
 
+    A provider caches the prompt prefix the tool list belongs to, so the list
+    keeps its order for the whole run. A skill or MCP server attached later can
+    only append its tools; the plan phase never removes one (plan_mode.tools_for_run).
+    """
     state = self._state
-    role = state.current_agent_role
+    if state.native_tool_defs:
+        offered = {tool["function"]["name"] for tool in state.native_tool_defs}
+        attached = [tool for tool in self.skills.tool_definitions() if tool["function"]["name"] not in offered]
+        return state.native_tool_defs + attached
+    from kernel.agent.agent_model import _load_role_prompt
+
     tools = tools_for_role(_load_role_prompt(role))
     if end_session.available(self, role):
         tools.append(tool_definition(end_session.ACTION))
@@ -838,7 +847,15 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
         # its questions go through the main agent.
         tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user", "wait", "schedule", "feedback")]
     tools.extend(self.skills.tool_definitions())
-    state.native_tool_defs = plan_mode.tools_for_phase(tools, self)
+    return plan_mode.tools_for_run(tools, self)
+
+
+def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
+    from kernel.agent.agent_model import build_role_system_prompt, call_native_action_model
+
+    state = self._state
+    role = state.current_agent_role
+    state.native_tool_defs = _native_tool_defs(self, role)
     if not state.native_messages:
         state.native_messages = [
             {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},

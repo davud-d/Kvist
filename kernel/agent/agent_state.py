@@ -220,6 +220,7 @@ class RunState:
     # The (mode, reason) last sent as a tool_mode event, so only a change is announced.
     tool_mode_sent: tuple[str, str] | None = None
     native_messages: list[dict[str, Any]] = field(default_factory=list)
+    # Fixed at the run's first native step; later only skill tools are appended (agent_runtime._native_tool_defs).
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
     # Legacy inspection-nudge counter, no longer used to direct the workflow.
