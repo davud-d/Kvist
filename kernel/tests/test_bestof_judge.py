@@ -690,3 +690,15 @@ def test_the_prompt_and_the_task_tell_the_reviewer_that_no_winner_is_a_normal_ou
     assert "do not invent a winner" in prompt and "winner is null" in prompt
     assert "a normal outcome" in prompt and "a normal outcome" in goal and "winner is null" in goal
     assert "fails them too" in goal and "fails them too" in prompt
+
+
+def test_the_reviewer_is_told_that_at_equal_correctness_the_smaller_diff_wins_and_extra_changes_count_against():
+    from kernel.bestof.run import judge_goal
+
+    prompt = _load_role_prompt("judge")
+    goal = judge_goal(RUN_TASK, [("e1", "senior-dev"), ("e2", "minimalist")], "en")
+
+    assert "equally correct, the one with the smaller diff wins" in prompt
+    assert "counts against an attempt, never for it" in prompt
+    assert "not how much it changes" in prompt
+    assert "equally correct the smaller diff wins" in goal and "counts against an attempt, never for it" in goal
