@@ -125,3 +125,40 @@ def test_without_a_person_an_unapproved_server_cannot_be_attached(mcp_agent):
     with pytest.raises(Exception, match="nobody can answer"):
         agent.skills.attach("mcp:echo")
     assert agent.resources.owned_by(Owner()) == []
+
+
+def test_confirmed_tools_ask_every_time_and_never_use_auto_approval(mcp_agent, monkeypatch):
+    from dataclasses import replace
+
+    agent, ui = mcp_agent
+    agent.skills.attach("mcp:echo")
+    server = agent.skills.mcp_attached["echo"]
+    server.config = replace(server.config, confirm_tools=frozenset({"echo"}))
+    monkeypatch.setattr(agent, "confirm_capability", lambda *_: pytest.fail("Must ask the human directly"))
+    before = len(ui.dialogs)
+    for text in ("first message", "second message"):
+        assert agent.skills.call("mcp:echo", "echo", {"text": text}, "c1")["ok"]
+    assert len(ui.dialogs) == before + 2
+    assert "first message" in ui.dialogs[-2][1]
+    assert "second message" in ui.dialogs[-1][1]
+
+
+@pytest.mark.parametrize("interactive", [True, False])
+def test_unconfirmed_send_never_reaches_server(mcp_agent, monkeypatch, interactive):
+    from dataclasses import replace
+
+    agent, ui = mcp_agent
+    agent.skills.attach("mcp:echo")
+    server = agent.skills.mcp_attached["echo"]
+    server.config = replace(server.config, confirm_tools=frozenset({"echo"}))
+    agent.config.interactive = interactive
+    monkeypatch.setattr(ui, "confirm", lambda *_: False)
+    monkeypatch.setattr(server.client, "call_tool", lambda *_: pytest.fail("Denied call must not reach server"))
+    assert not agent.skills.call("mcp:echo", "echo", {"text": "never sent"}, "c1")["ok"]
+
+
+def test_confirmation_policy_cannot_classify_sends_as_read_only():
+    from kernel.plugins.mcp import McpError, parse_server
+
+    with pytest.raises(McpError, match="cannot be read-only"):
+        parse_server("gmail", {"command": ["server"], "readonly_tools": ["send_email"], "confirm_tools": ["send_email"]})

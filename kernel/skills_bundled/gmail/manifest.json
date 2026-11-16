@@ -1,0 +1,29 @@
+{
+  "manifest_version": 1,
+  "id": "gmail",
+  "version": "0.3.0",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {
+    "en": "Gmail MCP",
+    "ru": "Gmail MCP"
+  },
+  "summary": {
+    "en": "Search and read Gmail, draft replies and perform requested mail actions through a configured MCP server.",
+    "ru": "Поиск и чтение Gmail, подготовка ответов и запрошенные действия с почтой через настроенный MCP-сервер."
+  },
+  "instructions": "SKILL.md",
+  "platforms": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "source": {
+    "origin": "bundled",
+    "author": "Kvist",
+    "revision": "0.3.0"
+  },
+  "capabilities": {
+    "required": []
+  }
+}

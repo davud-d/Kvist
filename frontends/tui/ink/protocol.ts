@@ -42,6 +42,7 @@ export interface InputRequest {
 }
 
 export type CoreEvent =
+  | { type: "manifest"; slash_commands: { name: string }[] }
   | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; kvist_version?: string; workspace?: string; location?: string }
   | { type: "live_start" }
   | { type: "live_stop" }

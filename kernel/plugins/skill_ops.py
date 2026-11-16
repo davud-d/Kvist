@@ -200,6 +200,7 @@ def run_mcp_op(op: str, *, name: str | None, payload: dict[str, Any]) -> dict[st
         return {"ok": True, "servers": [
             {"name": server.name, "command": server.command, "sandbox": server.sandbox, "network": server.network,
              "workspace": server.workspace, "readonly_tools": sorted(server.readonly_tools),
+             "confirm_tools": sorted(server.confirm_tools),
              "env_keys": sorted(server.env), "description": server.description}
             for server in servers.values()]}
     if op == "add":
@@ -248,7 +249,7 @@ def main_mcp_op(args) -> None:
         if not isinstance(payload, dict):
             raise OpError("the payload must be a JSON object")
         result = run_mcp_op(args.mcp_op, name=args.mcp_name, payload=payload)
-    except (OpError, McpError, json.JSONDecodeError, OSError) as error:
+    except (OpError, McpError, ValueError, OSError, RuntimeError, EOFError) as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         raise SystemExit(1) from error
     print(json.dumps(result, ensure_ascii=False))

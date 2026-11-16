@@ -159,3 +159,20 @@ test("moveRow keeps the column across wrapped rows and stops at the first and la
   assert.equal(down.cursor, 6)
   assert.equal(moveRow(down, 8, 1)!.cursor, 8)
 })
+
+test("account login suggestions disappear after login and return when disconnected", async () => {
+  const { setConnectedServices, routeOf } = await import("../commands.js")
+  try {
+    setConnectedServices([])
+    assert.equal(suggest("/gmail")[0]?.name, "gmail")
+    assert.equal(suggest("/telegram")[0]?.name, "telegram")
+    setConnectedServices(["gmail"])
+    assert.deepEqual(suggest("/gmail"), [])
+    assert.equal(suggest("/telegram")[0]?.name, "telegram")
+    assert.equal(routeOf("gmail"), "core")
+    setConnectedServices([])
+    assert.equal(suggest("/gmail")[0]?.name, "gmail")
+  } finally {
+    setConnectedServices([])
+  }
+})

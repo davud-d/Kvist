@@ -37,6 +37,8 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "update", route: "core", hint: "Install the newest Kvist build (restart afterwards)" },
   { name: "permissions", route: "core", hint: "Command rules (allow | host | ask | deny | remove | check) and auto mode (not safe)" },
   { name: "website", route: "goal", hint: "Build a website: Kvist interviews you, builds it and checks it" },
+  { name: "gmail", route: "core", hint: "Sign in to Gmail once and save the token" },
+  { name: "telegram", route: "core", hint: "Sign in to Telegram once and save the session" },
   { name: "revert", route: "core", hint: "Undo the agent's changes" },
   { name: "resume", route: "core", hint: "Continue an interrupted run" },
   { name: "provider", route: "core", hint: "Switch or configure the provider" },
@@ -92,10 +94,16 @@ export function sessionArgs(args: string[]): string[] {
   return args.length ? ["switch", ...args.slice(0, 1)] : []
 }
 
+let connectedServices = new Set<string>()
+
+export function setConnectedServices(names: readonly string[]): void {
+  connectedServices = new Set(names)
+}
+
 export function suggest(text: string, commands: readonly SlashCommand[] = ALL_COMMANDS): SlashCommand[] {
   if (!text.startsWith("/") || text.includes(" ")) return []
   const prefix = text.slice(1).toLowerCase()
-  return commands.filter((command) => command.name.startsWith(prefix))
+  return commands.filter((command) => !connectedServices.has(command.name) && command.name.startsWith(prefix))
 }
 
 export interface Parsed {

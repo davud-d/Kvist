@@ -6,10 +6,12 @@
   "design": {"version": "0.2.0", "digest": "sha256:f3b94c916673aba9738d6c4a98753b39b0b2951272d4557b5f25c84afd28825a"},
   "desktop": {"version": "0.2.2", "digest": "sha256:733606961b9bbe698c1a1ba5251b74cff57ab47ee79d11abfd33eae909a23f5c"},
   "documents": {"version": "0.1.1", "digest": "sha256:ea2179111f836b3dc23b6f8e749de5b54b6d56ffd46d8b0b9c45846514921eba"},
+  "gmail": {"version": "0.3.0", "digest": "sha256:c464f6b407fd66dacc37736996ba21917965295ddd76e0061e34d6eac13caf34"},
   "kvist_docs": {"version": "0.1.6", "digest": "sha256:7e724ae5756f1b34af7ebfb8286ce6bf39652e8df04b9f6d1722d833bc8753e7"},
   "project_overview": {"version": "0.1.0", "digest": "sha256:7c44b6c7f01f9c8572afca0fac233849b003ebcd05c1e101d44f1aec316f3190"},
   "skill_authoring": {"version": "0.2.0", "digest": "sha256:0ac3f8d2d991df5f0ee44ca198f5f39390d93213bad82dd962467e4803a0d212"},
   "static_checks": {"version": "0.1.0", "digest": "sha256:f87caff902a36e93bd1bbf7b4e47455bd4a0deda80e89224f2b4878397f91b73"},
+  "telegram": {"version": "0.3.1", "digest": "sha256:c13d3ef0d2bd24b689fdad91dc51fdf079e18f53236c0cd2dc230294e0da0f3a"},
   "test_runner": {"version": "0.1.0", "digest": "sha256:2dfdc712ed0694fb35f11f1cf1d5bc9e7d1c289a62552fc76ec2a6818149a03f"},
   "visualize": {"version": "0.1.0", "digest": "sha256:489f70f372ff57ec1a8920f50bc71c2c0e725087ad054f1efebdd90b2886f140"},
   "website": {"version": "0.1.0", "digest": "sha256:96362129daf190f5588ba705a624aa1c023ffaddca506e9c97657b576b3deb10"}

@@ -125,10 +125,12 @@ def _slash_commands(served: frozenset[str]) -> list[dict[str, Any]]:
     ``via`` is ``"core"`` (send a ``command`` message, which the frontend's own dialogs then follow) or absent (only the
     Classic Legacy terminal has it, so a frontend does not offer it).
     """
-    from kernel.protocol.slash_commands import SLASH_COMMANDS, STDIO_ONLY_COMMANDS
+    from kernel.protocol.slash_commands import SLASH_COMMANDS, STDIO_ONLY_COMMANDS, command_is_visible
 
     result: list[dict[str, Any]] = []
     for cmd in (*SLASH_COMMANDS, *STDIO_ONLY_COMMANDS):
+        if not command_is_visible(cmd.name):
+            continue
         entry: dict[str, Any] = {
             "name": cmd.name,
             "description": cmd.description,

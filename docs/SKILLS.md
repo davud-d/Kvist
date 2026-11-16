@@ -433,6 +433,31 @@ HTTP/SSE servers are not supported.
   `notifications/cancelled`, but what the server already did cannot be undone and is
   reported as unknown.
 
+
+Bundled `gmail` and `telegram` have guided browser connection commands:
+
+```text
+/gmail
+/telegram
+```
+
+Enter these once inside Kvist. After login, their command suggestions disappear; tokens are reused automatically. Gmail needs Node.js/npm and a Google OAuth Desktop
+client JSON; Telegram needs Python/venv and your API ID/hash. Setup installs the service
+runtime, opens the OS browser (Windows, macOS, Linux), verifies login and registers MCP.
+Google uses OAuth consent; personal Telegram uses a local QR page approved in the phone app.
+After login, ask Kvist normally, for example “Reply to my manager in Telegram”.
+The agent selects the service skill and attaches its MCP tools itself; the connect command
+is only for account login.
+
+`confirm_tools` lists raw MCP tool names that require a **human approval for every call**,
+even in auto mode. They cannot also be `readonly_tools`. The managed connectors put every
+sending tool in this list. Reading and drafts do not request send permission; unattended
+runs cannot execute a sending tool. Account connection and tool attachment are separate
+from approval of an individual send.
+
+Details: [Gmail](../kernel/skills_bundled/gmail/references/setup.md) ·
+[Telegram](../kernel/skills_bundled/telegram/references/setup.md).
+
 ## Service connections
 
 `kvist --connection-op add|list|remove`: a name, an `https://` base URL and secret
@@ -466,6 +491,8 @@ out skills this OS can never run; `--skill-op list` shows them with the reason.
 | `static_checks` | ruff, mypy, tsc, eslint, `go vet` and `cargo check` detected from the project's configuration, findings as file, line, column, code and message, full output as a log artifact. A checker that is not installed is reported as `unavailable`, never as clean; nothing is installed. |
 | `debugging` | instructions only, no runner and no permissions: reproduce first, narrow, test one guess at a time, fix the cause, prove the fix; ends with `no_change_needed` when the problem cannot be reproduced. Works on every platform. |
 | `skill_authoring` | instructions only, no permissions: when a skill is worth building, instructions or tools, then the scaffold → check → install flow and the restart rule. Three reference pages read on request: writing an instructions-only skill (manifest, shape of `SKILL.md`, how to test prose), a tools skill (manifest, the capability table, `plugin.py` and `ctx` rules, unit tests with a fake context, `contract.json`) and how to read `skills check` reports. The tools it describes are the built-in `skills` ops. Works on every platform. |
+| `gmail` | instructions for Gmail search, reading, drafts and requested mail actions through a configured stdio MCP server; browser OAuth connection command; each send requires human confirmation. |
+| `telegram` | instructions for personal-account Telegram dialogs, history, drafts and requested messages through a configured stdio MCP server; browser QR connection command; each send requires human confirmation. |
 | `kvist_docs` | instructions only, no permissions: answers questions about Kvist itself. A short core (how to answer, what holds everywhere) and eight reference pages read on request: install and first launch, commands, keys and flags, providers/models/effort/environment, sandbox and approvals, sessions/undo/memory/timers, interfaces and the protocol, skills and MCP, troubleshooting. Defers to `README.md` and `docs/` when the workspace is Kvist's own repository. Works on every platform. |
 | `design` | instructions only, no permissions: interfaces people can use — web apps, websites, phone apps, CLI output and full-screen TUIs, desktop and IDE panels, installers and the first run. A short core (process, the quality floor every interface must reach, first-run rules, the generic look to avoid, a checklist) and eleven reference pages read on request: process and audits, visual foundations with a contrast script (WCAG and APCA), web apps, websites, terminal, interaction patterns, accessibility (WCAG 2.2 AA), writing in English and Russian, first run and installation, desktop and IDE, mobile. Works on every platform. |
 

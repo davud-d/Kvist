@@ -15,6 +15,8 @@ The rules the registry applies to skills apply here:
   approval and a changed list needs a new approval;
 * a tool counts as read-only only if the person listed it in
   ``readonly_tools`` — what the server says about itself is not trusted;
+* ``confirm_tools`` need separate human confirmation on every call, including
+  when automatic approval is enabled; these tools cannot be read-only;
 * results are untrusted data; secrets in ``env`` stay in the core's process
   table and are never shown to the model or to skills;
 * the server process belongs to the task and stops with it;
@@ -65,6 +67,7 @@ class ServerConfig:
     workspace: str  # "none" | "read" | "write"
     readonly_tools: frozenset[str]
     description: str
+    confirm_tools: frozenset[str] = frozenset()
 
 
 def config_path() -> Path:
@@ -103,8 +106,13 @@ def parse_server(name: str, raw: Any) -> ServerConfig:
     readonly = raw.get("readonly_tools", [])
     if not isinstance(readonly, list) or not all(isinstance(item, str) for item in readonly):
         raise McpError(f"server {name}: readonly_tools must be a list of tool names")
+    confirm = raw.get("confirm_tools", [])
+    if not isinstance(confirm, list) or not all(isinstance(item, str) and item for item in confirm):
+        raise McpError(f"server {name}: confirm_tools must be a list of tool names")
+    if set(confirm) & set(readonly):
+        raise McpError(f"server {name}: confirmation tools cannot be read-only")
     return ServerConfig(name, list(command), dict(env), sandbox, bool(raw.get("network", False)), workspace,
-                        frozenset(readonly), str(raw.get("description", ""))[:300])
+                        frozenset(readonly), str(raw.get("description", ""))[:300], frozenset(confirm))
 
 
 def save_server(name: str, raw: dict[str, Any], path: Path | None = None) -> ServerConfig:

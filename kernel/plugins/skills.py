@@ -17,6 +17,8 @@ that changes its own tools mid-run is a conversation nobody has tested.
 """
 from __future__ import annotations
 
+import json
+
 import sys
 import threading
 import time
@@ -585,6 +587,21 @@ class SkillManager:
                     self.detach(f"mcp:{name}")
                     return _failed(f"MCP server {name} changed its tools since the person approved them; attach "
                                    "it again so they can review the new list")
+            if tool_name in server.config.confirm_tools:
+                agent = self._agent
+                if not getattr(agent.config, "interactive", False):
+                    return _failed("This operation needs a separate human confirmation; no interactive UI is available.")
+                ru = self._language() == "ru"
+                title = "Разрешить отправку?" if ru else "Allow this send?"
+                body = f"{name}.{tool_name}\n" + json.dumps(arguments, ensure_ascii=False, indent=2)
+                agent.control.awaiting_input(True)
+                try:
+                    # Deliberately bypass auto approval and persistent capability grants.
+                    approved = bool(agent._ui.confirm(title, body))
+                finally:
+                    agent.control.awaiting_input(False)
+                if not approved or agent.control.interrupted():
+                    return _failed("The person did not approve this operation; nothing was sent.")
             result = server.client.call_tool(tool_name, arguments, self._agent.control)
         except McpError as error:
             return _failed(f"mcp:{name}.{tool_name}: {error}")
@@ -696,6 +713,8 @@ def _mcp_approval_text(server: ServerConfig, tools: list[dict[str, Any]], langua
              "Инструменты:" if ru else "Tools:"]
     for tool in tools[:40]:
         mark = " (read-only)" if tool["name"] in server.readonly_tools else ""
+        if tool["name"] in server.confirm_tools:
+            mark += " (confirmation every call)"
         lines.append(f"• {tool['name']}{mark} — {str(tool.get('description') or '')[:160]}")
     if len(tools) > 40:
         lines.append(f"… +{len(tools) - 40}")

@@ -443,6 +443,8 @@ def _run_command(
         CommandResultEvent(command.name, result.ok, result.message, result.effects),
         out_stream,
     )
+    if result.ok and "connected_services" in result.effects:
+        _write_manifest(out_stream, commands=sorted(handlers))
 
 
 def _run_turn_command(session: EventSession, command: _Command, out_stream) -> None:

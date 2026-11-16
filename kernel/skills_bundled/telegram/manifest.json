@@ -1,0 +1,29 @@
+{
+  "manifest_version": 1,
+  "id": "telegram",
+  "version": "0.3.1",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {
+    "en": "Telegram MCP",
+    "ru": "Telegram MCP"
+  },
+  "summary": {
+    "en": "Read personal Telegram dialogs and history, draft replies and send requested messages through a configured MCP server.",
+    "ru": "Чтение диалогов и истории личного Telegram-аккаунта, подготовка ответов и отправка по запросу через настроенный MCP-сервер."
+  },
+  "instructions": "SKILL.md",
+  "platforms": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "source": {
+    "origin": "bundled",
+    "author": "Kvist",
+    "revision": "0.3.1"
+  },
+  "capabilities": {
+    "required": []
+  }
+}

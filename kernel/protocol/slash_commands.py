@@ -79,6 +79,8 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         aliases=("permission",),
     ),
     SlashCommand("website", "Build a website: Kvist interviews you, builds it and checks it"),
+    SlashCommand("gmail", "Sign in to Gmail once and save the account token"),
+    SlashCommand("telegram", "Sign in to your personal Telegram account once and save the session"),
     SlashCommand("feedback", "Read the feedback Kvist drafted and send it as a GitHub issue, keep it or discard it"),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
     SlashCommand("doctor", "Check modules, frontends, provider, API keys and settings"),
@@ -114,12 +116,26 @@ STDIO_ONLY_COMMANDS: tuple[SlashCommand, ...] = (
 )
 
 
+def command_is_visible(name: str) -> bool:
+    if name not in ("gmail", "telegram"):
+        return True
+    from kernel.plugins.service_connect import connected_services
+    from kernel.plugins.mcp import McpError
+
+    try:
+        return name not in connected_services()
+    except (McpError, OSError):
+        return True
+
+
 def slash_commands_context() -> str:
     """Shared command reference for roles answering questions about Kvist."""
     ink = os.getenv("KVIST_COMMAND_FRONTEND") == "ink"
     classic_only = {"commands", "status", "diff", "bug"}
     rows = []
     for command in SLASH_COMMANDS:
+        if not command_is_visible(command.name):
+            continue
         if ink and command.name in classic_only:
             continue
         if ink:
@@ -386,6 +402,8 @@ class SlashCommandCompleter(Completer):
         query = text[1:].casefold()
 
         for command in self._commands:
+            if not command_is_visible(command.name):
+                continue
             matched_name = _matching_name(command, query)
             if matched_name is None:
                 continue

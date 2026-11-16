@@ -226,7 +226,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mcp-op",
         choices=("list", "add", "remove"),
-        help="Manage the MCP servers Kvist may connect (payload JSON on stdin or --mcp-payload), print JSON, exit.",
+        help="Manage MCP servers; add reads JSON on stdin or --mcp-payload. Print JSON, exit.",
     )
     parser.add_argument("--mcp-name", help="Server name for --mcp-op add/remove.")
     parser.add_argument("--mcp-payload", help="JSON server definition for --mcp-op add.")
@@ -4808,7 +4808,21 @@ def _stdio_commit_message(ctx: CommandContext) -> CommandResult:
     return CommandResult(True, message, {"files": [f.path for f in files]})
 
 
+def _stdio_service_login(ctx: CommandContext, name: str) -> CommandResult:
+    from kernel.plugins.service_connect import connect_service, connected_services
+
+    if ctx.args:
+        return CommandResult(False, f"/{name} is only for account login. Describe tasks in ordinary language.")
+    try:
+        result = connect_service(name, ui=ctx.ui)
+    except (ValueError, OSError, RuntimeError, EOFError) as error:
+        return CommandResult(False, sanitize_display_text(str(error)))
+    return CommandResult(True, result["note"], {"connected_services": sorted(connected_services())})
+
+
 STDIO_COMMANDS: dict[str, CommandHandler] = {
+    "gmail": lambda ctx: _stdio_service_login(ctx, "gmail"),
+    "telegram": lambda ctx: _stdio_service_login(ctx, "telegram"),
     "commit-message": _stdio_commit_message,
     "role": _stdio_role,
     "effort": _stdio_effort,
@@ -5360,6 +5374,20 @@ def main() -> None:
             # A bare Enter is a no-op in every shell. Re-prompt silently instead
             # of answering it with a "describe the task" lecture.
             if not user_goal:
+                continue
+            if user_goal.split(maxsplit=1)[0].lower() in ("/gmail", "/telegram"):
+                from kernel.plugins.service_connect import connect_service
+
+                name = user_goal.split(maxsplit=1)[0][1:].lower()
+                if len(user_goal.split(maxsplit=1)) > 1:
+                    console.print(f"/{name} is only for account login. Describe tasks in ordinary language.")
+                    continue
+                try:
+                    with paused_interactive_screen(interactive_screen):
+                        result = connect_service(name, ui=agent._ui)
+                    console.print(_display_text(result["note"], "green"))
+                except (ValueError, OSError, RuntimeError, EOFError) as error:
+                    console.print(_display_text(sanitize_display_text(str(error)), "yellow"))
                 continue
             if not user_goal.startswith("/"):
                 session_language = detect_request_language(user_goal, fallback=session_language)
@@ -6335,6 +6363,9 @@ def main() -> None:
 
                 console.print("[bold]Available commands:[/bold]")
                 for command in SLASH_COMMANDS:
+                    from kernel.protocol.slash_commands import command_is_visible
+                    if not command_is_visible(command.name):
+                        continue
                     aliases = (
                         f" [dim](aliases: {', '.join('/' + a for a in command.aliases)})[/dim]"
                         if command.aliases

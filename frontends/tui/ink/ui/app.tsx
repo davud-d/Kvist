@@ -2,7 +2,7 @@ import { Box, Static, Text, useApp, useInput } from "ink"
 import { writeFileSync } from "node:fs"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
-import { ALL_COMMANDS, CLASSIC_COMMAND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs } from "../commands.js"
+import { CLASSIC_COMMAND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs, setConnectedServices, suggest } from "../commands.js"
 import { copyToClipboard } from "../clipboard.js"
 import { restoreWindowTitle, setWindowTitle } from "../window-title.js"
 import { KvistCore, type CoreCommand } from "../core.js"
@@ -79,8 +79,8 @@ function initialEffort(): string {
 
 const CLASSIC_NOTE = `Available in Classic Legacy: ${CLASSIC_COMMAND}`
 
-const HELP = [
-  ...ALL_COMMANDS.map((c) => `/${c.name.padEnd(NAME_WIDTH)} ${c.hint}`),
+const helpText = () => [
+  ...suggest("/").map((c) => `/${c.name.padEnd(NAME_WIDTH)} ${c.hint}`),
   "",
   "enter send · esc esc stop a run · ctrl+d quit",
 ].join("\n")
@@ -129,6 +129,13 @@ export function App(props: AppProps) {
       dispatch({ type: "note", tone: "info", text: englishOnly(event.message) })
     }
     instance.on("event", (event: CoreEvent) => {
+      if (event.type === "manifest") {
+        const visible = new Set(event.slash_commands.map((command) => command.name))
+        setConnectedServices(["gmail", "telegram"].filter((name) => !visible.has(name)))
+      }
+      if (event.type === "command_result" && event.ok && Array.isArray(event.effects?.connected_services)) {
+        setConnectedServices(event.effects.connected_services as string[])
+      }
       dispatch({ type: "event", event })
       if (event.type === "hello" && props.resume !== undefined) dispatch({ type: "resume_start" })
       if (event.type === "command_result") {
@@ -197,7 +204,7 @@ export function App(props: AppProps) {
   const runLocal = useCallback((name: string, args: string[]) => {
     switch (name) {
       case "help":
-        return note(HELP)
+        return note(helpText())
       case "quit":
         return void quit()
       case "clear":
