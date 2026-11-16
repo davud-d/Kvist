@@ -45,7 +45,9 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         provider_override,
         models_override,
         ui,
+        persist_selection,
     ):
+        assert persist_selection is False
         assert max_steps == 150
         assert persist_logs is False
         assert verbose is False

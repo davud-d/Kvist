@@ -731,6 +731,7 @@ def launch(
         try:
             with open(os.devnull, encoding="utf-8") as null_input:
                 sys.stdin = null_input
+                # A provider given at launch is not a new pick: it must not replace the saved one.
                 agent, _config, _warnings = build_agent_fn(
                     executor,
                     max_steps=150,
@@ -739,6 +740,7 @@ def launch(
                     provider_override=provider_override,
                     models_override=models_override,
                     ui=ui,
+                    persist_selection=False,
                 )
         finally:
             sys.stdin = original_stdin
@@ -803,6 +805,7 @@ def launch_multi(
         try:
             with open(os.devnull, encoding="utf-8") as null_input:
                 sys.stdin = null_input
+                # A provider given at launch is not a new pick: it must not replace the saved one.
                 agent, _config, _warnings = build_agent_fn(
                     executor,
                     max_steps=150,
@@ -812,6 +815,7 @@ def launch_multi(
                     models_override=models_override,
                     ui=ui,
                     end_session=True,
+                    persist_selection=False,
                 )
         finally:
             sys.stdin = original_stdin
@@ -820,7 +824,7 @@ def launch_multi(
         if on_ready is not None:
             on_ready(session)
 
-        def rebuild(provider_override=None, models_override=None, interactive=False):
+        def rebuild(provider_override=None, models_override=None, interactive=False, persist_selection=False):
             current = session.agent.config
             # Same stdin guard as the launch build: a credential prompt must
             # not consume the protocol lines the reader thread is waiting on.
@@ -840,6 +844,7 @@ def launch_multi(
                         models_override=models_override,
                         ui=ui,
                         end_session=True,
+                        persist_selection=persist_selection,
                         **({"interactive_ui": ui} if interactive else {}),
                     )
             finally:

@@ -69,7 +69,7 @@ def test_provider_uses_subscription_without_api_keys():
 def test_saved_credentials_do_not_open_browser(monkeypatch):
     saved_account()
     monkeypatch.setattr(auth, "login", lambda *a, **k: pytest.fail("login should not run"))
-    assert user_config.ensure_provider_credentials("chatgpt", "gpt-6.1-sol") == {}
+    assert user_config.ensure_provider_credentials("chatgpt", "gpt-6.1-sol", save_selection=True) == {}
     assert user_config.get_saved_provider() == "chatgpt"
     assert auth.access_token() == "access-fixture"
     assert "access-fixture" not in json.dumps(build_config_info())

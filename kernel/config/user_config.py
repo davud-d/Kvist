@@ -722,9 +722,15 @@ def ensure_provider_credentials(
     language_hint: str | None = None,
     skip_validation: bool = False,
     prompt_secret_fn: Callable[[str], str] | None = None,
+    save_selection: bool = False,
 ) -> dict[str, str]:
     """Resolve (and persist) the secrets a provider needs, prompting for any
     that are missing.
+
+    ``save_selection`` makes the provider the person's main one in the config.
+    Only an explicit pick (the setup wizard, ``/provider``) passes True; a
+    provider given by ``--provider`` or ``AGENT_LLM_PROVIDER`` or merely
+    checked must not replace the saved choice.
 
     ``prompt_secret_fn`` overrides how a missing secret is collected. It
     defaults to the bare ``getpass``-based :func:`prompt_secret` in this
@@ -748,15 +754,15 @@ def ensure_provider_credentials(
                     "/ ChatGPT не выполнен вход на вашем компьютере. Сначала войдите там (/provider, ChatGPT), затем выберите его здесь."
                 )
             login(config_path, account_id=account_status(config_path)["active"] or None)
-        set_provider_secret(LLM_PROVIDER_KEY, "chatgpt", config_path)
+        if save_selection:
+            set_provider_secret(LLM_PROVIDER_KEY, "chatgpt", config_path)
         return {}
     secret_prompt = prompt_secret_fn or prompt_secret
     normalized_provider = normalize_provider(provider)
     payload = load_user_config(config_path)
-    payload[LLM_PROVIDER_KEY] = normalized_provider
-    changed_values: dict[str, object] = {
-        LLM_PROVIDER_KEY: normalized_provider,
-    }
+    changed_values: dict[str, object] = {}
+    if save_selection:
+        changed_values[LLM_PROVIDER_KEY] = normalized_provider
     collected: dict[str, str] = {}
 
     keys_to_resolve = required_keys

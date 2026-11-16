@@ -604,6 +604,7 @@ def _run_set_provider_op(raw: object) -> dict:
         models.get("fast", ""),
         required_keys=required,
         prompt_secret_fn=lambda _label: api_key,
+        save_selection=True,
     )
     if missing_roles:
         save_models_for_provider(normalized, models)
@@ -1937,7 +1938,11 @@ def build_agent(
     ui: AgentUI | None = None,
     interactive_ui: AgentUI | None = None,
     end_session: bool = False,
+    persist_selection: bool = True,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
+    # ``persist_selection`` is False when the provider is not a new pick by the
+    # person: a rebuild of the current provider. A provider from AGENT_LLM_PROVIDER
+    # at launch is never saved either, so an override does not become the main one.
     # ``interactive_ui`` is how an event frontend answers what the terminal
     # answers through a TTY (provider, models, base URL, secrets). Without a
     # TTY and without it, those questions fail instead of hanging.
@@ -2124,6 +2129,7 @@ def build_agent(
             help_text="Paste or type the value, then press Enter.",
         ) or ""
 
+    env_only_provider = provider_override is None and bool(os.getenv("AGENT_LLM_PROVIDER"))
     credentials = ensure_provider_credentials(
         provider=provider,
         validation_model=models["fast"],
@@ -2131,6 +2137,7 @@ def build_agent(
         language_hint=language_hint,
         skip_validation=(provider == OPENAI_PROVIDER),
         prompt_secret_fn=_prompt_secret_via_ui,
+        save_selection=persist_selection and not env_only_provider,
     )
     if provider == FREEFLOW_PROVIDER:
         credentials.update(
@@ -4468,7 +4475,7 @@ def _stdio_provider(ctx: CommandContext) -> CommandResult:
             {"provider": previous, "changed": False},
         )
     try:
-        config, warnings = _adopt_rebuilt_agent(ctx, provider_override=selected)
+        config, warnings = _adopt_rebuilt_agent(ctx, provider_override=selected, persist_selection=True)
     except (RuntimeError, ValueError, OSError) as error:
         return CommandResult(False, _failure_detail(error))
     return CommandResult(
@@ -4530,7 +4537,7 @@ def _stdio_del_provider(ctx: CommandContext) -> CommandResult:
         )
     clear_saved_provider()
     try:
-        new_config, warnings = _adopt_rebuilt_agent(ctx)
+        new_config, warnings = _adopt_rebuilt_agent(ctx, persist_selection=True)
     except (RuntimeError, ValueError, OSError) as error:
         detail = _failure_detail(error)
         return CommandResult(
@@ -4582,7 +4589,7 @@ def _stdio_full_reset(ctx: CommandContext) -> CommandResult:
         )
     ctx.routed_role = None
     try:
-        config, warnings = _adopt_rebuilt_agent(ctx)
+        config, warnings = _adopt_rebuilt_agent(ctx, persist_selection=True)
     except (RuntimeError, ValueError, OSError) as error:
         detail = _failure_detail(error)
         return CommandResult(
@@ -5619,6 +5626,7 @@ def main() -> None:
                             persist_logs=persist_logs,
                             verbose=verbose,
                             provider_override=config.provider,
+                            persist_selection=False,
                             language_hint=session_language,
                             end_session=True,
                         )
@@ -5707,6 +5715,7 @@ def main() -> None:
                                     persist_logs=persist_logs,
                                     verbose=verbose,
                                     provider_override=config.provider,
+                                    persist_selection=False,
                                     models_override=selected_models,
                                     language_hint=session_language,
                                     end_session=True,

@@ -687,8 +687,8 @@ def test_home_is_isolated_for_every_config_writing_test(home):
 
 
 def _rebuilder(replacement, calls, error=None):
-    def rebuild(provider_override=None, models_override=None, interactive=False):
-        calls.append({"provider": provider_override, "interactive": interactive})
+    def rebuild(provider_override=None, models_override=None, interactive=False, persist_selection=False):
+        calls.append({"provider": provider_override, "interactive": interactive, "persist": persist_selection})
         if error is not None:
             raise error
         return replacement, replacement.config, ["w"]
@@ -706,7 +706,7 @@ def test_provider_wizard_switches_through_an_interactive_rebuild(home, agent_fac
         rebuild=_rebuilder(replacement, calls),
     )
     assert requests[0].title == "Select LLM Provider"
-    assert calls == [{"provider": "anthropic", "interactive": True}]
+    assert calls == [{"provider": "anthropic", "interactive": True, "persist": True}]
     assert result.ok and result.effects["provider"] == "anthropic"
     assert result.effects["changed"] is True and result.effects["warnings"] == ["w"]
     assert ctx.session.agent is replacement
@@ -752,7 +752,7 @@ def test_provider_can_create_a_custom_provider_through_dialogs(home, agent_facto
     result, requests, _ = _run_handler(
         "provider", agent_factory(), answers=answers, rebuild=_rebuilder(replacement, calls)
     )
-    assert result.ok and calls == [{"provider": "custom:my-llm", "interactive": True}]
+    assert result.ok and calls == [{"provider": "custom:my-llm", "interactive": True, "persist": True}]
     assert "custom-secret-key" not in json.dumps([r.to_dict() for r in requests])
     assert "custom-secret-key" not in json.dumps(result.effects) + result.message
     assert "my-llm" in (_saved("custom_providers") or {})
@@ -767,7 +767,7 @@ def test_change_api_saves_the_secret_and_never_echoes_it(home, agent_factory):
     )
     assert [r.kind for r in requests] == ["secret"]
     assert result.ok and result.effects["key_saved"] is True
-    assert calls == [{"provider": "openai", "interactive": True}]
+    assert calls == [{"provider": "openai", "interactive": True, "persist": False}]
     assert _saved("openai_api_key") == secret
     wire = json.dumps([r.to_dict() for r in requests]) + json.dumps(result.effects) + result.message
     assert secret not in wire
@@ -820,7 +820,7 @@ def test_del_provider_confirms_deletes_and_picks_a_replacement(home, agent_facto
         "del-provider", agent, answers=[True], rebuild=_rebuilder(replacement, calls)
     )
     assert [r.kind for r in requests] == ["confirm"]
-    assert calls == [{"provider": None, "interactive": True}]
+    assert calls == [{"provider": None, "interactive": True, "persist": True}]
     assert result.ok and result.effects["deleted"] == "gw" and result.effects["provider"] == "openai"
     assert "gw" not in (_saved("custom_providers") or {})
     assert _saved("llm_provider") is None
@@ -863,7 +863,7 @@ def test_full_reset_needs_two_explicit_yeses_then_wipes_the_config(home, agent_f
     assert [r.kind for r in requests] == ["confirm", "confirm"]
     assert "Final confirmation" in requests[1].title
     assert result.ok and result.effects["reset"] is True
-    assert calls == [{"provider": None, "interactive": True}]
+    assert calls == [{"provider": None, "interactive": True, "persist": True}]
     assert _saved("role_selection") is None
     assert ctx.session.agent is replacement
 
