@@ -723,7 +723,12 @@ class ArgumentValidationMixin:
 
     def _check_resolved_sensitive_path(self, candidate: Path, kind: str) -> None:
         normalized = candidate.as_posix()
-        if _INTERNAL_TOKEN_RE.search(normalized):
+        below_workspace = (
+            candidate.relative_to(self.workspace).as_posix()
+            if self.workspace_inside_kvist and _is_relative_to(candidate, self.workspace)
+            else normalized
+        )
+        if _INTERNAL_TOKEN_RE.search(below_workspace):
             raise HardDenyError(
                 f"Hard security denial: {kind} points into internal .kvist state"
             )

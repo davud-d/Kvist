@@ -261,7 +261,7 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | merged (2 круга) |
 | T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | merged (2 круга) |
 | T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged `a564151` (2 круга) |
-| T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | work |
+| T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | merged (2 круга) |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | work |
 | T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | todo |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
@@ -423,6 +423,19 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
   достаточен; мусор проверки — редкий путь restart; гонка отмены ограничена 15 с; дублирование и
   приватный импорт допустимы; в подпапке git и так закрыт по D-23). Риск «moderate» для
   `python3/pytest` — оставить fail-closed: без bwrap авто-одобрение запускало бы код вне worktree.
+
+**Круг 2** (коммит `182073f`; полный набор 5277 passed / 80 skipped, 1 warning; песочница и модуль 625 passed).
+Флаг `workspace_inside_kvist` (по умолчанию False) в `SafeExecutor` → `TerminalExecutor` →
+`_check_resolved_sensitive_path`: при флаге `.kvist` сверяется ниже workspace, без флага — как было;
+проверка секретов не менялась. Побочная находка сабагента: `_sanitize_internal_paths_in_text` молча
+выбрасывала строки вывода с абсолютным путём worktree (трейсбеки pytest) — при флаге путь workspace
+вырезается перед проверкой. `terminal.py` (3 строки проводки флага) вне списка — **подтверждено**
+ведущим. Тесты: обычный workspace внутри `.kvist` по-прежнему отказ; с флагом `cat`/`pwd` работают;
+отказ для `.kvist` worktree (относительно, абсолютно, симлинк, cwd) и внешнего `.kvist`; настоящая
+песочница — `check` passed/failed; git закрыт именно по D-23; настоящий `EventStreamUI` в
+`JournalingUI`. Процесс: сабагент по ошибке сделал `git stash` и сразу `pop` (общий стек с основным
+checkout) — ведущий проверил: стек пуст, основной checkout чист. Осталось: интеграционные тесты
+идут в режиме `workspace` (без bwrap) — **в ручные проверки** (bwrap).
 
 ### T5 — префикс кэша, стиль в конце, постоянные tools
 **Круг 1** (коммит `315297f`, 10 файлов, +491/−41; полный набор 5247 passed / 80 skipped, ruff чисто).

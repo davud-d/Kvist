@@ -252,8 +252,14 @@ class SafeExecutor:
         approvals: ApprovalGate | None = None,
         read_roots: tuple[str | Path, ...] = (),
         scratchpad: Scratchpad | None = None,
+        workspace_inside_kvist: bool = False,
     ) -> None:
+        """``workspace_inside_kvist``: the workspace is a throwaway folder that Kvist itself made under a
+        ``.kvist`` directory (a best-of executor's git worktree). The ``.kvist`` rule then applies to
+        paths below the workspace, not to the workspace's own location; without it a workspace whose
+        absolute path contains ``.kvist`` refuses every shell command."""
         self._approvals = approvals or TerminalApprovalGate()
+        self.workspace_inside_kvist = workspace_inside_kvist
         # Helpers are handed the main agent's scratchpad, so they all share one.
         self.scratchpad = scratchpad or Scratchpad()
         self.workspace = Path(workspace).expanduser().resolve()
@@ -325,6 +331,7 @@ class SafeExecutor:
             "max_output_chars": self.max_output_chars,
             "profile": terminal_profile,
             "scratch": self.scratchpad,
+            "workspace_inside_kvist": workspace_inside_kvist,
         }
         self._terminal = TerminalExecutor(approvals=self._approvals, **self._terminal_args)
         # A TerminalExecutor keeps one run's state on itself and serializes its runs under a lock, so
@@ -1042,10 +1049,12 @@ class SafeExecutor:
     def _sanitize_internal_paths_in_text(self, text: str) -> str:
         if not text:
             return text
+        # The workspace's own absolute path may contain ".kvist"; only what lies below it is internal.
+        own_prefix = self.workspace.as_posix() if self.workspace_inside_kvist else None
         sanitized_lines = [
             line
             for line in text.splitlines()
-            if not self._INTERNAL_PATH_TOKEN_RE.search(line)
+            if not self._INTERNAL_PATH_TOKEN_RE.search(line.replace(own_prefix, "") if own_prefix else line)
         ]
         return "\n".join(sanitized_lines)
 

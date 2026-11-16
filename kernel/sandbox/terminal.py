@@ -151,9 +151,12 @@ class TerminalExecutor(
         extra_forbidden: set[str] | None = None,
         approvals: ApprovalGate | None = None,
         scratch: Scratchpad | None = None,
+        workspace_inside_kvist: bool = False,
     ) -> None:
         self._approvals = approvals or TerminalApprovalGate()
         self.scratch = scratch
+        # See SafeExecutor: the .kvist rule reads paths below the workspace, not the workspace's own location.
+        self.workspace_inside_kvist = workspace_inside_kvist
         # Set by the caller around one command to watch its output live; the
         # captured, bounded result is unaffected.
         self.output_sink: Callable[[str], None] | None = None
