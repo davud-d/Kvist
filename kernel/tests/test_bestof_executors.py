@@ -989,3 +989,51 @@ def test_the_executors_events_have_the_shape_the_contract_gives_through_a_real_e
     assert activity[0]["call_id"] == activity[1]["call_id"] and activity[1]["ok"] is True and "ok" not in activity[0]
     # Nothing of the executors' own thoughts or steps reaches the main stream.
     assert {event["type"] for event in events} <= {"bestof_status", "executor_activity"}
+
+
+# --- Kvist's own notebooks stay out of an executor's work ------------------
+
+
+@pytest.mark.parametrize("name", ["KVIST.md", "KVIST-CHAT.md"])
+@pytest.mark.parametrize("action,args", [
+    ("write_file", {"content": "rewritten\n"}),
+    ("append_file", {"content": "more\n"}),
+    ("replace_in_file", {"old_text": "mine", "new_text": "theirs"}),
+])
+def test_an_executor_cannot_change_kvists_notebooks_and_is_told_why(tmp_path, name, action, args):
+    from kernel.sandbox.executor import ExecutorError as SandboxError
+
+    (tmp_path / name).write_text("mine\n", encoding="utf-8")
+    sandbox = SafeExecutor(tmp_path, approvals=DenyApprovalGate(), protect_instruction_files=True)
+
+    with pytest.raises(SandboxError, match=r"own notebook.*not part of this task"):
+        sandbox.execute(AgentCommand("edit", Action(action, {"path": name, **args})))
+
+    assert (tmp_path / name).read_text(encoding="utf-8") == "mine\n"
+    # Reading stays allowed, and an ordinary file is written as before.
+    assert sandbox.execute(AgentCommand("read", Action("read_file", {"path": name}))).ok
+    assert sandbox.execute(AgentCommand("edit", Action("write_file", {"path": "x.txt", "content": "1\n"}))).ok
+
+
+def test_the_main_sandbox_still_edits_its_own_notebook(tmp_path):
+    (tmp_path / "KVIST.md").write_text("mine\n", encoding="utf-8")
+    sandbox = SafeExecutor(tmp_path, approvals=DenyApprovalGate())
+
+    assert sandbox.execute(AgentCommand("edit", Action("write_file", {"path": "KVIST.md", "content": "new\n"}))).ok
+
+
+def test_an_executors_sandbox_protects_the_notebooks_and_its_attempt_to_write_one_is_refused(agent_factory, repo):
+    (repo / "KVIST.md").write_text("the user's notes\n", encoding="utf-8")
+    scripts = {"senior-dev": [
+        _call("write_file", {"path": "KVIST.md", "content": "overwritten\n"}),
+        "Tried to update the notes.",
+    ]}
+    main, _ = _main(agent_factory, StyledClient(scripts=scripts))
+    pool = _pool(main, repo)
+
+    pool.start()
+    assert pool.wait(15)["done"]
+
+    assert pool.get("e1").agent.executor.protect_instruction_files is True
+    assert (pool.get("e1").workspace / "KVIST.md").read_text(encoding="utf-8") == "the user's notes\n"
+    assert pool.summary("e1")["diff"] == {"files": 0, "added": 0, "removed": 0}

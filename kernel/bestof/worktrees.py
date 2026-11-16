@@ -61,6 +61,10 @@ _SERVICE_IDENTITY = {
 }
 # A glob pattern, because the workspace may be a subfolder whose own .kvist must stay out as well.
 _EXCLUDE_KVIST = ":(exclude,glob)**/.kvist/**"
+# What a run leaves behind that is not the executor's work: running the tests writes these, and they are not ignored
+# by a project without its own rules. Kvist's notebooks are excluded by path, see _result_pathspecs().
+_EXCLUDE_RUN_ARTIFACTS = (":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/.pytest_cache/**")
+_SERVICE_FILES = ("KVIST.md", "KVIST-CHAT.md")
 _ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 # Variables that move the repository or change what a pathspec means; each call that needs one sets it itself.
 _INHERITED_GIT_STATE = (
@@ -549,6 +553,16 @@ _NO_RESULT = _both(
 )
 
 
+def _result_pathspecs(run: RunInfo) -> list[str]:
+    """Pathspecs that keep Kvist's own notebooks and test-run artifacts out of the executor's result.
+
+    An excluded file is simply not staged, so the result holds it exactly as the snapshot did: the executor's
+    edit to the person's KVIST.md never shows in the diff, reaches the judge's summary or gets accepted.
+    """
+    notebooks = [f":(exclude,literal){(run.workspace_rel / name).as_posix()}" for name in _SERVICE_FILES]
+    return [*notebooks, *_EXCLUDE_RUN_ARTIFACTS]
+
+
 def record_result(run: RunInfo, executor_id: str) -> str:
     """Commit everything the executor left in its worktree (nothing is fine) and return that commit W."""
     info = _executor(run, executor_id)
@@ -558,7 +572,7 @@ def record_result(run: RunInfo, executor_id: str) -> str:
             f"The worktree of executor {executor_id} is gone", f"Worktree исполнителя {executor_id} пропал",
         ))
     branch = run.executor_branch(executor_id)
-    _git(worktree, "add", "-A", "--", ".", _EXCLUDE_KVIST)
+    _git(worktree, "add", "-A", "--", ".", _EXCLUDE_KVIST, *_result_pathspecs(run))
     tree = _out(worktree, "write-tree")
     tip = _out(worktree, "rev-parse", "HEAD")
     result = _service_commit(worktree, tree, tip, f"Kvist best-of result of {executor_id}")

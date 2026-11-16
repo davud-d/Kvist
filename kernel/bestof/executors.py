@@ -261,7 +261,7 @@ class ExecutorPool:
         # The worktree lies under <repo>/.kvist/bestof: without the flag the sandbox would refuse every command
         # for the folder's own location. Its own .kvist, below the worktree, stays forbidden.
         sandbox = SafeExecutor(executor.workspace, approvals=gate, scratchpad=Scratchpad(),
-                               workspace_inside_kvist=True)
+                               workspace_inside_kvist=True, protect_instruction_files=True)
         sandbox.write_approval_enabled = False
         ui = _ExecutorUI(
             lambda payload: self._activity(executor, payload),

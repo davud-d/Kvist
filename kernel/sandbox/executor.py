@@ -59,7 +59,7 @@ from kernel.sandbox.auto_approval import AutoApprovalGate, Classifier, refusal_n
 from kernel.sandbox.scratchpad import Scratchpad, ScratchpadFull
 from kernel.sandbox.permission_policy import append_web_domain, load_policy
 from kernel.config.user_config import get_web_search_settings
-from kernel.context.system_context import AGENT_INSTRUCTIONS_FILE
+from kernel.context.system_context import AGENT_INSTRUCTIONS_FILE, CHAT_INSTRUCTIONS_FILE
 from kernel.sandbox.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
 
 
@@ -253,13 +253,19 @@ class SafeExecutor:
         read_roots: tuple[str | Path, ...] = (),
         scratchpad: Scratchpad | None = None,
         workspace_inside_kvist: bool = False,
+        protect_instruction_files: bool = False,
     ) -> None:
         """``workspace_inside_kvist``: the workspace is a throwaway folder that Kvist itself made under a
         ``.kvist`` directory (a best-of executor's git worktree). The ``.kvist`` rule then applies to
         paths below the workspace, not to the workspace's own location; without it a workspace whose
-        absolute path contains ``.kvist`` refuses every shell command."""
+        absolute path contains ``.kvist`` refuses every shell command.
+
+        ``protect_instruction_files``: KVIST.md and KVIST-CHAT.md belong to the person's own folder, not to the
+        task, so writes to them are refused (a best-of executor works on a copy whose result is compared and
+        accepted, and those notes must not ride along)."""
         self._approvals = approvals or TerminalApprovalGate()
         self.workspace_inside_kvist = workspace_inside_kvist
+        self.protect_instruction_files = protect_instruction_files
         # Helpers are handed the main agent's scratchpad, so they all share one.
         self.scratchpad = scratchpad or Scratchpad()
         self.workspace = Path(workspace).expanduser().resolve()
@@ -1086,7 +1092,19 @@ class SafeExecutor:
             self._resolve_read_path(path) if read_only else self._resolve_path(path)
         )
         self._check_env_file(target)
+        if not read_only:
+            self._check_instruction_file_write(target)
         return target
+
+    def _check_instruction_file_write(self, target: Path) -> None:
+        if not self.protect_instruction_files:
+            return
+        for name in (AGENT_INSTRUCTIONS_FILE, CHAT_INSTRUCTIONS_FILE):
+            if target == self.workspace / name:
+                raise ExecutorError(
+                    f"{name} is Kvist's own notebook in the person's folder and is not part of this task, "
+                    "so it cannot be changed here. Leave it as it is and put what you learned in your report."
+                )
 
     def _read_file(
         self, path: str, start_line: int | None = None, end_line: int | None = None

@@ -799,3 +799,81 @@ def test_recover_in_a_folder_without_git_finds_nothing(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert worktrees.recover(plain) == []
+
+
+# ------------------------------------------------- notebooks and test-run artifacts
+
+def _changed_paths(run, executor_id: str) -> list[str]:
+    return sorted(change.path for change in worktrees.summary(run, executor_id).files)
+
+
+@pytest.mark.parametrize("tracked", [True, False])
+def test_the_result_leaves_out_kvists_notebooks_whether_the_snapshot_holds_them_or_not(repo, tracked):
+    (repo / "KVIST.md").write_text("notes\n", encoding="utf-8")
+    if tracked:
+        (repo / "KVIST-CHAT.md").write_text("chat\n", encoding="utf-8")
+    run = worktrees.create_run(repo, "r1", ["e1"])
+
+    def edit(folder: Path) -> None:
+        (folder / "KVIST.md").write_text("rewritten by the executor\n", encoding="utf-8")
+        (folder / "KVIST-CHAT.md").write_text("so was this\n", encoding="utf-8")
+        (folder / "real.txt").write_text("the work\n", encoding="utf-8")
+
+    finished(run, "e1", edit)
+
+    assert _changed_paths(run, "e1") == ["real.txt"]
+    assert "KVIST" not in worktrees.full_diff(run, "e1")
+
+
+def test_the_result_leaves_out_the_notebooks_of_a_workspace_subfolder(repo):
+    (repo / "sub").mkdir()
+    (repo / "sub" / "KVIST.md").write_text("notes\n", encoding="utf-8")
+    (repo / "sub" / "code.py").write_text("x = 1\n", encoding="utf-8")
+    run = worktrees.create_run(repo / "sub", "r1", ["e1"])
+
+    def edit(folder: Path) -> None:
+        (folder / "KVIST.md").write_text("rewritten\n", encoding="utf-8")
+        (folder / "code.py").write_text("x = 2\n", encoding="utf-8")
+
+    finished(run, "e1", edit)
+
+    assert _changed_paths(run, "e1") == ["sub/code.py"]
+
+
+def test_a_test_run_in_the_worktree_adds_no_files_to_the_result(repo):
+    (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    (repo / "test_calc.py").write_text(
+        "from calc import add\n\n\ndef test_add():\n    assert add(1, 1) == 2\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "calc")
+    run = worktrees.create_run(repo, "r1", ["e1"])
+    folder = worktrees.executor_workspace(run, "e1")
+
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], cwd=folder,
+                          capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(folder)})
+    assert done.returncode == 0, done.stdout + done.stderr
+    # The same run with the cache plugin on, and a compiled module of a subfolder, as a real run leaves them.
+    (folder / ".pytest_cache").mkdir(exist_ok=True)
+    (folder / ".pytest_cache" / "v").write_text("cache\n", encoding="utf-8")
+    assert (folder / "__pycache__").is_dir()
+
+    worktrees.record_result(run, "e1")
+
+    assert worktrees.summary(run, "e1").empty
+
+
+def test_accept_leaves_the_users_own_notebook_alone(repo):
+    (repo / "KVIST.md").write_text("the user's notes\n", encoding="utf-8")
+    run = worktrees.create_run(repo, "r1", ["e1"])
+
+    def edit(folder: Path) -> None:
+        (folder / "KVIST.md").write_text("executor rewrote it\n", encoding="utf-8")
+        (folder / "real.txt").write_text("the work\n", encoding="utf-8")
+
+    finished(run, "e1", edit)
+    outcome = worktrees.accept(run, "e1", "Take it")
+
+    assert outcome.accepted
+    assert (repo / "KVIST.md").read_text(encoding="utf-8") == "the user's notes\n"
+    assert git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split() == ["real.txt"]
+    assert "KVIST.md" in git(repo, "status", "--porcelain")  # still the user's untracked file, not committed
