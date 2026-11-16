@@ -57,7 +57,7 @@ git -C <repo> merge --ff-only bo/int   # experimental уходит вперёд 
   `ruff check .` — чисто.
 - Ресурсы тесные: на дисках по ~20 ГБ свободно, RAM ~4 ГБ свободно; `target` glass и tauri —
   по 7.9 ГБ: параллельных полных rust-сборок не делать (см. D-19).
-- Живых прогонов израсходовано: 0 из 10.
+- Живых прогонов израсходовано: 2 из 10 (§9). Все задачи T1–T15 слиты; работа завершена (§8).
 - Инцидент: все четыре сабагента волны 1 остановились на 5-часовом лимите использования
   аккаунта (HTTP 429 у сабагентов, это не лимит живых прогонов Kvist). Незакоммиченная работа
   осталась в их worktree; после сброса лимита они возобновлены с места остановки. Если лимит
@@ -71,7 +71,7 @@ git -C <repo> merge --ff-only bo/int   # experimental уходит вперёд 
   `--provider` идут одним `build_agent(provider_override=…)` → `ensure_provider_credentials`, развести их можно
   только в `main.py` (сейчас его правит T9). План: после слияния T9 — `bo/t15` на свежий experimental,
   разрешить `main.py`: `ensure_provider_credentials(..., save_selection=False)`, `True` только у явного выбора;
-  проверить и второй писатель `kernel/ssh/credentials.py:89`.
+  проверить и второй писатель `kernel/ssh/credentials.py:89`. **Закрыто**: T15 слит `e7d6f30` (§6).
 - Инцидент 2: лимит аккаунта сработал во время волны 2 (T6, T7 остановлены посреди работы);
   после сброса возобновлены с места остановки.
 
@@ -84,6 +84,8 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 - thinking снимается на шагах с tool_use: `kernel/llm/llm_clients.py` (`_replays_tool_use` →
   `del request_kwargs["thinking"]`). Подпись (`signature_delta`) и `redacted_thinking` вообще
   не читаются ни в потоке (`_normalize_stream_chunk`), ни без него (`_normalize_response`).
+  **Закрыто T11** (`6694938`): `replays_tool_use_without_thinking` снимает thinking только для истории,
+  где у хода с tool_use блоков нет.
 - итог за ход, а не за сессию: `kernel/session/session_events.py` (`_write_turn_summary`,
   `usage` с `kind: "turn"`); в документе сессии итогов нет.
 - набор tools меняется посреди прогона: `kernel/plan/plan_mode.py:tools_for_phase` вызывается на
@@ -285,10 +287,15 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | merged (3 круга) |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | merged (2 круга) |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | merged (1 круг) |
-| T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
+| T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | merged `6694938` (1 круг) |
 | T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | merged `7a573a5` (2 круга) |
 | T13 | e3 | остальные фронтенды не ломаются, текстовый итог | по итогам аудита | T7 T8 | merged (1 круг) |
-| T14 | — | живая проверка (сам) | — | T5 T7 T8 T10 | todo |
+| T14 | — | живая проверка (сам) | — | T5 T7 T8 T10 | done (2 прогона, §9) |
+| T15 | — | `--provider`/env/пересборки не сохраняют основной провайдер (инцидент 3) | `kernel/config/user_config.py`, `kernel/main.py`, `kernel/protocol/event_stdio.py`, тесты | T9 | merged `e7d6f30` (2 круга) |
+
+Слитые коммиты: T2 `4e8ec9c`, T4 `7b2a63c`, T1 `a490abf`, T3 `21f6210`, T12 `7a573a5`, T5 `a564151`,
+T6 `5986b86`, T7 `2ea0a5d`, T10 `de412ba`, T13 `8d44eda`, T8 `846f6a3`, T9 `6cf27d1`, T15 `e7d6f30`,
+T11 `6694938`.
 
 Волны: 1 — T1 T2 T3 T4; 2 — T5 T6 T7 (+T12, как только слит T4); 3 — T8; 4 — T9 T10 T13;
 5 — T11; затем T14. Одновременно не больше 4 сабагентов; задачи с общим файлом идут друг за
@@ -645,6 +652,38 @@ ruff чисто.
 5186 passed / 51 skipped + 1 известный флейк (отдельно прошёл); `test_session_native` 46 passed;
 cargo test 25, clippy чисто. Принято.
 
+### T15 — переопределённый провайдер не становится основным (haiku, effort medium)
+
+**Круг 1** (`9823d19`): `ensure_provider_credentials(save_selection=False)`, `build_agent(persist_selection=True)`,
+классические пересборки текущего провайдера — `False`. Слабое место ведущего: stdio-путь (`launch`,
+`launch_multi`, `rebuild` в `event_stdio.py`) — именно тот, на котором случился инцидент, — не тронут
+→ **доработка**, файл разрешён.
+**Круг 2** (`71afc9d`): launch/launch_multi — `False`; `rebuild` по умолчанию `False`; `True` только у
+`/provider`, `/del-provider`, `/full-reset` (выбор человека в мастере) и `--session-op set-provider`;
+`AGENT_LLM_PROVIDER` без `--provider` не сохраняется. Тест `launch_multi` на настоящем `main.build_agent`.
+- Обман: нет. Процесс: отчёт сабагент слал повторно в цикле — остановлен ведущим после сдачи.
+- Слабые места (приняты): классический `/provider` и stdio `/provider` проверены флагом, не записью в конфиг;
+  путь выбора, забывший `True`, молча не сохранит (безопасная сторона); случай «env + /provider» без теста.
+- Слияние: experimental ушла вперёд коммитом владельца `487f22e` (тот же файл, другой участок) — rebase,
+  полный набор 5744 passed / 51 skipped, ruff чисто.
+
+### T11 — thinking с подписью (sonnet)
+
+**Круг 1** (`34f0ec4`, 15 файлов, +1597/−54). У ведущего в int: полный набор 5794 passed / 51 skipped;
+`test_session_native.py` 47 passed (не пропущен, крейт собран в int); cargo test 26, clippy чисто; ruff чисто.
+- Обман: нет; мутации сабагента (редакция блоков, сброс при смене tools/урезании) роняют тесты.
+- Процесс: одна строка импорта вставлена скриптом, не Edit (сообщил сам).
+- Решения: ключ `anthropic_thinking: {provider, model, blocks}`; один фильтр `request_messages` — блоки мимо
+  `redact_value` и только для `AnthropicCompatibleClient` той же пары; при `/resume` с другой парой разговор
+  строится заново; незавершённым вызовам — честное «результат не записан, могло сработать, проверь».
+- Слабые места (приняты, в финальный отчёт): (1) файл всего нативного разговора (до 8 МиБ, с
+  редактированными tool-выводами) остаётся в `.kvist/sessions` до удаления сессии или нового прогона;
+  (2) повтор с `auto` на принудительный `tool_choice` узнаётся по подстроке `tool_choice` в тексте 400 —
+  настоящего текста отказа в репозитории нет; (3) `getattr(stream, "get_final_message")` молча даёт «без
+  блоков» на фейках без метода; (4) редактор, сработавший на тексте мысли, роняет блоки этого и ранних ходов
+  при `/resume`; (5) fsync файла ~3 раза за шаг, не замерено; (6) вживую не проверено (anthropic запрещён).
+- Принято с первого круга.
+
 ## 7. Брифы
 
 Брифы целиком — `<repo>/.claude/bestof-briefs/{common,<id>}.md` (D-22); сабагент получает
@@ -653,10 +692,11 @@ cargo test 25, clippy чисто. Принято.
 
 ## 8. Следующий шаг
 
-Слиты: T2 `4e8ec9c`, T4 `7b2a63c`, T1 `a490abf`, T3 `21f6210`, T12 `7a573a5`, T5 `a564151`, T6 `5986b86`,
-T7 `2ea0a5d`, T10 `de412ba`. В работе: T8 (от `de412ba`) и T13 (от `2ea0a5d`). Дальше: ревью T8 и T13;
-после T8 — бриф T9 (готов в `.claude/bestof-briefs/t9.md`), затем T11; живая проверка T14 — сразу
-после слияния T8 (нужны только best-of и council), параллельно T9/T11.
+Все задачи слиты (список в §5), живая проверка сделана (§9). Осталось владельцу: ручные проверки §11,
+решение о слиянии `experimental` → `main`. Долги — в финальном отчёте сессии: выбывание вживую не
+наблюдалось; ошибка JSON-режима chatgpt показывается как `error` в council; `max_output` у claude 5 = null;
+путь чата пересобирает системный промпт на каждое сообщение; `blocks.test.mjs:204` (web-local) красный до
+этой работы; в Zed без форм диалог решения на 4 варианта не ответить; известный флейк `test_app_screen.py`.
 
 ## 9. Живые прогоны (лимит 10)
 
