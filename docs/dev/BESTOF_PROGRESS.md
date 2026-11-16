@@ -263,12 +263,12 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged `a564151` (2 круга) |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | merged (2 круга) |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | merged (2 круга) |
-| T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | todo |
+| T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | work (с `de412ba`) |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | merged (1 круг) |
 | T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
 | T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | merged `7a573a5` (2 круга) |
-| T13 | e3 | остальные фронтенды не ломаются, текстовый итог | по итогам аудита | T7 T8 | todo |
+| T13 | e3 | остальные фронтенды не ломаются, текстовый итог | по итогам аудита | T7 T8 | work (с `2ea0a5d`, параллельно T8) |
 | T14 | — | живая проверка (сам) | — | T5 T7 T8 T10 | todo |
 
 Волны: 1 — T1 T2 T3 T4; 2 — T5 T6 T7 (+T12, как только слит T4); 3 — T8; 4 — T9 T10 T13;
@@ -567,9 +567,10 @@ cargo test 25, clippy чисто. Принято.
 
 ## 8. Следующий шаг
 
-Волна 1 слита: T2 `4e8ec9c`, T4 `7b2a63c`, T1 `a490abf`, T3 `21f6210`. Волна 2 в работе: T5, T6, T7
-(worktree от `21f6210`) и T12 (от `7b2a63c`). Дальше: ревью по мере прихода; после T5+T6+T7 —
-бриф и старт T8 (T8 владеет и `agent_model._ROLE_PROMPT_FILES` — только регистрация роли judge).
+Слиты: T2 `4e8ec9c`, T4 `7b2a63c`, T1 `a490abf`, T3 `21f6210`, T12 `7a573a5`, T5 `a564151`, T6 `5986b86`,
+T7 `2ea0a5d`, T10 `de412ba`. В работе: T8 (от `de412ba`) и T13 (от `2ea0a5d`). Дальше: ревью T8 и T13;
+после T8 — бриф T9 (готов в `.claude/bestof-briefs/t9.md`), затем T11; живая проверка T14 — сразу
+после слияния T8 (нужны только best-of и council), параллельно T9/T11.
 
 ## 9. Живые прогоны (лимит 10)
 
