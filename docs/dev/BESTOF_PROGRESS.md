@@ -44,6 +44,12 @@ git -C <repo> merge --ff-only bo/int   # experimental уходит вперёд 
 ```
 `reset --hard`, `clean`, удаление веток/worktree — только для `bo/*` и их папок.
 
+**В `experimental` коммитит и владелец** (его собственная сессия Kvist в основном checkout, например
+`ca968db feat(dashboard)` в `cloud/frontend` 16.11). Поэтому перед `merge --ff-only` проверять
+`git merge-base --is-ancestor experimental bo/int`; если нет — `git -C $INT reset --hard experimental`,
+`git -C $INT cherry-pick <коммит задачи>`, полный прогон заново, потом перенос. Основной checkout
+не трогать ничем, кроме `merge --ff-only`.
+
 ## 1. Состояние
 
 - Отправная точка: `experimental` @ `eb0d067`, дерево чистое, worktree — только основной.
@@ -254,12 +260,12 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T2 | a3 | события и протокол | `kernel/protocol/frontend_protocol.py`, `kernel/protocol/event_stream_ui.py`, `kernel/protocol/ui.py`, `kernel/session/session_events.py`, `docs/UI_API.md`, `docs/UI_API.ru.md`, тесты этих модулей | — | merged (2 круга) |
 | T3 | a1 | сессии исполнителей, итоги за сессию | `kernel/session/agent_logging.py`, `kernel/session/session_store.py`, `kernel/session/session_usage.py` (новый), `kernel/agent/agent.py` (только конструктор), `kernel/agent/agent_model.py` (только `_emit_usage`), `kernel/session-rs/src/*`, тесты сессий | — | merged (2 круга) |
 | T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | merged (2 круга) |
-| T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged (2 круга) |
+| T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged `a564151` (2 круга) |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | work |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | work |
 | T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | todo |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
-| T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | todo |
+| T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | work |
 | T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
 | T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | merged `7a573a5` (2 круга) |
 | T13 | e3 | остальные фронтенды не ломаются, текстовый итог | по итогам аудита | T7 T8 | todo |
@@ -380,6 +386,43 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
 в фазе захвата, пока слой виден (диалоги, настройки и обзор сохраняют свой Esc) — паузы хода нет
 (проверено вручную посреди прогона на mock); фон слоя по правилу `.feed-wrap` с `--glass`. node 58/58.
 Осталось (принято): `:has()` в WebKitGTK окна Tauri не проверен — в ручные проверки.
+
+### T7 — council и команды-ходы
+**Круг 1** (коммит `9ebdf36`, 9 файлов, +1729/−16; 39 + 23 новых теста; полный набор зелёный).
+- Обман: нет; единственная правка существующего теста — `hello.commands` с новой командой.
+- Качество: `turns.py` (команда-ход: события, `turn_end`, `command_result`, журнал как у хода),
+  строгая проверка выбора (`chosen` — участник с карточкой, `dissent` — только другие), текст решения
+  копируется из карточки, промпты на принципах; `council` в `STDIO_ONLY_COMMANDS` (классика — T13).
+- Слабые места:
+  1. (ведущий) `council.py:169` сигнал «первый ответ» на возврате `create()` — у chatgpt и anthropic
+     потоковый ответ ленивый генератор, запрос уходит на первой итерации → сдвиг не греет кэш →
+     **доработка**: событие на первом полученном куске + тест.
+  2. (ведущий) промпты константами в коде (из-за `test_pyproject_modules`) → **доработка**: в
+     `kernel/prompts/bestof/*.txt`, разрешена правка `pyproject.toml` под новый каталог.
+  3. (ведущий) заголовок «Совет» → **доработка**: имя режима «council» на обоих языках (ТЗ).
+  4. `turns.py:69-104` копия кухни `LocalAgent.run` → **отклонено**: журнал и история под тестами; общий
+     метод потребовал бы правки ядра хода для всех прогонов.
+  5. остальные (приватный `_HelperUI`, гонка cancel, повтор как новый run, смысл reason, маркеры
+     классификатора в тестах) → **отклонено**; фронтенды — T13.
+
+### T6 — исполнители
+**Круг 1** (коммит `7a02dc0`, 4 новых файла; 48 тестов модуля; полный набор зелёный).
+- Обман: нет. Вне разрешённых файлов ничего нет.
+- Блокер, найденный сабагентом: `terminal_validation._check_resolved_sensitive_path` ищет `.kvist` в
+  **абсолютном** пути → любой `run_shell` в worktree (`.kvist/bestof/...`) отклоняется (моё допущение в
+  разведке, что проверка относительная, было верно только для файловых действий — ошибка ведущего).
+  Сабагент правильно остановился. **Решение ведущего**: разрешена правка `terminal_validation.py` и
+  параметра конструктора `SafeExecutor` — явный флаг `internal_workspace`, который ставит только
+  `ExecutorPool`; при флаге `.kvist` сверяется относительно workspace (свой `.kvist` worktree закрыт),
+  без флага — как было. Обычные прогоны не меняются.
+- Решения сабагента приняты: `finished` по `run_status == "completed"` (у помощников мёртвая попытка
+  выглядела бы законченной), свой scratchpad, без `read_roots`, `routed_role="coder"`, заголовок
+  сессии вручную, перезапись в worktree — `write_approval_enabled = False` на своём `SafeExecutor`.
+- Слабые места: 1 → **доработка** (флаг + 5 тестов, включая настоящую песочницу); 8 (нет теста с
+  настоящим `EventStreamUI`) → **доработка**; 2, 3, 4, 5, 6, 7 → **отклонено** (снимок diff по итогу
+  достаточен; мусор проверки — редкий путь restart; гонка отмены ограничена 15 с; дублирование и
+  приватный импорт допустимы; в подпапке git и так закрыт по D-23). Риск «moderate» для
+  `python3/pytest` — оставить fail-closed: без bwrap авто-одобрение запускало бы код вне worktree.
 
 ### T5 — префикс кэша, стиль в конце, постоянные tools
 **Круг 1** (коммит `315297f`, 10 файлов, +491/−41; полный набор 5247 passed / 80 skipped, ruff чисто).
