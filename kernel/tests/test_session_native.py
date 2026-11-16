@@ -338,6 +338,7 @@ def test_a_workspace_with_every_kind_of_session_is_read_identically(tmp_path, bi
 
 def test_a_workspace_with_every_kind_of_session_is_changed_identically(tmp_path, binary):
     def script(workspace: Path, op: SessionOp) -> list:
+        op = _in_a_new_second(op)
         return [
             op(workspace, "switch", "damaged"),
             op(workspace, "switch", "interrupted"),

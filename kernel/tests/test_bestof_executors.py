@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import subprocess
 import threading
 import time
 from itertools import groupby
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -805,6 +807,14 @@ def test_executor_ids_are_e1_to_en():
 
 # --- the real sandbox in a worktree under .kvist ------------------------------
 
+# The sandbox allows a different read-only set on each platform, and a command
+# outside its allowlist never runs: cat, grep and pwd do not exist on Windows,
+# where the allowlist offers type, findstr and cd instead.
+READ = ("type",) if os.name == "nt" else ("cat",)
+MISSING = ("findstr", "hello") if os.name == "nt" else ("grep", "hello")
+WHERE = ("cd",) if os.name == "nt" else ("pwd",)
+PYTHON = "python" if os.name == "nt" else "python3"
+
 
 def _shell(sandbox, command, **args):
     return sandbox.execute(AgentCommand("verify", Action("run_shell", {"command": command, **args})))
@@ -833,12 +843,12 @@ def test_an_ordinary_workspace_inside_a_kvist_folder_still_refuses_every_shell_c
 def test_with_the_flag_a_command_in_a_workspace_under_kvist_runs(kvist_folder):
     sandbox = SafeExecutor(kvist_folder, approvals=DenyApprovalGate(), workspace_inside_kvist=True)
 
-    result = _shell(sandbox, ["cat", "a.txt"])
+    result = _shell(sandbox, [*READ, "a.txt"])
 
     assert result.ok and result.data["returncode"] == 0 and result.data["stdout"].strip() == "hello"
     # A line that names the workspace's own absolute path (a test run's traceback) is not dropped as "internal".
-    where = _shell(sandbox, ["pwd"])
-    assert where.data["stdout"].strip() == kvist_folder.as_posix()
+    where = _shell(sandbox, [*WHERE])
+    assert Path(where.data["stdout"].strip()) == kvist_folder
 
 
 @pytest.mark.parametrize("attempt", [
@@ -884,8 +894,8 @@ def test_check_goes_through_the_real_sandbox_and_reports_passed_and_failed(agent
     pool.start()
     assert pool.wait(15)["done"]
 
-    passed = pool.check("e1", ["cat", "a.txt"])
-    failed = pool.check("e1", ["cat", "missing.txt"])
+    passed = pool.check("e1", [*READ, "a.txt"])
+    failed = pool.check("e1", [*MISSING, "missing.txt"])
 
     assert passed == {"state": "passed", "summary": "hello"}
     assert failed["state"] == "failed" and "missing.txt" in failed["summary"]
@@ -897,7 +907,7 @@ def test_check_goes_through_the_real_sandbox_and_reports_passed_and_failed(agent
 def test_set_check_runs_the_real_command_when_each_executor_ends(agent_factory, repo):
     main, _ = _main(agent_factory, StyledClient())
     pool = _pool(main, repo)
-    pool.set_check(["cat", "a.txt"])
+    pool.set_check([*READ, "a.txt"])
 
     pool.start()
     assert pool.wait(15)["done"]
@@ -914,17 +924,17 @@ def test_a_command_that_needs_approval_goes_to_the_main_gate_and_without_one_the
     pool.start()
     assert pool.wait(15)["done"]
 
-    ran = pool.check("e1", ["python3", "-c", "import sys; sys.exit(3)"])
+    ran = pool.check("e1", [PYTHON, "-c", "import sys; sys.exit(3)"])
 
     assert ran["state"] == "failed"
-    assert [command[0] for command in gate.commands] == ["python3"]
+    assert [command[0] for command in gate.commands] == [PYTHON]
 
     other, _ = _main(agent_factory, StyledClient())
     other.executor._approvals = SimpleNamespace()  # cannot be answered from another thread
     second = ExecutorPool(other, worktrees.create_run(repo, "run2", executor_ids(2)), "task", styles_for(2))
     second.start()
     assert second.wait(15)["done"]
-    refused = second.check("e1", ["python3", "-c", "import sys; sys.exit(0)"])
+    refused = second.check("e1", [PYTHON, "-c", "import sys; sys.exit(0)"])
     assert refused["state"] == "unknown" and "approval" in refused["summary"]
 
 
@@ -952,7 +962,7 @@ def test_the_executors_events_have_the_shape_the_contract_gives_through_a_real_e
     channel = FrontendChannel()
     object.__setattr__(main._ui, "_ui", EventStreamUI(channel))
     pool = _pool(main, repo)
-    pool.set_check(["cat", "a.txt"])
+    pool.set_check([*READ, "a.txt"])
 
     pool.start()
     assert pool.wait(15)["done"]
