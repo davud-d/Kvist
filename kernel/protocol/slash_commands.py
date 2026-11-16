@@ -109,6 +109,8 @@ STDIO_ONLY_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("machines", "Saved machines: add one, choose where to work, open a session on another"),
     SlashCommand("remote", "Work on a server over ssh: /remote user@host /folder, or /remote off"),
     SlashCommand("council", "Ask four read-only members an architecture question: /council <question>"),
+    SlashCommand("best-of", "Run 2-6 executors on one task and take the best result: /best-of [N] <task>; "
+                            "/best-of status | diff [id] | accept [id] | discard for a run left waiting"),
 )
 
 

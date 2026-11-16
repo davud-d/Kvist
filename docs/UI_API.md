@@ -174,7 +174,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level) and `commands` (the names `command` accepts, `resume` and `council` included) are sent by `--frontend stdio-multi`. |
+| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level) and `commands` (the names `command` accepts, `resume`, `council` and `best-of` included) are sent by `--frontend stdio-multi`. |
 | `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object[], themes:object` | UI-facing metadata catalog built by `core_manifest.build_manifest`; sent once after `hello` (by `--frontend stdio` and `--frontend stdio-multi`) so frontends can populate pickers dynamically without hardcoding. `styles` lists the picks (`{value, description}`); each pick also sets the chat voice, which the core derives and the manifest does not carry. `slash_commands` is the list a frontend should offer after `/`: `via: "core"` marks a command this core carries out (send a `command` message and draw its dialogs), and an entry without `via` exists only in the Classic Legacy terminal and is not to be offered. |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress; during a call `user_message` is the call's label built by the core ("reads src/x.py") |
@@ -279,11 +279,14 @@ Inbound request / response:
 | `current_value:str` | current/default value (empty for `secret`) |
 | `help_text:str` | optional hint |
 | `timeout_seconds:number` | optional (auto mode): unanswered after this long counts as "no" |
-| `purpose:str` | optional, sent only when non-empty: what the answer decides. `"bestof_decision"` is the person's choice of the result of a best-of run (`run_id` names the run). A frontend may give such a dialog its own view; one that does not know the value shows it as the ordinary `choice` it is |
+| `purpose:str` | optional, sent only when non-empty: what the answer decides. `"bestof_decision"` is the person's choice of the result of a best-of run (`run_id` names the run); its answers are `accept`, `diff`, `other`, `discard`, `diff:<executor_id>` and `pick:<executor_id>` (§8c, `best-of`), and a closed dialog postpones the run. A frontend may give such a dialog its own view; one that does not know the value shows it as the ordinary `choice` it is |
 | `run_id:str` | optional, sent only when non-empty: the best-of run the dialog belongs to (`bestof_started.run_id`) |
 
 When the core gives up waiting it emits `{"type": "input_closed", "request_id", "reason": "timeout"}`:
-drop that dialog. A reply that arrives later is ignored.
+drop that dialog. A reply that arrives later is ignored. `reason` is `"timeout"` when no answer came in time, and
+`"cancelled"` when the person stopped (`cancel`) or paused the turn while a best-of decision dialog
+(`purpose: "bestof_decision"`) was open: the run waits as `pending` and the question must leave the screen. No other
+dialog is closed by a stop. A frontend treats any `reason` the same way: drop the dialog.
 
 **Your reply is one JSON object:**
 
@@ -777,6 +780,91 @@ decision (one round), and one decision is chosen. The stream is a turn's, with t
   `ok:false` and no turn: no events, no `turn_end`.
 - `ok:false` also when fewer than two members handed in a usable card, when no valid choice came out after two tries, or when the model
   did not answer; `final` then says so and shows the cards and objections that exist.
+- As for any command, a `command` sent while a turn runs is refused at once; a goal line is queued as a goal is.
+
+**Commands that are turns: `best-of`.** `{"type":"command","name":"best-of","args":[…words]}` (the words are joined
+with spaces) or a goal line that starts with `/best-of ` (a plain line, or the text of a `{"type":"goal"}`
+message) runs the best-of mode of §7: `/best-of [N] <task>`. `N` is an optional first word, a number from 2 to 6
+(default 4): that many executors work on the task, each in its own git worktree with its own working style
+(`senior-dev`, `minimalist`, `paranoid`, `fast-and-dirty`, `perfectionist`, `architect`; a run takes the first
+`N`), the main agent reviews what they leave (internally in a reviewer role that no event or text names), and the
+person decides what to do with the result. The stream is a turn's, with the `command_result` of a command after it:
+
+```
+>>> {"type": "bestof_started", "run_id": "3fa9c1d2", "task": "…", "count": 2, "base": "9be41f07aa", "executors": [{"executor_id": "e1", "style": "senior-dev", "branch": "kvist/bestof/3fa9c1d2/e1", "session": "bo-3fa9c1d2-e1"}, …]}
+>>> {"type": "bestof_status", …}  /  {"type": "executor_activity", …}   (live only, many)
+>>> {"type": "bestof_eliminated", "run_id": "3fa9c1d2", "executor_id": "e2", "reason": "…"}      (when the review drops one)
+>>> {"type": "bestof_verdict", "run_id": "3fa9c1d2", "rows": […], "winner": "e1", "reason": "…"}
+>>> {"type": "input_request", "request_id": "…", "kind": "choice", "purpose": "bestof_decision", "run_id": "3fa9c1d2", "title": "…", "body": "<verdict table>", "options": [{"value": "accept", …}, {"value": "diff", …}, {"value": "other", …}, {"value": "discard", …}]}
+<<< {"request_id": "…", "value": "accept"}
+>>> {"type": "bestof_finished", "run_id": "3fa9c1d2", "outcome": "accepted", "message": "…", "executor_id": "e1", "commit": "…"}
+>>> {"type": "final", "message": "## best-of …", "outcome": "done", …}
+>>> {"type": "turn_end"}
+>>> {"type": "command_result", "name": "best-of", "ok": true, "message": "best-of: accepted e1, commit 7c1d… / best-of: принят e1, коммит 7c1d…", "effects": {"run_id": "3fa9c1d2", "outcome": "accepted", "executor_id": "e1", "commit": "…"}}
+```
+
+- **The review.** The steps of the review (`step`, `action_result`) stream like any turn's; the review never sends
+  its own `final`, and no `route` event: the only `final` is the turn's, after the decision. The core checks the
+  verdict against what the executors really left, so `style`, `tests` and `diff` of every `bestof_verdict` row are
+  the core's facts, and only `outcome` and `note` are the reviewer's words. The winner is always an executor that
+  finished and changed something. The order of the review is fixed: cheating first (deleted or skipped tests,
+  weakened asserts, stubs, edits unrelated to the task), then the project's tests, then quality of the
+  finalists' full diffs.
+- **The decision dialog** is an `input_request` of `kind: "choice"` with `purpose: "bestof_decision"` and the run's
+  `run_id`. The `body` of the first one is the verdict as Markdown (a table of style, outcome, tests, diff and note
+  per executor, the winner and the reason); the labels are in the language of the request. The values of the
+  answer and what each does:
+
+  | `value` | what the core does |
+  |---|---|
+  | `accept` | takes the winner: the winner's change becomes **one** commit on the person's current branch (the commit message is the first line of the task, then the winner's style and the reason); the person's other uncommitted changes stay uncommitted; the executors' worktrees and branches are removed; `bestof_finished` `accepted` with `executor_id` and `commit` |
+  | `diff`, `diff:<executor_id>` | sends `bestof_diff` (the winner's patch, or the named executor's) and asks the **same question again**, whose `body` is now the patch (cut at 20 000 characters); a plain `diff` means the winner |
+  | `other` | a second dialog, again `bestof_decision`, over the other finalists (`pick:<executor_id>` per finalist, and `back`); a pick is taken as `accept` is; `back` (or no other finalist) returns to the first question |
+  | `pick:<executor_id>` | takes that finalist at once (a frontend that lists the finalists itself may answer this to the first dialog); an id that is not a finalist returns to the question with a note |
+  | `discard` | removes the executors' worktrees, branches and the run's folder; the person's files and branch are not touched; `bestof_finished` `discarded` |
+  | `null` (the dialog was closed, or there is nobody to ask) | the run is **postponed**: `bestof_finished` `pending`, and the `final` says how to decide later |
+
+  A frontend that does not know the dialog shows it as the ordinary `choice` it is (§7). A UI of the core that
+  has no `ask_decision` is asked with `ask_choice` over the same options.
+- **A conflict** stops the accept: the winner changed a path the person changed after the run started, or its patch
+  does not lay on the person's current commit. Nothing is changed; `bestof_finished` is `pending`, and `final` names
+  the paths and quotes git's own text, and says what to do (commit or stash the changes in those places, then
+  `/best-of accept <id>`). `command_result` is `ok:false`.
+- **`message` of `bestof_finished` and the whole `final`** are in the language of the request (not `English / Русский`):
+  the `final` always carries the verdict table and the outcome, so a frontend without a best-of screen shows that
+  text and nothing else. `command_result.message` is `English / Русский` like every command's.
+- **A run left waiting** (`pending`, `cancelled`, or `interrupted` when the process that owned it died) is
+  managed by the same command word; each of these is a turn too, with its events journaled: `/best-of status`
+  (the state, the task, what each executor left, the verdict: no events), `/best-of diff [id]` (a `bestof_diff` event
+  and the patch in `final`; no id means the winner), `/best-of accept [id]` (as `accept` above; no id means the
+  winner, and without a chosen winner the answer is `ok:false` asking for an id), `/best-of discard`. They act on the
+  newest such run of the workspace's repository; with none, `command_result` is `ok:false` and says so. An id that
+  the run does not have is an `ok:false` answer that changes nothing. A run's task and verdict are kept in
+  `.kvist/bestof/<run_id>/decision.json` for this.
+- **Refusals.** Without a task, or with only `N`, or with `N` outside 2 to 6, the answer is `command_result`
+  `ok:false` (the usage or the range, in both languages) and **no turn**: no events, no `turn_end`. Where best-of
+  cannot start (not a git repository, no commit yet, a detached HEAD, a merge or rebase in progress, git missing)
+  the turn ends at once with that reason as `final`, `command_result` `ok:false`, and nothing is created.
+- **Management words versus a task.** A request that is exactly `status` or `discard`, or `diff` or `accept` with
+  at most one more word (an id), is read as the management command above, not as a task. A task that really begins
+  with one of these words is therefore written another way: put the executor count first (`/best-of 4 diff the two
+  parsers`), or begin with another word (`/best-of compare the two parsers by diff`).
+- **A stop while the decision dialog is open** (or just before an accept) closes the question and leaves the run
+  `pending` like a closed dialog: `bestof_finished` `pending`, `final.outcome` `incomplete`, `command_result`
+  `ok:false` with `effects.stopped: true` and `effects.outcome: "pending"`; nothing is committed. The open dialog is
+  closed with `input_closed` (`reason: "cancelled"`, same `request_id`), for the second dialog too, and a late answer
+  to it is ignored. A stop that comes
+  after the commit does not undo it.
+- **`cancel` or a pause** during the run stops every executor (`bestof_status` `stopped`), marks the run
+  `cancelled`, sends `bestof_finished` `cancelled`, and the turn ends with `final.outcome` `incomplete` and
+  `command_result` `ok:false` with `effects.stopped: true`. What the executors did stays: `/best-of diff e1`
+  shows it and `/best-of discard` removes it. A review that ends without a verdict (it found nobody who qualifies)
+  leaves the run `pending` with `bestof_finished` `pending`, `ok:false`, and the executors' results in the `final`.
+- The turn is journaled like any turn: `user` with the typed text (`/best-of …`), `bestof_started`, the review's
+  steps, `bestof_eliminated`, `bestof_verdict`, `bestof_finished`, `final`, `turn_end`; `bestof_status`,
+  `executor_activity` and `bestof_diff` are live only. The executors' own work is in their child sessions
+  (`service.kind: "executor"`, §8a). The review is not a message of the session: it leaves no entry in the
+  session's history and no checkpoint, only the turn does.
 - As for any command, a `command` sent while a turn runs is refused at once; a goal line is queued as a goal is.
 
 A `session` or `new` command that changed the active session also emits a

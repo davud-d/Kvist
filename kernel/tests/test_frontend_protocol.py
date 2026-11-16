@@ -365,3 +365,63 @@ def test_v2_call_fields_are_additive():
 
     assert FinalEvent("ok", []).to_dict()["outcome"] == "done"
     assert FinalEvent("not yet", [], "incomplete").to_dict()["outcome"] == "incomplete"
+
+
+# --- closing a request by purpose (a stop during the best-of decision dialog) ---------------------------
+
+
+def _ask_in_a_thread(channel, purpose):
+    answers = []
+
+    def ask():
+        answers.append(channel.request("choice", "Decide", purpose=purpose, run_id="r1" if purpose else ""))
+
+    thread = threading.Thread(target=ask, daemon=True)
+    thread.start()
+    event = channel.get(timeout=2)
+    assert isinstance(event, InputRequestEvent)
+    return thread, answers, event
+
+
+def test_close_requests_tells_the_frontend_wakes_the_waiter_and_ignores_a_late_answer():
+    from kernel.protocol.frontend_protocol import InputClosedEvent
+
+    channel = FrontendChannel()
+    thread, answers, request = _ask_in_a_thread(channel, "bestof_decision")
+
+    closed = channel.close_requests("cancelled", purpose="bestof_decision")
+    thread.join(2)
+
+    assert closed == [request.request_id] and not thread.is_alive()
+    event = channel.get(timeout=1)
+    assert isinstance(event, InputClosedEvent)
+    assert event.to_dict() == {"type": "input_closed", "request_id": request.request_id, "reason": "cancelled"}
+    assert answers[0].value is None and answers[0].approved is None and not answers[0].timed_out
+    channel.respond(request.request_id, value="accept")  # late: ignored, no error
+    assert channel.open_request_ids() == []
+
+
+def test_close_requests_leaves_requests_of_other_purposes_open_and_closes_each_request_once():
+    channel = FrontendChannel()
+    decision_thread, _, decision = _ask_in_a_thread(channel, "bestof_decision")
+    other_thread, other_answers, other = _ask_in_a_thread(channel, "")
+
+    assert channel.close_requests("cancelled", purpose="bestof_decision") == [decision.request_id]
+    assert channel.close_requests("cancelled", purpose="bestof_decision") == []
+    decision_thread.join(2)
+
+    assert other_thread.is_alive() and channel.open_request_ids() == [other.request_id]
+    channel.respond(other.request_id, value="yes")
+    other_thread.join(2)
+    assert other_answers[0].value == "yes"
+
+
+def test_the_first_answer_to_a_request_is_the_one_that_counts():
+    channel = FrontendChannel()
+    thread, answers, request = _ask_in_a_thread(channel, "")
+
+    channel.respond(request.request_id, value="first")
+    channel.respond(request.request_id, value="second")
+    thread.join(2)
+
+    assert answers[0].value == "first"

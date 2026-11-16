@@ -40,6 +40,9 @@ ActionType = Literal[
     "wait",
     "schedule",
     "feedback",
+    # Offered only to the reviewer role of a best-of run (kernel/bestof/judge.py).
+    "executor",
+    "verdict",
     # Internal: what a call of an attached skill's tool (<skill>__<tool>)
     # becomes after validation. The model never names it.
     "skill_call",

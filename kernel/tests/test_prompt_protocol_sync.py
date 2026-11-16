@@ -23,6 +23,10 @@ _LEGACY_FINISHES = {"report_to_user"}
 # Added to the prompt at run time, and only by an interactive frontend
 # (end_session.with_tool_in_prompt); the static prompt files never list it.
 _CONDITIONAL = {"end_session", "generate_image"}
+# Offered by the reviewer's role prompt of a best-of run only (judge_prompt.txt), never by the roles above.
+_REVIEW_ACTIONS = {"executor", "verdict"}
+_REVIEWER_ACTIONS = {"final_answer", "read_file", "read_multiple_files", "list_dir", "list_tree", "find_files",
+                     "search_code", "git_status", "git_diff", "executor", "verdict"}
 
 
 @pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
@@ -49,7 +53,7 @@ def test_prompt_action_list_matches_parser(role):
     """The allowed-actions list in role prompts must mirror parser.ALLOWED_ACTIONS."""
     prompt_text = _load_role_prompt(role)
     prompt_actions = _extract_allowed_actions_block(prompt_text)
-    offered = ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL
+    offered = ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL - _REVIEW_ACTIONS
     assert prompt_actions == offered, (
         f"{role} prompt action list is out of sync with parser.ALLOWED_ACTIONS. "
         f"Missing in prompt: {sorted(offered - prompt_actions)}. "
@@ -57,12 +61,12 @@ def test_prompt_action_list_matches_parser(role):
     )
 
 
-@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal", "judge"])
 def test_prompt_says_a_response_without_calls_ends_the_turn(role):
     assert "A response with no tool call ends your turn" in _load_role_prompt(role)
 
 
-@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal", "judge"])
 def test_prompt_no_longer_asks_for_thought_or_user_message(role):
     prompt_text = _load_role_prompt(role)
     for gone in ('"thought"', "user_message", "140 chars", "step_summary", "plan_step"):
@@ -80,7 +84,7 @@ def test_prompt_tool_call_examples_pass_the_parser(role):
         assert command.action.type in ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL
 
 
-@pytest.mark.parametrize("role", ["coder", "devops", "universal"])
+@pytest.mark.parametrize("role", ["coder", "devops", "universal", "judge"])
 def test_prompt_marks_web_content_untrusted(role):
     """Role prompts must teach that web content is data, not instructions."""
     prompt_text = _load_role_prompt(role)
@@ -133,3 +137,40 @@ def test_both_transports_describe_model_owned_completion(role):
         assert "runtime never records a fix task with no edits as done" not in prompt
         assert "final_answer" in _extract_allowed_actions_block(prompt)
         assert "no_change_needed" in prompt
+
+
+def test_the_reviewer_prompt_offers_the_reads_and_the_two_review_actions_and_nothing_that_writes():
+    prompt = _load_role_prompt("judge")
+
+    assert _extract_allowed_actions_block(prompt) == _REVIEWER_ACTIONS
+    assert _REVIEWER_ACTIONS <= ALLOWED_ACTIONS
+    assert not _REVIEWER_ACTIONS & {"write_file", "append_file", "replace_in_file", "run_shell", "delegate_task"}
+
+
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
+def test_no_other_role_prompt_offers_the_review_actions(role):
+    prompt = _load_role_prompt(role)
+
+    assert not _REVIEW_ACTIONS & _extract_allowed_actions_block(prompt)
+    assert not any(f"{action}:" in prompt for action in _REVIEW_ACTIONS)
+
+
+def test_every_example_of_the_reviewer_prompt_passes_the_parser_with_the_actions_it_offers():
+    examples = _example_calls(_load_role_prompt("judge"))
+    assert examples
+
+    seen = set()
+    for example in examples:
+        (command,) = commands_from_response(example)
+        assert command.action.type in _REVIEWER_ACTIONS
+        seen.add(command.action.type)
+    assert {"executor", "verdict", "read_file"} <= seen
+
+
+def test_the_native_reviewer_prompt_keeps_its_action_list_and_drops_the_text_protocol():
+    from kernel.agent.agent_model import _load_native_channel_section
+
+    native = native_role_prompt(_load_role_prompt("judge"), _load_native_channel_section())
+
+    assert _extract_allowed_actions_block(native) == _REVIEWER_ACTIONS
+    assert "<tool_call>" not in native and "== 4. ARGS SCHEMAS ==" not in native

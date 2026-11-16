@@ -96,6 +96,7 @@ from kernel.agent.role_router import has_change_verb, has_deferred_write_marker,
 from kernel.agent.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 from kernel.agent.background_jobs import UiJobListener
 from kernel.agent.agent_tools import AGENT_TOOL_ACTIONS, memory_prompt_section, run_agent_tool
+from kernel.bestof.judge import JUDGE_ACTIONS, JUDGE_ROLE, run_judge_action
 from kernel.plugins.resources import CleanupReport, Owner, StopOutcome
 from kernel.agent.task_control import PAUSED
 from kernel.session.agent_logging import mark_checkpoint_paused
@@ -106,6 +107,8 @@ _READ_ONLY_ACTIONS = {
 }
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file", "generate_image"}
+# The roles that look and never change: the reviewer of a best-of run reads the executors' work, it does not redo it.
+_READ_ONLY_ROLES = frozenset({"reader", JUDGE_ROLE})
 # The agent's own tools never change the workspace, except a skill tool not
 # declared read-only (checked per call).
 _AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "feedback"}
@@ -456,7 +459,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     # blocking its writes left it with nothing it was allowed to do. Clearing
     # create/modify avoids the runtime demanding a write it will then refuse.
     read_only_goal = (
-        self._state.current_agent_role == "reader"
+        self._state.current_agent_role in _READ_ONLY_ROLES
         or has_no_write_marker(user_goal)
         or self.force_read_only
     )
@@ -464,7 +467,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         if has_no_write_marker(update):
             read_only_goal = True
         elif (
-            self._state.current_agent_role != "reader"
+            self._state.current_agent_role not in _READ_ONLY_ROLES
             and not self.force_read_only
             and (_is_modify_goal(update) or _is_create_goal(update))
         ):
@@ -1413,9 +1416,24 @@ def _run_one_action(
 
     if command.action.type == "report_to_user":
         return _finish_with_report(self, user_goal, step, command)
+    if command.action.type == "verdict":
+        return _finish_with_verdict(self, user_goal, step, command)
     if command.action.type in plan_mode.PLAN_ACTIONS:
         return _run_plan_action(self, step, command)
     return _execute_action(self, user_goal, step, command)
+
+
+def _finish_with_verdict(self, user_goal: str, step: int, command: AgentCommand) -> _ActionOutcome:
+    """An accepted verdict ends the review; a refused one comes back as the call's error and the reviewer repeats it.
+
+    ``report_rendered`` keeps the loop from printing a final answer: the verdict is shown by the best-of turn
+    itself, with the person's decision after it.
+    """
+    outcome = _execute_action(self, user_goal, step, command)
+    if not outcome.proceed:
+        return outcome
+    self._register_final_answer(step, str(command.action.args["reason"]))
+    return _ActionOutcome(finished=True, final_message=str(command.action.args["reason"]), report_rendered=True)
 
 
 def _run_end_session(self, step: int, command: AgentCommand) -> _ActionOutcome:
@@ -1693,6 +1711,8 @@ def reset_run_state(self) -> None:
 
 
 def execute_command(self, command: AgentCommand) -> dict[str, Any]:
+    if command.action.type in JUDGE_ACTIONS:
+        return redact_value(run_judge_action(self, command))
     if command.action.type in AGENT_TOOL_ACTIONS:
         return redact_value(run_agent_tool(self, command))
     try:
@@ -2472,7 +2492,7 @@ def _is_read_only_violation(self, command: AgentCommand) -> bool:
         read_only_phase = (
             self._state.plan_phase == PLAN_PLANNING
             or self._state.read_only_goal
-            or self._state.current_agent_role == "reader"
+            or self._state.current_agent_role in _READ_ONLY_ROLES
         )
         return read_only_phase and not _skill_call_readonly(self, command)
     if self._state.plan_phase == PLAN_PLANNING:

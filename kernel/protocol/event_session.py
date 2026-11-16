@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from kernel.sandbox.approvals import ApprovalTimedOut, FetchDecision, start_approval_reminder
-from kernel.protocol.frontend_protocol import ErrorEvent, FrontendChannel, InputResponse
+from kernel.protocol.frontend_protocol import PURPOSE_BESTOF_DECISION, ErrorEvent, FrontendChannel, InputResponse
 
 
 def _raise_if_timed_out(response: InputResponse) -> None:
@@ -252,13 +252,21 @@ class EventSession:
     def cancel(self) -> None:
         """"Stop all": the active run, its helpers, calls and processes — or a paused task's leftovers.
 
-        Delegates straight to the agent's transport-agnostic ``request_cancel``.
+        Delegates to the agent's transport-agnostic ``request_cancel``, then closes the best-of decision dialog if
+        one is open: its turn ends on the stop and the run waits, so the question must leave the screen.
         """
         self._agent.request_cancel()
+        self._close_decision_dialog()
 
     def pause(self) -> None:
         """Pause the active run and its helpers at their next safe point; nothing is lost."""
         self._agent.request_pause()
+        self._close_decision_dialog()
+
+    def _close_decision_dialog(self) -> None:
+        # Only a stop that reached a turn closes it; the flag is what the best-of turn reads to end on the stop.
+        if self._agent.control.interrupted():
+            self._channel.close_requests("cancelled", purpose=PURPOSE_BESTOF_DECISION)
 
     def stop_helper(self, agent_id: str) -> None:
         """The person stopped one helper; a failure (unknown id) is reported as an error event."""

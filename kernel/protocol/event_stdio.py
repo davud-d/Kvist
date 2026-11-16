@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from kernel.bestof.turns import TURN_COMMANDS, TurnResult, parse_turn_goal, run_turn
+from kernel.bestof.turns import TURN_COMMANDS, TurnResult, parse_turn_goal, run_turn, turn_refusal
 from kernel.session.durable_json import JsonStorageError
 from kernel.protocol.event_session import EventApprovalGate, EventSession
 from kernel.protocol.event_stream_ui import EventStreamUI
@@ -366,10 +366,6 @@ def _refuse(
             goal_queue.put(event)
 
 
-def _needs_question(name: str) -> CommandResultEvent:
-    return _rejected(name, f"Usage: /{name} <question> / Использование: /{name} <вопрос>")
-
-
 def _queue_turn_goal(
     session: EventSession,
     turn: tuple[str, str],
@@ -378,8 +374,9 @@ def _queue_turn_goal(
 ) -> None:
     """A goal line that is a turn command (``/council …``): queued like a goal, run like the command."""
     name, question = turn
-    if not question:
-        _refuse(session, goal_queue, gate, _needs_question(name))
+    refusal = turn_refusal(name, question)
+    if refusal is not None:
+        _refuse(session, goal_queue, gate, _rejected(name, refusal))
         return
     with gate.lock:
         gate.busy = True
@@ -406,8 +403,9 @@ def _queue_command(
             _rejected(name, "Command args must be a list of strings."),
         )
         return
-    if name in TURN_COMMANDS and not " ".join(args).strip():
-        _refuse(session, goal_queue, gate, _needs_question(name))
+    refusal = turn_refusal(name, " ".join(args).strip()) if name in TURN_COMMANDS else None
+    if refusal is not None:
+        _refuse(session, goal_queue, gate, _rejected(name, refusal))
         return
     with gate.lock:
         if gate.busy:

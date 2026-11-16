@@ -1157,7 +1157,7 @@ class InputClosedEvent:
     """An input request the core stopped waiting for; the frontend drops its dialog."""
 
     request_id: str
-    reason: str  # "timeout"
+    reason: str  # "timeout", or "cancelled" when the person stopped the turn the request belonged to
     type: ClassVar[str] = "input_closed"
 
     def to_dict(self) -> dict:
@@ -1215,6 +1215,11 @@ def is_helper_stop_message(d: dict) -> bool:
 class _Waiter:
     event: threading.Event
     response: InputResponse | None = None
+    purpose: str = ""
+
+
+# The best-of decision dialog (``input_request.purpose``): the one dialog a Stop closes instead of leaving open.
+PURPOSE_BESTOF_DECISION = "bestof_decision"
 
 
 class FrontendChannel:
@@ -1269,7 +1274,7 @@ class FrontendChannel:
         run_id: str = "",
     ) -> InputResponse:
         request_id = uuid.uuid4().hex
-        waiter = _Waiter(event=threading.Event())
+        waiter = _Waiter(event=threading.Event(), purpose=purpose)
         with self._lock:
             if self._closed:
                 return InputResponse(request_id, value=None, approved=None)
@@ -1318,12 +1323,30 @@ class FrontendChannel:
     ) -> None:
         with self._lock:
             waiter = self._waiters.get(request_id)
-            if waiter is None:
+            # A request already answered or closed (``close_requests``) takes no second answer.
+            if waiter is None or waiter.response is not None:
                 return
             waiter.response = InputResponse(
                 request_id, value=value, approved=approved, remember=remember
             )
             waiter.event.set()
+
+    def close_requests(self, reason: str, *, purpose: str) -> list[str]:
+        """Stop waiting for the open requests of ``purpose``: tell the frontend (``input_closed``) and wake the waiters.
+
+        The waiting call returns an empty answer (no value, not approved), as for a request the frontend closed;
+        an answer that arrives later is ignored. Returns the ids closed.
+        """
+        with self._lock:
+            closing = [(request_id, waiter) for request_id, waiter in self._waiters.items()
+                       if waiter.purpose == purpose and waiter.response is None]
+            for request_id, waiter in closing:
+                waiter.response = InputResponse(request_id, value=None, approved=None)
+        for request_id, waiter in closing:
+            # The event first: whatever the woken thread emits next must come after it.
+            self.emit(InputClosedEvent(request_id, reason))
+            waiter.event.set()
+        return [request_id for request_id, _waiter in closing]
 
     def open_request_ids(self) -> list[str]:
         """Requests still waiting for an answer; a reattaching frontend shows only these."""

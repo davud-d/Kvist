@@ -61,6 +61,9 @@ ALLOWED_ACTIONS = {
     "wait",
     "schedule",
     "feedback",
+    # The reviewer of a best-of run; only its role prompt lists them, and the runtime refuses them elsewhere.
+    "executor",
+    "verdict",
 }
 SKILL_CALL = "skill_call"
 _SKILL_OPS = ("list", "attach", "detach", "read", "status", "scaffold", "check", "install")
@@ -70,6 +73,10 @@ _SESSION_OPS = ("list", "search", "read")
 _HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
 _HELPER_ROLES = ("reader", "coder", "devops", "universal")
 _SCHEDULE_OPS = ("add", "list", "update", "cancel", "pause", "resume")
+EXECUTOR_OPS = ("status", "wait", "inspect", "message", "start", "diff", "check", "set_check", "eliminate")
+VERDICT_OUTCOMES = ("winner", "finalist", "eliminated", "failed")
+# A wait only parks the reviewer; the step budget, not this, bounds a whole review.
+MAX_EXECUTOR_WAIT_SECONDS = 600.0
 
 MAX_BATCH_ACTIONS = 30
 MAX_READ_ACTIONS = 40
@@ -510,6 +517,12 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         if len(args["body"]) > FEEDBACK_MAX_BODY:
             raise CommandValidationError(f"'body' is {len(args['body'])} characters; at most {FEEDBACK_MAX_BODY}")
 
+    elif action_type == "executor":
+        _validate_executor(args)
+
+    elif action_type == "verdict":
+        _validate_verdict(args)
+
     elif action_type == SKILL_CALL:
         require_keys(args, {"skill", "tool"})
         require_only_allowed_keys(args, {"skill", "tool", "arguments"})
@@ -750,6 +763,62 @@ def _validate_helper(args: dict[str, Any]) -> None:
             args["timeout"] = min(max(float(timeout), 0.0), 600.0)
     _optional_int(args, "cursor", 0, 10**9)
     _optional_int(args, "limit", 1, 100)
+
+
+_EXECUTOR_KEYS = {
+    "status": {"op"},
+    "wait": {"op", "executor_id", "timeout"},
+    "inspect": {"op", "executor_id", "cursor", "limit"},
+    "message": {"op", "executor_id", "text"},
+    "start": {"op", "executor_id", "instruction"},
+    "diff": {"op", "executor_id", "path"},
+    "check": {"op", "executor_id", "command"},
+    "set_check": {"op", "command"},
+    "eliminate": {"op", "executor_id", "reason"},
+}
+_EXECUTOR_REQUIRED = {
+    "wait": set(), "inspect": {"executor_id"}, "message": {"executor_id", "text"},
+    "start": {"executor_id", "instruction"}, "diff": {"executor_id"}, "check": {"executor_id"},
+    "set_check": {"command"}, "eliminate": {"executor_id", "reason"}, "status": set(),
+}
+
+
+def _validate_executor(args: dict[str, Any]) -> None:
+    op = _require_op(args, EXECUTOR_OPS)
+    require_only_allowed_keys(args, _EXECUTOR_KEYS[op])
+    require_keys(args, _EXECUTOR_REQUIRED[op])
+    for key in ("executor_id", "text", "instruction", "reason"):
+        if key in args:
+            require_str(args, key)
+    require_optional_str(args, "path")
+    if "command" in args:
+        _optional_str_list(args, "command", limit=64)
+        if not args["command"]:
+            raise CommandValidationError("'command' must be an argv list with at least one string")
+    timeout = args.get("timeout")
+    if timeout is not None:
+        _require_number(args, "timeout", 0, MAX_EXECUTOR_WAIT_SECONDS)
+    _optional_int(args, "cursor", 0, 10**9)
+    _optional_int(args, "limit", 1, 100)
+
+
+def _validate_verdict(args: dict[str, Any]) -> None:
+    require_keys(args, {"rows", "winner", "reason"})
+    require_only_allowed_keys(args, {"rows", "winner", "reason"})
+    require_str(args, "winner")
+    require_str(args, "reason")
+    rows = args["rows"]
+    if not isinstance(rows, list) or not rows:
+        raise CommandValidationError("'rows' must be a non-empty list: one row per executor")
+    for row in rows:
+        if not isinstance(row, dict):
+            raise CommandValidationError("every row of 'rows' must be an object")
+        require_keys(row, {"executor_id", "outcome"})
+        require_only_allowed_keys(row, {"executor_id", "outcome", "note"})
+        require_str(row, "executor_id")
+        require_optional_str(row, "note")
+        if row["outcome"] not in VERDICT_OUTCOMES:
+            raise CommandValidationError(f"a row's 'outcome' must be one of: {', '.join(VERDICT_OUTCOMES)}")
 
 
 _MESSAGE_ID_RE = re.compile(r"#?\s*([1-9][0-9]*)")

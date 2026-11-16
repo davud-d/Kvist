@@ -272,7 +272,7 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged `a564151` (2 круга) |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | merged (2 круга) |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | merged (2 круга) |
-| T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | work (с `de412ba`) |
+| T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | merged (3 круга) |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | merged (1 круг) |
 | T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
@@ -441,6 +441,15 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
 событий; найдена и исправлена гонка открытия запроса до `cancel_all`); строка в UI_API про слова-команды.
 Остаток: прерванный диалог остаётся на экране → **круг 3**: закрывать запрос `input_closed` с `reason:"cancelled"`
 (разрешён `event_session.py`), UI_API.
+
+**Круг 3** (коммит `d0aea77`; полный набор 5604 passed / 80 skipped; ruff чисто; модули best-of 3 раза подряд
+зелёные с ошибкой на необработанное исключение в потоке). `FrontendChannel.close_requests(reason, purpose=…)`
+шлёт `input_closed` и будит ждущего; `respond()` больше не принимает второй ответ на отвеченный/закрытый
+запрос (совпадает с документированным «поздний ответ игнорируется»); `EventSession.cancel()/pause()`
+закрывают только диалог `bestof_decision` и только если остановка дошла до хода; `reason: "cancelled"` в
+UI_API (EN/RU). Тесты на настоящем stdio-цикле: один `input_closed` с тем же id до `final`, поток диалога
+завершён, поздний ответ без ошибки. Остаток (принято): закрытие по `purpose`, а не по ходу — двух
+одновременных best-of в сессии не бывает. **T8 принят после 3 кругов.**
 
 ### T10 — кэш anthropic, system текстового режима
 **Круг 1** (коммит `7a9167e`, 4 файла: `llm_clients.py` +39/−10, `agent_model.py` +19/−1, `agent_state.py` +4,

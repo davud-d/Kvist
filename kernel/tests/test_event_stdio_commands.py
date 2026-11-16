@@ -1069,7 +1069,7 @@ def test_hello_carries_effort_and_the_command_names():
     hello = out.wait_for(lambda e: e["type"] == "hello")
     assert hello["effort"] == "medium"
     assert "planning" not in hello
-    assert hello["commands"] == ["council", "ping", "resume"]
+    assert hello["commands"] == ["best-of", "council", "ping", "resume"]
     _finish(reader, thread)
 
 

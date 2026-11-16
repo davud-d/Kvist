@@ -47,6 +47,22 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "schedule": ("расписание: {target}", "schedule: {target}"),
     "feedback": ("пишет черновик отзыва", "drafts feedback"),
     "generate_image": ("рисует картинку {target}", "generates an image {target}"),
+    "verdict": ("выносит вердикт", "gives the verdict"),
+}
+
+# What the reviewer of a best-of run does, by op. The person sees "variants", never "executors" or the reviewer's
+# role; {id} is the variant's id (e2). ``wait`` without an id waits for all of them.
+_EXECUTOR_TEMPLATES: dict[str, tuple[str, str]] = {
+    "status": ("смотрит итоги вариантов", "checks how the variants are doing"),
+    "wait": ("ждёт варианты", "waits for the variants"),
+    "wait_one": ("ждёт вариант {id}", "waits for variant {id}"),
+    "inspect": ("смотрит, что делал вариант {id}", "looks at what variant {id} did"),
+    "message": ("пишет варианту {id}", "sends a note to variant {id}"),
+    "start": ("даёт варианту {id} новую работу", "gives variant {id} more work"),
+    "diff": ("читает diff варианта {id}", "reads the diff of variant {id}"),
+    "check": ("запускает проверку варианта {id}", "runs the check on variant {id}"),
+    "set_check": ("выбирает команду проверки", "picks the check command"),
+    "eliminate": ("убирает вариант {id} из сравнения", "drops variant {id} from the comparison"),
 }
 
 _IN = {"ru": " в ", "en": " in "}
@@ -62,9 +78,19 @@ def trim_purpose(purpose: Any) -> str:
 def call_label(action_type: str, args: dict[str, Any], language: str = "en", purpose: str = "") -> str:
     if action_type == "run_shell" and purpose:
         return purpose
+    if action_type == "executor":
+        return _executor_label(args, language)
     ru, en = _TEMPLATES.get(action_type, ("{target}", "{target}"))
     template = ru if language == "ru" else en
     return template.format(target=_target(action_type, args, language)).strip()
+
+
+def _executor_label(args: dict[str, Any], language: str) -> str:
+    op = _text(args.get("op"))
+    executor_id = _text(args.get("executor_id"))
+    key = "wait_one" if op == "wait" and executor_id else op
+    ru, en = _EXECUTOR_TEMPLATES.get(key, ("работает с вариантами", "works with the variants"))
+    return (ru if language == "ru" else en).format(id=executor_id)
 
 
 def _target(action_type: str, args: dict[str, Any], language: str) -> str:
