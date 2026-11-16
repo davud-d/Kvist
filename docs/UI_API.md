@@ -174,7 +174,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level) and `commands` (the names `command` accepts, `resume` included) are sent by `--frontend stdio-multi`. |
+| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level) and `commands` (the names `command` accepts, `resume` and `council` included) are sent by `--frontend stdio-multi`. |
 | `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object[], themes:object` | UI-facing metadata catalog built by `core_manifest.build_manifest`; sent once after `hello` (by `--frontend stdio` and `--frontend stdio-multi`) so frontends can populate pickers dynamically without hardcoding. `styles` lists the picks (`{value, description}`); each pick also sets the chat voice, which the core derives and the manifest does not carry. `slash_commands` is the list a frontend should offer after `/`: `via: "core"` marks a command this core carries out (send a `command` message and draw its dialogs), and an entry without `via` exists only in the Classic Legacy terminal and is not to be offered. |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress; during a call `user_message` is the call's label built by the core ("reads src/x.py") |
@@ -199,10 +199,10 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `bestof_verdict` | `run_id:str, rows:[{executor_id, style, outcome, tests, diff, note}], winner:str, reason:str` | the result of the check, one row per executor (`outcome`: `winner`, `finalist`, `eliminated`, `failed`; `tests` and `diff` shaped as in `bestof_status`) and the `winner`'s `executor_id` (empty when there is none) with the `reason`. Recorded in the journal. |
 | `bestof_diff` | `run_id:str, executor_id:str, patch:str, files:string[]` | an executor's patch against the base, for reading before a decision. `patch` is redacted and cut at 20 000 characters with `[... N characters omitted ...]` where it was cut. Live only. |
 | `bestof_finished` | `run_id:str, outcome:str, message:str`; optional `executor_id:str, commit:str` | how the run ended: `accepted`, `discarded`, `cancelled`, `failed`, or `pending` (waiting for the person's decision, which arrives as an `input_request` with `purpose` and `run_id`). `executor_id` names the executor whose result was taken, `commit` the resulting commit; both are left out when there is none. Recorded in the journal. |
-| `council_started` | `council_id:str, question:str, members:[{executor_id, angle, session}]` | a council begins: each member looks at the `question` from its own `angle`, in its own child session. Recorded in the journal. |
-| `council_card` | `council_id:str, executor_id:str, angle:str, decision:str, argument:str` | one member's decision and the argument for it. Recorded in the journal. |
-| `council_objection` | `council_id:str, executor_id:str, angle:str, risks:[{target, risk}]` | one member's objections to the other members' cards: for each `target` (an `executor_id`) the `risk` it sees. Recorded in the journal. |
-| `council_verdict` | `council_id:str, chosen:str, decision:str, reason:str, dissent:[{executor_id, angle, why}]` | the council's choice: `chosen` is the `executor_id` whose decision was taken, `decision` its text, `reason` why; `dissent` lists the members who disagreed and why. Recorded in the journal. |
+| `council_started` | `council_id:str, question:str, members:[{executor_id, angle, session}]` | a council begins (`/council`, §8c): each member looks at the `question` from its own angle, in its own child session. The four members and their `executor_id`/`angle` are `simplicity`, `security`, `speed` (speed of development) and `maintenance` (cost of keeping it); `angle` is always the same id as `executor_id`, never a caption: the frontend writes the human label. Recorded in the journal. |
+| `council_card` | `council_id:str, executor_id:str, angle:str, decision:str, argument:str` | one member's decision and the argument for it, sent when the member hands its card in. A member whose card is unusable (after one more request) sends none and is out of the council. Recorded in the journal. |
+| `council_objection` | `council_id:str, executor_id:str, angle:str, risks:[{target, risk}]` | one member's objections to the other members' cards: for each `target` (an `executor_id`) the `risk` it sees, one risk per target. Only the other members' cards (decision and argument) were shown to it, never their reasoning; there is one round of objections. Recorded in the journal. |
+| `council_verdict` | `council_id:str, chosen:str, decision:str, reason:str, dissent:[{executor_id, angle, why}]` | the council's choice: `chosen` is the `executor_id` whose decision was taken, `decision` its text, copied by the core from that member's card, `reason` why; `dissent` lists the other members whose objections still stand and why. Exactly one decision is chosen; there is no merged one. Recorded in the journal. |
 | `image_job` | `image_id:str, state:str, name:str, prompt:str, error:str` | a picture from `generate_image` is being drawn in the background (`state: "generating"`) or could not be made (`failed`, with `error`). The finished picture arrives as an `artifact` event with `skill: "image"`. The agent is not blocked meanwhile and is woken when the picture is ready. Live-only. |
 | `artifact` | `name:str, mime:str, path:str, caption:str, skill:str`; optional `preview:str` | a file or image a skill produced for the person; `path` is the absolute path of the saved copy under the workspace's `.kvist/artifacts/` (a frontend may show it as a link or read it; it never leaves the workspace), `preview` a small JPEG data URL (live only).  The built-in `generate_image` tool (AnyModel sessions) emits it with `skill: "image"`, `caption` the prompt and `path` the picture saved in the workspace; Glass shows it in the browser's card. Recorded in the journal without `preview`. |
 | `route` | `role:str, source:str` | the role the turn actually runs under, sent once per turn before the plan or reply. `role` is `coder`, `reader`, `devops` or `chat`. `source` is `explicit` (the caller passed the role), `direct` / `llm` / `keyword_fallback` / `default` (how the router decided) or `resume` (a bare "continue" after a stopped run inherited that run's role). |
@@ -698,8 +698,9 @@ counts as yes, anything else (`false`, no answer, EOF) does nothing.
 - A command runs **between turns** only. While a turn (or another command) is
   running the core answers at once with `ok:false` and does not run it.
 - Every accepted command ends with exactly one `command_result`; unlike a turn
-  there is **no `turn_end`**. An unknown name, a missing name or malformed
-  `args` also get a `command_result` with `ok:false`.
+  there is **no `turn_end`** (except for the commands that are turns, below).
+  An unknown name, a missing name or malformed `args` also get a
+  `command_result` with `ok:false`.
 - `ok:false` means the command failed (`message` says why). A dialog the user
   cancelled is `ok:true` with `effects` `{"cancelled": true}` and nothing
   changed. stdin EOF cancels an open dialog the same way.
@@ -748,6 +749,35 @@ There is **no `command_result`** for a resumed turn; `turn_end` ends it, and
 takes no `command` while it runs. In a closed session (§8a) `resume` is a turn
 without the `session` event: the core's closed-session reply as `final`, then
 `turn_end`.
+
+**Commands that are turns: `council`.** `{"type":"command","name":"council","args":[…words]}`
+(the words are joined with spaces) or a goal line that starts with `/council `
+(a plain line, or the text of a `{"type":"goal"}` message) asks the council of §7
+a question: four read-only members look at it from four angles (`simplicity`,
+`security`, `speed`, `maintenance`), hand in a card each, name the main risk they see in each other's
+decision (one round), and one decision is chosen. The stream is a turn's, with the
+`command_result` of a command after it:
+
+```
+>>> {"type": "council_started", "council_id": "c1…", "question": "…", "members": [{"executor_id": "simplicity", "angle": "simplicity", "session": "council-…"}, …]}
+>>> {"type": "council_card", …}  ×4   {"type": "council_objection", …}  ×4   {"type": "council_verdict", …}
+>>> {"type": "final", "message": "## council …", "outcome": "done", …}
+>>> {"type": "turn_end"}
+>>> {"type": "command_result", "name": "council", "ok": true, "message": "council: decision chosen: … / council: выбрано решение: …", "effects": {"council_id": "c1…", "chosen": "security", "decision": "…"}}
+```
+
+- `final.message` is the whole answer as Markdown in the language of the question: the question, the cards, the
+  objections, the chosen decision with its reason, and who stays against. A frontend without a council screen shows
+  this text and nothing else.
+- The turn is journaled like any turn: `user` with the typed text (`/council …`), the council events, `final`,
+  `turn_end`. The members' own work is in their child sessions (`service.kind: "council_member"`, §8a).
+- `cancel` during the turn stops every member; the turn ends without `council_verdict`, `final.outcome` is
+  `incomplete` and `command_result` is `ok:false` with `effects.stopped: true`. A pause stops it the same way.
+- Without a question (`args` empty or blank, or the bare line `/council`) the answer is `command_result`
+  `ok:false` and no turn: no events, no `turn_end`.
+- `ok:false` also when fewer than two members handed in a usable card, when no valid choice came out after two tries, or when the model
+  did not answer; `final` then says so and shows the cards and objections that exist.
+- As for any command, a `command` sent while a turn runs is refused at once; a goal line is queued as a goal is.
 
 A `session` or `new` command that changed the active session also emits a
 `session` event before its `command_result`, with `closed`/`closed_notice` when

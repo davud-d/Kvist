@@ -177,7 +177,7 @@ fail-closed).
 
 | `type` | Поля | Смысл |
 |---|---|---|
-| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake и эффективная конфигурация прогона; всегда первым. `effort` (уровень reasoning) и `commands` (имена, которые принимает `command`, включая `resume`) отправляет `--frontend stdio-multi`. |
+| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake и эффективная конфигурация прогона; всегда первым. `effort` (уровень reasoning) и `commands` (имена, которые принимает `command`, включая `resume` и `council`) отправляет `--frontend stdio-multi`. |
 | `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object[], themes:object` | Каталог метаданных ядра, формируемый `core_manifest.build_manifest`; отправляется сразу после `hello`, чтобы фронтенды динамически наполняли пикеры без хардкода. `styles` перечисляет варианты (`{value, description}`); каждый вариант задаёт и голос чата, его ядро выводит само, в манифесте его нет. `slash_commands` — список, который фронтенд предлагает после `/`: `via: "core"` — команду выполняет это ядро (шлите сообщение `command` и рисуйте её диалоги), запись без `via` есть только в терминале Classic Legacy, и предлагать её не нужно. |
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу; во время вызова `user_message` — подпись вызова, которую строит ядро («читает src/x.py») |
@@ -202,10 +202,10 @@ fail-closed).
 | `bestof_verdict` | `run_id:str, rows:[{executor_id, style, outcome, tests, diff, note}], winner:str, reason:str` | итог проверки: строка на каждого исполнителя (`outcome`: `winner`, `finalist`, `eliminated`, `failed`; `tests` и `diff` той же формы, что в `bestof_status`), `executor_id` победителя в `winner` (пусто, если победителя нет) и `reason`. Записывается в журнал. |
 | `bestof_diff` | `run_id:str, executor_id:str, patch:str, files:string[]` | патч исполнителя относительно базы, чтобы прочитать его до решения. `patch` проходит редактирование секретов и обрезается на 20 000 символах с пометкой `[... N characters omitted ...]` на месте обрезки. Только вживую. |
 | `bestof_finished` | `run_id:str, outcome:str, message:str`; необязательные `executor_id:str, commit:str` | чем закончился прогон: `accepted`, `discarded`, `cancelled`, `failed` или `pending` (ждёт решения человека, оно приходит как `input_request` с `purpose` и `run_id`). `executor_id` — исполнитель, чей результат принят, `commit` — получившийся коммит; без них, если их нет. Записывается в журнал. |
-| `council_started` | `council_id:str, question:str, members:[{executor_id, angle, session}]` | начался совет: каждый участник смотрит на `question` со своего угла (`angle`) в своей дочерней сессии. Записывается в журнал. |
-| `council_card` | `council_id:str, executor_id:str, angle:str, decision:str, argument:str` | решение одного участника и довод в его пользу. Записывается в журнал. |
-| `council_objection` | `council_id:str, executor_id:str, angle:str, risks:[{target, risk}]` | возражения одного участника к карточкам остальных: для каждого `target` (`executor_id`) риск, который он видит. Записывается в журнал. |
-| `council_verdict` | `council_id:str, chosen:str, decision:str, reason:str, dissent:[{executor_id, angle, why}]` | выбор совета: `chosen` — `executor_id`, чьё решение принято, `decision` — его текст, `reason` — почему; `dissent` перечисляет несогласных участников и почему. Записывается в журнал. |
+| `council_started` | `council_id:str, question:str, members:[{executor_id, angle, session}]` | начался council (`/council`, §8c): каждый участник смотрит на `question` со своего угла в своей дочерней сессии. Четыре участника и их `executor_id`/`angle`: `simplicity`, `security`, `speed` (скорость разработки) и `maintenance` (цена поддержки); `angle` всегда равен `executor_id`, это id, а не подпись: подпись на языке человека делает фронтенд. Записывается в журнал. |
+| `council_card` | `council_id:str, executor_id:str, angle:str, decision:str, argument:str` | решение одного участника и довод в его пользу; приходит, когда участник сдал карточку. Участник с непригодной карточкой (после одного повторного запроса) её не шлёт и выбывает из council. Записывается в журнал. |
+| `council_objection` | `council_id:str, executor_id:str, angle:str, risks:[{target, risk}]` | возражения одного участника к карточкам остальных: для каждого `target` (`executor_id`) риск, который он видит (по одному на каждого). Ему показаны только карточки остальных (решение и довод), без их рассуждений; раунд возражений один. Записывается в журнал. |
+| `council_verdict` | `council_id:str, chosen:str, decision:str, reason:str, dissent:[{executor_id, angle, why}]` | выбор council: `chosen` — `executor_id`, чьё решение принято, `decision` — его текст, `reason` — почему; `dissent` перечисляет остальных участников, чьи возражения к выбору остались в силе, и почему. Текст `decision` ядро копирует из карточки выбранного участника. Выбрано ровно одно решение, склеенного нет. Записывается в журнал. |
 | `image_job` | `image_id:str, state:str, name:str, prompt:str, error:str` | картинка из `generate_image` рисуется в фоне (`state: "generating"`) или не получилась (`failed`, с `error`). Готовая картинка приходит событием `artifact` с `skill: "image"`. Агент при этом не блокируется, а когда картинка готова, его будят. Только живое. |
 | `artifact` | `name:str, mime:str, path:str, caption:str, skill:str`; необязательное `preview:str` | файл или изображение, которое скилл создал для человека; `path` — абсолютный путь сохранённой копии в `.kvist/artifacts/` проекта (фронтенд может показать ссылку или прочитать файл; за пределы проекта он не выходит), `preview` — маленький JPEG как data URL (только живое). Встроенный инструмент `generate_image` (сессии AnyModel) шлёт его с `skill: "image"`, `caption` — запрос, `path` — картинка, сохранённая в workspace; Glass показывает её в карточке браузера. В журнал записывается без `preview`. |
 | `route` | `role:str, source:str` | роль, под которой фактически идёт ход; отправляется один раз за ход, до плана или ответа. `role` — `coder`, `reader`, `devops` или `chat`. `source` — `explicit` (роль передал вызывающий), `direct` / `llm` / `keyword_fallback` / `default` (как решил роутер) или `resume` (голое «продолжай» после остановленного прогона унаследовало роль того прогона). |
@@ -705,8 +705,9 @@ kvist --commit-message < payload.json
 - Команда выполняется **только между ходами**. Пока идёт ход (или другая
   команда), ядро сразу отвечает `ok:false` и команду не запускает.
 - Каждая принятая команда заканчивается ровно одним `command_result`; в отличие
-  от хода **`turn_end` нет**. Неизвестное имя, отсутствующее имя и неверные
-  `args` тоже получают `command_result` с `ok:false`.
+  от хода **`turn_end` нет** (кроме команд, которые сами являются ходом, см.
+  ниже). Неизвестное имя, отсутствующее имя и неверные `args` тоже получают
+  `command_result` с `ok:false`.
 - `ok:false` — команда не удалась (`message` объясняет почему). Отменённый
   пользователем диалог — это `ok:true` и `effects` `{"cancelled": true}`, ничего
   не изменилось. EOF на stdin отменяет открытый диалог так же.
@@ -755,6 +756,39 @@ kvist --commit-message < payload.json
 `session` говорит фронтенду, какая беседа теперь активна. Как и обычный ход, он
 не принимает `command`, пока идёт. В закрытой сессии (§8a) `resume` — ход без
 события `session`: ответ ядра для закрытой сессии в `final`, затем `turn_end`.
+
+**Команды-ходы: `council`.** `{"type":"command","name":"council","args":[…слова]}`
+(слова склеиваются пробелом) или строка цели, которая начинается с `/council `
+(обычная строка либо текст сообщения `{"type":"goal"}`), задаёт режиму council из §7
+вопрос: четыре участника без права записи смотрят на него с четырёх углов
+(`simplicity`, `security`, `speed`, `maintenance`), каждый сдаёт карточку, затем называет главный риск в решении каждого
+из остальных (один раунд), и выбирается одно решение. Поток — как у хода, а после
+него `command_result`, как у команды:
+
+```
+>>> {"type": "council_started", "council_id": "c1…", "question": "…", "members": [{"executor_id": "simplicity", "angle": "simplicity", "session": "council-…"}, …]}
+>>> {"type": "council_card", …}  ×4   {"type": "council_objection", …}  ×4   {"type": "council_verdict", …}
+>>> {"type": "final", "message": "## council …", "outcome": "done", …}
+>>> {"type": "turn_end"}
+>>> {"type": "command_result", "name": "council", "ok": true, "message": "council: decision chosen: … / council: выбрано решение: …", "effects": {"council_id": "c1…", "chosen": "security", "decision": "…"}}
+```
+
+- `final.message` — весь ответ в Markdown на языке вопроса: вопрос, карточки,
+  возражения, выбранное решение с причиной и кто остался против. Фронтенд без
+  экрана council показывает этот текст и больше ничего.
+- Ход журналируется как любой ход: `user` с набранным текстом (`/council …`), события
+  council, `final`, `turn_end`. Собственная работа участников лежит в их дочерних
+  сессиях (`service.kind: "council_member"`, §8a).
+- `cancel` во время хода останавливает всех участников; ход заканчивается без
+  `council_verdict`, `final.outcome` равен `incomplete`, `command_result` — `ok:false`
+  с `effects.stopped: true`. Пауза останавливает его так же.
+- Без вопроса (пустые или пробельные `args`, либо голая строка `/council`) ответ —
+  `command_result` с `ok:false`, хода нет: ни событий, ни `turn_end`.
+- `ok:false` бывает и когда пригодную карточку сдали меньше двух участников, когда
+  за две попытки не получился допустимый выбор или когда модель не ответила;
+  `final` тогда говорит об этом и показывает карточки и возражения, которые есть.
+- Как для любой команды, `command` во время хода отклоняется сразу; строка цели
+  встаёт в очередь, как встаёт цель.
 
 Команда `session` или `new`, сменившая активную сессию, тоже шлёт событие
 `session` перед своим `command_result`, с `closed`/`closed_notice`, если цель

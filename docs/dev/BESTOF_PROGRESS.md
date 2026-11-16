@@ -262,7 +262,7 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T4 | e1 | glass: арена, лог, вердикт, council, статус | `frontends/tui/glass/**` | контракт §4 | merged (2 круга) |
 | T5 | a4 | префикс кэша, стиль в конце, постоянные tools | `kernel/agent/agent_model.py` (промпт), `kernel/plan/plan_mode.py`, `kernel/agent/agent_runtime.py`, `kernel/providers/chatgpt_client.py`, `kernel/llm/prompt_prefix.py` (новый), тесты | T3 | merged `a564151` (2 круга) |
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | merged (2 круга) |
-| T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | work |
+| T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | merged (2 круга) |
 | T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | todo |
 | T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | work |
@@ -387,6 +387,26 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
 (проверено вручную посреди прогона на mock); фон слоя по правилу `.feed-wrap` с `--glass`. node 58/58.
 Осталось (принято): `:has()` в WebKitGTK окна Tauri не проверен — в ручные проверки.
 
+### T10 — кэш anthropic, system текстового режима
+**Круг 1** (коммит `7a9167e`, 4 файла: `llm_clients.py` +39/−10, `agent_model.py` +19/−1, `agent_state.py` +4,
+новый `test_anthropic_cache.py` на 63 теста; полный набор 5313 passed / 80 skipped; ruff чисто).
+- Обман: нет; существующие тесты не менялись. Процесс: опечатку в импортах своего нового теста
+  поправил через `sed` — нарушение hard rule (сообщил сам), содержимое проверено тестами.
+- Сделано: system прямого запроса — два блока по `### SELECTED STYLE` с меткой на каждом; меток
+  никогда > 4 (32 комбинации); аудит 16 путей к клиенту (натив 3–4 метки, текст 2, чат 2–3, разовые
+  вызовы 1, vision и doctor 0), шлюзы без меток; system текстового режима — один раз на прогон/роль/модель
+  (`text_system_prompt`), байт в байт между шагами; сабагент проверил, что 4 теста падают без правки.
+- **D-25** (принято): правки KVIST.md и стилей посреди прогона — в system со следующего прогона; секция
+  плана — по старту прогона.
+- Пункт 4 (метка на статической части user-сообщения) **не делан с замером**: свежий прогон — 326 ток. из
+  738 (< порога 512), с историей — 1567 из 1979; выигрыш ≈1,3–7 % входа шага при правке строкового
+  user-сообщения во всех провайдерах и обрезке. Принято.
+- Слабые места: 1 (text → native → text берёт system старта прогона) → **отклонено**: это и есть
+  D-25 и лучше для кэша; 2 (поток не проверен отдельно; `\n\n` в конце первого блока) → **в ручные
+  проверки**; 3 (метка на коротких разовых вызовах) → **отклонено**: короче порога молча не кэшируется,
+  поведение было и до задачи; 4 (чат пересобирает system на каждом сообщении, второй вызов хода — другой
+  system) → **остаётся долгом** (вне задачи, `agent.py`) — в финальный отчёт.
+
 ### T7 — council и команды-ходы
 **Круг 1** (коммит `9ebdf36`, 9 файлов, +1729/−16; 39 + 23 новых теста; полный набор зелёный).
 - Обман: нет; единственная правка существующего теста — `hello.commands` с новой командой.
@@ -404,6 +424,14 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
      метод потребовал бы правки ядра хода для всех прогонов.
   5. остальные (приватный `_HelperUI`, гонка cancel, повтор как новый run, смысл reason, маркеры
      классификатора в тестах) → **отклонено**; фронтенды — T13.
+
+**Круг 2** (коммит `6aa7f35`; полный набор 5277 passed / 80 skipped): событие «первый ответ» — на первом
+куске потока (обёртка генератора), тест с ленивым потоком; промпты в `kernel/prompts/bestof/*.txt`,
+`pyproject.toml` +2 строки (пакет и package-data); имя режима «council» в `final` и `command_result`.
+`except BaseException` с немедленным `raise` в `_FirstAnswerClient` — принято: ничего не глушится, а
+отмена тоже должна отпустить ждущих участников. Принято.
+
+**T6 слит: `5986b86`** (в `int`: 5342 passed / 51 skipped, без предупреждений; ruff чисто).
 
 ### T6 — исполнители
 **Круг 1** (коммит `7a02dc0`, 4 новых файла; 48 тестов модуля; полный набор зелёный).

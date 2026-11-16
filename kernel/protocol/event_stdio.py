@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar
 
+from kernel.bestof.turns import TURN_COMMANDS, TurnResult, parse_turn_goal, run_turn
 from kernel.session.durable_json import JsonStorageError
 from kernel.protocol.event_session import EventApprovalGate, EventSession
 from kernel.protocol.event_stream_ui import EventStreamUI
@@ -334,6 +335,10 @@ def _read_multi(
                 stripped = data["text"].strip()
                 if not stripped:
                     continue
+            turn = parse_turn_goal(stripped)
+            if turn is not None:
+                _queue_turn_goal(session, turn, goal_queue, gate)
+                continue
             with gate.lock:
                 gate.busy = True
                 goal_queue.put(stripped)
@@ -361,6 +366,26 @@ def _refuse(
             goal_queue.put(event)
 
 
+def _needs_question(name: str) -> CommandResultEvent:
+    return _rejected(name, f"Usage: /{name} <question> / Использование: /{name} <вопрос>")
+
+
+def _queue_turn_goal(
+    session: EventSession,
+    turn: tuple[str, str],
+    goal_queue: queue.Queue,
+    gate: _Gate,
+) -> None:
+    """A goal line that is a turn command (``/council …``): queued like a goal, run like the command."""
+    name, question = turn
+    if not question:
+        _refuse(session, goal_queue, gate, _needs_question(name))
+        return
+    with gate.lock:
+        gate.busy = True
+        goal_queue.put(_Command(name, [question]))
+
+
 def _queue_command(
     session: EventSession,
     data: dict,
@@ -380,6 +405,9 @@ def _queue_command(
             gate,
             _rejected(name, "Command args must be a list of strings."),
         )
+        return
+    if name in TURN_COMMANDS and not " ".join(args).strip():
+        _refuse(session, goal_queue, gate, _needs_question(name))
         return
     with gate.lock:
         if gate.busy:
@@ -417,6 +445,28 @@ def _run_command(
         CommandResultEvent(command.name, result.ok, result.message, result.effects),
         out_stream,
     )
+
+
+def _run_turn_command(session: EventSession, command: _Command, out_stream) -> None:
+    """Serve a command that is a turn (``/council``): its events, ``turn_end``, then ``command_result``.
+
+    ``turn_end`` comes first because that is what ends a turn for a frontend; the ``command_result`` after it is
+    for the ones that wait for the outcome of a command.
+    """
+    agent = session.agent
+    question = " ".join(command.args).strip()
+    session.submit_call(lambda: run_turn(agent, command.name, question))
+    _stream_events(session, out_stream)
+    out_stream.write(json.dumps({"type": "turn_end"}) + "\n")
+    out_stream.flush()
+    result = session.result
+    if isinstance(result, TurnResult):
+        event = CommandResultEvent(command.name, result.ok, result.message, result.effects)
+    else:
+        # The worker raised; its error event is already in the stream.
+        detail = str(session.error).strip() or type(session.error).__name__
+        event = _rejected(command.name, f"Command failed: {detail}")
+    _write_event(event, out_stream)
 
 
 def _resumable_session(agent) -> str | None:
@@ -575,7 +625,7 @@ def serve_session_multi(
     """
     if isinstance(resume, str):
         session.agent.select_resume_session(resume)
-    served = sorted({*(commands or {}), "resume"})
+    served = sorted({*(commands or {}), "resume", *TURN_COMMANDS})
     hello = build_session_hello(
         session.agent,
         routed_role=routed_role,
@@ -611,6 +661,8 @@ def serve_session_multi(
                 _run_resume(session, out_stream)
             elif item is _WAKE:
                 _run_wake(session, out_stream)
+            elif isinstance(item, _Command) and item.name in TURN_COMMANDS:
+                _run_turn_command(session, item, out_stream)
             elif isinstance(item, _Command):
                 _run_command(session, item, commands or {}, context, out_stream)
             else:

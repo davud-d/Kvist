@@ -1,0 +1,5 @@
+Below are the other members' cards: each is a decision and its main argument; how the member got there is not shown. For each of those decisions name the one main risk you see in it from your angle: what is most likely to go wrong, or to cost the person later, if the council chose it. A risk is specific and checkable ("the migration locks the table for minutes at 5M rows"), not a general worry ("it may not scale"). This is the only round of objections; do not read more files unless a risk cannot be stated without it.
+
+Answer with one JSON object and nothing after it:
+{"risks": [{"target": "<angle id of the member>", "risk": "<one or two sentences>"}]}
+One entry per other member, in the language of the question.
