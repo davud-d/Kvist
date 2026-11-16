@@ -598,3 +598,38 @@ def test_web_search_settings_fall_back_to_auto_for_an_unknown_provider(tmp_path)
     assert user_config.get_web_search_settings(path).provider == "auto"
     with pytest.raises(ValueError):
         user_config.save_web_search_settings("bing", {}, path)
+
+
+@requires_posix
+def test_a_config_dir_above_a_symlink_is_readable(tmp_path, monkeypatch):
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    # On macOS every temporary directory sits under /var, a link to /private/var: the link is above
+    # the config directory, never the directory itself.
+    link = tmp_path / "maclike"
+    link.symlink_to(actual, target_is_directory=True)
+    config_dir = link / "try-config"
+    config_dir.mkdir()
+    monkeypatch.setenv(user_config.CONFIG_DIR_ENV, str(config_dir))
+
+    user_config.save_user_config({"llm_provider": "deepseek"})
+
+    assert user_config.get_saved_provider_or_none() == "deepseek"
+    saved = (actual / "try-config" / "config.json").read_text(encoding="utf-8")
+    assert json.loads(saved)["llm_provider"] == "deepseek"
+
+
+@requires_posix
+def test_a_config_file_above_a_symlink_is_readable(tmp_path):
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    link = tmp_path / "maclike"
+    link.symlink_to(actual, target_is_directory=True)
+    config_dir = link / "try-config"
+    config_dir.mkdir()
+    path = config_dir / "config.json"
+
+    user_config.save_user_config({"generation": 7}, path)
+
+    assert user_config.load_user_config(path) == {"generation": 7}
+    assert json.loads((actual / "try-config" / "config.json").read_text(encoding="utf-8")) == {"generation": 7}

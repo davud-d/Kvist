@@ -199,13 +199,21 @@ def _config_path_and_boundary(config_path: Path | None) -> tuple[Path, Path]:
     if config_path is None:
         boundary = Path.home().resolve(strict=True)
         return boundary / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME, boundary
-    path = Path(os.path.abspath(Path(config_path).expanduser()))
-    boundary = path.parent
-    while not boundary.exists():
-        if boundary.parent == boundary:
+    unresolved = Path(os.path.abspath(Path(config_path).expanduser()))
+    ancestor = unresolved.parent
+    while not ancestor.exists():
+        if ancestor.parent == ancestor:
             raise RuntimeError("User config parent directory is unavailable.")
-        boundary = boundary.parent
-    return path, boundary.resolve(strict=True)
+        ancestor = ancestor.parent
+    if ancestor.is_symlink():
+        # The config directory is itself a link, so it may point anywhere; the unresolved path is
+        # handed to storage as it came, which refuses it instead of following the link.
+        return unresolved, ancestor.resolve(strict=True)
+    # Storage compares the path with its resolved boundary, so the path is rebuilt on the resolved
+    # ancestor. A link above the config directory (on macOS every temporary directory is under
+    # /var, which links to /private/var) would otherwise read as a path outside its own directory.
+    boundary = ancestor.resolve(strict=True)
+    return boundary / unresolved.relative_to(ancestor), boundary
 
 
 # A core that serves someone else's frontend (kernel/ssh) works with that person's provider, key and models, and must
