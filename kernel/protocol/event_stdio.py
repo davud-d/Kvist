@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from kernel.bestof.turns import TURN_COMMANDS, TurnResult, parse_turn_goal, run_turn, turn_refusal
+from kernel.bestof.turns import TURN_COMMANDS, TurnResult, parse_turn_goal, run_turn, take_follow_up, turn_refusal
 from kernel.session.durable_json import JsonStorageError
 from kernel.protocol.event_session import EventApprovalGate, EventSession
 from kernel.protocol.event_stream_ui import EventStreamUI
@@ -638,6 +638,9 @@ def serve_session_multi(
     if resume:
         goal_queue.put(_RESUME)
     gate = _Gate()
+    # This loop starts the best-of turn the person agreed to after the turn that offered it (below), so the
+    # model may offer it here; a transport without that step must not.
+    session.agent.bestof_follow_up = True
     if wake:
         session.agent.wake_listener = lambda: _queue_wake(goal_queue, gate)
     context = CommandContext(session, ui, rebuild, routed_role)
@@ -670,6 +673,11 @@ def serve_session_multi(
                 # tell a frontend the turn is over.
                 out_stream.write(json.dumps({"type": "turn_end"}) + "\n")
                 out_stream.flush()
+            # Before anything queued meanwhile: the person said yes to this, so it is the next turn.
+            follow_up = take_follow_up(session.agent)
+            if follow_up is not None:
+                name, question = follow_up
+                _run_turn_command(session, _Command(name, [question]), out_stream)
             with gate.lock:
                 # Refusals emitted while this item ran may have missed its
                 # stream; flush them before the gate reopens.

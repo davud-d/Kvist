@@ -70,6 +70,22 @@ def turn_refusal(name: str, question: str) -> str | None:
     return None
 
 
+def take_follow_up(agent: Any) -> tuple[str, str] | None:
+    """``(command, question)`` of the best-of turn to start now, once, after the person agreed to the model's offer.
+
+    The question is the attempts count and the person's own request, the form ``/best-of N <task>`` takes, so the
+    follow-up runs through ``run_turn`` exactly as the typed command does. The offer's turn has ended by now: its
+    ``final`` said best-of is starting.
+    """
+    from kernel.bestof import offer
+
+    agreed = offer.take_agreed(agent)
+    if agreed is None:
+        return None
+    count, task = agreed
+    return "best-of", f"{count} {task}"
+
+
 def turn_runner(name: str) -> TurnRunner:
     # Imported when used: both modes pull in the agent, and the transport imports this module at start.
     if name == "council":

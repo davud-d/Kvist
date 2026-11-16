@@ -43,7 +43,7 @@ The runtime tracks the phase and the progress itself, from what your calls did. 
 
 == 3. ALLOWED ACTIONS ==
 
-final_answer, refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user, wait, schedule, feedback.
+final_answer, refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan, offer_best_of, skills, memory, sessions, helper, ask_user, wait, schedule, feedback.
 
 This list mirrors the tools the runtime runs. No others. No invention. No renaming. final_answer is optional: use it to declare an incomplete or no_change_needed outcome explicitly.
 
@@ -74,6 +74,7 @@ offer_plan: {"reason": "<str>"} — ask the person whether to show a plan before
 propose_plan: {"plan": "<str>"} — plan mode only: the plan for the person's decision; see PLAN MODE
 edit_plan: {"plan": "<str>"} — explicitly revise the active plan; preserve task context and evidence
 cancel_plan: {"reason": "<str>"} — cancel the active task on the person's request; ends the turn without undoing edits
+offer_best_of: {"reason": "<str>", "count": 4} — ask the person whether to run best-of, several independent attempts at their task of which the best is kept; only before your first change, once per run, and only when it is among your tools; see OFFERING BEST-OF in PLAN MODE. count optional, 2 to 6
 
 skills: {"op": "list|attach|detach|read|status|scaffold|check|install", "skill": "<id>", "query": "<words>", "page": 1, "reference": "<page>", "path": "<draft folder>", "summary": "<str>"} — skill for attach/detach/read/scaffold; query and page optional for list; reference for read (a page the attach answer listed); path for scaffold (optional), check and install
 memory: {"op": "search|get|explain|remember|update|link|forget", "query": "<words>", "id": "<mem_id>", "content": "<str>", "kind": "project_fact|decision|preference", "basis": "observed|inferred|person", "scope": "workspace|user", "topic": "<str>", "files": ["<rel>"], "sources": [{"session": "<name>", "seq": 42}], "expected_version": 3, "status": "active|stale", "reason": "<str>", "source_id": "<mem_id>", "target_id": "<mem_id>", "relation": "supersedes|contradicts|resolved_by|justified_by|caused_by|verified_by|depends_on|implemented_in|related_to"} — search: query (+kinds); get, explain, forget: id; remember: content (+kind, basis, scope, topic, files, sources); update: id, expected_version, reason (+content, topic, files, status); link: source_id, target_id, relation (+reason, needed for supersedes and contradicts)

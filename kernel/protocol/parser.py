@@ -48,6 +48,7 @@ ALLOWED_ACTIONS = {
     "propose_plan",
     "edit_plan",
     "cancel_plan",
+    "offer_best_of",
     # Offered only by an interactive frontend (end_session.available); the
     # runtime answers it as an unknown tool everywhere else.
     "end_session",
@@ -77,6 +78,11 @@ EXECUTOR_OPS = ("status", "wait", "inspect", "message", "start", "diff", "check"
 VERDICT_OUTCOMES = ("winner", "finalist", "eliminated", "failed")
 # A wait only parks the reviewer; the step budget, not this, bounds a whole review.
 MAX_EXECUTOR_WAIT_SECONDS = 600.0
+
+# The attempts an offered best-of run may take; the same bounds as /best-of (kernel/bestof/styles.py, which
+# test_bestof_offer.py compares them with: this module does not import the best-of package).
+MIN_BESTOF_ATTEMPTS = 2
+MAX_BESTOF_ATTEMPTS = 6
 
 MAX_BATCH_ACTIONS = 30
 MAX_READ_ACTIONS = 40
@@ -209,7 +215,7 @@ def plan_step_for_calls(names: list[str], files_changed: bool) -> str:
     kinds = set(names)
     if kinds & FINISHING_ACTIONS:
         return "done"
-    if kinds & {"offer_plan", "propose_plan", "edit_plan", "cancel_plan"}:
+    if kinds & {"offer_plan", "propose_plan", "edit_plan", "cancel_plan", "offer_best_of"}:
         return "plan"
     if kinds & _WRITE_ACTIONS:
         return "edit"
@@ -456,6 +462,18 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_keys(args, {"reason"})
         require_only_allowed_keys(args, {"reason"})
         require_str(args, "reason")
+
+    elif action_type == "offer_best_of":
+        require_keys(args, {"reason"})
+        require_only_allowed_keys(args, {"reason", "count"})
+        require_str(args, "reason")
+        count = args.get("count")
+        if count is not None and (
+            type(count) is not int or not MIN_BESTOF_ATTEMPTS <= count <= MAX_BESTOF_ATTEMPTS
+        ):
+            raise CommandValidationError(
+                f"'count' must be a whole number of attempts from {MIN_BESTOF_ATTEMPTS} to {MAX_BESTOF_ATTEMPTS}"
+            )
 
     elif action_type in {"propose_plan", "edit_plan"}:
         require_keys(args, {"plan"})

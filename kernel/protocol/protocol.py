@@ -30,6 +30,7 @@ ActionType = Literal[
     "propose_plan",
     "edit_plan",
     "cancel_plan",
+    "offer_best_of",
     "end_session",
     "generate_image",
     "skills",

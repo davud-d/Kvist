@@ -12,8 +12,20 @@ from typing import Any
 
 from rich.text import Text
 
-from kernel.bestof.turns import parse_turn_goal, run_turn
+from kernel.bestof.turns import parse_turn_goal, run_turn, take_follow_up
 from kernel.sandbox.redaction import sanitize_display_text
+
+
+def run_follow_up_turn(agent: Any, console: Any, interactive_screen: Any = None) -> None:
+    """Start the best-of turn the person agreed to after the turn that offered it, if there is one.
+
+    It runs as the typed ``/best-of N <task>`` does, so its output and its failures are the same.
+    """
+    follow_up = take_follow_up(agent)
+    if follow_up is None:
+        return
+    name, question = follow_up
+    run_turn_goal(agent, f"/{name} {question}", console, interactive_screen)
 
 
 def run_turn_goal(agent: Any, goal: str, console: Any, interactive_screen: Any = None) -> bool:

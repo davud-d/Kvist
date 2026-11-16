@@ -62,6 +62,16 @@ git -C <repo> merge --ff-only bo/int   # experimental уходит вперёд 
   аккаунта (HTTP 429 у сабагентов, это не лимит живых прогонов Kvist). Незакоммиченная работа
   осталась в их worktree; после сброса лимита они возобновлены с места остановки. Если лимит
   срабатывает снова — ждать сброса и возобновлять тех же сабагентов, новых не запускать.
+- **Инцидент 3 (живые прогоны)**: ядро, запущенное с `--provider chatgpt` (переопределение), записало
+  chatgpt основным провайдером в `~/.kvist/config.json` владельца (был OpenCode Go):
+  `user_config.ensure_provider_credentials` (стр. ~741) для chatgpt безусловно вызывает
+  `set_provider_secret(LLM_PROVIDER_KEY, "chatgpt")`. Ошибка была до этой работы; конфиг ведущий не читал и
+  не правил (hard rule) — владельцу сообщено, как вернуть (`/provider` → OpenCode Go). По согласию владельца —
+  задача **T15** (haiku, effort medium): круг 1 — сабагент правильно остановился: `/provider`, мастер и
+  `--provider` идут одним `build_agent(provider_override=…)` → `ensure_provider_credentials`, развести их можно
+  только в `main.py` (сейчас его правит T9). План: после слияния T9 — `bo/t15` на свежий experimental,
+  разрешить `main.py`: `ensure_provider_credentials(..., save_selection=False)`, `True` только у явного выбора;
+  проверить и второй писатель `kernel/ssh/credentials.py:89`.
 - Инцидент 2: лимит аккаунта сработал во время волны 2 (T6, T7 остановлены посреди работы);
   после сброса возобновлены с места остановки.
 
@@ -273,7 +283,7 @@ edad255, d45484c, c3c1626, 8ee2fd4, 4325243, 326c4e1.
 | T6 | b | исполнители (запуск со сдвигом, статус, выбывание) | `kernel/bestof/executors.py`, `kernel/bestof/styles.py`, тесты | T1 T2 T3 | merged (2 круга) |
 | T7 | c | council + проводка команд-ходов | `kernel/bestof/council.py`, `kernel/prompts/bestof/*`, `kernel/protocol/event_stdio.py`, `kernel/protocol/slash_commands.py`, `kernel/protocol/core_manifest.py`, тесты | T2 T3 | merged (2 круга) |
 | T8 | b | судья, прогон best-of, вердикт, принятие, `/best-of` | `kernel/bestof/run.py`, `kernel/bestof/judge.py`, `kernel/prompts/system/judge_prompt.txt`, `kernel/protocol/protocol.py`, `kernel/protocol/parser.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_runtime.py`, `event_stdio.py`, `slash_commands.py`, тесты | T5 T6 T7 | merged (3 круга) |
-| T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | todo |
+| T9 | b | предложение режима основным агентом | `protocol.py`, `parser.py`, `native_tools.py`, `agent_runtime.py`, ролевые промпты, `kernel/bestof/offer.py`, тесты | T8 | merged (2 круга) |
 | T10 | d2 | аудит кэша anthropic, текстовый режим | `kernel/llm/llm_clients.py`, `kernel/agent/agent_model.py`, `kernel/agent/agent_context.py`, тесты | T5 | merged (1 круг) |
 | T11 | d1 | thinking с подписью по всей цепочке | `kernel/llm/llm_clients.py`, `kernel/llm/anthropic_wire.py`, `kernel/agent/native_tools.py`, `kernel/agent/agent_model.py`, `kernel/session/agent_logging.py`, `kernel/session-rs` (если нужно), тесты | T9 T10 | todo |
 | T12 | e2 | pixel gui: те же экраны | `frontends/gui/tauri/ui/**`, `frontends/gui/tauri/tests/**`, README | T4 T2 | merged `7a573a5` (2 круга) |
@@ -395,6 +405,18 @@ T10 (оба `agent_model.py`) не идут вместе — T10 уходит в
 в фазе захвата, пока слой виден (диалоги, настройки и обзор сохраняют свой Esc) — паузы хода нет
 (проверено вручную посреди прогона на mock); фон слоя по правилу `.feed-wrap` с `--glass`. node 58/58.
 Осталось (принято): `:has()` в WebKitGTK окна Tauri не проверен — в ручные проверки.
+
+### T9 — предложение best-of основным агентом
+**Круг 1** (коммит `f9f5c8d`, 14 файлов, +1058/−9; 71 тест; полный набор 5700 passed). Действие `offer_best_of
+{reason, count?}`, один раз за прогон, до первой правки; вопрос без внутренних терминов, «примерно в N+1 раз
+дороже», «≈» сумма только из измеренных итогов сессии; согласие → в stdio-multi следующим ходом `/best-of N
+<текст человека>`; отказ/закрытие — заметка модели. Флаг `bestof_follow_up` ставит только транспорт, который
+умеет запустить следующий ход. Процесс: одна правка python-скриптом — нарушение hard rule (сообщил сам).
+Доработка: подпись в `call_labels.py`, хук в цикле классики (`main.py`). Отклонено: «продолжай» как задача,
+грубое среднее (подписано «≈»), preflight без кэша, флаг атрибутом, имя `_reject_plan_misuse`.
+**Круг 2** (коммит `21306ef`; 5705 passed): подпись + тест; `run_follow_up_turn` в классике, хук в `main.py` после
+успешного хода + 4 теста; UI_API — где предложение есть. Остаток: сам вызов хука в цикле `main.py` без
+PTY-теста — в ручные проверки. Принято.
 
 ### T13 — остальные фронтенды
 **Круг 1** (коммит `52763a1`, 43 файла, +1403/−35; Ink 505/505 + typecheck, VS Code 98/98 + typecheck, OpenCode
@@ -640,6 +662,8 @@ T7 `2ea0a5d`, T10 `de412ba`. В работе: T8 (от `de412ba`) и T13 (от `
 
 | # | что | результат |
 |---|---|---|
+| 1 | best-of 2 (chatgpt, gpt-6.1-sol, effort high), временный репозиторий: исправить `average()` + тест | `tool_mode native/probe_ok`; 2 исполнителя (senior-dev, minimalist), сдвиг старта сработал (e2 стартовал после первого ответа e1, 19.3 с); **кэш между исполнителями**: первый вызов e2 — `cache_read_tokens` 2048 из 22 962 (общий префикс от e1); дальше на каждом шаге ~80–90 % входа из кэша (e1: 169 728 из 196 397 за 8 шагов); проверяющий: `set_check` → у обоих `passed` (3 теста); вердикт — победитель e1, причина; диалог решения → `accept` → ровно +1 коммит `338c779` (только `calc.py`, `test_calc.py`), worktree и ветки удалены; правка `.gitignore`, которую Kvist делает сам при старте, осталась незакоммиченной (D-09). **Выбывания не было** — оба варианта честные и зелёные; выбывание проверено только тестами. 83 с. |
+| 2 | council (тот же репозиторий): «ValueError или None на пустом списке?» | 4 участника, 4 карточки (29–33 с: сдвиг старта сработал), 4 возражения с адресатами (52–55 с), вердикт выбрал `maintenance`, `decision` — текст его карточки, `final` — Markdown с карточками и возражениями, `command_result ok`. Все четыре угла пришли к одному решению (вопрос простой) — «против» нет. **Находка**: вызов выбора просит JSON-режим, chatgpt его отвергает, откат на обычный вызов (`_create_json_completion`, было до этой работы) показывается человеку как событие `error` «Provider rejected JSON mode…» — в долг для финального отчёта. 79 с. |
 
 ## 10. Открытые вопросы
 

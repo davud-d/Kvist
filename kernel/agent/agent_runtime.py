@@ -96,6 +96,7 @@ from kernel.agent.role_router import has_change_verb, has_deferred_write_marker,
 from kernel.agent.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 from kernel.agent.background_jobs import UiJobListener
 from kernel.agent.agent_tools import AGENT_TOOL_ACTIONS, memory_prompt_section, run_agent_tool
+from kernel.bestof import offer as bestof_offer
 from kernel.bestof.judge import JUDGE_ACTIONS, JUDGE_ROLE, run_judge_action
 from kernel.plugins.resources import CleanupReport, Owner, StopOutcome
 from kernel.agent.task_control import PAUSED
@@ -850,7 +851,7 @@ def _native_tool_defs(self, role: str) -> list[dict[str, Any]]:
         # its questions go through the main agent.
         tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user", "wait", "schedule", "feedback")]
     tools.extend(self.skills.tool_definitions())
-    return plan_mode.tools_for_run(tools, self)
+    return bestof_offer.tools_for_run(plan_mode.tools_for_run(tools, self), self)
 
 
 def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
@@ -1420,6 +1421,8 @@ def _run_one_action(
         return _finish_with_verdict(self, user_goal, step, command)
     if command.action.type in plan_mode.PLAN_ACTIONS:
         return _run_plan_action(self, step, command)
+    if command.action.type == bestof_offer.ACTION:
+        return _run_best_of_offer(self, step, command)
     return _execute_action(self, user_goal, step, command)
 
 
@@ -1474,6 +1477,15 @@ def _run_plan_action(self, step: int, command: AgentCommand) -> _ActionOutcome:
         self._state.finished_incomplete = True
         message = result.final_message or plan_mode.ended_message(self._state, str(command.action.args.get("plan", "")))
         return _ActionOutcome(finished=True, final_message=message)
+    return outcome
+
+
+def _run_best_of_offer(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    """The offer of best-of, outside the filesystem path: a yes ends the turn, a no is a note and the run goes on."""
+    result = bestof_offer.offer_best_of(self, command)
+    outcome = _finish_action(self, step, command, result.feedback)
+    if result.ended:
+        return _ActionOutcome(finished=True, final_message=result.final_message)
     return outcome
 
 
@@ -1536,9 +1548,10 @@ def _reject_before_execution(self, step: int, command: AgentCommand) -> bool:
 
 
 def _reject_plan_misuse(self, step: int, command: AgentCommand) -> bool:
-    if command.action.type not in plan_mode.PLAN_ACTIONS:
-        return False
-    reason = plan_mode.rejection_reason(self, command)
+    if command.action.type in plan_mode.PLAN_ACTIONS:
+        reason = plan_mode.rejection_reason(self, command)
+    else:
+        reason = bestof_offer.rejection_reason(self, command)
     if not reason:
         return False
     self._register_feedback(step, command, {"ok": False, "action_type": command.action.type, "error": reason})

@@ -198,6 +198,16 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         {"reason": {"type": "string", "description": "One or two sentences, in the person's language: why a plan helps here."}},
         ("reason",),
     ),
+    "offer_best_of": ToolSpec(
+        "Ask the person whether to run best-of: several independent attempts at their task, each in its own copy "
+        "of the project, and the best one kept after a check. Shown to them with your reason. Nothing starts "
+        "without their yes; it costs about count + 1 ordinary runs.",
+        {
+            "reason": {"type": "string", "description": "One or two sentences, in the person's language: why one wrong solution would be costly here."},
+            "count": {"type": "integer", "minimum": 2, "maximum": 6, "description": "Attempts to run; 4 when omitted."},
+        },
+        ("reason",),
+    ),
     "propose_plan": ToolSpec(
         "Show the person your plan for their decision. Only in plan mode, after exploring read-only.",
         {"plan": {"type": "string", "description": "Short Markdown: goal, key changes, how you will verify, assumptions."}},

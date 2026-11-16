@@ -12,6 +12,13 @@ def test_labels_name_what_the_call_touches_in_the_response_language():
     assert call_label("git_status", {}, "ru") == "смотрит git status"
 
 
+def test_the_best_of_offer_has_a_label_in_both_languages():
+    args = {"reason": "Two designs fit.", "count": 3}
+
+    assert call_label("offer_best_of", args, "ru") == "предлагает запустить best-of"
+    assert call_label("offer_best_of", args, "en") == "offers to run best-of"
+
+
 def test_shell_label_is_the_model_purpose_or_the_command():
     assert call_label("run_shell", {"command": ["pytest", "-q"]}, "ru", purpose="гоняю тесты парсера") == "гоняю тесты парсера"
     assert call_label("run_shell", {"command": ["pytest", "-q"]}, "ru") == "запускает pytest -q"

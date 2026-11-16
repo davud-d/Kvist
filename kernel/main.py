@@ -806,7 +806,7 @@ from kernel.context.system_context import ensure_workspace_instructions
 from kernel.plugins.bundled import sync_bundled
 from kernel.plugins.registry import SkillRegistry
 from kernel.protocol.ui import AgentUI
-from bestof_turns import run_turn_goal
+from bestof_turns import run_follow_up_turn, run_turn_goal
 from terminal_banner import SetupCancelled, TerminalBannerUI, ctrl_c_stops_setup
 from window_title import pop_window_title, push_window_title, set_window_title
 from terminal_image import print_exit_logo
@@ -5330,6 +5330,9 @@ def main() -> None:
     # Turns finished in this process. Drives the prompt-length gate; the
     # persisted session history must not be used for it.
     completed_turns = 0
+    # This loop starts the best-of turn the person agreed to right after the turn that offered it
+    # (run_follow_up_turn below), so the model may offer it here.
+    agent.bestof_follow_up = True
     try:
         startup_resume = bool(args.resume)
         push_window_title()
@@ -6429,6 +6432,7 @@ Support:
             completed_turns += 1
             if verbose:
                 print(f"\n[Final Answer]\n{sanitize_display_text(result)}")
+            run_follow_up_turn(agent, console, interactive_screen)
     except KeyboardInterrupt:
         save_session_for_shutdown(agent)
         interrupted = True

@@ -867,6 +867,40 @@ person decides what to do with the result. The stream is a turn's, with the `com
   session's history and no checkpoint, only the turn does.
 - As for any command, a `command` sent while a turn runs is refused at once; a goal line is queued as a goal is.
 
+**The model offers best-of (`offer_best_of`).** Typing `/best-of` is one way in; the other is the main agent
+itself. When a task has clearly different solutions and a wrong one would be expensive (a core design, a public
+interface, a migration of stored data), the model asks the person before its first change, once per run. Nothing
+starts without a yes. It is offered only where the loop starts the turn that follows: `--frontend stdio-multi` and
+the classic terminal (ACP and the single-turn stdio do not offer it), in the roles that change files, in a git repository
+where best-of can start, in an interactive run, and not in an executor, in the review, or for a turn that is not the
+person's own message (a wake-up, a resume).
+
+```
+>>> {"type": "input_request", "request_id": "…", "kind": "choice", "title": "<reason>\nBest-of mode: run 4 independent attempts at the task in parallel, each in its own copy of the project, and keep the best one after a check. Your files do not change until you accept a result.\nRoughly 5 times the cost of an ordinary run: 4 attempts and a check. That is ≈ $1.50 by the average of this session's past turns.", "options": [{"value": "best_of", "label": "Start best-of (4)"}, {"value": "go", "label": "Ordinary run"}], …}
+<<< {"request_id": "…", "value": "best_of"}
+>>> {"type": "final", "message": "Starting best-of: 4 attempts at your task. The result will wait for your decision.", "outcome": "done", …}
+>>> {"type": "turn_end"}
+>>> …the events of a `best-of` turn, as above…
+>>> {"type": "turn_end"}
+>>> {"type": "command_result", "name": "best-of", "ok": true, …}
+```
+
+- **The dialog** is an ordinary `input_request` of `kind: "choice"` (no new `purpose`, no new event): the model's
+  reason first, then what will happen, then the cost, in the language of the request. The cost is "about N + 1
+  times an ordinary run" (N attempts and the check). The sentence with `≈` is added only when the session has
+  measured turns (from its usage totals, §7): the average cost of a turn of this session (money when every priced
+  call had a price, tokens otherwise) times N + 1. Before the second message of a session there is only the multiple.
+  N is the model's `count` (2 to 6, default 4). The answers are `best_of` and `go`; a closed or unanswered dialog
+  counts as `go`.
+- **A yes** ends the turn that offered it with a short `final` and `turn_end`, with no file touched. The core then
+  starts the next turn by itself, as if `/best-of N <task>` had been typed: the task is the person's own message of
+  the offering turn, not the model's summary of it, and the turn is journaled with that typed text. Its events,
+  `turn_end` and `command_result` are those of the `best-of` command above. A message the person queued meanwhile
+  runs after it.
+- **A no** is a note to the model: it does the task itself, and does not offer again in that run. No `command_result`
+  follows, since no command ran.
+- Nothing changes for a frontend: it needs no new message or event, and a run without an offer is as before.
+
 A `session` or `new` command that changed the active session also emits a
 `session` event before its `command_result`, with `closed`/`closed_notice` when
 the target is closed.
