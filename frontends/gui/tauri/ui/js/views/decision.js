@@ -11,6 +11,9 @@ const TEST_WORDS = { unknown: "testsUnknown", running: "testsRunning", passed: "
 const ACTION_WORDS = { accept: "actionAccept", diff: "actionDiff", other: "actionOther", discard: "actionDiscard" };
 const ACTION_LOOK = { accept: "primary", discard: "danger" };
 
+/** Accept looks like the main button only while it is what the dialog opens on (a winner whose tests fail is not). */
+const actionClass = (action, decision) => `btn ${action === "accept" && decision.first !== "accept" ? "" : (ACTION_LOOK[action] ?? "")}${action === decision.first ? " default" : ""}`;
+
 const testsText = (tests) => tests.summary || w(TEST_WORDS[tests.state]);
 const sizeText = (diff) => `+${diff.added} −${diff.removed} · ${diff.files} ${w("files")}`;
 
@@ -37,10 +40,18 @@ function table(arena, decision, repaint) {
       h("td", { class: "vt-note" }, row.note),
     ),
   );
-  const winner = verdict.rows.find((row) => row.id === verdict.winner);
+  const winner = verdict.rows.find((row) => verdict.winner && row.id === verdict.winner);
+  const failing = winner?.tests.state === "failed";
   return [
     h("table", { class: "verdict-table" }, h("thead", {}, head), h("tbody", {}, rows)),
-    winner ? h("div", { class: "vt-winner" }, h("b", {}, `${w("winner")}: `), winner.style || winner.id, verdict.reason ? h("span", { class: "dim" }, ` — ${verdict.reason}`) : null) : verdict.reason ? h("div", { class: "dim" }, verdict.reason) : null,
+    h(
+      "div",
+      { class: "vt-winner" },
+      h("b", {}, `${w("winner")}: `),
+      winner ? winner.style || winner.id : w("noWinner"),
+      failing ? h("span", { class: "dim" }, ` · ${w("winnerFailing")}`) : null,
+      verdict.reason ? h("span", { class: "dim" }, ` — ${verdict.reason}`) : null,
+    ),
   ];
 }
 
@@ -80,7 +91,7 @@ export function decisionDialog(agent, request, decision) {
     fill(
       buttons,
       toggle,
-      decision.actions.map((action) => h("button", { class: `btn ${ACTION_LOOK[action] ?? ""}`, type: "button", onclick: () => reply(action) }, w(ACTION_WORDS[action]))),
+      decision.actions.map((action) => h("button", { class: actionClass(action, decision), type: "button", onclick: () => reply(action) }, w(ACTION_WORDS[action]))),
     );
   }
   toggle.addEventListener("click", () => {
@@ -90,7 +101,7 @@ export function decisionDialog(agent, request, decision) {
   repaint();
 
   return {
-    focus: ".btn.primary",
+    focus: ".btn.default",
     title: w("decisionTitle"),
     tone: "bestof",
     content: [body, buttons],

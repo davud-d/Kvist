@@ -280,6 +280,8 @@ export function noteRequest(agent, ev) {
   if (ev.purpose !== DECISION_PURPOSE || ev.kind !== "choice" || text(ev.run_id) !== arena.runId) return;
   const offered = list(ev.options).map((option) => option?.value);
   const actions = DECISION_ACTIONS.filter((action) => offered.includes(action));
+  // The core puts the safe choice first (accept for a sound winner, discard when there is none): the dialog opens on it.
+  const first = offered.find((value) => actions.includes(value)) ?? actions[0];
   if (!actions.length || !text(ev.request_id)) return;
   const fresh = arena.diffFresh;
   arena.diffFresh = false;
@@ -287,6 +289,7 @@ export function noteRequest(agent, ev) {
   arena.decision = {
     requestId: ev.request_id,
     actions,
+    first,
     // The row the person is on: the winner's to begin with.
     row: Math.max(0, winner),
     // A patch that has just arrived is what the core asked again for; show it once.

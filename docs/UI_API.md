@@ -818,8 +818,10 @@ person decides what to do with the result. The stream is a turn's, with the `com
 - **The review.** The steps of the review (`step`, `action_result`) stream like any turn's; the review never sends
   its own `final`, and no `route` event: the only `final` is the turn's, after the decision. The core checks the
   verdict against what the executors really left, so `style`, `tests` and `diff` of every `bestof_verdict` row are
-  the core's facts, and only `outcome` and `note` are the reviewer's words. The winner is always an executor that
-  finished and changed something. The order of the review is fixed: cheating first (deleted or skipped tests,
+  the core's facts, and only `outcome` and `note` are the reviewer's words. The winner is an executor that
+  finished and changed something, or there is none: when no executor solved the task the check says so, the
+  `bestof_verdict` has `winner: ""` and no row with `outcome` `winner`. A winner whose `tests.state` is `failed` is
+  named only when every executor left in the comparison fails too. The order of the review is fixed: cheating first (deleted or skipped tests,
   weakened asserts, stubs, edits unrelated to the task), then the project's tests, then quality of the
   finalists' full diffs.
 - **The decision dialog** is an `input_request` of `kind: "choice"` with `purpose: "bestof_decision"` and the run's
@@ -835,6 +837,14 @@ person decides what to do with the result. The stream is a turn's, with the `com
   | `pick:<executor_id>` | takes that finalist at once (a frontend that lists the finalists itself may answer this to the first dialog); an id that is not a finalist returns to the question with a note |
   | `discard` | removes the executors' worktrees, branches and the run's folder; the person's files and branch are not touched; `bestof_finished` `discarded` |
   | `null` (the dialog was closed, or there is nobody to ask) | the run is **postponed**: `bestof_finished` `pending`, and the `final` says how to decide later |
+
+  The choices depend on the verdict, and the **first one is the safe default** (a frontend opens on it): with a winner
+  whose tests passed or never ran it is `accept`; with a winner whose `tests.state` is `failed` it is `diff`, and `accept` is
+  still offered, labelled as accepting despite failing tests; with **no winner** the choices are `discard`, `diff` and `other`
+  only (in that order), and `accept` is not offered: an `accept` answered anyway takes nothing and asks the same question
+  again with a note. With no winner `diff` without an id shows the first result that changed something, and `other` / `pick:<id>` choose by hand among every
+  result that changed something (not only among finalists). The `body` then says "none" for the winner, and for a
+  failing winner it carries a "Warning" line. A result chosen by hand with no winner is committed without the reviewer's reason.
 
   A frontend that does not know the dialog shows it as the ordinary `choice` it is (§7). A UI of the core that
   has no `ask_decision` is asked with `ask_choice` over the same options.
@@ -870,7 +880,7 @@ person decides what to do with the result. The stream is a turn's, with the `com
 - **`cancel` or a pause** during the run stops every executor (`bestof_status` `stopped`), marks the run
   `cancelled`, sends `bestof_finished` `cancelled`, and the turn ends with `final.outcome` `incomplete` and
   `command_result` `ok:false` with `effects.stopped: true`. What the executors did stays: `/best-of diff e1`
-  shows it and `/best-of discard` removes it. A review that ends without a verdict (it found nobody who qualifies)
+  shows it and `/best-of discard` removes it. A review that ends without a verdict (the reviewer stopped with plain text; "nobody qualifies" is a verdict with no winner)
   leaves the run `pending` with `bestof_finished` `pending`, `ok:false`, and the executors' results in the `final`.
 - The turn is journaled like any turn: `user` with the typed text (`/best-of …`), `bestof_started`, the review's
   steps, `bestof_eliminated`, `bestof_verdict`, `bestof_finished`, `final`, `turn_end`; `bestof_status`,

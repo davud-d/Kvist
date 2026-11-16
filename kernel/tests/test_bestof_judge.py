@@ -566,3 +566,127 @@ def test_an_elimination_in_the_review_stops_the_executor_and_shows_the_person_th
     assert final_states["e2"] == "eliminated"
     assert watching.of("verdict")[0]["rows"][1]["outcome"] == "eliminated"
     assert commits(repo) == [RUN_TASK, "first"]
+
+
+# --- a verdict with no winner, and a winner whose tests fail ----------------------------------------
+
+
+def _checked(agent_factory, repo, monkeypatch, states):
+    """A two-executor pool whose executors were checked with the given ``passed``/``failed`` results."""
+    from kernel.sandbox.executor import ExecutionResult
+
+    seam = CheckSeam(monkeypatch)
+    main, watching, pool, tools = make_pool(agent_factory, repo)
+    assert pool.wait(30)["done"]
+    for executor_id, state in states.items():
+        passed = state == "passed"
+        seam.result = ExecutionResult(ok=passed, action_type="run_shell", data={
+            "command": [seam.MARKER], "returncode": 0 if passed else 1,
+            "stdout": "1 passed\n" if passed else "1 failed\n", "stderr": "", "timed_out": False})
+        pool.check(executor_id, [seam.MARKER])
+    return pool, tools
+
+
+NO_WINNER_ROWS = [{"executor_id": "e1", "outcome": "failed", "note": "does not solve it"},
+                  {"executor_id": "e2", "outcome": "eliminated", "note": "does not solve it"}]
+
+
+def test_a_verdict_may_name_no_winner_when_it_says_why(agent_factory, repo):
+    _, _, pool, tools = make_pool(agent_factory, repo)
+    assert pool.wait(30)["done"]
+
+    feedback = verdict_of(tools, NO_WINNER_ROWS, winner=None, reason="  The task cannot be done.  ")
+
+    assert feedback["ok"] is True and feedback["data"]["winner"] is None
+    assert tools.verdict.winner == "" and tools.verdict.reason == "The task cannot be done."
+    assert [row["outcome"] for row in tools.verdict.rows] == ["failed", "eliminated"]
+
+
+def test_an_empty_string_winner_means_no_winner_too(agent_factory, repo):
+    _, _, pool, tools = make_pool(agent_factory, repo)
+    assert pool.wait(30)["done"]
+
+    assert verdict_of(tools, NO_WINNER_ROWS, winner="", reason="Nothing works.")["ok"] is True
+    assert tools.verdict.winner == ""
+
+
+def test_no_winner_with_a_winner_row_or_without_a_reason_is_refused(agent_factory, repo):
+    _, _, pool, tools = make_pool(agent_factory, repo)
+    assert pool.wait(30)["done"]
+
+    with_row = verdict_of(tools, good_rows(), winner=None, reason="Nothing works.")
+    no_reason = verdict_of(tools, NO_WINNER_ROWS, winner=None, reason="   ")
+
+    assert with_row["ok"] is False and "e1 has outcome winner" in with_row["error"]
+    assert no_reason["ok"] is False and "needs a reason" in no_reason["error"]
+    assert tools.verdict is None
+
+
+def test_a_finalist_of_a_verdict_without_a_winner_must_still_have_finished_with_changes(agent_factory, repo):
+    _, _, pool, tools = make_pool(agent_factory, repo)
+    assert pool.wait(30)["done"]
+    pool.eliminate("e2", "out")
+
+    feedback = verdict_of(tools, [{"executor_id": "e1", "outcome": "eliminated"},
+                                  {"executor_id": "e2", "outcome": "finalist"}], winner=None, reason="Nothing works.")
+
+    assert feedback["ok"] is False and "e2 is eliminated, not finished" in feedback["error"]
+
+
+def test_a_winner_with_failing_tests_is_refused_while_a_finalist_passes(agent_factory, repo, monkeypatch):
+    _, tools = _checked(agent_factory, repo, monkeypatch, {"e1": "failed", "e2": "passed"})
+
+    feedback = verdict_of(tools, good_rows())
+
+    assert feedback["ok"] is False
+    assert "tests of e1 fail while those of e2 pass" in feedback["error"]
+    assert tools.verdict is None
+
+
+def test_a_winner_with_failing_tests_is_allowed_when_every_finalist_fails_too(agent_factory, repo, monkeypatch):
+    _, tools = _checked(agent_factory, repo, monkeypatch, {"e1": "failed", "e2": "failed"})
+
+    assert verdict_of(tools, good_rows())["ok"] is True
+    assert tools.verdict.winner == "e1" and tools.verdict.rows[0]["tests"]["state"] == "failed"
+
+
+def test_a_passing_rival_that_the_reviewer_eliminated_does_not_block_a_failing_winner(agent_factory, repo, monkeypatch):
+    # A green run on a diff that cheats proves nothing, so the cheater is not "left in the comparison".
+    _, tools = _checked(agent_factory, repo, monkeypatch, {"e1": "failed", "e2": "passed"})
+
+    assert verdict_of(tools, good_rows(e2="eliminated"))["ok"] is True
+
+
+def test_a_passing_winner_beats_a_failing_finalist_without_remark(agent_factory, repo, monkeypatch):
+    _, tools = _checked(agent_factory, repo, monkeypatch, {"e1": "passed", "e2": "failed"})
+
+    assert verdict_of(tools, good_rows())["ok"] is True
+
+
+def test_the_parser_and_the_native_schema_take_a_null_winner_and_nothing_else_that_is_not_text():
+    arguments = {"rows": NO_WINNER_ROWS, "winner": None, "reason": "Nothing works."}
+    validate_action_args("verdict", arguments)
+    with pytest.raises(CommandValidationError):
+        validate_action_args("verdict", {**arguments, "winner": 3})
+    schema = tool_definition("verdict")["function"]["parameters"]
+    assert "null" in schema["properties"]["winner"]["type"]
+
+
+def test_a_null_winner_survives_the_tool_call_where_every_other_null_means_absent():
+    arguments = {"rows": NO_WINNER_ROWS, "winner": None, "reason": "Nothing works."}
+
+    assert build("verdict", arguments).action.args == arguments
+    # Leaving the key out is still an error: the reviewer has to say "none" in so many words.
+    with pytest.raises(CommandValidationError, match="Missing required fields: winner"):
+        build("verdict", {"rows": NO_WINNER_ROWS, "reason": "Nothing works."})
+
+
+def test_the_prompt_and_the_task_tell_the_reviewer_that_no_winner_is_a_normal_outcome():
+    from kernel.bestof.run import judge_goal
+
+    prompt = _load_role_prompt("judge")
+    goal = judge_goal(RUN_TASK, [("e1", "senior-dev"), ("e2", "minimalist")], "en")
+
+    assert "do not invent a winner" in prompt and "winner is null" in prompt
+    assert "a normal outcome" in prompt and "a normal outcome" in goal and "winner is null" in goal
+    assert "fails them too" in goal and "fails them too" in prompt

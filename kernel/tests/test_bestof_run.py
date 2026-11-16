@@ -1117,3 +1117,119 @@ def test_a_second_run_while_one_works_is_refused_at_once(repo):
     _answer_dialogs(stdio, ["discard"])
     stdio.result("best-of")
     stdio.finish()
+
+
+# --- no winner, and a winner whose tests fail ----------------------------------------------------------
+
+NO_WINNER_ROWS = [{"executor_id": "e1", "outcome": "failed", "note": "does not solve it"},
+                  {"executor_id": "e2", "outcome": "eliminated", "note": "does not solve it"}]
+NO_WINNER = verdict_call(winner=None, rows=NO_WINNER_ROWS, reason="The task cannot be done.")
+
+
+def _checked_run(monkeypatch, passed: bool) -> str:
+    """Make every executor's check come out as ``passed`` or failed; returns the judge's set_check call."""
+    from kernel.sandbox.executor import ExecutionResult
+    from kernel.tests.test_bestof_executors import CheckSeam
+
+    seam = CheckSeam(monkeypatch)
+    seam.result = ExecutionResult(ok=passed, action_type="run_shell", data={
+        "command": [seam.MARKER], "returncode": 0 if passed else 1, "stdout": "2 passed\n" if passed else "2 failed\n",
+        "stderr": "", "timed_out": False})
+    return call("executor", {"op": "set_check", "command": [seam.MARKER]})
+
+
+def _check_all() -> list[str]:
+    """After the wait: check each executor now, so one that ended before set_check was called is checked too."""
+    return [call("executor", {"op": "check", "executor_id": executor_id}) for executor_id in ("e1", "e2")]
+
+
+def test_with_no_winner_the_question_opens_on_discarding_and_accepting_is_not_offered(agent_factory, repo):
+    main, watching = make_main(agent_factory, ReviewClient({"judge": [WAIT, NO_WINNER]}), answers=["discard"])
+
+    result = best_of(main, f"2 {RUN_TASK}")
+
+    verdict, decision = watching.of("verdict")[0], watching.of("decision")[0]
+    assert verdict["winner"] == "" and verdict["reason"] == "The task cannot be done."
+    assert [row["outcome"] for row in verdict["rows"]] == ["failed", "eliminated"]
+    assert [value for value, _label in decision["options"]] == ["discard", "diff", "other"]
+    assert "**Winner:** none: no result solves the task" in decision["body"]
+    assert "The task cannot be done." in decision["body"]
+    assert result.effects["outcome"] == "discarded" and commits(repo) == ["first"]
+    assert worktree_list(repo) == [f"worktree {repo.resolve()}"]
+
+
+def test_an_accept_answered_to_a_run_with_no_winner_takes_nothing_and_asks_again(agent_factory, repo):
+    main, watching = make_main(agent_factory, ReviewClient({"judge": [WAIT, NO_WINNER]}),
+                               answers=["accept", "discard"])
+
+    best_of(main, f"2 {RUN_TASK}")
+
+    first, second = watching.of("decision")
+    assert "no winner to accept" in second["body"] and second["body"].endswith(first["body"])
+    assert commits(repo) == ["first"]
+
+
+def test_with_no_winner_the_person_may_look_at_a_diff_and_choose_a_result_by_hand(agent_factory, repo):
+    main, watching = make_main(agent_factory, ReviewClient({"judge": [WAIT, NO_WINNER]}),
+                               answers=["diff", "diff:e2", "other", "pick:e2"])
+
+    result = best_of(main, f"2 {RUN_TASK}")
+
+    assert [(item["executor_id"]) for item in watching.of("diff")] == ["e1", "e2"]
+    other = watching.of("decision")[3]
+    assert [value for value, _label in other["options"]] == ["pick:e1", "pick:e2", "back"]
+    assert result.effects["outcome"] == "accepted" and result.effects["executor_id"] == "e2"
+    assert (repo / "a.txt").read_text(encoding="utf-8") == "hi!\n"
+    # The reviewer's reason says why nothing was good enough, which is not why this one was taken.
+    assert "cannot be done" not in git(repo, "log", "-1", "--format=%B")
+
+
+def test_a_run_with_no_winner_waits_when_the_dialog_is_closed_and_the_person_may_still_pick_by_id(agent_factory, repo):
+    main, watching = make_main(agent_factory, ReviewClient({"judge": [WAIT, NO_WINNER]}), answers=[None])
+
+    best_of(main, f"2 {RUN_TASK}")
+    plain = best_of(main, "accept")
+    by_id = best_of(main, "accept e1")
+
+    assert not plain.ok and "no chosen winner" in plain.final
+    assert by_id.ok and by_id.effects["executor_id"] == "e1"
+
+
+def test_a_winner_whose_tests_fail_is_marked_and_the_question_opens_on_the_diff_not_on_accept(
+        agent_factory, repo, monkeypatch):
+    check = _checked_run(monkeypatch, passed=False)
+    main, watching = make_main(agent_factory, ReviewClient({"judge": [check, WAIT, *_check_all(), verdict_call()]}),
+                               answers=["accept"])
+
+    result = best_of(main, f"2 {RUN_TASK}")
+
+    verdict, decision = watching.of("verdict")[0], watching.of("decision")[0]
+    assert verdict["winner"] == "e1" and verdict["rows"][0]["tests"]["state"] == "failed"
+    assert [value for value, _label in decision["options"]] == ["diff", "accept", "other", "discard"]
+    assert dict(decision["options"])["accept"] == "Accept e1 anyway (its tests fail)"
+    assert "**Warning:** Its tests fail, and so do those of every other result" in decision["body"]
+    # Accepting is still the person's right.
+    assert result.effects["outcome"] == "accepted"
+
+
+def test_a_winner_whose_tests_pass_opens_on_accept_with_no_warning(agent_factory, repo, monkeypatch):
+    check = _checked_run(monkeypatch, passed=True)
+    main, watching = make_main(agent_factory, ReviewClient({"judge": [check, WAIT, *_check_all(), verdict_call()]}),
+                               answers=["discard"])
+
+    best_of(main, f"2 {RUN_TASK}")
+
+    decision = watching.of("decision")[0]
+    assert [value for value, _label in decision["options"]] == ["accept", "diff", "other", "discard"]
+    assert "Warning" not in decision["body"]
+
+
+def test_the_table_for_no_winner_and_for_a_failing_winner_is_in_the_persons_language():
+    rows = [{"executor_id": "e1", "style": "senior-dev", "outcome": "failed", "tests": {"state": "failed"},
+             "diff": {"files": 1, "added": 1, "removed": 0}, "note": ""}]
+
+    none = verdict_table({"rows": rows, "winner": "", "reason": "Невыполнимо."}, "ru")
+    failing = verdict_table({"rows": [{**rows[0], "outcome": "winner"}], "winner": "e1", "reason": "Лучший."}, "ru")
+
+    assert "**Победитель:** нет: ни один результат не решает задачу" in none
+    assert "**Внимание:** Его тесты падают" in failing

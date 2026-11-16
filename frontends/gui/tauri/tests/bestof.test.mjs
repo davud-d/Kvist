@@ -467,3 +467,24 @@ test("both languages have the same words, and nothing says who judges", () => {
   assert.equal(EN.bestofTitle, "best-of");
   assert.equal(EN.councilTitle, "council");
 });
+
+// -- no winner, and a winner whose tests fail ---------------------------------------------------------------------
+
+test("the decision opens on the first choice the core offered, whatever order the buttons stand in", () => {
+  const sound = createAgent("a1", "/w");
+  feed(sound, started(), verdict(), decisionRequest());
+  assert.equal(decisionOf(sound, sound.dialogs[0]).first, "accept");
+
+  const failing = createAgent("a2", "/w");
+  feed(failing, started(), verdict(), decisionRequest("q1", "r1", ["diff", "accept", "other", "discard"]));
+  assert.equal(decisionOf(failing, failing.dialogs[0]).first, "diff", "a winner whose tests fail opens on the diff");
+
+  const none = createAgent("a3", "/w");
+  feed(none, started(), { ...verdict(), winner: "" }, decisionRequest("q1", "r1", ["discard", "diff", "other"]));
+  const decision = decisionOf(none, none.dialogs[0]);
+  assert.equal(decision.first, "discard");
+  assert.deepEqual(decision.actions, ["diff", "other", "discard"], "accept is not offered");
+  assert.equal(decision.row, 0, "with no winner the first row");
+  assert.deepEqual(decisionReply(none.bestof.arena, decision, "diff"), { value: "diff:e1" });
+  assert.deepEqual(decisionReply(none.bestof.arena, decision, "other"), { value: "pick:e1" });
+});

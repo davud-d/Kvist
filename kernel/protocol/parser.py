@@ -165,7 +165,10 @@ def build_command(
         return _skill_command(call, resolved, text=text, batch_id=batch_id, plan_step=plan_step, language=language)
     # A model that fills every property of a flat multi-operation schema sends
     # null for the ones this operation does not take; absent and null mean the same.
-    args = {key: value for key, value in (call.arguments or {}).items() if value is not None}
+    # null means absent, except for a verdict's winner: there null is the answer "none", and leaving the key out
+    # is still an error (the reviewer must say it).
+    args = {key: value for key, value in (call.arguments or {}).items()
+            if value is not None or (call.name == "verdict" and key == "winner")}
     purpose = trim_purpose(args.pop(PURPOSE_KEY, "")) if call.name in _PURPOSE_ACTIONS else ""
     validate_action_args(call.name, args)
     return AgentCommand(
@@ -823,7 +826,9 @@ def _validate_executor(args: dict[str, Any]) -> None:
 def _validate_verdict(args: dict[str, Any]) -> None:
     require_keys(args, {"rows", "winner", "reason"})
     require_only_allowed_keys(args, {"rows", "winner", "reason"})
-    require_str(args, "winner")
+    # null is the honest answer when no executor solved the task; "" is read the same way.
+    if args["winner"] is not None:
+        require_str(args, "winner")
     require_str(args, "reason")
     rows = args["rows"]
     if not isinstance(rows, list) or not rows:

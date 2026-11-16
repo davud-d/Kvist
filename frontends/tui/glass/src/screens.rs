@@ -571,8 +571,18 @@ fn draw_table(p: &mut Painter, card: Rect, decision: &Decision, hover: Option<Hi
         y += 1;
     }
     y += 1;
-    let winner = decision.verdict.rows.iter().find(|r| r.id == decision.verdict.winner).map_or(decision.verdict.winner.as_str(), |r| r.style.as_str());
-    p.line(x, y, &vec![span(format!("{}: ", s.decision_winner), DUSK), bold(winner, MOON)]);
+    let winner_row = decision.verdict.rows.iter().find(|r| !decision.verdict.winner.is_empty() && r.id == decision.verdict.winner);
+    let mut winner_line = vec![span(format!("{}: ", s.decision_winner), DUSK)];
+    match winner_row {
+        None => winner_line.push(bold(s.decision_no_winner, ROSEHIP)),
+        Some(row) => {
+            winner_line.push(bold(&row.style, MOON));
+            if row.tests.state == TestState::Failed {
+                winner_line.push(span(format!(" · {}", s.decision_winner_failing), ROSEHIP));
+            }
+        }
+    }
+    p.line(x, y, &winner_line);
     y += 1;
     for line in wrapped(&decision.verdict.reason, MIST, width, 3) {
         p.line(x, y, &line);

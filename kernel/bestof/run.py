@@ -86,7 +86,11 @@ _TEXT: dict[str, tuple[str, str]] = {
     "result_files": ("{files} files, +{added} -{removed}", "файлов: {files}, +{added} -{removed}"),
     "verdict": ("Verdict", "Вердикт"),
     "winner": ("Winner", "Победитель"),
+    "winner_none": ("none: no result solves the task", "нет: ни один результат не решает задачу"),
+    "winner_failing": ("Its tests fail, and so do those of every other result left in the comparison.",
+                       "Его тесты падают, и у всех остальных оставшихся результатов тоже."),
     "reason": ("Reason", "Причина"),
+    "warning": ("Warning", "Внимание"),
     "col_executor": ("Executor", "Исполнитель"),
     "col_style": ("Style", "Стиль"),
     "col_outcome": ("Outcome", "Итог"),
@@ -112,6 +116,11 @@ _TEXT: dict[str, tuple[str, str]] = {
     "option_accept": ("Accept the winner ({id})", "Принять победителя ({id})"),
     "option_diff": ("Show the winner's diff", "Показать diff победителя"),
     "option_other": ("Choose another result", "Выбрать другой результат"),
+    "option_accept_failing": ("Accept {id} anyway (its tests fail)", "Всё равно принять {id} (тесты падают)"),
+    "option_diff_none": ("Look at a result's diff", "Посмотреть diff результата"),
+    "option_other_none": ("Choose a result by hand", "Выбрать результат вручную"),
+    "no_accept": ("There is no winner to accept. Look at the diffs, choose a result by hand, or discard everything.",
+                  "Победителя, которого можно принять, нет. Посмотри diff, выбери результат вручную или отбрось всё."),
     "option_discard": ("Discard everything", "Отбросить всё"),
     "other_title": ("Which result to take?", "Какой результат взять?"),
     "option_back": ("Back", "Назад"),
@@ -280,10 +289,21 @@ def verdict_table(verdict: dict[str, Any], language: str) -> str:
         cells = [row["executor_id"], row["style"], _say(language, f"outcome_{row['outcome']}"),
                  _tests_cell(row["tests"], language), _diff_cell(row["diff"], language), row.get("note") or ""]
         lines.append("| " + " | ".join(_cell(cell) for cell in cells) + " |")
-    winner = next(row for row in verdict["rows"] if row["executor_id"] == verdict["winner"])
-    lines += ["", f"**{_say(language, 'winner')}:** {verdict['winner']} ({winner['style']})", "",
-              f"**{_say(language, 'reason')}:** {verdict['reason']}"]
+    winner = next((row for row in verdict["rows"] if row["executor_id"] == verdict["winner"]), None)
+    if winner is None:
+        lines += ["", f"**{_say(language, 'winner')}:** {_say(language, 'winner_none')}"]
+    else:
+        lines += ["", f"**{_say(language, 'winner')}:** {verdict['winner']} ({winner['style']})"]
+        if failing_winner(verdict):
+            lines += ["", f"**{_say(language, 'warning')}:** {_say(language, 'winner_failing')}"]
+    lines += ["", f"**{_say(language, 'reason')}:** {verdict['reason']}"]
     return "\n".join(lines)
+
+
+def failing_winner(verdict: dict[str, Any]) -> bool:
+    """True when the winner's tests ran and failed (the reviewer may name such a winner only if every rival fails too)."""
+    return any(row["executor_id"] == verdict["winner"] and (row.get("tests") or {}).get("state") == "failed"
+               for row in verdict["rows"])
 
 
 def commit_message(task: str, executor_id: str, style: str, reason: str) -> str:
@@ -396,8 +416,15 @@ class _Run:
         return "\n".join(lines)
 
     def _finalists(self) -> list[str]:
-        """The results the reviewer left in the running (winner included); the person may pick among them."""
-        rows = (self.record.verdict or {}).get("rows") or []
+        """The results the person may pick among: those the reviewer left in the running (winner included).
+
+        With no winner the reviewer left none in the running, and the person chooses by hand among every result
+        that changed something, because that is the whole point of choosing by hand.
+        """
+        verdict = self.record.verdict or {}
+        rows = verdict.get("rows") or []
+        if not verdict.get("winner"):
+            return [row["executor_id"] for row in rows if row["diff"]["files"] > 0]
         return [row["executor_id"] for row in rows if row["outcome"] in ("winner", "finalist")]
 
     # --- the decision -----------------------------------------------------------------
@@ -444,8 +471,7 @@ class _Run:
         """Show the verdict and act on the person's answer; a closed dialog leaves the run pending."""
         verdict = self.record.verdict
         winner = verdict["winner"]
-        options = [("accept", self._say("option_accept", id=winner)), ("diff", self._say("option_diff")),
-                   ("other", self._say("option_other")), ("discard", self._say("option_discard"))]
+        options = self._decision_options(verdict)
         title = self._say("decision_title")
         table = verdict_table(verdict, self.language)
         body = table
@@ -455,12 +481,14 @@ class _Run:
                 return self.postpone()
             action, _, target = answer.partition(":")
             body = table
-            if action == "accept":
+            if action == "accept" and winner:
                 return self.take(winner)
-            if action == "discard":
+            if action == "accept":
+                body = f"{self._say('no_accept')}\n\n{table}"
+            elif action == "discard":
                 return self.discard()
-            if action == "diff":
-                body = self._diff_body(target or winner, table)
+            elif action == "diff":
+                body = self._diff_body(target or winner or next(iter(self._finalists()), ""), table)
             elif action == "pick" and target in self._finalists():
                 return self.take(target)
             elif action == "pick":
@@ -473,8 +501,26 @@ class _Run:
                     return self.take(picked)
                 body = f"{self._say('no_other')}\n\n{table}" if not self._others(winner) else table
 
+    def _decision_options(self, verdict: dict[str, Any]) -> list[tuple[str, str]]:
+        """The question's choices; the first is what a frontend opens on, so it is never ``accept`` unless it is safe.
+
+        A winner whose tests pass opens on accept. A winner whose tests fail opens on looking at the diff, and
+        accepting it says so. With no winner there is nothing to accept: the question opens on discarding.
+        """
+        winner = verdict["winner"]
+        discard = ("discard", self._say("option_discard"))
+        if not winner:
+            return [discard, ("diff", self._say("option_diff_none")), ("other", self._say("option_other_none"))]
+        diff = ("diff", self._say("option_diff"))
+        other = ("other", self._say("option_other"))
+        if failing_winner(verdict):
+            return [diff, ("accept", self._say("option_accept_failing", id=winner)), other, discard]
+        return [("accept", self._say("option_accept", id=winner)), diff, other, discard]
+
     def _diff_body(self, executor_id: str, table: str) -> str:
         """The patch to ask the question over; a result that has none is said so above the table."""
+        if not executor_id:
+            return f"{self._say('no_other')}\n\n{table}"
         try:
             return self.show_diff(executor_id)
         except BestOfRefused as refused:
@@ -518,7 +564,9 @@ class _Run:
         if self.main.control.interrupted():
             return self.postpone()
         style = self._style(executor_id)
-        reason = (self.record.verdict or {}).get("reason", "")
+        verdict = self.record.verdict or {}
+        # With no winner the reason explains why nothing was good enough, which is not why this one was taken.
+        reason = verdict.get("reason", "") if verdict.get("winner") else ""
         message = commit_message(self.record.task, executor_id, style, reason)
         try:
             taken = worktrees.accept(self.run, executor_id, message)
@@ -609,8 +657,10 @@ def judge_goal(task: str, executors: list[tuple[str, str]], language: str) -> st
         "Eliminate an executor as soon as you know it is out (executor eliminate, with the reason): that stops it "
         "and saves the person its cost. Use executor wait instead of polling; it makes no model requests.\n\n"
         "End with verdict: one row per executor, exactly one winner that finished and changed something, and a "
-        "reason of two or three sentences. If no executor qualifies, end with plain text that says what you found "
-        "instead of choosing one."
+        "reason of two or three sentences. If no executor solves the task, that is a normal outcome: end with "
+        "verdict whose winner is null, no winner row, and a reason that says what you found, instead of choosing "
+        "the least bad one. A winner whose tests fail is allowed only when every executor still in the comparison "
+        "fails them too."
     )
 
 

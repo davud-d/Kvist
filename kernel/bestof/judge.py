@@ -35,7 +35,7 @@ class Verdict:
     """An accepted verdict. ``rows`` carry style, tests and diff taken from the pool, never from the reviewer."""
 
     rows: list[dict[str, Any]]
-    winner: str
+    winner: str  # "" when the reviewer found no result that solves the task
     reason: str
 
 
@@ -109,7 +109,7 @@ class JudgeTools:
     def _accept_verdict(self, args: dict[str, Any]) -> dict[str, Any]:
         verdict = self._check_verdict(args)
         self.verdict = verdict
-        return {"accepted": True, "winner": verdict.winner,
+        return {"accepted": True, "winner": verdict.winner or None,
                 "note": "The review is over; the person decides next. Do not call anything else."}
 
     def _check_verdict(self, args: dict[str, Any]) -> Verdict:
@@ -129,15 +129,44 @@ class JudgeTools:
         for name in known:
             self._require_settled(name)
         winners = [row["executor_id"] for row in rows if row["outcome"] == "winner"]
+        reason = args["reason"].strip()
+        if not args["winner"]:
+            self._check_no_winner(winners, reason)
+            self._require_finalists_finished(rows)
+            return Verdict([self._row(row) for row in rows], "", reason)
         if len(winners) != 1:
             raise JudgeError(f"exactly one row must have outcome winner; {len(winners)} do")
         if winners[0] != args["winner"]:
             raise JudgeError(f"'winner' is {args['winner']} but the winner row is {winners[0]}; they must match")
         self._require_finished_with_changes(winners[0])
+        self._require_finalists_finished(rows)
+        self._require_no_better_finalist(winners[0], rows)
+        return Verdict([self._row(row) for row in rows], winners[0], reason)
+
+    def _require_finalists_finished(self, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             if row["outcome"] == "finalist":
                 self._require_finished_with_changes(row["executor_id"])
-        return Verdict([self._row(row) for row in rows], winners[0], args["reason"].strip())
+
+    def _check_no_winner(self, winners: list[str], reason: str) -> None:
+        """No winner is a verdict like any other, but it must say so in every row and give the person the why."""
+        if winners:
+            raise JudgeError(f"'winner' is null but {', '.join(winners)} has outcome winner; with no winner no row "
+                             "may be a winner")
+        if not reason:
+            raise JudgeError("a verdict without a winner needs a reason: say why no executor solves the task")
+
+    def _require_no_better_finalist(self, winner: str, rows: list[dict[str, Any]]) -> None:
+        """A winner whose tests fail is allowed only when every executor still in the comparison fails too."""
+        if self._pool.get(winner).tests["state"] != pool_states.TESTS_FAILED:
+            return
+        passing = [row["executor_id"] for row in rows if row["outcome"] == "finalist"
+                   and self._pool.get(row["executor_id"]).tests["state"] == pool_states.TESTS_PASSED]
+        if passing:
+            raise JudgeError(f"the tests of {winner} fail while those of {', '.join(passing)} pass; a winner with "
+                             "failing tests is possible only when every executor left in the comparison fails "
+                             "them too. Choose one that passes, or eliminate the passing one with the reason "
+                             "(for example, that it cheats)")
 
     def _require_settled(self, executor_id: str) -> None:
         executor = self._pool.get(executor_id)

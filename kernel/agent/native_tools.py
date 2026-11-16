@@ -434,7 +434,8 @@ ACTION_TOOLS.update({
     "verdict": ToolSpec(
         "End the review with your verdict: one row per executor (outcome winner, finalist, eliminated or failed, "
         "and a note), exactly one winner, and the reason for the choice in two or three sentences in the person's "
-        "language. The runtime checks it against what the executors actually left; if something does not hold, "
+        "language. When no executor solves the task, winner is null, no row is a winner, and the reason says "
+        "why. The runtime checks it against what the executors actually left; if something does not hold, "
         "the answer says what, and you send it again.",
         {
             "rows": {
@@ -450,7 +451,7 @@ ACTION_TOOLS.update({
                     "additionalProperties": False,
                 },
             },
-            "winner": _STRING,
+            "winner": {"type": ["string", "null"], "description": "The winning executor_id, or null for none."},
             "reason": _STRING,
         },
         ("rows", "winner", "reason"),

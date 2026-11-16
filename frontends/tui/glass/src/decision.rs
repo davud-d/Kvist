@@ -76,6 +76,9 @@ impl Decision {
         let verdict = arena.verdict.clone()?;
         let offered: Vec<&str> = event.get("options")?.as_array()?.iter().filter_map(|o| o.get("value")?.as_str()).collect();
         let actions: Vec<Action> = Action::ALL.into_iter().filter(|a| offered.contains(&a.offered_as())).collect();
+        // The core puts the safe choice first (accept for a sound winner, discard when there is none), so the
+        // buttons open on the first one it offered, whatever order they stand in.
+        let first = offered.iter().find_map(|value| Action::ALL.into_iter().find(|a| a.offered_as() == *value));
         if actions.is_empty() || text("request_id").is_none_or(str::is_empty) {
             return None;
         }
@@ -84,7 +87,7 @@ impl Decision {
         let row = verdict.rows.iter().position(|r| r.id == verdict.winner).unwrap_or(0);
         Some(Decision {
             request_id: text("request_id")?.to_string(),
-            action: actions.iter().position(|a| *a == Action::Accept).unwrap_or(0),
+            action: first.and_then(|first| actions.iter().position(|a| *a == first)).unwrap_or(0),
             actions,
             page: if fresh && patch.is_some() { Page::Patch } else { Page::Table },
             verdict,
@@ -182,6 +185,30 @@ mod tests {
         assert_eq!(decision.reply(Action::Other)["value"], "pick:e3");
         assert_eq!(decision.reply(Action::Accept)["value"], "accept", "accepting is always about the winner");
         assert_eq!(decision.cancel(), json!({"request_id": "q1", "value": null}));
+    }
+
+    #[test]
+    fn the_buttons_open_on_the_first_choice_the_core_offered() {
+        let mut arena = arena_with_verdict();
+        let sound = Decision::from_request(&request(&["accept", "diff", "other", "discard"]), &mut arena).unwrap();
+        assert_eq!(sound.actions[sound.action], Action::Accept);
+        let failing = Decision::from_request(&request(&["diff", "accept", "other", "discard"]), &mut arena).unwrap();
+        assert_eq!(failing.actions[failing.action], Action::Diff, "a winner whose tests fail opens on the diff");
+        let none = Decision::from_request(&request(&["discard", "diff", "other"]), &mut arena).unwrap();
+        assert_eq!(none.actions, [Action::Diff, Action::Other, Action::Discard], "accept is not offered");
+        assert_eq!(none.actions[none.action], Action::Discard);
+        assert_eq!(none.accept().unwrap()["value"], "discard", "Enter on a run with no winner discards, it cannot accept");
+    }
+
+    #[test]
+    fn with_no_winner_a_diff_or_a_pick_is_about_the_row_the_person_is_on() {
+        let mut arena = arena_with_verdict();
+        arena.verdict.as_mut().unwrap().winner = String::new();
+        let mut none = Decision::from_request(&request(&["discard", "diff", "other"]), &mut arena).unwrap();
+        assert_eq!(none.row, 0, "no winner row to begin on: the first row");
+        none.step_row(1);
+        assert_eq!(none.reply(Action::Diff)["value"], "diff:e2");
+        assert_eq!(none.reply(Action::Other)["value"], "pick:e2");
     }
 
     #[test]
