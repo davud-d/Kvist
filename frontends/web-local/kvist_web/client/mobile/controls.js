@@ -103,7 +103,8 @@ export function createControls(ctx) {
             closeMenu();
             return ctx.stop();
         }
-        ctx.toast(t('computerOnly'));
+        // A turn command with its question goes out as a message (parseCommand); bare, it has nothing to ask.
+        ctx.toast(COMMANDS.some(command => command.name === name && command.turn) ? t('needsQuestion', `/${name}`) : t('computerOnly'));
         return Promise.resolve();
     }
 

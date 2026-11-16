@@ -321,14 +321,15 @@
     }
 
     runCommand(text) {
-      const name = text.slice(1).trim().split(/\s+/)[0].toLowerCase()
-      const command = this.host.commands().find((entry) => entry.name === name)
+      const [head, ...words] = text.slice(1).trim().split(/\s+/)
+      const command = this.host.commands().find((entry) => entry.name === head.toLowerCase())
       if (!command) return false
       this.input.value = ""
       this.autosize()
       this.updateSend()
       this.closeSuggest()
-      command.run()
+      // What follows the name goes to the commands that take a question (`council`, `best-of`).
+      command.run(words.join(" "))
       return true
     }
 

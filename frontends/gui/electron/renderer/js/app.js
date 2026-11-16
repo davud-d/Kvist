@@ -490,6 +490,29 @@
     }
   }
 
+  // `/council <question>` and `/best-of [N] <task>` are turns that a command starts (UI_API.md §8c): shown as a request,
+  // run in a core of their own that exits with the command's `command_result`; without a question the line is completed.
+  async function startTurnCommand(name, question) {
+    if (state.running) return
+    if (!question) return composer.setText(`/${name} `)
+    if (!(await ensureConfigSafe())) return
+    const text = `/${name} ${question}`
+    showView("thread")
+    thread.addUser(text)
+    thread.markLiveStart()
+    state.startedAt = Date.now()
+    protocol.reset()
+    setRunning(true)
+    timeline.scrollToEnd(true)
+    renderEmpty()
+    void root.kvist.inputHistoryAdd(text).catch(() => {})
+    try {
+      await root.kvist.command(name, question.split(/\s+/), state.workspace, composer.options())
+    } catch (error) {
+      failTask(error.message)
+    }
+  }
+
   function failTask(message) {
     thread.apply({ type: "error", message })
     state.requests = []
@@ -582,6 +605,10 @@
         return
       case "session_title":
         void refreshNavigation()
+        return
+      case "command_result":
+        // A turn's result is its `final`; what is left to say is a command the core refused or a turn that failed.
+        if (!event.ok && !event.effects?.stopped) thread.apply({ type: "notice", level: "error", text: String(event.message || "").split(" / ")[0] })
         return
       case "task_state":
         state.taskState = event.state || "idle"
@@ -713,6 +740,8 @@
     return [
       { name: "new", icon: "compose", label: "Start a new thread", run: () => void newThread(state.workspace) },
       { name: "resume", icon: "undo", label: "Resume the unfinished task", run: () => (state.hasCheckpoint ? void resumeTask() : K.toast("Nothing to resume here.")) },
+      { name: "council", icon: "sparkle", label: "Ask four read-only members: /council <question>", run: (question) => void startTurnCommand("council", question) },
+      { name: "best-of", icon: "branch", label: "Run several executors on a task and pick one: /best-of [N] <task>", run: (question) => void startTurnCommand("best-of", question) },
       { name: "review", icon: "review", label: "Open the review panel", run: () => review.setOpen(true) },
       { name: "commit", icon: "branch", label: "Commit the working tree", run: () => void commit() },
       { name: "commands", icon: "terminal", label: "Show the commands drawer", run: () => drawer.setOpen(true) },

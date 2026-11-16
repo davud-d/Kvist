@@ -50,6 +50,8 @@
     "notice",
     "input_closed",
     "session_title",
+    // Only a command that is a turn (`council`, `best-of`) runs in a core that sends it.
+    "command_result",
   ])
 
   class ProtocolState {

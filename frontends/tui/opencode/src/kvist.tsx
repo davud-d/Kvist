@@ -157,8 +157,9 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
       } catch (error) {
         return reject(error)
       }
-      // `resume` is a turn, not a wizard: the core answers it with events and `turn_end`.
-      dispatch(name === "resume" ? { type: "resume_start" } : { type: "command_start", name })
+      // `resume` is a turn, not a wizard: the core answers it with events and `turn_end`. So are `council` and
+      // `best-of` (UI_API.md §8c), which also end with a `command_result` after `turn_end`.
+      dispatch(name === "resume" ? { type: "resume_start" } : routeOf(name) === "turn" ? { type: "turn_command_start", name, text: ["/" + name, ...args].join(" ") } : { type: "command_start", name })
       waiting = { name, resolve }
     })
   }
@@ -175,6 +176,7 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
     const { name, args } = parsed
     if (local.handler(name, args)) return
     switch (routeOf(name)) {
+      case "turn":
       case "core":
         return runQuietly(name, name === "session" ? sessionArgs(args) : name === "new" ? args.slice(0, 1) : args)
       case "classic":

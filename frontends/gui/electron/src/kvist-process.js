@@ -5,6 +5,9 @@ const { spawn } = require("node:child_process")
 
 const { PROTOCOL_VERSION } = require("./protocol-state")
 
+// The commands of UI_API.md §8c that are turns of the agent; the only ones this app starts as commands.
+const TURN_COMMANDS = new Set(["council", "best-of"])
+
 class NdjsonDecoder {
   constructor(onValue, onError) {
     this.buffer = ""
@@ -80,6 +83,7 @@ class KvistProcess extends EventEmitter {
     this.handshakeComplete = false
     this.pendingRequests = new Map()
     this.stopping = false
+    this.turnCommand = ""
   }
 
   start(goal, options = {}) {
@@ -94,13 +98,23 @@ class KvistProcess extends EventEmitter {
     this._launch(normalizeRunOptions(options), { resume: true })
   }
 
-  _launch(runOptions, { goal = "", resume = false } = {}) {
+  // A command that is a turn (`council`, `best-of`; UI_API.md §8c) needs the long-lived core, which serves
+  // `command` messages: one command per process, and the process ends with the command's `command_result`.
+  runTurnCommand(name, args, options = {}) {
+    if (this.child) throw new Error("Kvist is already running.")
+    const words = (Array.isArray(args) ? args : []).map(String)
+    if (!TURN_COMMANDS.has(name)) throw new Error("Unsupported command.")
+    this.turnCommand = String(name)
+    this._launch(normalizeRunOptions(options), { command: { name: this.turnCommand, args: words } })
+  }
+
+  _launch(runOptions, { goal = "", resume = false, command = null } = {}) {
     const args = [
       ...this.prefixArgs,
       "--workspace",
       this.workspace,
       "--frontend",
-      "stdio",
+      command ? "stdio-multi" : "stdio",
     ]
     if (resume) args.push("--resume")
     if (runOptions.provider) args.push("--provider", runOptions.provider)
@@ -137,6 +151,7 @@ class KvistProcess extends EventEmitter {
     })
 
     if (resume) child.stdin.end()
+    else if (command) child.stdin.write(JSON.stringify({ type: "command", name: command.name, args: command.args }) + "\n")
     else child.stdin.write(goal + "\n")
   }
 
@@ -164,6 +179,8 @@ class KvistProcess extends EventEmitter {
       this.pendingRequests.set(event.request_id, event.kind)
     }
     this.emit("event", event)
+    // The one command this process was started for is over (a refusal included): end its input so it exits.
+    if (event.type === "command_result" && event.name === this.turnCommand) this.child?.stdin.end()
   }
 
   handleProtocolError(error) {
@@ -252,4 +269,4 @@ class KvistProcess extends EventEmitter {
   }
 }
 
-module.exports = { KvistProcess, NdjsonDecoder, normalizeRunOptions, redactDiagnostic }
+module.exports = { KvistProcess, NdjsonDecoder, TURN_COMMANDS, normalizeRunOptions, redactDiagnostic }

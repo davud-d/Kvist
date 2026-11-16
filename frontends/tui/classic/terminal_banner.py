@@ -258,6 +258,31 @@ class TerminalBannerUI:
             return None
         return ask(title, options)
 
+    def ask_decision(
+        self,
+        title: str,
+        options: list[tuple[str, str]],
+        *,
+        body: str = "",
+        purpose: str = "",
+        run_id: str = "",
+    ) -> str | None:
+        """Ask for a decision the core waits on (which best-of result to take), after showing what is decided.
+
+        ``body`` is the verdict or the patch, shown whole before the question: a choice menu has no room for it.
+        ``None`` is "no answer", which the caller leaves open rather than resolving by itself.
+        """
+        _ = (purpose, run_id)
+        if body.strip():
+            patch = any(line.startswith("@@ ") for line in body.splitlines())
+            self.print_user_markdown(f"```diff\n{body.rstrip()}\n```" if patch else body)
+        if getattr(self._screen, "ask_choice", None) is not None:
+            return self.ask_choice(title, options)
+        # Without a terminal there is nobody to ask, and choose_option would pick the first option for them.
+        if not sys.stdin.isatty():
+            return None
+        return self.choose_option(title, [{"value": value, "label": label} for value, label in options])
+
     def set_thinking(self, text: str) -> None:
         """Stream the model's reasoning into the pinned banner.
 

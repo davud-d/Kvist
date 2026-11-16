@@ -81,6 +81,7 @@ Identical behaviour, whatever the host renders it with:
 | Session identity | Session ids are stable and derivable (`workspace` + session name), so an id from yesterday still loads after a restart. Nothing is a throwaway UUID. |
 | Session lifecycle | New, list, load, resume, delete, close. A resumed run continues the conversation it belongs to. |
 | Slash commands | The same registry and the same handlers as the terminal and the TUI, including `/commit-message`. |
+| `/council`, `/best-of` | The core's commands that are turns of the agent: `/council <question>` runs as a turn of the session, its answer is a message, and a best-of decision arrives as an ordinary question with the verdict posted to the thread first. There is no arena screen in Zed. |
 | Role, reasoning effort | The same knobs and the same effect on the run. |
 | Plan before editing | The agent may offer "plan first or start right away"; the proposed plan arrives as a message, and accepting or rejecting it is a two-button question. |
 | Commit messages | `/commit-message` describes the workspace diff. It never stages, commits or pushes. |

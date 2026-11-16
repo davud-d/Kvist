@@ -8,6 +8,10 @@ export const COMMANDS = [
     { name: 'diff', description: 'Show the changes Kvist made in this session' },
     { name: 'files', description: 'Show the files Kvist read and changed' },
     { name: 'stop', description: 'Stop the current task' },
+    // Turns of the agent (UI_API.md section 8c): with a question the whole line goes to the core as a goal, and
+    // the core runs it as a command; bare, the menu only completes the name.
+    { name: 'council', turn: true, description: 'Ask four read-only members a question: /council <question>' },
+    { name: 'best-of', turn: true, description: 'Run several executors on a task and pick one: /best-of [N] <task>' },
 ];
 // A command typed with a Russian layout on: the same keys give Cyrillic letters ("/ьщвуд" is "/model").
 const CYRILLIC = 'йцукенгшщзфывапролдячсмить', LATIN = 'qwertyuiopasdfghjklzxcvbnm';
@@ -23,12 +27,15 @@ export function matchCommands(query, commands = COMMANDS) {
 }
 // A message that starts with "/word" (a word, then a space or the end, no second slash) is a command attempt
 // and never goes to the agent: { command } when it is known, { unknown: "/word" } when it is not. Anything
-// else, a path such as "/tmp/a is broken" included, is an ordinary message (null).
+// else, a path such as "/tmp/a is broken" included, is an ordinary message (null). A turn command with a
+// question after it (`/council why?`) is a message too: the core reads that line as the command.
 export function parseCommand(text, commands = COMMANDS) {
-    const match = /^\/([^\s/]+)(?:\s|$)/.exec(text.trim());
+    const match = /^\/([^\s/]+)(?:\s+(.*)|$)/s.exec(text.trim());
     if (!match)
         return null;
     const word = latin(match[1]);
     const command = commands.find(item => names(item).includes(word));
+    if (command?.turn && match[2]?.trim())
+        return null;
     return command ? { command } : { unknown: `/${match[1]}` };
 }

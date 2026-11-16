@@ -44,7 +44,7 @@ OpenAI- or Anthropic-compatible endpoint.
 | Memories | **Memory**: what Kvist remembers about you and the project, with *Forget*. |
 | Browser / computer use | The agent's own **screen** card (live preview, *Open in browser*), from the `browser` and `app_screen` skills. |
 | ChatGPT sign-in | The `chatgpt` provider's sign-in and sign-out. |
-| Slash commands, `@` files | `/new /resume /review /commit /commands /skills /memory /folder /settings`; `@` completes a project file; images attach by paste, drop or `+`. |
+| Slash commands, `@` files | `/new /resume /review /commit /commands /skills /memory /folder /settings /council /best-of`; `@` completes a project file; images attach by paste, drop or `+`. `/council <question>` and `/best-of [N] <task>` are turns of the agent: each runs in a core of its own (`--frontend stdio-multi`, one command, ended by its `command_result`), the answer is the thread's final message, and a best-of decision is an ordinary choice whose verdict is in its body. There is no arena or council screen here (Glass and Pixel have them). |
 | Search, shortcuts | `Ctrl+K` searches threads and commands; `Ctrl+N`, `Ctrl+B`, `Ctrl+J`, `Ctrl+Shift+D`, `Ctrl+,`; `Esc` pauses the agent. |
 
 Not covered: several tasks running at once (one task per app; other threads open when it has

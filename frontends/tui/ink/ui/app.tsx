@@ -2,7 +2,7 @@ import { Box, Static, Text, useApp, useInput } from "ink"
 import { writeFileSync } from "node:fs"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
-import { CLASSIC_COMMAND, COMMANDS, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs } from "../commands.js"
+import { ALL_COMMANDS, CLASSIC_COMMAND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs } from "../commands.js"
 import { copyToClipboard } from "../clipboard.js"
 import { restoreWindowTitle, setWindowTitle } from "../window-title.js"
 import { KvistCore, type CoreCommand } from "../core.js"
@@ -80,7 +80,7 @@ function initialEffort(): string {
 const CLASSIC_NOTE = `Available in Classic Legacy: ${CLASSIC_COMMAND}`
 
 const HELP = [
-  ...COMMANDS.map((c) => `/${c.name.padEnd(NAME_WIDTH)} ${c.hint}`),
+  ...ALL_COMMANDS.map((c) => `/${c.name.padEnd(NAME_WIDTH)} ${c.hint}`),
   "",
   "enter send · esc esc stop a run · ctrl+d quit",
 ].join("\n")
@@ -168,6 +168,18 @@ export function App(props: AppProps) {
     }
   }, [note])
 
+  // `council` and `best-of` are turns that a command starts: shown as a request, running (and stoppable with
+  // Ctrl+C) until `turn_end`; a refusal comes back as a lone `command_result`.
+  const sendTurnCommand = useCallback((name: string, args: string[], text: string) => {
+    if (stateRef.current.running || stateRef.current.command) return note("Wait for the current run to finish.", "warn")
+    try {
+      core.current?.sendCommand(name, args)
+      dispatch({ type: "turn_command_start", name, text })
+    } catch (error) {
+      note(error instanceof Error ? error.message : String(error), "error")
+    }
+  }, [note])
+
   // The launcher checks the server (and offers to install the service there), then starts this
   // interface again with the core on it, or on this machine for "local".
   const switchRemote = useCallback((choice: string) => {
@@ -244,12 +256,14 @@ export function App(props: AppProps) {
         return runLocal(name, args)
       case "core":
         return sendCommand(name, name === "session" ? sessionArgs(args) : name === "new" ? args.slice(0, 1) : args)
+      case "turn":
+        return sendTurnCommand(name, args, text.trim())
       case "classic":
         return note(CLASSIC_NOTE, "warn")
       default:
         return note(`Unknown command /${name}. Try /help.`, "warn")
     }
-  }, [runLocal, sendCommand, note])
+  }, [runLocal, sendCommand, sendTurnCommand, note])
 
   const submit = useCallback((raw: string, shown: string = raw) => {
     const text = raw.trim()
@@ -258,8 +272,8 @@ export function App(props: AppProps) {
     void addInputHistory(props.command, props.workspace, shown)
     // A "goal" command is an ordinary request the core expands itself.
     if (text.startsWith("/") && routeOf(parseSlash(text)?.name ?? "") !== "goal") {
-      // The reply of a command hangs off its echo, as in Claude Code.
-      if (props.skin === "claude") dispatch({ type: "echo", text })
+      // The reply of a command hangs off its echo, as in Claude Code; a turn command shows its own request.
+      if (props.skin === "claude" && routeOf(parseSlash(text)?.name ?? "") !== "turn") dispatch({ type: "echo", text })
       return void runCommand(text)
     }
     try {

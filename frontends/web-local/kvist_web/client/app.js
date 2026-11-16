@@ -444,8 +444,14 @@ function command(label) {
         openView(label.slice(5).toLowerCase());
 }
 const commands = () => openPalette('commands', paletteChoice);
-function runCommand({ name }) {
-    if (name === 'provider')
+function runCommand({ name, turn }) {
+    if (turn) {
+        // A question comes after the name; the person writes it, and Enter sends the whole line.
+        prompt.value = `/${name} `;
+        prompt.dispatchEvent(new Event('input'));
+        prompt.focus();
+    }
+    else if (name === 'provider')
         showModel();
     else if (name === 'model' || name === 'role')
         openChip(name);

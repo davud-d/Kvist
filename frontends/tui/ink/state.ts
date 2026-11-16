@@ -1,3 +1,4 @@
+import { routeOf } from "./commands.js"
 import { clipText, englishOnly } from "./format.js"
 import type { CoreEvent, InputRequest, JournalEvent } from "./protocol.js"
 import type { RemoteLink } from "./remote.js"
@@ -119,6 +120,9 @@ export interface State {
   pending: InputRequest | null
   // The slash command the core is running; the input stays locked meanwhile.
   command: string | null
+  // The command that is a turn (`council`, `best-of`) whose turn has not ended yet. Its `command_result`
+  // arrives after `turn_end`; one that arrives while this is still set is a refusal, which has no turn.
+  turnCommand: string | null
   // The level `hello` announced, then the last `/effort` result.
   effort: string
   // The core's notice when end_session closed the session on screen; it takes the input's
@@ -168,6 +172,9 @@ export type Action =
   | { type: "interrupt" }
   | { type: "command_start"; name: string }
   | { type: "resume_start"; now?: number }
+  // A command that is a turn (`council`, `best-of`; UI_API.md §8c) was sent: shown like a request,
+  // and the turn runs (and can be stopped) until `turn_end`.
+  | { type: "turn_command_start"; name: string; text: string; now?: number }
   | { type: "note"; tone: Tone; text: string }
   | { type: "answered" }
   | { type: "core_exit"; expected: boolean; code: number | null }
@@ -191,6 +198,7 @@ export function initialState(effort = "", banner = false): State {
     status: null,
     pending: null,
     command: null,
+    turnCommand: null,
     effort,
     closed: null,
     observer: null,
@@ -387,6 +395,16 @@ function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
+// The verdict or the patch of a best-of decision is the `body` of its dialog, and a dialog shows a few lines of
+// a body at most: the whole text goes into the feed first, and the dialog keeps the question and its options.
+function withDecisionText(state: State, request: InputRequest): State {
+  if (request.purpose !== "bestof_decision" || !request.body.trim()) return { ...state, pending: request }
+  const isPatch = request.body.split("\n").some((line) => line.startsWith("@@ "))
+  const text = isPatch ? `\`\`\`diff\n${request.body.trimEnd()}\n\`\`\`` : request.body
+  const shown = push(state, (id) => ({ id, kind: "answer", text, done: true }))
+  return { ...shown, pending: { ...request, body: "" } }
+}
+
 // What a finished command changed, mirrored into what the UI shows.
 function applyEffects(state: State, effects: Record<string, unknown>): State {
   const info = { ...state.info }
@@ -419,8 +437,18 @@ function commandNotes(state: State, event: Extract<CoreEvent, { type: "command_r
   return warnings.reduce((acc, warning) => push(acc, (id) => ({ id, kind: "note", tone: "warn", text: englishOnly(warning) })), next)
 }
 
+// The core refused a command that is a turn (no question, a count out of range, a command it does not know):
+// no turn ran and no `turn_end` follows, so the run shown for it ends here.
+function refusedTurn(state: State): State {
+  return { ...state, turnCommand: null, running: false, startedAt: null, waitingSince: null, interrupted: false, thought: null, live: null, status: null }
+}
+
 function onCommandResult(state: State, event: Extract<CoreEvent, { type: "command_result" }>): State {
-  const done = { ...state, command: null, pending: null }
+  const refused = state.turnCommand !== null && state.turnCommand === event.name
+  const done = { ...(refused ? refusedTurn(state) : state), command: null, pending: null }
+  // A turn command's `final` already carries everything its `message` says, and a stop the person asked for
+  // is not news.
+  if (routeOf(event.name) === "turn" && (event.ok || record(event.effects).stopped === true)) return done
   if (!event.ok) {
     const reason = englishOnly(event.message).trim() || `/${event.name} failed`
     return push(done, (id) => ({ id, kind: "note", tone: "error", text: reason }))
@@ -601,7 +629,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
     case "notice":
       return push(state, (id) => ({ id, kind: "note", tone: event.level === "error" ? "error" : event.level === "warn" ? "warn" : "info", text: event.text }))
     case "input_request":
-      return { ...state, pending: event }
+      return withDecisionText(state, event)
     case "input_closed":
       return state.pending?.request_id === event.request_id ? { ...state, pending: null } : state
     case "command_result":
@@ -646,7 +674,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       // the input box disabled forever.
       // Jobs keep their state: a stopped one already reported job_finished, and one still
       // running was left running by an answered turn and reports its end later.
-      return { ...settle(state), exploreSteps: [], queued: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, screen: state.taskState === "paused" ? state.screen : null }
+      return { ...settle(state), exploreSteps: [], queued: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, turnCommand: null, screen: state.taskState === "paused" ? state.screen : null }
     default:
       return state
   }
@@ -744,6 +772,8 @@ export function reduce(state: State, action: Action): State {
       return push(state, (id) => ({ id, kind: "user", text: action.text }))
     case "command_start":
       return { ...state, command: action.name }
+    case "turn_command_start":
+      return { ...reduce(state, { type: "submit", text: action.text, request: action.text, now: action.now }), turnCommand: action.name }
     case "resume_start":
       return { ...state, running: true, startedAt: action.now ?? Date.now(), waitingSince: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null }
     case "note":
@@ -751,7 +781,7 @@ export function reduce(state: State, action: Action): State {
     case "answered":
       return { ...state, pending: null }
     case "core_exit": {
-      const next = { ...settle(state), jobs: stopRunning(state.jobs, Date.now()), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, command: null }
+      const next = { ...settle(state), jobs: stopRunning(state.jobs, Date.now()), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, command: null, turnCommand: null }
       if (action.expected) return next
       return push(next, (id) => ({ id, kind: "note", tone: "error", text: `The Kvist core stopped unexpectedly (exit code ${action.code ?? "?"}).` }))
     }

@@ -1659,9 +1659,12 @@ details[open] > summary > .chevron {
   margin: 0 0 4px;
 }
 
+/* The body of a request keeps its line breaks: a best-of verdict is a table and a patch. */
 .pending-input p {
   color: var(--text-2);
   font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .pending-actions {

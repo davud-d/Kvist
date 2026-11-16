@@ -48,6 +48,11 @@ The phone app (`frontends/android`, or a phone browser at `http://<computer>:967
 of its own (`client/mobile/`) over the same API, so a trusted phone can do what the browser can: start and
 switch sessions, stop the agent, answer requests, type `/` commands, change model, reasoning and role.
 
+`/council <question>` and `/best-of [N] <task>` (the core's commands that are turns of the agent) are typed in
+the browser and on the phone as a line that goes to the core as a goal; the answer is the session's final
+message, and a best-of decision is an ordinary request whose verdict is shown in full in its panel. A command
+the core refuses (no question, a count out of range) leaves the session idle. There is no arena screen here.
+
 - **Trust.** The first time, the phone taps the computer in its list, and **this computer asks its owner in a
   window of the desktop** (zenity, yad or kdialog on Linux, a dialog on macOS, a message box on Windows; with
   no desktop session it cannot ask and the phone is told so). On "Allow" the phone gets a token of its own,

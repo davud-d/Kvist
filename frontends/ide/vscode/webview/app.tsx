@@ -3,7 +3,7 @@ import { readImages, imageGoal, MAX_IMAGES, type ImageAttachment } from "../../.
 import { FolderOpen, History } from "lucide-preact"
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 
-import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
+import { ALL_COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
 import { contextLabel, formatSeconds, formatTokens, outputLines } from "../../../tui/ink/format"
 import { actionTarget, exploreSummary, initialState, lastInflight, reduce, requestIsRussian } from "../../../tui/ink/state"
 import { relaunchOf, remoteNotice } from "../../../tui/ink/remote"
@@ -28,7 +28,7 @@ import { HIDDEN_STEPS, ShellCard, Thinking, TranscriptItem, Working, commandLine
 import { verbOf } from "./verbs"
 
 // The terminal-only commands make no sense inside an editor panel.
-const PANEL_COMMANDS = COMMANDS.filter((command) => command.name !== "tui" && command.name !== "quit")
+const PANEL_COMMANDS = ALL_COMMANDS.filter((command) => command.name !== "tui" && command.name !== "quit")
 const workspacePage = document.getElementById("root")?.dataset.layout === "workspace"
 const logoUrl = workspacePage ? workspaceMark : document.getElementById("root")?.dataset.logo ?? ""
 const projectName = document.getElementById("root")?.dataset.project ?? ""
@@ -76,6 +76,15 @@ export function App() {
     setView("chat")
   }
   runCommandRef.current = runCommand
+
+  // `council` and `best-of` are turns that a command starts (UI_API.md §8c): the person's line is the request,
+  // the run can be stopped until `turn_end`, and a refusal comes back as a lone `command_result`.
+  function runTurnCommand(name: string, args: string[], text: string): void {
+    beginTurn()
+    dispatch({ type: "turn_command_start", name, text })
+    post({ type: "command", name, args })
+    setView("chat")
+  }
 
   function applyEnvironment(next: Record<string, string>): void {
     post({ type: "setEnvironment", env: next })
@@ -245,6 +254,7 @@ export function App() {
     }
     const route = routeOf(slash.name)
     if (route === "core") return runCommand(slash.name, slash.args)
+    if (route === "turn") return runTurnCommand(slash.name, slash.args, value)
     if (slash.name === "help") return dispatch({ type: "note", tone: "info", text: HELP })
     if (slash.name === "clear") return dispatch({ type: "clear" })
     if (slash.name === "debug") return dispatch({ type: "toggle_debug" })

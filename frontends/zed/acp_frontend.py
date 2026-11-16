@@ -28,7 +28,7 @@ import queue
 import sys
 import threading
 from contextlib import redirect_stdout
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -41,6 +41,7 @@ from acp.utils import normalize_result
 
 from acp_events import AcpEventTranslator
 from acp_stdio import stdio_streams
+from kernel.bestof.turns import TURN_COMMANDS
 
 # Stable protocol version this agent implements. ``InitializeRequest`` may
 # carry a date string (Zed sends one); the SDK coerces it to an int before it
@@ -807,6 +808,10 @@ class KvistAcpAgent:
     async def _answer_input(self, session: KvistAcpSession, event: Any) -> None:
         bridge = AcpInputBridge(self._client, session.session_id, self._capabilities)
         pending = bridge.describe(event)
+        if getattr(event, "purpose", "") == "bestof_decision" and pending.body.strip():
+            # A permission request or a form shows only part of a long body; the verdict goes into the thread whole.
+            await self._send(session, _message_event(_decision_text(pending.body)))
+            pending = replace(pending, body="")
 
         def respond(
             *,
@@ -826,6 +831,9 @@ class KvistAcpAgent:
         name, args = command
         if name == _COMMAND_TERMINAL:
             await self._run_terminal_command(session)
+            return
+        if name in TURN_COMMANDS:
+            await self._run_turn_command(session, name, " ".join(args))
             return
         handler = _stdio_commands().get(name)
         if handler is None:
@@ -851,6 +859,26 @@ class KvistAcpAgent:
         result = session.session.result
         if isinstance(result, CommandResult) and result.message:
             await self._send(session, _message_event(result.message))
+
+    async def _run_turn_command(self, session: KvistAcpSession, name: str, question: str) -> None:
+        """Run ``/council`` or ``/best-of`` as a turn of the session's agent.
+
+        The turn's events and its ``final`` answer reach the client like any turn's; the dialogs it opens are
+        answered by the same input bridge.
+        """
+        from kernel.bestof.turns import run_turn
+
+        if not question:
+            session.translator.begin_turn()
+            await self._send(session, _message_event(
+                f"Usage: /{name} <question> / Использование: /{name} <вопрос>"
+            ))
+            session.translator.end_turn()
+            return
+        agent = session.session.agent
+        await self._run_events(
+            session, lambda: session.session.submit_call(lambda: run_turn(agent, name, question))
+        )
 
     async def _run_terminal_command(self, session: KvistAcpSession) -> None:
         """Ask the client for a terminal running the Kvist CLI.
@@ -1342,6 +1370,21 @@ _COMMAND_TERMINAL = "terminal"
 ACP_ONLY_COMMANDS: dict[str, str] = {
     _COMMAND_TERMINAL: "Open a terminal running the Kvist CLI",
 }
+
+# The commands of the core that are turns of the agent, not wizards (UI_API.md section 8c): they have no handler
+# in ``STDIO_COMMANDS`` either, and are advertised for as long as the core has them.
+_TURN_COMMAND_HELP = {
+    "council": "Ask four read-only members an architecture question: /council <question>",
+    "best-of": "Run several executors on one task and pick the best result: /best-of [N] <task>",
+}
+ACP_ONLY_COMMANDS.update({name: _TURN_COMMAND_HELP.get(name, f"Kvist /{name}") for name in TURN_COMMANDS})
+
+
+def _decision_text(body: str) -> str:
+    """The verdict or the patch of a best-of decision, as Markdown: a patch keeps its lines in a diff block."""
+    if any(line.startswith("@@ ") for line in body.splitlines()):
+        return f"```diff\n{body.rstrip()}\n```"
+    return body
 
 
 def terminal_launch_argv() -> tuple[str, list[str]]:

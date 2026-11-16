@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld("kvist", {
   // the running task
   start: (goal, workspace, options) => invoke("kvist:start", { goal, workspace, options }),
   resume: (workspace, options) => invoke("kvist:resume", { workspace, options }),
+  // `council` and `best-of`: commands that are turns of the agent (UI_API.md §8c)
+  command: (name, args, workspace, options) => invoke("kvist:command", { name, args, workspace, options }),
   respond: (payload) => invoke("kvist:respond", payload),
   stop: () => invoke("kvist:stop"),
   pause: () => invoke("kvist:pause"),

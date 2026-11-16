@@ -35,6 +35,10 @@ export interface InputRequest {
   remember_pattern?: string | null
   // Auto mode: unanswered after this many seconds counts as "no" (the core then sends input_closed).
   timeout_seconds?: number | null
+  // What the answer decides (`bestof_decision`: the person's choice of a best-of result) and the run it
+  // belongs to. A view that does not know the purpose shows the dialog as the ordinary choice it is.
+  purpose?: string
+  run_id?: string
 }
 
 export type CoreEvent =
@@ -79,6 +83,10 @@ export type CoreEvent =
   | { type: "input_closed"; request_id: string; reason: string }
   | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
   | { type: "turn_end" }
+  // Best-of and council (UI_API.md §7): the screens of Glass and Pixel draw them; this interface has no view for
+  // them and ignores them. What a run or a council produced reaches the person as `final` and, for a best-of
+  // run, as the `input_request` with `purpose: "bestof_decision"`.
+  | { type: "bestof_started" | "bestof_status" | "executor_activity" | "bestof_eliminated" | "bestof_verdict" | "bestof_diff" | "bestof_finished" | "council_started" | "council_card" | "council_objection" | "council_verdict" }
   // `--wake` only: the core starts a turn nobody typed, because helpers or jobs an answered turn
   // left running have ended. Its events and turn_end follow like any turn's.
   | { type: "wake" }

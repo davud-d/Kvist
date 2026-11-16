@@ -806,6 +806,7 @@ from kernel.context.system_context import ensure_workspace_instructions
 from kernel.plugins.bundled import sync_bundled
 from kernel.plugins.registry import SkillRegistry
 from kernel.protocol.ui import AgentUI
+from bestof_turns import run_turn_goal
 from terminal_banner import SetupCancelled, TerminalBannerUI, ctrl_c_stops_setup
 from window_title import pop_window_title, push_window_title, set_window_title
 from terminal_image import print_exit_logo
@@ -5388,6 +5389,10 @@ def main() -> None:
                     console.print("[yellow]No saved checkpoint to resume.[/yellow]")
                 elif verbose:
                     print(f"\n[Final Answer]\n{sanitize_display_text(result)}")
+                continue
+
+            # `/council` and `/best-of` are turns of the agent, run here like any other request.
+            if run_turn_goal(agent, user_goal, console, interactive_screen):
                 continue
 
             if (

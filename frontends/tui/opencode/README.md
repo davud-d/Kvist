@@ -58,6 +58,7 @@ Selecting text with the mouse copies it on release.
 | model and its variants | the fast and the smart model; reasoning effort |
 | connect a provider | `/provider`, `/change-api`, `/settings-api` (the core's own dialogs, drawn as OpenCode dialogs) |
 | sessions, fork, undo | `/session`, `/new`, `/revert`, `/changes` |
+| (nothing) | `/council <question>` and `/best-of [N] <task>`: turns of the agent. They run until `turn_end`, can be stopped like any turn, end with the answer as a message, and a best-of decision is an ordinary choice whose verdict is in the transcript. No arena or council screen here (Glass and Pixel have them). |
 | `/export` a transcript | `/export` imports sessions from other agents (Claude Code, Codex, OpenCode, Cursor …) |
 | todo list, MCP servers | background jobs; the core's skills |
 | permission prompt | the core's approvals |

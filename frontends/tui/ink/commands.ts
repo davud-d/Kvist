@@ -1,10 +1,13 @@
 import type { Skin } from "./ui/theme.js"
+import { TURN_COMMANDS } from "./turn-commands.js"
 
 // Where a command runs: here in the UI, in the core process over the
 // `command` message (UI_API.md §8c), only in the classic terminal, or as a
 // goal: the core expands `/name request` itself (kernel/agent/prompt_commands.py),
-// so the whole line travels as an ordinary request.
-export type Route = "local" | "core" | "classic" | "goal"
+// so the whole line travels as an ordinary request. "turn" is a command that is a turn of the
+// agent (UI_API.md §8c): it travels as a `command` message, and the answer is the turn's events,
+// `turn_end`, then `command_result`.
+export type Route = "local" | "core" | "classic" | "goal" | "turn"
 
 export interface SlashCommand {
   name: string
@@ -51,7 +54,10 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "quit", route: "local", hint: "Exit (also /exit, /bye)" },
 ]
 
-export const NAME_WIDTH = Math.max(...COMMANDS.map((command) => command.name.length))
+// Every command an interface offers: the ones above and the turns (turn-commands.ts).
+export const ALL_COMMANDS: readonly SlashCommand[] = [...COMMANDS, ...TURN_COMMANDS]
+
+export const NAME_WIDTH = Math.max(...ALL_COMMANDS.map((command) => command.name.length))
 
 export const EFFORTS = ["false", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -76,7 +82,7 @@ export const FRONTEND_REQUEST_ID = "local:frontend"
 export const CLASSIC_COMMAND = "python -m kernel --frontend terminal"
 
 export function routeOf(name: string): Route | null {
-  return COMMANDS.find((command) => command.name === name)?.route ?? null
+  return ALL_COMMANDS.find((command) => command.name === name)?.route ?? null
 }
 
 // The core takes `switch|new|delete [NAME]`; a bare name means switch.
@@ -86,7 +92,7 @@ export function sessionArgs(args: string[]): string[] {
   return args.length ? ["switch", ...args.slice(0, 1)] : []
 }
 
-export function suggest(text: string, commands: readonly SlashCommand[] = COMMANDS): SlashCommand[] {
+export function suggest(text: string, commands: readonly SlashCommand[] = ALL_COMMANDS): SlashCommand[] {
   if (!text.startsWith("/") || text.includes(" ")) return []
   const prefix = text.slice(1).toLowerCase()
   return commands.filter((command) => command.name.startsWith(prefix))
@@ -138,7 +144,7 @@ export function visibleBoxRows(rows: number): number {
 export type EnterAction = { kind: "submit"; text: string } | { kind: "fill"; text: string }
 
 // What Enter does for the text in the box while the suggestion list is open.
-export function resolveEnter(text: string, selected: number, commands: readonly SlashCommand[] = COMMANDS): EnterAction {
+export function resolveEnter(text: string, selected: number, commands: readonly SlashCommand[] = ALL_COMMANDS): EnterAction {
   const command = suggest(text, commands)[selected]
   if (!command) return { kind: "submit", text }
   if (command.needsArgument) return { kind: "fill", text: `/${command.name} ` }

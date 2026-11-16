@@ -300,6 +300,11 @@ function registerRunIpc() {
     workspace = rememberWorkspace(payload?.workspace || workspace)
     return launchRunner((active) => active.resume(payload?.options || {}))
   })
+  ipcMain.handle("kvist:command", async (_event, payload) => {
+    requireIdle()
+    workspace = rememberWorkspace(payload?.workspace || workspace)
+    return launchRunner((active) => active.runTurnCommand(payload?.name, payload?.args, payload?.options || {}))
+  })
   ipcMain.handle("kvist:respond", (_event, payload) => {
     if (!runner) throw new Error("Kvist is no longer running.")
     runner.respond(payload)

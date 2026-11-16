@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from kernel.bestof.turns import parse_turn_goal
+
 from .events import EventBroker
 from .protocol import ExecutionState, ProcessSnapshot
 from .security import redact
@@ -36,6 +38,10 @@ _TRANSIENT_CORE_EVENTS = frozenset(
         "job_output",
         "context",
         "command_result",
+        # Best-of snapshots, an executor's calls and its patch are live only (UI_API.md section 7).
+        "bestof_status",
+        "executor_activity",
+        "bestof_diff",
     }
 )
 
@@ -75,6 +81,10 @@ class SessionProcess:
         self._stdout_done = threading.Event()
         self._stop_requested = False
         self._command_in_flight = False
+        # The command (`council`, `best-of`) a goal line started as a turn, until its `command_result`; and
+        # whether that turn has already ended. A `command_result` that comes before `turn_end` is a refusal.
+        self._turn_command = ""
+        self._turn_ended = False
         self._snapshot = ProcessSnapshot(server_id, str(workspace), session)
 
     def start(self) -> None:
@@ -128,6 +138,9 @@ class SessionProcess:
             if self._command_in_flight:
                 raise ValueError("Wait for the model change to finish before sending a message.")
             self._stop_requested = False
+            turn = parse_turn_goal(text.strip())
+            self._turn_command = turn[0] if turn else ""
+            self._turn_ended = False
             self._write({"type": "goal", "text": text.strip()})
             self._set_state(ExecutionState.RUNNING)
 
@@ -288,7 +301,15 @@ class SessionProcess:
                 self._command_in_flight = False
                 self._snapshot.pending_input = None
                 self._snapshot.state = ExecutionState.IDLE
+            elif kind == "command_result" and self._turn_command and event.get("name") == self._turn_command:
+                # After its turn the result only closes the command; before it, the core refused the command
+                # and no turn_end will come.
+                if not self._turn_ended:
+                    self._snapshot.pending_input = None
+                    self._snapshot.state = ExecutionState.IDLE
+                self._turn_command = ""
             elif kind == "turn_end":
+                self._turn_ended = True
                 self._snapshot.pending_input = None
                 self._snapshot.state = (
                     ExecutionState.STOPPED if self._stop_requested else ExecutionState.FINISHED

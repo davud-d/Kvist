@@ -308,7 +308,8 @@ a.btn { text-decoration: none; }
 }
 .sheet.busy { opacity: 0.6; pointer-events: none; }
 .sheet-title { font-size: 15px; font-weight: 800; color: var(--accent); margin-bottom: 6px; }
-.sheet-text { margin-bottom: 8px; font-size: 13px; }
+/* The body of a request keeps its line breaks: a best-of verdict is a table and a patch. */
+.sheet-text { margin-bottom: 8px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .subject { margin: 8px 0; }
 .subject-label { font-size: 10px; letter-spacing: 0.16em; color: var(--dim); margin-bottom: 4px; }
 .subject-code { margin: 0; padding: 8px; background: var(--shade); font-size: 12px; white-space: pre-wrap; max-height: 24dvh; overflow: auto; box-shadow: 0 0 0 2px var(--ink); }

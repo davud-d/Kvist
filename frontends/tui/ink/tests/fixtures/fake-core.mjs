@@ -36,7 +36,7 @@ if (process.env.FAKE_MANIFEST) {
     action_types: [],
     // What the real core lists: the commands it carries out say so (`via`), the launcher's are marked, a classic-only one has none.
     slash_commands: [
-      ...["memory", "permissions", "resume", "doctor", "update", "provider", "web-search-provider", "change-api", "strime", "full-reset", "del-provider", "style", "context", "changes", "export", "verbose", "settings-api", "machines", "remote"]
+      ...["memory", "permissions", "resume", "doctor", "update", "provider", "web-search-provider", "change-api", "strime", "full-reset", "del-provider", "style", "context", "changes", "export", "verbose", "settings-api", "machines", "remote", "council", "best-of"]
         .map((name) => ({ name, description: `the core's ${name}`, via: "core" })),
       { name: "bug", description: "Save a local bug report (classic only)" },
     ],
@@ -55,6 +55,10 @@ rl.on("line", (line) => {
     message = JSON.parse(line)
   } catch {}
   if (message && message.type === "cancel") {
+    if (stopTurnCommand) {
+      stopTurnCommand()
+      return
+    }
     out({ type: "final", message: "Stopped by the user.", user_messages: [] })
     out({ type: "turn_end" })
     return
@@ -431,12 +435,73 @@ const handlers = {
   },
 }
 
+// ---- commands that are turns: `council` and `best-of` (UI_API.md §8c) ----
+// The turn's events, `turn_end`, then `command_result`; a refusal is a lone `command_result`.
+// The question picks the scenario: "slow" waits for `cancel`, "refuse" ends with `ok:false` after the turn.
+
+let stopTurnCommand = null
+
+const COUNCIL_ANGLES = ["simplicity", "security", "speed", "maintenance"]
+
+async function councilTurn(question) {
+  out({ type: "council_started", council_id: "c1", question, members: COUNCIL_ANGLES.map((angle) => ({ executor_id: angle, angle, session: `council-${angle}` })) })
+  if (question === "slow") {
+    await new Promise((resolve) => {
+      stopTurnCommand = resolve
+    })
+    out({ type: "final", message: "council stopped", user_messages: [], outcome: "incomplete" })
+    return { ok: false, message: `council: stopped / ${TR}`, effects: { stopped: true } }
+  }
+  for (const angle of COUNCIL_ANGLES) out({ type: "council_card", council_id: "c1", executor_id: angle, angle, decision: `use ${angle}`, argument: "because" })
+  for (const angle of COUNCIL_ANGLES) out({ type: "council_objection", council_id: "c1", executor_id: angle, angle, risks: [{ target: "speed", risk: "it is slow" }] })
+  out({ type: "council_verdict", council_id: "c1", chosen: "security", decision: "use security", reason: "safest", dissent: [] })
+  out({ type: "final", message: "## council\n\nThe chosen decision: use security\n\n| member | decision |\n|---|---|\n| security | use security |", user_messages: [], outcome: "done" })
+  if (question === "refuse") return { ok: false, message: `council: fewer than two cards / ${TR}`, effects: {} }
+  return { ok: true, message: `council: decision chosen: use security / ${TR}`, effects: { council_id: "c1", chosen: "security", decision: "use security" } }
+}
+
+async function bestOfTurn(task) {
+  const executors = ["e1", "e2"].map((id, index) => ({ executor_id: id, style: ["careful", "bold"][index], branch: `kvist/bestof/r1/${id}`, session: `exec-${id}` }))
+  out({ type: "bestof_started", run_id: "r1", task, count: 2, base: "abc1234", executors })
+  for (const { executor_id } of executors) {
+    out({ type: "executor_activity", run_id: "r1", executor_id, phase: "step", call_id: "k1", action_type: "run_shell", label: "run", summary: "", output: "" })
+    out({ type: "bestof_status", run_id: "r1", executor_id, style: "careful", branch: "b", state: "finished", step: 3, tests: { state: "passed", summary: "ok" }, diff: { files: 1, added: 2, removed: 0 }, usage: { input_tokens: 1, output_tokens: 1, cost_approx: false } })
+  }
+  // A kind of event a later core may add: a view that does not know it must not fail on it.
+  out({ type: "bestof_from_the_future", run_id: "r1" })
+  out({ type: "bestof_verdict", run_id: "r1", rows: [], winner: "e1", reason: "tests passed" })
+  const verdict = "Best-of verdict\nwinner: e1 (tests passed)\n| executor | outcome |\n| e1 | winner |\n| e2 | finalist |"
+  const answer = await ask({ title: "Best-of result", body: verdict, purpose: "bestof_decision", run_id: "r1", options: [option("accept", "Accept e1"), option("discard", "Discard everything")] })
+  out({ type: "bestof_finished", run_id: "r1", outcome: answer.value === "accept" ? "accepted" : "discarded", message: "" })
+  out({ type: "final", message: `## best-of\n\nThe result was ${answer.value === "accept" ? "accepted" : "discarded"}.`, user_messages: [], outcome: "done" })
+  return { ok: true, message: `best-of: ${answer.value} / ${TR}`, effects: { run_id: "r1" } }
+}
+
+async function turnCommand(name, args) {
+  const rest = name === "best-of" && /^\d+$/.test(args[0] ?? "") ? args.slice(1) : args
+  const question = rest.join(" ").trim()
+  const count = name === "best-of" && /^\d+$/.test(args[0] ?? "") ? Number(args[0]) : 2
+  if (!question || count < 2 || count > 6) {
+    finish(name, false, `Usage: /${name} / ${TR}`)
+    return
+  }
+  busy = true
+  out({ type: "live_start" })
+  const result = await (name === "council" ? councilTurn(question) : bestOfTurn(question))
+  stopTurnCommand = null
+  out({ type: "live_stop" })
+  busy = false
+  out({ type: "turn_end" })
+  finish(name, result.ok, result.message, result.effects)
+}
+
 async function command(message) {
   const name = String(message.name || "").toLowerCase()
   if (busy) {
     finish(name, false, `A turn or another command is running / ${TR}`)
     return
   }
+  if (name === "council" || name === "best-of") return turnCommand(name, Array.isArray(message.args) ? message.args : [])
   // `resume` is a turn, not a wizard: the real core queues it past the command
   // handlers and answers with the run's events and `turn_end`.
   if (name === "resume") {
