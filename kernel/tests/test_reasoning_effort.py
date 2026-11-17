@@ -498,3 +498,79 @@ def test_absent_reasoning_marker_still_means_no_thinking_block():
     assert _anthropic_thinking_from_effort(None) is None
     assert _anthropic_thinking_from_effort("") is None
     assert _anthropic_thinking_from_effort("false") is not None
+
+
+# ── other form of thinking before giving effort up ──────────────────────────
+
+
+class _FormRejectingClient(FakeLLMClient):
+    """Accepts only one form of thinking, like an Anthropic model the name list got wrong."""
+
+    def __init__(self, accepts: str):
+        super().__init__()
+        self._accepts = accepts
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        form = kwargs.get("thinking_style")
+        if "reasoning_effort" in kwargs and form != self._accepts:
+            raise RuntimeError("400: thinking.budget_tokens is not supported for this model")
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"thought":"ok"}'))]
+        )
+
+
+def _anthropic_agent(agent_factory, monkeypatch, accepts):
+    from kernel.agent import agent_model
+
+    monkeypatch.setattr(agent_model, "_REASONING_UNSUPPORTED", set())
+    monkeypatch.setattr(agent_model, "_ANTHROPIC_THINKING_STYLE", {})
+    agent = agent_factory(
+        stream=False, provider="anthropic", reasoning_effort="low", cache_enabled=False
+    )
+    agent.client = _FormRejectingClient(accepts)
+    return agent
+
+
+def test_rejected_thinking_form_is_answered_with_the_other_form_and_keeps_effort(
+    agent_factory, monkeypatch
+):
+    agent = _anthropic_agent(agent_factory, monkeypatch, accepts="adaptive")
+    warnings: list[str] = []
+    agent._ui.print_error = warnings.append
+
+    # The name list calls this model old, so the first request carries the budget form.
+    assert agent._call_model("claude-haiku-4-5", "system", "user") == '{"thought":"ok"}'
+    assert agent._call_model("claude-haiku-4-5", "system", "user") == '{"thought":"ok"}'
+
+    requests = agent.client.requests
+    # First guess (no style), the other form, then the remembered form at once.
+    assert [r.get("thinking_style") for r in requests] == [None, "adaptive", "adaptive"]
+    assert all(r["reasoning_effort"] == "low" for r in requests)
+    assert warnings == []
+
+
+def test_effort_is_dropped_only_when_both_forms_are_rejected(agent_factory, monkeypatch):
+    agent = _anthropic_agent(agent_factory, monkeypatch, accepts="neither")
+    agent._ui.print_error = lambda message: None
+
+    assert agent._call_model("claude-haiku-4-5", "system", "user") == '{"thought":"ok"}'
+
+    requests = agent.client.requests
+    assert [r.get("thinking_style") for r in requests] == [None, "adaptive", None]
+    assert "reasoning_effort" not in requests[2]
+
+
+def test_wrapper_uses_the_requested_thinking_form_over_the_name_guess():
+    client = AnthropicCompatibleClient(api_key="test-key")
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+    client.chat.completions.create(
+        model="claude-sonnet-4-5",
+        messages=[{"role": "user", "content": "hi"}],
+        reasoning_effort="low",
+        thinking_style="adaptive",
+    )
+    assert record["thinking"] == {"type": "adaptive"}
+    assert record["output_config"] == {"effort": "low"}
+    assert "thinking_style" not in record

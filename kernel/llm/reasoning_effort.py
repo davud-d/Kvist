@@ -171,14 +171,29 @@ def anthropic_uses_adaptive_thinking(model: str) -> bool:
     return (major, minor) > (4, _LAST_LEGACY_MINOR)
 
 
-def anthropic_request_config(model: str, level: str) -> dict[str, Any]:
+THINKING_STYLE_KEY = "thinking_style"
+THINKING_ADAPTIVE = "adaptive"
+THINKING_LEGACY = "legacy"
+
+
+def anthropic_request_config(
+    model: str, level: str, style: str | None = None
+) -> dict[str, Any]:
     """Build Anthropic thinking/effort fields for a model and Kvist level.
 
     New Claude models expose effort through ``output_config`` and only accept
     adaptive thinking. Older models continue to use a bounded enabled block.
+    ``style`` overrides the guess made from the model name: the name list cannot
+    know a model that did not exist yet, so a rejection of the guess is answered
+    by trying the other form (see ``other_thinking_style``).
     """
     normalized = normalize_effort(level)
-    if anthropic_uses_adaptive_thinking(model):
+    adaptive = (
+        anthropic_uses_adaptive_thinking(model)
+        if style is None
+        else style == THINKING_ADAPTIVE
+    )
+    if adaptive:
         # Modern Claude models do not expose a thinking-off effort. Treat the
         # Kvist ``false`` level as the lowest supported effort, matching the
         # legacy translation and avoiding a request that the API rejects.
@@ -188,6 +203,17 @@ def anthropic_request_config(model: str, level: str) -> dict[str, Any]:
             "output_config": {"effort": effort},
         }
     return {"thinking": anthropic_thinking_config(normalized)}
+
+
+def other_thinking_style(model: str, tried: str | None = None) -> str:
+    """The form of thinking that ``tried`` (or the name-based guess) is not."""
+    if tried is None:
+        tried = (
+            THINKING_ADAPTIVE
+            if anthropic_uses_adaptive_thinking(model)
+            else THINKING_LEGACY
+        )
+    return THINKING_LEGACY if tried == THINKING_ADAPTIVE else THINKING_ADAPTIVE
 
 
 def _custom_protocol(provider: str) -> str:
@@ -297,7 +323,7 @@ def merge_reasoning_kwargs(
             request_kwargs[key] = value
 
 
-_REASONING_KWARG_KEYS: tuple[str, ...] = ("reasoning_effort", "thinking")
+_REASONING_KWARG_KEYS: tuple[str, ...] = ("reasoning_effort", "thinking", THINKING_STYLE_KEY)
 
 
 def strip_reasoning_kwargs(request_kwargs: dict[str, Any]) -> dict[str, Any]:

@@ -1784,9 +1784,11 @@ class _AnthropicCompletionsNamespace:
 
         effort = kwargs.get("reasoning_effort")
         if effort:
-            from kernel.llm.reasoning_effort import anthropic_request_config
+            from kernel.llm.reasoning_effort import THINKING_STYLE_KEY, anthropic_request_config
 
-            controls = anthropic_request_config(model, str(effort))
+            controls = anthropic_request_config(
+                model, str(effort), kwargs.get(THINKING_STYLE_KEY)
+            )
             thinking = controls.get("thinking")
             if thinking is not None:
                 request_kwargs["thinking"] = thinking

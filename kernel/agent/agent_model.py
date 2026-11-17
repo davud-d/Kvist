@@ -65,10 +65,13 @@ from kernel.agent.native_tools import (
 )
 from kernel.llm.pricing import call_cost
 from kernel.llm.reasoning_effort import (
+    THINKING_STYLE_KEY,
     is_reasoning_error,
     merge_reasoning_kwargs,
     normalize_effort,
+    other_thinking_style,
     strip_reasoning_kwargs,
+    uses_anthropic_protocol,
 )
 from kernel.context.system_context import workspace_instructions_context
 from kernel.llm.prompt_prefix import SELECTED_STYLE_MARKER
@@ -1754,19 +1757,58 @@ def _warn_reasoning_unsupported(self, error: Exception | None, key: tuple[str, s
 _REASONING_UNSUPPORTED: set[tuple[str, str]] = set()
 
 
+# (provider, model) -> the form of thinking Anthropic accepted after it rejected
+# the one guessed from the model name. Remembered like the native-tools probe, so
+# a model the name list does not know costs one extra request per process.
+_ANTHROPIC_THINKING_STYLE: dict[tuple[str, str], str] = {}
+
+
+def _retry_other_thinking_style(self, request_kwargs: dict[str, Any], key: tuple[str, str]):
+    """Resend with the other form of thinking; ``None`` when that is rejected too.
+
+    A rejection that is not about reasoning propagates: it is not this step's
+    business, and the caller's own error handling must see it.
+    """
+    style = other_thinking_style(key[1])
+    self._ui.debug_print(f"[reasoning] retrying with {style} thinking")
+    try:
+        response = self.client.chat.completions.create(**{**request_kwargs, THINKING_STYLE_KEY: style})
+    except Exception as error:
+        if not is_reasoning_error(error):
+            raise
+        self._ui.debug_print(f"[reasoning] {style} thinking rejected too: {redact_text(str(error))}")
+        return None
+    _ANTHROPIC_THINKING_STYLE[key] = style
+    return response
+
+
 def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, Any]):
     """Create a completion; on a reasoning-control rejection, warn and retry
-    once without any reasoning kwargs. Other errors propagate unchanged."""
+    once without any reasoning kwargs. Other errors propagate unchanged.
+
+    Anthropic gets one more step first: the other form of thinking (adaptive
+    instead of a token budget or the reverse), because the form is guessed from
+    the model name and a new model is a guess that can be wrong. Effort is only
+    dropped when both forms are refused.
+    """
     stripped = strip_reasoning_kwargs(request_kwargs)
     key = (self.config.provider, str(request_kwargs.get("model", "")))
     if stripped != request_kwargs and key in _REASONING_UNSUPPORTED:
         _warn_reasoning_unsupported(self, None, key)
         return self.client.chat.completions.create(**stripped)
+    anthropic = "reasoning_effort" in request_kwargs and uses_anthropic_protocol(self.config.provider)
+    if anthropic and key in _ANTHROPIC_THINKING_STYLE:
+        request_kwargs = {**request_kwargs, THINKING_STYLE_KEY: _ANTHROPIC_THINKING_STYLE[key]}
     try:
         return self.client.chat.completions.create(**request_kwargs)
     except Exception as error:
         if not is_reasoning_error(error):
             raise
+        if anthropic and THINKING_STYLE_KEY not in request_kwargs:
+            self._ui.debug_print(f"[reasoning] first form rejected: {redact_text(str(error))}")
+            response = _retry_other_thinking_style(self, request_kwargs, key)
+            if response is not None:
+                return response
         _REASONING_UNSUPPORTED.add(key)
         _warn_reasoning_unsupported(self, error, key)
         return self.client.chat.completions.create(**stripped)
