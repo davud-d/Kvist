@@ -1897,3 +1897,152 @@ def test_verify_only_goal_matches_english_counting_like_the_russian_one():
     assert _is_verify_only_goal("how many files are in src?")
     assert _is_verify_only_goal("count the TODO comments")
     assert not _is_verify_only_goal("fix the parser")
+
+
+# --- stages: the calls of one stage run side by side, the stages one after another ---------------
+
+
+def _name_stages(monkeypatch, stages: list[int | None]) -> None:
+    """Native tools carry a call's stage in its arguments; the text protocol has no place for it, so a test sets it after parsing."""
+    from kernel.agent import agent_runtime
+
+    parse = agent_runtime.parse_model_response
+
+    def parse_with_stages(text: str):
+        response = parse(text)
+        for call, stage in zip(response.calls, stages):
+            call.stage = stage
+        return response
+
+    monkeypatch.setattr(agent_runtime, "parse_model_response", parse_with_stages)
+
+
+def _capture_answers(monkeypatch) -> list[list[str]]:
+    from kernel.agent import agent_runtime
+
+    run_calls = agent_runtime._run_calls
+    seen: list[list[str]] = []
+
+    def run_and_keep(*args):
+        outcome, step, answers = run_calls(*args)
+        seen.append(answers)
+        return outcome, step, answers
+
+    monkeypatch.setattr(agent_runtime, "_run_calls", run_and_keep)
+    return seen
+
+
+def test_stages_run_in_order_and_the_calls_of_one_stage_run_together(agent_factory, monkeypatch):
+    agent = agent_factory(max_steps=10)
+    # The call made first belongs to the last stage: it must still finish last.
+    execute, probe = _concurrency_probe({"late.py": 0.05, "a.py": 0.3, "b.py": 0.3})
+    agent.executor.execute = execute
+    responses = iter([
+        _v2("", _tool("read_file", path="late.py"), _tool("read_file", path="a.py"), _tool("read_file", path="b.py")),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+    _name_stages(monkeypatch, [1, 0, 0])
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert probe["peak"] == 2
+    assert probe["finished"][-1] == "late.py"
+    assert sorted(probe["finished"][:2]) == ["a.py", "b.py"]
+
+
+def test_answers_keep_the_order_the_calls_were_made_in_whatever_the_stages(agent_factory, monkeypatch):
+    agent = agent_factory(max_steps=10)
+    execute, _probe = _concurrency_probe({})
+    agent.executor.execute = execute
+    responses = iter([
+        _v2("", _tool("read_file", path="one.py"), _tool("read_file", path="two.py"), _tool("read_file", path="three.py")),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+    _name_stages(monkeypatch, [2, 0, 1])
+    answers = _capture_answers(monkeypatch)
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    (first,) = answers
+    assert [("one.py" in answer, "two.py" in answer, "three.py" in answer) for answer in first] == [
+        (True, False, False), (False, True, False), (False, False, True),
+    ]
+
+
+def test_a_failed_call_does_not_cancel_the_next_stage_and_that_stage_is_told(agent_factory, monkeypatch):
+    agent = agent_factory(max_steps=10)
+    ran: list[str] = []
+
+    def execute(command):
+        path = command.action.args["path"]
+        ran.append(path)
+        if path == "broken.py":
+            return ExecutionResult(False, command.action.type, {"error": "no such file"})
+        return ExecutionResult(True, command.action.type, {"path": path, "content": "ok"})
+
+    agent.executor.execute = execute
+    responses = iter([
+        _v2("", _tool("read_file", path="broken.py"), _tool("read_file", path="fine.py"), _tool("read_file", path="after.py")),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+    _name_stages(monkeypatch, [0, 0, 1])
+    answers = _capture_answers(monkeypatch)
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert ran == ["broken.py", "fine.py", "after.py"]
+    broken, fine, after = answers[0]
+    assert "earlier stage" not in broken and "earlier stage" not in fine
+    assert "earlier stage" in after
+
+
+def test_a_response_without_stages_runs_in_call_order(agent_factory, monkeypatch):
+    agent = agent_factory(max_steps=10)
+    ran: list[str] = []
+
+    def execute(command):
+        ran.append(command.action.args["path"])
+        return ExecutionResult(True, command.action.type, {"path": ran[-1], "content": "ok"})
+
+    agent.executor.execute = execute
+    responses = iter([_v2("", _tool("write_file", path="a.py", content="x"), _tool("read_file", path="a.py")), "Готово."])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Write and read", start_step=1)
+
+    assert ran == ["a.py", "a.py"]
+    assert [log["command"]["action"]["type"] for log in agent._state.step_logs if "feedback" in log] == ["write_file", "read_file"]
+
+
+def test_a_native_turn_with_stages_answers_each_call_id_with_its_own_result(agent_factory):
+    from kernel.agent import agent_runtime
+    from kernel.agent.native_tools import NativeTurn, ToolCall, calls_from_turn
+    from kernel.protocol.protocol import ModelResponse
+
+    agent = agent_factory(max_steps=10)
+    agent._state.native_tools = True
+    # run_loop sets the budget; this test enters one turn below it.
+    agent._state.step_budget = 10
+    ran: list[str] = []
+
+    def execute(command):
+        path = command.action.args["path"]
+        ran.append(path)
+        return ExecutionResult(True, command.action.type, {"path": path, "content": f"content of {path}"})
+
+    agent.executor.execute = execute
+    turn = NativeTurn("", tool_calls=[
+        ToolCall("id-last", "read_file", json.dumps({"path": "last.py", "stage": 2})),
+        ToolCall("id-first", "read_file", json.dumps({"path": "first.py", "stage": 0})),
+        ToolCall("id-middle", "read_file", json.dumps({"path": "middle.py", "stage": 1})),
+    ])
+
+    agent_runtime._run_turn(agent, "Investigate files", 1, ModelResponse(text="", calls=calls_from_turn(turn)), turn)
+
+    assert ran == ["first.py", "middle.py", "last.py"]
+    answered = {m["tool_call_id"]: m["content"] for m in agent._state.native_messages if m["role"] == "tool"}
+    assert list(answered) == ["id-last", "id-first", "id-middle"]
+    assert "last.py" in answered["id-last"] and "first.py" in answered["id-first"] and "middle.py" in answered["id-middle"]

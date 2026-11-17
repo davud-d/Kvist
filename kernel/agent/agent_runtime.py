@@ -1091,6 +1091,10 @@ class _PlannedCall:
     def readonly(self) -> bool:
         return self.request.name in READONLY_TOOLS
 
+    @property
+    def stage(self) -> int:
+        return self.request.stage or 0
+
 
 # Read-only calls of one response that may run at the same time.
 MAX_PARALLEL_CALLS = 10
@@ -1098,6 +1102,9 @@ _INTERRUPT_POLL_SECONDS = 0.05
 _NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already ended the task."
 _NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
 _NOT_RUN_BUDGET = "Not executed: the step budget ran out."
+_AFTER_FAILED_STAGE = (
+    "\n(A call of an earlier stage of this response did not succeed; this call ran anyway.)"
+)
 _NOT_RUN_INTERRUPTED = (
     "Not executed: the person paused or stopped the task before this call. "
     "Check again whether it is still needed before making it."
@@ -1163,26 +1170,32 @@ def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCa
 def _run_calls(
     self, user_goal: str, step: int, planned: list[_PlannedCall]
 ) -> tuple[_ActionOutcome, int, list[str]]:
-    """Run a response's calls in call order and answer every one of them.
+    """Run a response's calls stage by stage and answer every one of them, in call order.
 
-    Consecutive read-only calls run as one group, in parallel; a writing call
-    runs alone. Every call is its own step, so step logs, checkpoints, the
-    pending-action record and the step budget keep their meaning. A failed
-    call costs only itself: the calls of one response do not depend on each
-    other (the prompts say so), so no failure cancels the rest.
+    Consecutive read-only calls run as one group, in parallel; so do consecutive
+    commands that need no approval; any other call runs alone. A response that
+    names stages runs them one after another, and inside a stage the calls are
+    independent, so reads and commands that can share a moment are put together
+    (``_in_stage_order``). Every call is its own step, so step logs, checkpoints,
+    the pending-action record and the step budget keep their meaning. A failed
+    call costs only itself: no failure cancels the rest, a later stage included.
     """
     _prefetch_approvals(self, planned)
     runs_alongside: dict[int, bool] = {}
+    order = _in_stage_order(self, planned, runs_alongside)
+    items = [planned[position] for position in order]
     answers: list[str] = []
     not_run: list[str] = []
+    failed_stages: list[int] = []
     outcome = _ActionOutcome()
     refusal = next(
-        (item for item in planned if item.command is not None and item.command.action.type == "refuse"),
+        (item for item in items if item.command is not None and item.command.action.type == "refuse"),
         None,
     )
     index = 0
-    while index < len(planned):
-        item = planned[index]
+    while index < len(items):
+        item = items[index]
+        after_failure = _AFTER_FAILED_STAGE if failed_stages and min(failed_stages) < item.stage else ""
         if self.control.interrupted() and not outcome.finished:
             # A pause or stop between calls: the rest of the response does not
             # run; after the person's correction the model decides again.
@@ -1198,48 +1211,88 @@ def _run_calls(
         if item.over_limit:
             answers.append(item.error)
             not_run.append(item.error)
+            failed_stages.append(item.stage)
             index += 1
             continue
         if item.command is None:
             _register_unreadable_call(self, item.error)
             answers.append(item.error)
             not_run.append(item.error)
+            failed_stages.append(item.stage)
             index += 1
             continue
         if item.readonly:
-            group = _readonly_run(planned, index)
-            step, group_answers, group_not_run = _run_readonly_group(
+            group = _readonly_run(items, index)
+            step, group_answers, group_not_run, failed = _run_readonly_group(
                 self, user_goal, step, group, first_in_response=index == 0
             )
-            answers.extend(group_answers)
+            answers.extend(answer + after_failure for answer in group_answers)
             not_run.extend(group_not_run)
+            failed_stages.extend([item.stage] * failed)
             index += len(group)
             continue
-        shells = _shell_run(self, planned, index, runs_alongside)
+        shells = _shell_run(self, items, index, runs_alongside)
         if len(shells) > 1:
-            step, group_answers, group_not_run = _run_shell_group(
+            step, group_answers, group_not_run, failed = _run_shell_group(
                 self, user_goal, step, shells, first_in_response=index == 0
             )
-            answers.extend(group_answers)
+            answers.extend(answer + after_failure for answer in group_answers)
             not_run.extend(group_not_run)
+            failed_stages.extend([item.stage] * failed)
             index += len(shells)
             continue
         index += 1
         if step > self._state.step_budget and index > 1:
             answers.append(_NOT_RUN_BUDGET)
             not_run.append(f"{item.command.action.description}: {_NOT_RUN_BUDGET}")
+            failed_stages.append(item.stage)
             continue
         serial = getattr(self, "_result_serial", 0)
         result = _run_one_action(self, user_goal, step, item.command)
         step += 1
         answer = _call_answer(self, serial, result)
-        answers.append(answer)
+        answers.append(answer + after_failure)
         if result.finished:
             outcome = result
-        elif not result.proceed and getattr(self, "_result_serial", 0) == serial:
-            not_run.append(f"{item.command.action.description}: {answer}")
+        elif not result.proceed:
+            failed_stages.append(item.stage)
+            if getattr(self, "_result_serial", 0) == serial:
+                not_run.append(f"{item.command.action.description}: {answer}")
     _note_calls_not_run(self, not_run)
-    return outcome, step, answers
+    return outcome, step, _in_call_order(order, answers)
+
+
+def _in_stage_order(
+    self, planned: list[_PlannedCall], runs_alongside: dict[int, bool]
+) -> list[int]:
+    """Positions of ``planned`` in the order they run.
+
+    A response that names no stage keeps its call order. Otherwise the stages
+    run in ascending order, and since the calls of one stage are independent,
+    the reads of a stage come first, then its commands that need no approval,
+    then the rest in call order: that is what makes each kind one parallel group.
+    """
+    if all(item.request.stage is None for item in planned):
+        return list(range(len(planned)))
+
+    def rank(item: _PlannedCall) -> int:
+        if item.command is None or item.over_limit:
+            return 2
+        if item.readonly:
+            return 0
+        if id(item) not in runs_alongside:
+            runs_alongside[id(item)] = self.executor.runs_alongside_others(item.command)
+        return 1 if runs_alongside[id(item)] else 2
+
+    return sorted(range(len(planned)), key=lambda position: (planned[position].stage, rank(planned[position]), position))
+
+
+def _in_call_order(order: list[int], answers: list[str]) -> list[str]:
+    """``answers`` came in running order; the conversation wants them in the order the calls were made."""
+    by_call = [""] * len(answers)
+    for position, answer in zip(order, answers):
+        by_call[position] = answer
+    return by_call
 
 
 def _prefetch_approvals(self, planned: list[_PlannedCall]) -> None:
@@ -1268,10 +1321,10 @@ def _prefetch_approvals(self, planned: list[_PlannedCall]) -> None:
 
 
 def _readonly_run(planned: list[_PlannedCall], start: int) -> list[_PlannedCall]:
-    """The read-only calls that follow each other from ``start``, at most a response's worth."""
+    """The read-only calls of one stage that follow each other from ``start``, at most a response's worth."""
     group: list[_PlannedCall] = []
     for item in planned[start:]:
-        if item.command is None or not item.readonly:
+        if item.command is None or not item.readonly or item.stage != planned[start].stage:
             break
         group.append(item)
     return group
@@ -1279,12 +1332,13 @@ def _readonly_run(planned: list[_PlannedCall], start: int) -> list[_PlannedCall]
 
 def _run_readonly_group(
     self, user_goal: str, step: int, group: list[_PlannedCall], *, first_in_response: bool
-) -> tuple[int, list[str], list[str]]:
+) -> tuple[int, list[str], list[str], int]:
     """Guards in call order, the executor in parallel, results registered in call order.
 
     Only the executor call leaves the main thread: every guard and every
     change to the run state stays where it was, so a group behaves like the
-    same reads made one by one, just sooner.
+    same reads made one by one, just sooner. The last value is how many of the
+    group's calls did not succeed.
     """
     answers: list[str] = [""] * len(group)
     not_run: list[str] = []
@@ -1305,19 +1359,21 @@ def _run_readonly_group(
                 not_run.append(f"{command.action.description}: {answers[position]}")
         step += 1
     feedbacks = _execute_in_parallel(self, [group[position].command for position, _step, _serial in ready])
+    succeeded = 0
     for (position, call_step, serial), feedback in zip(ready, feedbacks):
         result = _finish_action(self, call_step, group[position].command, feedback)
         answers[position] = _call_answer(self, serial, result)
-    return step, answers, not_run
+        succeeded += result.proceed
+    return step, answers, not_run, len(group) - succeeded
 
 
 def _shell_run(
     self, planned: list[_PlannedCall], start: int, runs_alongside: dict[int, bool]
 ) -> list[_PlannedCall]:
-    """The run_shell calls that follow each other from ``start`` and need no approval."""
+    """The run_shell calls of one stage that follow each other from ``start`` and need no approval."""
     group: list[_PlannedCall] = []
     for item in planned[start:]:
-        if item.command is None or item.over_limit:
+        if item.command is None or item.over_limit or item.stage != planned[start].stage:
             break
         if id(item) not in runs_alongside:
             runs_alongside[id(item)] = self.executor.runs_alongside_others(item.command)
@@ -1329,12 +1385,12 @@ def _shell_run(
 
 def _run_shell_group(
     self, user_goal: str, step: int, group: list[_PlannedCall], *, first_in_response: bool
-) -> tuple[int, list[str], list[str]]:
+) -> tuple[int, list[str], list[str], int]:
     """Guards in call order, the commands side by side, results registered in call order.
 
     Like the read group, only the executor call leaves the main thread. A command
     that turns out to need the person is run again alone afterwards, where a dialog
-    can be shown.
+    can be shown. The last value is how many of the group's commands did not succeed.
     """
     answers: list[str] = [""] * len(group)
     not_run: list[str] = []
@@ -1355,7 +1411,7 @@ def _run_shell_group(
                 not_run.append(f"{command.action.description}: {answers[position]}")
         step += 1
     if not ready:
-        return step, answers, not_run
+        return step, answers, not_run, len(group)
     # One record for the group: a shell command is never replayed, so resume only needs to know
     # that something of this kind was in flight.
     first_step, first_command = ready[0][1], group[ready[0][0]].command
@@ -1363,6 +1419,7 @@ def _run_shell_group(
     if pending_action is not None:
         self._save_checkpoint(user_goal, first_step, pending_action=pending_action)
     feedbacks = _execute_shells_together(self, [(call_step, group[position].command) for position, call_step, _ in ready])
+    succeeded = 0
     for (position, call_step, serial), feedback in zip(ready, feedbacks):
         command = group[position].command
         if _needs_the_person(feedback):
@@ -1371,8 +1428,9 @@ def _run_shell_group(
         else:
             result = _finish_action(self, call_step, command, feedback)
         answers[position] = _call_answer(self, serial, result)
+        succeeded += result.proceed
     self._save_checkpoint(user_goal, ready[-1][1])
-    return step, answers, not_run
+    return step, answers, not_run, len(group) - succeeded
 
 
 def _needs_the_person(feedback: dict[str, Any]) -> bool:

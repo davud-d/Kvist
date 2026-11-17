@@ -165,7 +165,10 @@ edits files only after you accept it. Small edits skip this.
 
 Each step the model sends a short batch of actions: read, search, write, run a
 command, search the web. They run in order and a failed one does not cancel the
-rest. The agent finishes when the model says the work is done. It is told to verify the
+rest. With native tool calls the model can also give each call a `stage`: the
+calls of one stage are independent and run side by side where they can, and the
+next stage starts when the previous one is done (edit and read, then build, then
+check, in one response). The agent finishes when the model says the work is done. It is told to verify the
 result and to say what it could not finish or check.
 
 `Esc` pauses a run and keeps its state. `Ctrl+C` stops it and cleans up. The

@@ -95,6 +95,10 @@ class ToolCallRequest:
     name: str
     arguments: dict[str, Any] | None
     error: str = ""
+    # The group the model put the call in (native tools only). Calls with one
+    # stage are independent and run side by side; a stage starts when the
+    # previous one is done. None: the model named no stage.
+    stage: int | None = None
 
 
 @dataclass(slots=True)

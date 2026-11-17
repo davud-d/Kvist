@@ -161,7 +161,7 @@ def test_read_file_offers_a_line_range_and_passes_it_on():
     tools = {tool["function"]["name"]: tool["function"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
     parameters = tools["read_file"]["parameters"]
 
-    assert set(parameters["properties"]) == {"path", "start_line", "end_line"}
+    assert set(parameters["properties"]) == {"path", "start_line", "end_line", "stage"}
     assert parameters["required"] == ["path"]
 
     turn = NativeTurn(
@@ -816,3 +816,32 @@ def test_a_stream_of_bare_call_headers_is_asked_again_without_streaming(agent_fa
     agent_model._request_native_turn(agent, "m", [{"role": "user", "content": "x"}], [])
 
     assert sent == [True, False, False]
+
+
+def test_a_call_names_its_stage_and_the_stage_never_reaches_the_action_arguments():
+    turn = NativeTurn("", tool_calls=[
+        ToolCall("c1", "read_file", json.dumps({"path": "a.py", "stage": 1})),
+        ToolCall("c2", "read_file", json.dumps({"path": "b.py"})),
+    ])
+
+    first, second = calls_from_turn(turn)
+
+    assert (first.stage, first.arguments) == (1, {"path": "a.py"})
+    assert (second.stage, second.arguments) == (None, {"path": "b.py"})
+
+
+@pytest.mark.parametrize("stage", [-1, 1.5, "1", True])
+def test_a_stage_that_is_not_a_whole_number_from_zero_is_an_error_of_that_call(stage):
+    turn = NativeTurn("", tool_calls=[ToolCall("c1", "read_file", json.dumps({"path": "a.py", "stage": stage}))])
+
+    (request,) = calls_from_turn(turn)
+
+    assert request.arguments is None
+    assert "stage of read_file must be a whole number from 0" in request.error
+
+
+def test_every_tool_offers_the_stage():
+    tools = tools_for_role(agent_model._load_role_prompt("coder"))
+
+    assert tools and all("stage" in tool["function"]["parameters"]["properties"] for tool in tools)
+    assert all("stage" not in tool["function"]["parameters"]["required"] for tool in tools)

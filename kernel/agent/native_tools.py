@@ -65,9 +65,10 @@ class ToolSpec:
     """One tool of the registry.
 
     ``readonly`` marks a tool with no side effect that may run in parallel with
-    its neighbours (agent_runtime._run_calls). Every other tool is treated as
-    writing: it runs alone, in call order; a failure never cancels the other
-    calls of the response. run_shell is always writing; git_status/git_diff
+    the other calls of its stage (agent_runtime._run_calls). Every other tool is
+    treated as writing: it runs alone, in call order within its stage; a failure
+    never cancels the other calls of the response. Writes are not run side by
+    side: the executor's write-ahead transaction holds one action at a time. run_shell is always writing; git_status/git_diff
     are too, because they spawn through process_tree.run_supervised, whose
     preexec_fn Python does not guarantee in a process with threads.
     """
@@ -563,9 +564,21 @@ _PURPOSE: dict[str, Any] = {
 _PURPOSE_TOOLS = frozenset({"git_status", "git_diff"})
 
 
+STAGE_KEY = "stage"
+# Every tool takes it: the runtime strips it before the call is validated, so
+# no action schema knows about it. The schema text is the only place a model
+# learns the rule while it fills the arguments.
+_STAGE: dict[str, Any] = {
+    "type": "integer",
+    "minimum": 0,
+    # Short on purpose: the schema of every tool goes out with every request.
+    "description": "Optional. Same stage: independent calls. A higher stage starts after the lower ones finish.",
+}
+
+
 def tool_definition(name: str) -> dict[str, Any]:
     spec = ACTION_TOOLS[name]
-    properties, required = spec.properties, spec.required
+    properties, required = {**spec.properties, STAGE_KEY: _STAGE}, spec.required
     if name in _PURPOSE_TOOLS:
         properties, required = {**properties, "purpose": _PURPOSE}, ("purpose",)
     return {
@@ -658,7 +671,14 @@ def _call_request(call: ToolCall, number: int) -> ToolCallRequest:
         return ToolCallRequest(
             call.call_id, call.name, None, f"Tool call {number} was not run: arguments of {call.name} must be a JSON object."
         )
-    return ToolCallRequest(call.call_id, call.name, value)
+    stage = value.pop(STAGE_KEY, None)
+    # bool is an int in Python, and "stage": true would otherwise read as stage 1.
+    if stage is not None and (isinstance(stage, bool) or not isinstance(stage, int) or stage < 0):
+        return ToolCallRequest(
+            call.call_id, call.name, None,
+            f"Tool call {number} was not run: stage of {call.name} must be a whole number from 0, got {stage!r}.",
+        )
+    return ToolCallRequest(call.call_id, call.name, value, stage=stage)
 
 
 def assistant_message(turn: NativeTurn) -> dict[str, Any]:
