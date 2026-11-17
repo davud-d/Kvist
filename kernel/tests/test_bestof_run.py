@@ -198,6 +198,11 @@ def worktree_list(repo) -> list[str]:
     return [line for line in git(repo, "worktree", "list", "--porcelain").splitlines() if line.startswith("worktree ")]
 
 
+def only_main_worktree(repo) -> list[str]:
+    # git prints forward slashes on Windows too.
+    return [f"worktree {repo.resolve().as_posix()}"]
+
+
 def wait_until(predicate, seconds: float = 10.0) -> None:
     deadline = time.monotonic() + seconds
     while not predicate():
@@ -331,7 +336,7 @@ def test_two_executors_a_verdict_the_persons_accept_and_one_commit_with_the_winn
     body = git(repo, "log", "-1", "--format=%B")
     assert "Best-of: e1 (senior-dev) was chosen." in body and "smaller change" in body
     # The executors' folders and branches are gone.
-    assert worktree_list(repo) == [f"worktree {repo.resolve()}"]
+    assert worktree_list(repo) == only_main_worktree(repo)
     assert git(repo, "branch", "--list", "kvist/bestof/*").strip() == ""
     assert result.ok and result.effects["outcome"] == "accepted" and result.effects["commit"] == finished["commit"]
     assert " / " in result.message and finished["commit"][:10] in result.message
@@ -476,7 +481,7 @@ def test_discard_removes_everything_and_leaves_the_users_branch_and_files_alone(
     assert watching.kinds()[-1] == "finished" and watching.of("finished")[0]["outcome"] == "discarded"
     assert git(repo, "rev-parse", "HEAD").strip() == head
     assert (repo / "a.txt").read_text(encoding="utf-8") == "hello\n"
-    assert worktree_list(repo) == [f"worktree {repo.resolve()}"]
+    assert worktree_list(repo) == only_main_worktree(repo)
     assert not (repo / ".kvist" / "bestof" / watching.of("started")[0]["run_id"]).exists()
     assert result.ok and result.effects["outcome"] == "discarded"
     assert "Discarded" in result.final and "nothing" not in result.final.lower().split("discarded")[0]
@@ -502,7 +507,7 @@ def test_a_closed_dialog_leaves_the_run_pending_and_the_next_turn_accepts_it(age
     assert later.ok and commits(repo) == [RUN_TASK, "first"]
     assert watching.of("finished")[1]["outcome"] == "accepted" and watching.of("finished")[1]["executor_id"] == "e1"
     assert (repo / "a.txt").read_text(encoding="utf-8") == "hello there\n"
-    assert worktree_list(repo) == [f"worktree {repo.resolve()}"]
+    assert worktree_list(repo) == only_main_worktree(repo)
     # The second turn's events are the turn's own: the outcome, not a new run.
     assert watching.kinds()[-1] == "finished" and watching.kinds().count("started") == 1
 
@@ -782,7 +787,7 @@ def test_a_repository_without_a_commit_and_a_detached_head_are_refused_with_thei
 
     assert not result.ok and "HEAD is detached" in result.final
     assert watching.events == []
-    assert worktree_list(repo) == [f"worktree {repo.resolve()}"]
+    assert worktree_list(repo) == only_main_worktree(repo)
 
 
 def test_a_refused_command_names_both_languages_in_the_command_result_and_one_in_the_text(agent_factory, tmp_path):
@@ -855,7 +860,7 @@ def test_discard_of_a_waiting_run_removes_it_and_a_second_discard_finds_nothing(
     again = best_of(main, "discard")
 
     assert done.ok and watching.of("finished")[-1]["outcome"] == "discarded"
-    assert not again.ok and worktree_list(repo) == [f"worktree {repo.resolve()}"]
+    assert not again.ok and worktree_list(repo) == only_main_worktree(repo)
     assert git(repo, "branch", "--list", "kvist/bestof/*").strip() == ""
 
 
@@ -1155,7 +1160,7 @@ def test_with_no_winner_the_question_opens_on_discarding_and_accepting_is_not_of
     assert "**Winner:** none: no result solves the task" in decision["body"]
     assert "The task cannot be done." in decision["body"]
     assert result.effects["outcome"] == "discarded" and commits(repo) == ["first"]
-    assert worktree_list(repo) == [f"worktree {repo.resolve()}"]
+    assert worktree_list(repo) == only_main_worktree(repo)
 
 
 def test_an_accept_answered_to_a_run_with_no_winner_takes_nothing_and_asks_again(agent_factory, repo):

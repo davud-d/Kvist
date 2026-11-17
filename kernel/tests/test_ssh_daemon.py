@@ -258,10 +258,11 @@ def test_work_done_while_nobody_was_attached_is_reported_to_the_next_frontend_on
     daemon.daemon.inbox.put("work while nobody watches")
     wait_for_a_turn_to_end(daemon)
 
+    # The second client connects only after the first one is attached: two sockets opened back to back may be
+    # accepted in either order on a slow machine, and the report goes to whichever attaches first.
     first = daemon.client("first")
-    second = daemon.client("second")
-
     assert first.wait_for(is_type(wire.ATTACHED))["unseen_work"] is True
+    second = daemon.client("second")
     assert second.wait_for(is_type(wire.ATTACHED))["unseen_work"] is False
 
 

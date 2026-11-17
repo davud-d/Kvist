@@ -562,7 +562,8 @@ def test_accept_takes_binary_files(repo):
 
 
 def test_accept_handles_unusual_file_names(repo):
-    names = ["we ird[1]*.txt", "naïve-имя.txt", "-dash.txt"]
+    # Windows refuses `*` in a file name.
+    names = ["we ird[1].txt" if os.name == "nt" else "we ird[1]*.txt", "naïve-имя.txt", "-dash.txt"]
     run = worktrees.create_run(repo, "r1", ["e1"])
 
     def edit(folder: Path) -> None:
@@ -774,7 +775,8 @@ def test_recover_marks_an_executor_with_a_deleted_worktree_lost_and_prunes_git(r
     gone = run.worktree("e1")
     import shutil
     shutil.rmtree(gone)
-    assert str(gone) in git(repo, "worktree", "list", "--porcelain")
+    # git prints forward slashes on Windows.
+    assert gone.as_posix() in git(repo, "worktree", "list", "--porcelain")
     found = worktrees.recover(repo)
     assert len(found) == 1
     assert {key: info.status for key, info in found[0].executors.items()} == {"e1": "lost", "e2": "ready"}

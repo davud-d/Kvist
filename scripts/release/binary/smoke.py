@@ -43,8 +43,8 @@ def check_archive(binary: Path) -> None:
         [sys.executable, "-m", "PyInstaller.utils.cliutils.archive_viewer", "-l", str(binary)],
         capture_output=True, text=True, timeout=300, check=True,
     ).stdout
-    # Windows names its executables with an extension.
-    names = listing.replace("node/node.exe", "node/node").replace("kvist-session.exe", "kvist-session")
+    # Windows lists entries with backslashes (doubled in the repr) and names its executables with an extension.
+    names = listing.replace("\\\\", "/").replace("node/node.exe", "node/node").replace("kvist-session.exe", "kvist-session")
     missing = [entry for entry in REQUIRED_IN_ARCHIVE if f"'{entry}'" not in names]
     assert not missing, f"the binary does not carry: {', '.join(missing)}"
     print("archive: carries", ", ".join(REQUIRED_IN_ARCHIVE))

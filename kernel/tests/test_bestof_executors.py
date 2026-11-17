@@ -848,7 +848,7 @@ def test_with_the_flag_a_command_in_a_workspace_under_kvist_runs(kvist_folder):
     assert result.ok and result.data["returncode"] == 0 and result.data["stdout"].strip() == "hello"
     # A line that names the workspace's own absolute path (a test run's traceback) is not dropped as "internal".
     where = _shell(sandbox, [*WHERE])
-    assert Path(where.data["stdout"].strip()) == kvist_folder
+    assert Path(where.data.get("stdout", "").strip()) == kvist_folder, where.data
 
 
 @pytest.mark.parametrize("attempt", [
@@ -926,7 +926,7 @@ def test_a_command_that_needs_approval_goes_to_the_main_gate_and_without_one_the
 
     ran = pool.check("e1", [PYTHON, "-c", "import sys; sys.exit(3)"])
 
-    assert ran["state"] == "failed"
+    assert ran["state"] == "failed", ran
     assert [command[0] for command in gate.commands] == [PYTHON]
 
     other, _ = _main(agent_factory, StyledClient())
