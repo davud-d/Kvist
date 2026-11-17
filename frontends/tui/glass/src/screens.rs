@@ -77,7 +77,20 @@ fn state_look(state: ExecState, s: &Strings, ms: u128) -> (&'static str, Color, 
     }
 }
 
-/// The icon, its colour and the words of a test run: the core's summary when it sent one.
+/// The one line of a test run that says how it went. The core's summary is the tail of the command's output,
+/// pytest's `====` bars and `____ test ____` headings included, so this takes the last line that has words in it,
+/// without the bars and without the "in 0.12s" that follows the counts.
+fn test_digest(summary: &str) -> String {
+    let bars = |c: char| matches!(c, '=' | '-' | '_') || c.is_whitespace();
+    let line = summary.lines().rev().map(|line| line.trim_matches(bars)).find(|line| !line.is_empty()).unwrap_or("");
+    let counts = match line.rsplit_once(" in ") {
+        Some((head, took)) if !head.is_empty() && took.starts_with(|c: char| c.is_ascii_digit()) => head,
+        _ => line,
+    };
+    counts.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The icon, its colour and the words of a test run: the core's summary, as one line, when it sent one.
 fn tests_look(tests: &Tests, s: &Strings, ms: u128) -> (&'static str, Color, String) {
     let (icon, color, word) = match tests.state {
         TestState::Passed => (theme::I_CHECK, MOSS, s.tests_passed),
@@ -85,7 +98,8 @@ fn tests_look(tests: &Tests, s: &Strings, ms: u128) -> (&'static str, Color, Str
         TestState::Running => (theme::spinner(ms), MOON, s.tests_running),
         TestState::Unknown => ("·", DUSK, s.tests_unknown),
     };
-    let words = if tests.summary.trim().is_empty() { word.to_string() } else { tests.summary.replace('\n', " ") };
+    let digest = test_digest(&tests.summary);
+    let words = if digest.is_empty() { word.to_string() } else { digest };
     (icon, color, words)
 }
 
@@ -646,6 +660,60 @@ mod tests {
         arena.call_started("e1", "c1".into(), crate::model::ToolKind::Shell, "runs pytest".into());
         arena.eliminate("e2", "its tests keep failing".into());
         arena
+    }
+
+    const PYTEST_FAILURE: &str = "=================================== FAILURES ===================================\n\
+        ________________________________ test_add_numbers ________________________________\n\
+        E       assert 3 == 4\n\
+        =========================== short test summary info ============================\n\
+        FAILED test_calc.py::test_add_numbers - assert 3 == 4\n\
+        ========================= 2 failed, 5 passed in 0.12s =========================";
+
+    #[test]
+    fn a_test_summary_is_one_line_of_counts_without_pytests_bars_or_timing() {
+        assert_eq!(test_digest(PYTEST_FAILURE), "2 failed, 5 passed");
+        assert_eq!(test_digest("2 passed in 0.03s\n"), "2 passed");
+        assert_eq!(test_digest("1 failed in 61.50s (0:01:01)"), "1 failed");
+        assert_eq!(test_digest("=== 12 passed in 1.2s ===\n\n"), "12 passed");
+        assert_eq!(test_digest("________\n========\n"), "", "bars alone say nothing");
+        assert_eq!(test_digest(""), "");
+        assert_eq!(test_digest("Tests:   2 failed,\t5 total"), "Tests: 2 failed, 5 total", "inner whitespace is one space");
+        assert_eq!(test_digest("ran in the pool"), "ran in the pool", "an \"in\" that is not a duration stays");
+    }
+
+    #[test]
+    fn a_raw_pytest_tail_never_reaches_the_tests_column_and_an_empty_one_shows_the_state_word() {
+        let failed = Tests { state: TestState::Failed, summary: PYTEST_FAILURE.into() };
+        let (_, _, words) = tests_look(&failed, &EN, 0);
+        assert_eq!(words, "2 failed, 5 passed");
+        assert!(!words.contains('_') && !words.contains('='));
+        let bare = Tests { state: TestState::Failed, summary: "======\n".into() };
+        assert_eq!(tests_look(&bare, &EN, 0).2, EN.tests_failed);
+        let none = Tests { state: TestState::Passed, summary: String::new() };
+        assert_eq!(tests_look(&none, &RU, 0).2, RU.tests_passed);
+    }
+
+    #[test]
+    fn the_arena_row_draws_the_digest_of_a_pytest_tail_not_the_tail() {
+        let mut arena = arena();
+        arena.status(Status {
+            run_id: "r1".into(),
+            id: "e1".into(),
+            style: String::new(),
+            branch: String::new(),
+            state: Some(ExecState::Finished),
+            step: 7,
+            tests: Tests { state: TestState::Failed, summary: PYTEST_FAILURE.into() },
+            diff: DiffStat { files: 2, added: 30, removed: 4 },
+            usage: None,
+        });
+        for width in [80, 110] {
+            let sheet = arena_sheet(&arena, 0, true, width, &EN, 0);
+            let first = plain(&sheet.lines[sheet.rows[0].0]);
+            assert!(!first.contains("____") && !first.contains("===="), "{width}: {first}");
+        }
+        let text = all(&arena_sheet(&arena, 0, true, 110, &EN, 0));
+        assert!(text.contains("2 failed, 5 passed"), "{text}");
     }
 
     #[test]
