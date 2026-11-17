@@ -150,6 +150,30 @@ the place of the browser and helpers cards while it is open. Diffs come from the
 core with each write, so a file changed in a session saved before the core sent
 them shows the counts only.
 
+## Commands of this interface
+
+The `/` list has the same commands as the Ink app. Most go to the core
+(`/export`, `/resume`, `/feedback`, `/gmail`, `/telegram` too). `/website` is
+sent as an ordinary request, which the core expands. Four are answered here and
+never reach the core: `/help` (the command list, in the conversation), `/copy
+[N]` (the latest answer, or the N-th from the end, to the clipboard), `/clear`
+(the conversation on screen starts over; not while a turn runs) and `/quit`
+(`/exit` and `/bye` too). `/resume` is a turn without a request of its own: Esc
+Esc stops it, and it ends with `turn_end` alone.
+
+## The model's thinking
+
+When the provider passes its thinking on (`reasoning_*` events, `docs/UI_API.md`
+§7), it shows above the answer: a "Thinking" header with the seconds, and under
+it the latest five lines of the thought on a thin rule, dimmer towards the top.
+When the model stops thinking the window folds into one line, "Thought for N s".
+A provider that sends no thinking text shows only the "Thinking" row, as before.
+
+The text is not held back to look slow: a few characters are drawn the moment
+they arrive. A burst (some providers send the thought in big pieces) is caught up
+within about a second, however big, so it flows instead of jumping. The log of a
+helper or an executor leaves the thinking out.
+
 ## best-of and council
 
 `/best-of N <task>` and `/council <question>` are core commands, but they are

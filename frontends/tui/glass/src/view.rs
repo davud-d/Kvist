@@ -513,6 +513,9 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
     let mut previous_tool = false;
     let last_index = app.session.items.len().saturating_sub(1);
     for (index, item) in app.session.items.iter().enumerate() {
+        if matches!(item, Item::Thought(thought) if thought.hidden()) {
+            continue;
+        }
         let is_tool = matches!(item, Item::Tool { .. });
         if !lines.is_empty() && (!is_tool || !previous_tool) {
             lines.push(Vec::new());
@@ -548,6 +551,7 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
                     previous_tool = false;
                 }
             }
+            Item::Thought(thought) => lines.extend(thought.lines(width, now, ms)),
             Item::Error(message) => {
                 let mut first = true;
                 for line in text::wrap(&vec![span(message.as_str(), ROSEHIP)], width - 2) {
@@ -565,7 +569,10 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
         lines.push(Vec::new());
     }
     push_blocks(app, |block| !carded(&block.call), width, now, &mut lines, &mut blocks);
+    // A thought on screen carries its own "thinking" header.
+    let thought_open = matches!(app.session.items.last(), Some(Item::Thought(thought)) if thought.active());
     if app.session.busy
+        && !thought_open
         && let Some(since) = app.session.thinking_since
     {
         if !lines.is_empty() {
@@ -1396,6 +1403,30 @@ mod tests {
         for round in 0..rounds - 1 {
             assert!(drawn.contains(&format!("END{round}")), "message {round} still being typed");
         }
+    }
+
+    #[test]
+    fn a_thought_shows_one_header_with_its_latest_lines_and_folds_to_a_line() {
+        use crate::model::CoreEvent;
+        let mut now = Instant::now();
+        let mut app = App::new(layout::Grid { cols: 120, rows: 36, cw: 10, ch: 20 }, now, std::path::Path::new("/tmp"));
+        app.session.submit("hi".into(), now);
+        app.session.apply(CoreEvent::Thinking, now);
+        let words = (1..=9).map(|n| format!("idea {n}")).collect::<Vec<_>>().join("\n");
+        app.session.apply(CoreEvent::ThoughtText { text: words, append: true }, now);
+        now += std::time::Duration::from_secs(1);
+        app.session.tick(now);
+        let plain = |app: &App, now| -> Vec<String> {
+            transcript_lines(app, 100, now, 0).0.iter().map(|line| line.iter().map(|(s, _)| s.as_str()).collect()).collect()
+        };
+        let rows = plain(&app, now);
+        assert_eq!(rows.iter().filter(|row| row.starts_with(strings().thinking)).count(), 1, "the generic row is not drawn beside the thought's own");
+        assert!(rows.iter().any(|row| row.ends_with("idea 9")) && !rows.iter().any(|row| row.ends_with("idea 1")));
+
+        app.session.apply(CoreEvent::ThinkingDone { seconds: 3.0 }, now);
+        now += std::time::Duration::from_secs(1);
+        let rows = plain(&app, now);
+        assert!(rows.iter().any(|row| row.starts_with(strings().thought)) && !rows.iter().any(|row| row.contains("idea")), "{rows:?}");
     }
 
     #[test]

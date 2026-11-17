@@ -20,7 +20,14 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         // Only a journal has these; a wake-up turn's request has no text.
         "user" if !text("text").is_empty() => vec![CoreEvent::User(text("text"))],
         "reasoning_start" => vec![CoreEvent::Thinking],
-        "reasoning_commit" => vec![CoreEvent::ThinkingDone],
+        // Older cores sent no `append` and a cumulative snapshot: the text then replaces what is shown.
+        "reasoning_chunk" => vec![CoreEvent::ThoughtText {
+            text: text("text"),
+            append: event.get("append").and_then(Value::as_bool).unwrap_or(false),
+        }],
+        "reasoning_commit" => {
+            vec![CoreEvent::ThinkingDone { seconds: event.get("duration_seconds").and_then(Value::as_f64).unwrap_or(0.0) as f32 }]
+        }
         "stream_chunk" | "stream_commit" => vec![CoreEvent::Stream { id: text("stream_id"), text: text("text") }],
         "plan" => vec![CoreEvent::Say(text("markdown"))],
         "message" => vec![CoreEvent::Say(text("markdown"))],
@@ -344,6 +351,16 @@ mod tests {
 
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn thinking_events_carry_their_text_and_duration() {
+        let chunk = json!({"type": "reasoning_chunk", "stream_id": "s", "text": "hm", "append": true});
+        assert_eq!(translate(&chunk), [CoreEvent::ThoughtText { text: "hm".into(), append: true }]);
+        let old = json!({"type": "reasoning_chunk", "stream_id": "s", "text": "hm"});
+        assert_eq!(translate(&old), [CoreEvent::ThoughtText { text: "hm".into(), append: false }], "an older core sends snapshots");
+        let commit = json!({"type": "reasoning_commit", "stream_id": "s", "duration_seconds": 2.5});
+        assert_eq!(translate(&commit), [CoreEvent::ThinkingDone { seconds: 2.5 }]);
+    }
 
     #[test]
     fn a_write_carries_the_cores_line_counts_to_its_file() {

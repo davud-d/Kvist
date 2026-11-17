@@ -35,6 +35,7 @@ mod slash;
 mod strings;
 mod term;
 mod text;
+mod thought;
 mod theme;
 mod view;
 mod video;

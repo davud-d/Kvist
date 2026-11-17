@@ -277,7 +277,8 @@ pub fn arena_sheet(arena: &Arena, selected: usize, running: bool, width: usize, 
 fn item_lines(items: &[Item], width: usize, ms: u128) -> Vec<Line> {
     let mut lines: Vec<Line> = Vec::new();
     let mut after_tool = false;
-    for item in items {
+    // A journal log is the work (calls and words); its thinking is not part of it.
+    for item in items.iter().filter(|item| !matches!(item, Item::Thought(_))) {
         let is_tool = matches!(item, Item::Tool { .. });
         if !lines.is_empty() && (!is_tool || !after_tool) {
             lines.push(Vec::new());
@@ -293,6 +294,7 @@ fn item_lines(items: &[Item], width: usize, ms: u128) -> Vec<Line> {
             }
             Item::Agent { text: words, .. } => lines.extend(markdown::render_with_math(words, width, None).0),
             Item::Tool { kind, label, state, .. } => lines.push(view::tool_line(*kind, label, state, width, ms)),
+            Item::Thought(_) => {}
             Item::Error(message) => {
                 for line in text::wrap(&vec![span(message.as_str(), ROSEHIP)], width.saturating_sub(2)) {
                     lines.push([vec![span(format!("{} ", theme::I_ERROR), ROSEHIP)], line].concat());

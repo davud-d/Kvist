@@ -23,9 +23,11 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 27] = [
+pub const COMMANDS: [Command; 37] = [
+    command("help", "Show the commands", "Показать команды"),
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
+    command("export", "Import sessions from Claude Code, Codex, OpenCode, Cursor and others", "Импортировать сессии из Claude Code, Codex, OpenCode, Cursor и других"),
     Command { needs_argument: true, ..command("rename", "Set the active session's title", "Задать название сессии") },
     command("role", "Agent role: auto, coder, reader, devops, chat", "Роль агента: auto, coder, reader, devops, chat"),
     command("effort", "Reasoning effort: false … max", "Глубина рассуждений: false … max"),
@@ -46,8 +48,13 @@ pub const COMMANDS: [Command; 27] = [
     command("memory", "What Kvist remembers: inspect, why, forget, pause", "Что помнит Kvist: inspect, why, forget, pause"),
     command("doctor", "Check modules, frontends, provider, keys and settings", "Проверить модули, интерфейсы, провайдера, ключи и настройки"),
     command("update", "Install the newest Kvist build (restart afterwards)", "Установить свежую сборку Kvist (потом перезапуск)"),
+    command("feedback", "Read the feedback Kvist drafted: send it as a GitHub issue, keep it or discard it", "Прочитать черновик отзыва: отправить как issue на GitHub, оставить или удалить"),
     command("permissions", "Command rules (allow, host, ask, deny) and auto mode (not safe)", "Правила для команд (allow, host, ask, deny) и автоматический режим (небезопасно)"),
+    command("website", "Build a website: Kvist interviews you, builds it and checks it", "Сделать сайт: Kvist расспросит, соберёт и проверит его"),
+    command("gmail", "Sign in to Gmail once and save the token", "Один раз войти в Gmail и сохранить токен"),
+    command("telegram", "Sign in to Telegram once and save the session", "Один раз войти в Telegram и сохранить сессию"),
     command("revert", "Undo the agent's changes", "Отменить изменения агента"),
+    command("resume", "Continue an interrupted run", "Продолжить прерванный запуск"),
     command("provider", "Switch or configure the provider", "Сменить или настроить провайдера"),
     command("change-api", "Change the API key of the provider", "Сменить ключ провайдера"),
     command("settings-api", "Request pacing, timeouts, context window", "Темп запросов, таймауты, окно контекста"),
@@ -56,8 +63,24 @@ pub const COMMANDS: [Command; 27] = [
     command("full-reset", "Erase every saved provider and key", "Стереть всех провайдеров и ключи"),
     command("machines", "Saved machines: add one, choose where to work", "Сохранённые машины: добавить, выбрать, где работать"),
     command("remote", "Work on a server over ssh: /remote user@host /folder, or off", "Работать на сервере по ssh: /remote user@host /папка, или off"),
+    command("copy", "Copy the last answer to the clipboard (/copy N for older)", "Скопировать последний ответ (/copy N — более старый)"),
+    command("clear", "Clear the conversation on screen", "Очистить разговор на экране"),
     command("tui", "Choose the terminal interface", "Выбрать терминальный интерфейс"),
+    command("quit", "Exit (also /exit, /bye)", "Выйти (также /exit, /bye)"),
 ];
+
+/// What `/help` prints: every command and what it does, as Markdown.
+pub fn help_text() -> String {
+    let russian = crate::strings::russian();
+    let rows: Vec<String> = COMMANDS.iter().map(|command| format!("- `/{}` — {}", command.name, command.hint(russian))).collect();
+    format!("**{}**\n\n{}", crate::strings::strings().help_title, rows.join("\n"))
+}
+
+/// The names that mean another command.
+pub fn canonical(name: &str) -> String {
+    let name = name.to_lowercase();
+    if name == "exit" || name == "bye" { "quit".to_string() } else { name }
+}
 
 /// The commands whose name starts with what follows the `/`; empty once the
 /// text has a space (the arguments are being typed) or is not a command.
@@ -162,6 +185,13 @@ mod tests {
         assert_eq!(step(4, 3, 1), 0);
         assert_eq!(step(4, 0, -1), 3);
         assert_eq!(step(0, 0, 1), 0);
+    }
+
+    #[test]
+    fn exit_and_bye_are_quit() {
+        assert_eq!(canonical("Bye"), "quit");
+        assert_eq!(canonical("exit"), "quit");
+        assert_eq!(canonical("New"), "new");
     }
 
     #[test]

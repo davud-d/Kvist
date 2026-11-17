@@ -394,6 +394,7 @@ impl App {
         self.sync_menu(now);
         self.sync_strip(now);
         self.poll_feed(now, pictures);
+        self.session.tick(now);
         if matches!(self.phase, Phase::Splash) && self.splash_over(now, pictures) {
             self.phase = Phase::Main { since: now };
             self.input_rise.go(1.0, now, 600, Ease::Burst);
@@ -597,7 +598,13 @@ impl App {
             }
             CoreEvent::CallStream { call, tool, path, field, line, text } => self.stream_code(call, tool, path, field, *line, text, now),
             CoreEvent::Result { call, .. } => self.finish_code(Some(call), now),
-            CoreEvent::TurnEnd => self.finish_code(None, now),
+            CoreEvent::TurnEnd => {
+                // A resumed run ends with `turn_end` alone, no `command_result`.
+                if self.command.as_deref() == Some("resume") {
+                    self.command = None;
+                }
+                self.finish_code(None, now);
+            }
             _ => {}
         }
         self.session.apply(event, now);
@@ -857,7 +864,7 @@ impl App {
 
     fn on_command_result(&mut self, event: &Value, now: Instant) {
         // A command that failed before its turn began sends no `turn_end`.
-        if self.command.take().is_some_and(|name| TURN_COMMANDS.contains(&name.as_str())) {
+        if self.command.take().is_some_and(|name| name == "resume" || TURN_COMMANDS.contains(&name.as_str())) {
             self.session.apply(CoreEvent::TurnEnd, now);
         }
         let ok = event.get("ok").and_then(Value::as_bool).unwrap_or(false);
@@ -984,6 +991,10 @@ impl App {
     fn start_command(&mut self, name: &str, args: &[&str], now: Instant) {
         self.command = Some(name.to_string());
         self.send(&json!({"type": "command", "name": name, "args": args}), now);
+        // `resume` is a turn the core starts without a request: it streams events, then `turn_end`.
+        if name == "resume" {
+            self.session.apply(CoreEvent::TurnStarted, now);
+        }
         if TURN_COMMANDS.contains(&name) {
             let typed = std::iter::once(format!("/{name}")).chain(args.iter().map(|arg| arg.to_string())).collect::<Vec<_>>().join(" ");
             self.session.submit(typed, now);
@@ -1023,6 +1034,7 @@ impl App {
             || self.command.is_some()
             || tweens.iter().any(|t| t.running(now))
             || view::revealing(self, now)
+            || self.session.thinking_moves(now)
             || self.image_pending
             || self.log.as_ref().is_some_and(|log| matches!(log.state, LogState::Loading))
             || !self.code.is_empty()
@@ -1555,15 +1567,16 @@ impl App {
         if let Some(core) = self.core.as_ref() {
             core.remember_input(&text);
         }
-        if let Some(command) = text.strip_prefix('/') {
+        // `/website` is an ordinary request the core expands itself.
+        let command = text.strip_prefix('/').filter(|command| slash::canonical(command.split_whitespace().next().unwrap_or("")) != "website");
+        if let Some(command) = command {
             let mut words = command.split_whitespace();
-            let name = words.next().unwrap_or("").to_string();
+            let name = slash::canonical(words.next().unwrap_or(""));
             let args: Vec<&str> = words.collect();
             self.input.clear();
             self.cursor = 0;
-            // `/tui` belongs to the launcher, not the core: it picks the interface.
-            if name == "tui" {
-                return self.ask_frontend(now);
+            if self.run_local(&name, &args, now) {
+                return;
             }
             self.command(&name, &args, now);
             return;
@@ -1585,6 +1598,35 @@ impl App {
         self.next_image = 1;
         self.scroll = 0;
         self.input_pos.go(1.0, now, 540, Ease::Burst);
+    }
+
+    /// The commands this interface answers itself, never the core; false for any other.
+    fn run_local(&mut self, name: &str, args: &[&str], now: Instant) -> bool {
+        match name {
+            // `/tui` belongs to the launcher: it picks the interface.
+            "tui" => self.ask_frontend(now),
+            "quit" => self.quit = true,
+            "help" => self.session.note(slash::help_text(), now),
+            "copy" => self.copy_answer(args, now),
+            "clear" if self.session.busy => self.notify(strings().core_busy.to_string(), true, now),
+            "clear" => {
+                self.session.clear_view();
+                self.code.clear();
+                self.scroll = 0;
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// `/copy [N]`: the agent's latest answer (or the N-th from the end) goes to the clipboard.
+    fn copy_answer(&mut self, args: &[&str], now: Instant) {
+        let from_end = args.first().and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).max(1);
+        let Some(text) = self.session.answer_from_end(from_end).map(str::to_string) else {
+            return self.notify(strings().no_answer.to_string(), true, now);
+        };
+        self.clipboard = Some(text);
+        self.notify(strings().copied.to_string(), false, now);
     }
 
     /// `/tui`: the terminal interfaces the launcher can start, this one first
@@ -3107,6 +3149,66 @@ mod tests {
         typing(&mut app, "hello");
         assert_eq!(app.input, "hello");
         assert!(!app.input_locked());
+    }
+
+    fn submit_text(app: &mut App, text: &str) {
+        app.input = text.to_string();
+        app.cursor = text.chars().count();
+        app.submit(Instant::now());
+    }
+
+    #[test]
+    fn help_clear_and_copy_are_answered_here_and_never_reach_the_core() {
+        let mut app = main_app();
+        submit_text(&mut app, "/help");
+        assert!(app.sent.is_empty());
+        let shown = app.session.answer_from_end(1).expect("the help is in the conversation");
+        assert!(shown.contains("`/resume`") && shown.contains("`/quit`"));
+
+        submit_text(&mut app, "/copy");
+        assert!(app.clipboard.as_deref().is_some_and(|text| text.contains("`/help`")));
+        submit_text(&mut app, "/copy 2");
+        assert!(app.toast.as_ref().is_some_and(|toast| toast.error), "there is no second answer");
+
+        submit_text(&mut app, "/clear");
+        assert!(app.session.items.is_empty() && app.sent.is_empty());
+    }
+
+    #[test]
+    fn exit_and_bye_leave_like_quit() {
+        for word in ["/quit", "/exit", "/BYE"] {
+            let mut app = main_app();
+            submit_text(&mut app, word);
+            assert!(app.quit, "{word}");
+            assert!(app.sent.is_empty());
+        }
+    }
+
+    #[test]
+    fn website_is_a_request_not_a_command() {
+        let mut app = main_app();
+        submit_text(&mut app, "/website a shop for tea");
+        assert!(app.command.is_none(), "it is not sent as a `command`");
+        assert_eq!(app.input, "/website a shop for tea", "it went the way of a request, which waits for the core");
+    }
+
+    #[test]
+    fn a_resumed_run_is_a_turn_that_ends_with_turn_end_alone() {
+        let mut app = main_app();
+        app.start_command("resume", &[], Instant::now());
+        assert_eq!(last_value(&app), json!({"type": "command", "name": "resume", "args": []}));
+        assert!(app.session.busy, "Esc can stop it");
+        assert!(app.session.items.is_empty(), "it has no request text of its own");
+        feed(&mut app, &[json!({"type": "turn_end"})]);
+        assert!(!app.session.busy && app.command.is_none(), "no command_result follows a resumed run");
+    }
+
+    #[test]
+    fn a_resume_the_core_refuses_does_not_leave_the_turn_running() {
+        let mut app = main_app();
+        app.start_command("resume", &[], Instant::now());
+        feed(&mut app, &[json!({"type": "command_result", "name": "resume", "ok": false, "message": "No saved checkpoint to resume."})]);
+        assert!(!app.session.busy && app.command.is_none());
     }
 
     #[test]

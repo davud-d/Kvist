@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::arena::{Arena, ArenaDiff, Council, CouncilVerdict, Finished, Member, Risk, Spend, Started, Status, Usage, Verdict};
+use crate::thought::Thought;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ToolKind {
@@ -30,7 +31,10 @@ pub enum CoreEvent {
     /// A request from a session's journal; the live stream never carries one.
     User(String),
     Thinking,
-    ThinkingDone,
+    /// A piece of the model's thinking (`reasoning_chunk`); `append` tells whether it goes after what arrived.
+    ThoughtText { text: String, append: bool },
+    /// The thinking ended, after this many seconds (`reasoning_commit`).
+    ThinkingDone { seconds: f32 },
     /// The cumulative text of a streamed answer (a snapshot, not a delta).
     Stream { id: String, text: String },
     Say(String),
@@ -92,6 +96,8 @@ pub enum Item {
     /// The agent's words; `at` drives the typewriter reveal.
     Agent { text: String, at: Instant },
     Tool { call: String, kind: ToolKind, label: String, state: CallState },
+    /// The model's thinking, if the provider passes it on.
+    Thought(Thought),
     Error(String),
 }
 
@@ -187,8 +193,12 @@ impl Session {
         match event {
             CoreEvent::TurnStarted => self.begin_turn(now),
             CoreEvent::User(text) => self.items.push(Item::User(text)),
-            CoreEvent::Thinking => self.thinking_since = Some(now),
-            CoreEvent::ThinkingDone => {}
+            CoreEvent::Thinking => {
+                self.thinking_since = Some(now);
+                self.open_thought(now);
+            }
+            CoreEvent::ThoughtText { text, append } => self.open_thought(now).push(&text, append),
+            CoreEvent::ThinkingDone { seconds } => self.end_thought(now, seconds),
             CoreEvent::Stream { id, text } => self.stream(id, text, now),
             CoreEvent::Say(text) => self.say(text, now),
             CoreEvent::CallBegin { call, kind, label } => {
@@ -242,6 +252,11 @@ impl Session {
                 self.busy = false;
                 self.early.clear();
                 self.thinking_since = None;
+                // A turn stopped mid-thought never gets its `reasoning_commit`.
+                if let Some(thought) = self.active_thought() {
+                    let seconds = now.saturating_duration_since(thought.started()).as_secs_f32();
+                    thought.finish(now, seconds);
+                }
             }
             CoreEvent::Spent(usage) => self.spend.add(&usage),
             CoreEvent::ToolMode(mode) => self.tool_mode = Some(mode),
@@ -313,6 +328,72 @@ impl Session {
             }
             _ => {}
         }
+    }
+
+    /// A word from this interface itself (`/help`), set in the conversation like the agent's own.
+    pub fn note(&mut self, text: String, now: Instant) {
+        self.items.push(Item::Agent { text, at: now });
+    }
+
+    /// `/clear`: the conversation on screen starts over; files, helpers and spending stay.
+    pub fn clear_view(&mut self) {
+        self.items.clear();
+        self.streams.clear();
+        self.early.clear();
+    }
+
+    /// The text of the agent's `from_end`-th latest answer (1 = the last).
+    pub fn answer_from_end(&self, from_end: usize) -> Option<&str> {
+        self.items
+            .iter()
+            .rev()
+            .filter_map(|item| match item {
+                Item::Agent { text, .. } if !text.trim().is_empty() => Some(text.as_str()),
+                _ => None,
+            })
+            .nth(from_end.saturating_sub(1))
+    }
+
+    /// The thought being written: the last item, while it has not ended.
+    fn active_thought(&mut self) -> Option<&mut Thought> {
+        match self.items.last_mut() {
+            Some(Item::Thought(thought)) if thought.active() => Some(thought),
+            _ => None,
+        }
+    }
+
+    /// The thought being written; a new one starts when the last item is anything else.
+    fn open_thought(&mut self, now: Instant) -> &mut Thought {
+        if self.active_thought().is_none() {
+            self.items.push(Item::Thought(Thought::new(now)));
+        }
+        match self.items.last_mut() {
+            Some(Item::Thought(thought)) => thought,
+            _ => unreachable!("a thought was just pushed"),
+        }
+    }
+
+    fn end_thought(&mut self, now: Instant, seconds: f32) {
+        let Some(thought) = self.active_thought() else { return };
+        thought.finish(now, seconds);
+        // With words shown, the folded line stands for the wait; without, the "thinking" row goes on.
+        if thought.has_text() {
+            self.thinking_since = None;
+        }
+    }
+
+    /// Moves what changes by itself: the thinking window's reveal.
+    pub fn tick(&mut self, now: Instant) {
+        for item in self.items.iter_mut().rev().take(3) {
+            if let Item::Thought(thought) = item {
+                thought.tick(now);
+            }
+        }
+    }
+
+    /// True while the last thoughts still draw or fold.
+    pub fn thinking_moves(&self, now: Instant) -> bool {
+        self.items.iter().rev().take(3).any(|item| matches!(item, Item::Thought(t) if t.active() || t.folding(now)))
     }
 
     fn stream(&mut self, id: String, text: String, now: Instant) {
@@ -455,6 +536,55 @@ mod tests {
         assert_eq!((session.files[0].added, session.files[0].removed), (5, 1));
         assert_eq!(session.files[0].previous, (3, 1));
         assert_eq!(session.files[0].patches, ["one", "two"]);
+    }
+
+    fn thought_events(session: &mut Session, now: Instant) {
+        session.submit("hi".into(), now);
+        session.apply(CoreEvent::Thinking, now);
+        session.apply(CoreEvent::ThoughtText { text: "a ".into(), append: true }, now);
+        session.apply(CoreEvent::ThoughtText { text: "b".into(), append: true }, now);
+    }
+
+    #[test]
+    fn thinking_chunks_gather_in_one_thought_that_ends_with_the_commit() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        thought_events(&mut session, now);
+        assert!(matches!(&session.items[..], [Item::User(_), Item::Thought(t)] if t.active() && t.has_text()));
+        session.apply(CoreEvent::ThinkingDone { seconds: 1.5 }, now);
+        assert!(matches!(&session.items[1], Item::Thought(t) if !t.active()));
+        assert!(session.thinking_since.is_none(), "the folded line stands for the wait");
+    }
+
+    #[test]
+    fn a_thought_the_provider_hides_leaves_the_thinking_row_running() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        session.submit("hi".into(), now);
+        session.apply(CoreEvent::Thinking, now);
+        session.apply(CoreEvent::ThinkingDone { seconds: 4.0 }, now);
+        assert!(matches!(&session.items[1], Item::Thought(t) if t.hidden()));
+        assert!(session.thinking_since.is_some());
+    }
+
+    #[test]
+    fn a_turn_stopped_mid_thought_closes_it() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        thought_events(&mut session, now);
+        session.apply(CoreEvent::TurnEnd, now);
+        assert!(matches!(&session.items[1], Item::Thought(t) if !t.active()));
+    }
+
+    #[test]
+    fn thinking_after_a_call_starts_a_new_thought() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        thought_events(&mut session, now);
+        session.apply(CoreEvent::ThinkingDone { seconds: 1.0 }, now);
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "read".into() }, now);
+        session.apply(CoreEvent::Thinking, now);
+        assert_eq!(session.items.iter().filter(|item| matches!(item, Item::Thought(_))).count(), 2);
     }
 
     #[test]
