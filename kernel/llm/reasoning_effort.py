@@ -134,23 +134,41 @@ _ANTHROPIC_BUDGET: dict[str, int] = {
     "max": 24000,
 }
 
-# Claude 4.6+ and Claude 5 use adaptive thinking.  They support the effort
-# control, but reject the legacy ``thinking: {type: "enabled"}`` block with a
-# 400 even though the selected effort itself is valid.  Keep the model check
-# here, close to the provider translation, so aliases and dated model ids are
-# handled consistently by every Anthropic-compatible caller.
-_ANTHROPIC_ADAPTIVE_MODEL_RE = re.compile(
-    r"(?:claude[-/])?(?:sonnet[-/]4[-/]6|sonnet[-/]5(?:[-/]|$)|"
-    r"opus[-/]4[-/]([6-8])|opus[-/]5(?:[-/]\d+)?(?:[-/]|$)|"
-    r"(?:fable|mythos)[-/]5(?:[-/]|$))",
-    re.IGNORECASE,
+# Only the older Claude models still take the legacy ``thinking: {type:
+# "enabled", budget_tokens}`` block: Claude 3.x and 4.0-4.5 (haiku 4.5 included),
+# plus the opus/sonnet lines before 4.6. Every other Claude model, a name Kvist
+# has never seen included, wants adaptive thinking plus ``output_config.effort``
+# and rejects the legacy block. The list of what is old is closed and the list of
+# what is new keeps growing, so the old one is the one spelled out here.
+_CLAUDE_NAME_RE = re.compile(r"claude|fable|mythos", re.IGNORECASE)
+_CLAUDE_3_FIRST_RE = re.compile(r"claude[-.]3(?!\d)", re.IGNORECASE)
+# "<family>-<major>[-<minor>]"; a dated id ("sonnet-4-20250514") has no minor, the
+# date is more than two digits.
+_FAMILY_VERSION_RE = re.compile(
+    r"(?:haiku|sonnet|opus)[-.](\d+)(?:[-.](\d{1,2})(?!\d))?", re.IGNORECASE
 )
+_LAST_LEGACY_MINOR = 5
 
 
 def anthropic_uses_adaptive_thinking(model: str) -> bool:
-    """Return whether an Anthropic model requires adaptive thinking syntax."""
+    """Return whether an Anthropic model requires adaptive thinking syntax.
+
+    Gateway prefixes (``cc/``, ``anthropic/``) and cloud prefixes
+    (``us.anthropic.``) do not matter: the search is over the whole model id.
+    A model that is not a Claude at all, reached through an Anthropic-compatible
+    gateway, keeps the legacy block it was always sent.
+    """
     model_id = str(model or "").strip().rsplit("/", 1)[-1]
-    return bool(_ANTHROPIC_ADAPTIVE_MODEL_RE.search(model_id))
+    if not _CLAUDE_NAME_RE.search(model_id):
+        return False
+    if _CLAUDE_3_FIRST_RE.search(model_id):
+        return False
+    version = _FAMILY_VERSION_RE.search(model_id)
+    if version is None:
+        return True
+    major = int(version.group(1))
+    minor = int(version.group(2) or 0)
+    return (major, minor) > (4, _LAST_LEGACY_MINOR)
 
 
 def anthropic_request_config(model: str, level: str) -> dict[str, Any]:

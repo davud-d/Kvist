@@ -220,6 +220,54 @@ def test_modern_anthropic_models_receive_adaptive_effort_config():
     }
 
 
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-fable-5-2",
+        "claude-sonnet-4-6",
+        "claude-opus-4-8",
+        # A model Kvist has never heard of is new, not old.
+        "claude-nova-6-0",
+        "anthropic/claude-haiku-5-5",
+        "cc/claude-fable-5-2",
+        "us.anthropic.claude-haiku-5-5-v1:0",
+    ],
+)
+def test_new_and_unknown_claude_models_use_adaptive_thinking(model):
+    assert anthropic_uses_adaptive_thinking(model)
+    assert anthropic_request_config(model, "low") == {
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": "low"},
+    }
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-4-5-20250929",
+        "claude-opus-4-1-20250805",
+        "claude-opus-4-20250514",
+        "claude-sonnet-4-20250514",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-opus-20240229",
+        "anthropic/claude-sonnet-4-5",
+        "cc/claude-haiku-4-5",
+        # Not a Claude behind an Anthropic-compatible gateway: keeps what it got.
+        "glm-4.6",
+    ],
+)
+def test_old_claude_models_keep_the_budget_block(model):
+    assert not anthropic_uses_adaptive_thinking(model)
+    assert anthropic_request_config(model, "medium") == {
+        "thinking": {"type": "enabled", "budget_tokens": 4096}
+    }
+
+
 def test_anthropic_wrapper_sends_effort_for_sonnet_5():
     client = AnthropicCompatibleClient(api_key="test-key")
     record: dict = {}
