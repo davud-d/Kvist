@@ -164,8 +164,8 @@ plan. It reads the project without changing anything, proposes a short plan and
 edits files only after you accept it. Small edits skip this.
 
 Each step the model sends a short batch of actions: read, search, write, run a
-command, search the web. They run in order and stop at the first failure. The
-agent finishes when the model says the work is done. It is told to verify the
+command, search the web. They run in order and a failed one does not cancel the
+rest. The agent finishes when the model says the work is done. It is told to verify the
 result and to say what it could not finish or check.
 
 `Esc` pauses a run and keeps its state. `Ctrl+C` stops it and cleans up. The

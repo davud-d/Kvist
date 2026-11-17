@@ -66,8 +66,8 @@ class ToolSpec:
 
     ``readonly`` marks a tool with no side effect that may run in parallel with
     its neighbours (agent_runtime._run_calls). Every other tool is treated as
-    writing: it runs alone, in call order, and is skipped after a failed write
-    in the same response. run_shell is always writing; git_status/git_diff
+    writing: it runs alone, in call order; a failure never cancels the other
+    calls of the response. run_shell is always writing; git_status/git_diff
     are too, because they spawn through process_tree.run_supervised, whose
     preexec_fn Python does not guarantee in a process with threads.
     """

@@ -62,7 +62,7 @@ def _skill_call_readonly(self, command: AgentCommand) -> bool:
     return bool(self.skills.tool_readonly(str(args.get("skill")), str(args.get("tool"))))
 
 from kernel.context.context_meter import note_pending
-from kernel.protocol.action_result import SKIPPED_ERROR, build_action_result
+from kernel.protocol.action_result import build_action_result
 from kernel.agent.agent_state import PLAN_PLANNING, RunCancelled, RunState
 from kernel.sandbox.auto_approval import command_question
 from kernel.sandbox.executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
@@ -1102,8 +1102,6 @@ _NOT_RUN_INTERRUPTED = (
     "Not executed: the person paused or stopped the task before this call. "
     "Check again whether it is still needed before making it."
 )
-_SKIPPED_AFTER_FAILED_WRITE = SKIPPED_ERROR
-_SKIPPED_LABELS = ("пропущено: предыдущее действие упало", "skipped: an earlier action failed")
 
 
 def _over_limit(calls: list[ToolCallRequest]) -> list[bool]:
@@ -1170,15 +1168,14 @@ def _run_calls(
     Consecutive read-only calls run as one group, in parallel; a writing call
     runs alone. Every call is its own step, so step logs, checkpoints, the
     pending-action record and the step budget keep their meaning. A failed
-    read costs only itself. A failed or refused write stops the writes after
-    it — a later write may rest on it — but not the reads.
+    call costs only itself: the calls of one response do not depend on each
+    other (the prompts say so), so no failure cancels the rest.
     """
     _prefetch_approvals(self, planned)
     runs_alongside: dict[int, bool] = {}
     answers: list[str] = []
     not_run: list[str] = []
     outcome = _ActionOutcome()
-    write_failed = False
     refusal = next(
         (item for item in planned if item.command is not None and item.command.action.type == "refuse"),
         None,
@@ -1207,7 +1204,6 @@ def _run_calls(
             _register_unreadable_call(self, item.error)
             answers.append(item.error)
             not_run.append(item.error)
-            write_failed = write_failed or not item.readonly
             index += 1
             continue
         if item.readonly:
@@ -1219,26 +1215,19 @@ def _run_calls(
             not_run.extend(group_not_run)
             index += len(group)
             continue
-        shells = [] if write_failed else _shell_run(self, planned, index, runs_alongside)
+        shells = _shell_run(self, planned, index, runs_alongside)
         if len(shells) > 1:
-            step, group_answers, group_not_run, group_failed = _run_shell_group(
+            step, group_answers, group_not_run = _run_shell_group(
                 self, user_goal, step, shells, first_in_response=index == 0
             )
             answers.extend(group_answers)
             not_run.extend(group_not_run)
-            write_failed = write_failed or group_failed
             index += len(shells)
             continue
         index += 1
         if step > self._state.step_budget and index > 1:
             answers.append(_NOT_RUN_BUDGET)
             not_run.append(f"{item.command.action.description}: {_NOT_RUN_BUDGET}")
-            continue
-        if write_failed:
-            _show_skipped_call(self, step, item.command)
-            step += 1
-            answers.append(_SKIPPED_AFTER_FAILED_WRITE)
-            not_run.append(f"{item.command.action.description}: {_SKIPPED_AFTER_FAILED_WRITE}")
             continue
         serial = getattr(self, "_result_serial", 0)
         result = _run_one_action(self, user_goal, step, item.command)
@@ -1247,10 +1236,8 @@ def _run_calls(
         answers.append(answer)
         if result.finished:
             outcome = result
-        elif not result.proceed:
-            write_failed = True
-            if getattr(self, "_result_serial", 0) == serial:
-                not_run.append(f"{item.command.action.description}: {answer}")
+        elif not result.proceed and getattr(self, "_result_serial", 0) == serial:
+            not_run.append(f"{item.command.action.description}: {answer}")
     _note_calls_not_run(self, not_run)
     return outcome, step, answers
 
@@ -1342,18 +1329,16 @@ def _shell_run(
 
 def _run_shell_group(
     self, user_goal: str, step: int, group: list[_PlannedCall], *, first_in_response: bool
-) -> tuple[int, list[str], list[str], bool]:
+) -> tuple[int, list[str], list[str]]:
     """Guards in call order, the commands side by side, results registered in call order.
 
     Like the read group, only the executor call leaves the main thread. A command
     that turns out to need the person is run again alone afterwards, where a dialog
-    can be shown. Any command that fails or is refused makes the calls after the
-    group count as following a failed one, as one by one.
+    can be shown.
     """
     answers: list[str] = [""] * len(group)
     not_run: list[str] = []
     ready: list[tuple[int, int, int]] = []  # (position, step, result serial)
-    failed = False
     for position, item in enumerate(group):
         command = item.command
         assert command is not None
@@ -1368,10 +1353,9 @@ def _run_shell_group(
             answers[position] = _call_answer(self, serial, _BLOCKED)
             if getattr(self, "_result_serial", 0) == serial:
                 not_run.append(f"{command.action.description}: {answers[position]}")
-            failed = True
         step += 1
     if not ready:
-        return step, answers, not_run, failed
+        return step, answers, not_run
     # One record for the group: a shell command is never replayed, so resume only needs to know
     # that something of this kind was in flight.
     first_step, first_command = ready[0][1], group[ready[0][0]].command
@@ -1387,9 +1371,8 @@ def _run_shell_group(
         else:
             result = _finish_action(self, call_step, command, feedback)
         answers[position] = _call_answer(self, serial, result)
-        failed = failed or not result.proceed
     self._save_checkpoint(user_goal, ready[-1][1])
-    return step, answers, not_run, failed
+    return step, answers, not_run
 
 
 def _needs_the_person(feedback: dict[str, Any]) -> bool:
@@ -1447,28 +1430,6 @@ def _call_answer(self, serial: int, outcome: _ActionOutcome) -> str:
     reason = self._state.pending_instruction or "The runtime refused this call."
     self._state.native_note_sent = self._state.pending_instruction
     return f"Not executed: {reason}"
-
-
-def _show_skipped_call(self, step: int, command: AgentCommand) -> None:
-    """A write the response asked for but the runtime did not run, shown in its place."""
-    self._ui.print_step_header(step, command, 0.0)
-    feedback = {
-        "ok": False,
-        "action_type": command.action.type,
-        "error": _SKIPPED_AFTER_FAILED_WRITE,
-    }
-    _emit_action_result(self, step, command, feedback)
-    self._state.step_logs.append(
-        {"step": step, "status": "skipped_after_failed_write", "command": _command_log(command)}
-    )
-    self._ui.update_live(
-        user_message=f"{command.action.description}: {_SKIPPED_LABELS[0 if self._state.response_language == 'ru' else 1]}",
-        status="call skipped",
-        step=step,
-        progress=self._state.progress,
-        plan_step=command.plan_step,
-        is_error=True,
-    )
 
 
 def _note_calls_not_run(self, not_run: list[str]) -> None:

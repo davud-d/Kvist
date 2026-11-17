@@ -10,14 +10,6 @@ MAX_OUTPUT_CHARS = 4000
 MAX_SUMMARY_CHARS = 120
 
 _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
-# The runtime's answer to an action it did not run because an earlier action of
-# the same response failed (agent_runtime._SKIPPED_AFTER_FAILED_WRITE).
-SKIPPED_ERROR = "Skipped: an earlier action in this response failed."
-SKIPPED_SUMMARY = "Skipped: an earlier action failed"
-
-
-def feedback_skipped(error: str) -> bool:
-    return error == SKIPPED_ERROR
 
 
 def build_action_result(
@@ -64,8 +56,6 @@ def _plural(count: int, noun: str, many: str = "") -> str:
 def _summary(
     action_type: str, args: dict[str, Any], data: dict[str, Any], ok: bool, error: str
 ) -> str:
-    if feedback_skipped(error):
-        return SKIPPED_SUMMARY
     if action_type == "run_shell":
         return _shell_summary(data, error)
     if action_type in {"job_output", "job_stop"} and ok:

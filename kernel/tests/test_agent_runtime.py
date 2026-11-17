@@ -1223,9 +1223,8 @@ def test_run_loop_a_failed_read_does_not_stop_the_batch(agent_factory):
     assert [log["status"] for log in agent._state.step_logs if "step" in log] == ["ok", "error", "ok"]
 
 
-def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_factory):
+def test_run_loop_runs_every_call_of_a_response_whatever_fails(agent_factory):
     agent = agent_factory(max_steps=5)
-    prompts = []
     executed = []
     responses = iter(
         [
@@ -1239,10 +1238,7 @@ def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_
             _v2("", _tool("list_dir", path=".")),
         ]
     )
-
-    def fake_call_action_model(prompt: str) -> str:
-        prompts.append(prompt)
-        return next(responses)
+    agent._call_action_model = lambda prompt: next(responses)
 
     def fake_execute(command):
         executed.append((command.action.type, command.action.args.get("path")))
@@ -1250,16 +1246,16 @@ def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_
             return ExecutionResult(False, "write_file", {"error": "disk full"})
         return ExecutionResult(True, command.action.type, {"content": "c", "entries": []})
 
-    agent._call_action_model = fake_call_action_model
     agent.executor.execute = fake_execute
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert executed[:2] == [("write_file", "a.txt"), ("read_file", "c.txt")]
-    assert ("write_file", "b.txt") not in executed and ("append_file", "d.txt") not in executed
-    skipped = [log for log in agent._state.step_logs if log.get("status") == "skipped_after_failed_write"]
-    assert [log["command"]["action"]["args"]["path"] for log in skipped] == ["b.txt", "d.txt"]
-    assert "Skipped: an earlier action in this response failed." in prompts[1]
+    assert executed[:4] == [
+        ("write_file", "a.txt"),
+        ("write_file", "b.txt"),
+        ("read_file", "c.txt"),
+        ("append_file", "d.txt"),
+    ]
 
 
 def test_run_loop_shows_each_call_label_in_the_live_panel(agent_factory):
@@ -1731,7 +1727,7 @@ def test_a_command_that_needs_approval_is_run_again_alone_on_the_main_thread(age
     assert len(seen) == 4
 
 
-def test_a_failed_command_in_a_side_by_side_group_skips_the_writes_after_it(agent_factory):
+def test_a_failed_command_in_a_side_by_side_group_does_not_skip_the_writes_after_it(agent_factory):
     agent = agent_factory(max_steps=20)
     agent.executor.runs_alongside_others = lambda command: command.action.type == "run_shell"
     executed = []
@@ -1752,7 +1748,7 @@ def test_a_failed_command_in_a_side_by_side_group_skips_the_writes_after_it(agen
     agent._run_loop("Run checks then write", start_step=1)
 
     assert executed.count("run_shell") == 3
-    assert "write_file" not in executed
+    assert "write_file" in executed
 
 
 def test_a_command_that_asks_the_person_never_joins_a_side_by_side_group(agent_factory):
