@@ -82,6 +82,8 @@ User: "My build keeps failing, find out why and tell me" -> reader
 User: "Оцени мои инсталляторы в папке Installer, прочитай документацию и сами инсталляторы" -> reader
 User: "Evaluate my installers in the Installer folder, read the docs and the scripts themselves" -> reader
 User: "Review the auth module and tell me if it's solid" -> reader
+User: "Is this project ready to sell? Just tell me yes or no" -> reader
+User: "Можно уже продавать этот проект? Скажи честно" -> reader
 User: "Total invoice.csv including tax, client needs the final number now" -> reader
 User: "Сколько строк в access.log" -> reader
 User: "Запомни: коммиты в этом проекте пишем по-английски" -> reader
