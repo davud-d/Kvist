@@ -43,6 +43,7 @@ from kernel.protocol.frontend_protocol import (
     LiveStartEvent,
     LiveStopEvent,
     MessageEvent,
+    AsideEvent,
     NarrationEvent,
     PlanEvent,
     ReasoningChunkEvent,
@@ -229,6 +230,10 @@ class EventStreamUI:
 
     def print_narration(self, text: str) -> None:
         self._channel.emit(NarrationEvent(redact_text(text)))
+
+    def print_aside(self, aside_id: str, text: str, done: bool) -> None:
+        # The core redacted the line as a whole before cutting it into pieces.
+        self._channel.emit(AsideEvent(aside_id, text, done))
 
     def debug_print(self, message: str) -> None:
         self._channel.emit(DebugEvent(redact_text(message)))

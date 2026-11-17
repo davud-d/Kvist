@@ -370,35 +370,41 @@ def auto_classifier(agent: Any) -> Classifier:
         state = agent._state
         return "\n\n".join([state.user_goal, *state.task_updates])
 
-    def earlier_turns() -> str:
-        """The newest earlier turns that fit the budget; the newest one is always there, whole."""
-        from kernel.agent.agent_context import render_session_history
-
-        chosen: list = []
-        used = 0
-        for entry in reversed(getattr(agent, "_session_history", None) or []):
-            used += agent._count_tokens(render_session_history([entry], include_outputs=False))
-            if chosen and used > config.narrator_context_tokens:
-                break
-            chosen.append(entry)
-        return render_session_history(list(reversed(chosen)), include_outputs=False)
-
     def background() -> Background:
         from kernel.context.system_context import workspace_instructions_context
 
-        summaries = agent._state.rolling_summaries
-        steps: list[str] = []
-        used = 0
-        for step in sorted(summaries, reverse=True):
-            entry = f"step {step}: {summaries[step]}"
-            used += agent._count_tokens(entry)
-            if used > config.narrator_context_tokens:
-                break
-            steps.append(entry)
         instructions = workspace_instructions_context(agent.executor.workspace, agent.executor.active_role)
-        return Background(instructions, tuple(reversed(steps)), earlier_turns())
+        return Background(instructions, tuple(recent_steps(agent)), earlier_turns(agent))
 
     return Classifier(ask, request, background)
+
+
+def earlier_turns(agent: Any) -> str:
+    """The newest earlier turns that fit the side-model budget; the newest one is always there, whole."""
+    from kernel.agent.agent_context import render_session_history
+
+    chosen: list = []
+    used = 0
+    for entry in reversed(getattr(agent, "_session_history", None) or []):
+        used += agent._count_tokens(render_session_history([entry], include_outputs=False))
+        if chosen and used > agent.config.narrator_context_tokens:
+            break
+        chosen.append(entry)
+    return render_session_history(list(reversed(chosen)), include_outputs=False)
+
+
+def recent_steps(agent: Any) -> list[str]:
+    """The newest steps of this turn that fit the side-model budget, oldest first."""
+    summaries = agent._state.rolling_summaries
+    steps: list[str] = []
+    used = 0
+    for step in sorted(summaries, reverse=True):
+        entry = f"step {step}: {summaries[step]}"
+        used += agent._count_tokens(entry)
+        if used > agent.config.narrator_context_tokens:
+            break
+        steps.append(entry)
+    return steps[::-1]
 
 
 def memory_prompt_section(agent: Any, text: str) -> str:

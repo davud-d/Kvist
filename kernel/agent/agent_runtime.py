@@ -91,7 +91,7 @@ from kernel.protocol.parser import (
 )
 from kernel.protocol.protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from kernel.agent import image_generation
+from kernel.agent import aside, image_generation
 from kernel.plan import end_session
 from kernel.plan import plan_mode
 from kernel.agent.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker, mentions_any
@@ -1007,6 +1007,7 @@ def _run_turn(
     # A silent response still leaves a trace of what it set out to do.
     _keep_step_summary(self, step, response.text or _calls_note(planned))
     outcome, next_step, answers = _run_calls(self, user_goal, step, planned)
+    aside.note_turn(self, bool(response.text), aside.aside_calls(planned, answers))
     if turn is not None:
         for item, answer in zip(planned, answers):
             self._state.native_messages.append(tool_message(item.request.call_id, answer))

@@ -664,6 +664,30 @@ class NarrationEvent:
 
 
 @dataclass(slots=True)
+class AsideEvent:
+    """A line a fast model says in the agent's voice while the agent works (live-only).
+
+    ``from_model`` is always false: the words are not the action model's own, and a
+    frontend may style them apart. While ``done`` is false ``text`` is the next piece
+    to append to the line ``aside_id`` names; when ``done`` is true it is the whole line.
+    """
+
+    aside_id: str
+    text: str
+    done: bool
+    type: ClassVar[str] = "aside"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "aside_id": self.aside_id,
+            "text": self.text,
+            "done": self.done,
+            "from_model": False,
+        }
+
+
+@dataclass(slots=True)
 class DebugEvent:
     message: str
     type: ClassVar[str] = "debug"
