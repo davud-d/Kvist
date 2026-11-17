@@ -136,3 +136,4 @@ def test_call_cost_of_estimated_counts_is_approximate():
 def test_call_cost_is_none_for_a_model_outside_the_table_and_for_a_subscription():
     assert pricing.call_cost("anthropic", "claude-nope", 1000, 50, None, None, False) == (None, False)
     assert pricing.call_cost("chatgpt", "claude-sonnet-5", 1000, 50, None, None, False) == (None, False)
+

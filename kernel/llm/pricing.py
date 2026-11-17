@@ -8,6 +8,7 @@ tokens, or None when that cannot be said for certain. None is a real answer: cal
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -33,7 +34,23 @@ _OPENROUTER_VENDORS = {"anthropic": "anthropic", "openai": "openai", "deepseek":
 
 @lru_cache(maxsize=1)
 def _table() -> dict[str, dict]:
-    return json.loads(_TABLE_PATH.read_text(encoding="utf-8"))["models"]
+    try:
+        models = json.loads(_TABLE_PATH.read_text(encoding="utf-8"))["models"]
+        if not isinstance(models, dict):
+            raise ValueError("models must be an object")
+        for row in models.values():
+            if not isinstance(row, dict) or not isinstance(row.get("provider"), str):
+                raise ValueError("invalid model row")
+            for key in ("input", "output", "cache_read", "cache_write"):
+                value = row[key]
+                if value is not None and (type(value) not in (int, float) or value < 0):
+                    raise ValueError("invalid price")
+            if row["input"] is None or row["output"] is None:
+                raise ValueError("missing price")
+        return models
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
+        logging.getLogger(__name__).debug("Model price table unavailable: %s", exc)
+        return {}
 
 
 def _raw_row(table_provider: str, model: str) -> dict | None:
@@ -68,6 +85,8 @@ def lookup_price(provider: str, model: str) -> dict[str, float | None] | None:
 
 def lookup_max_output_tokens(provider: str, model: str) -> int | None:
     """The most tokens the model can write in one reply, or None when the table does not say."""
+    if not _table():
+        return 8192
     row = _find_row(provider, model)
     value = None if row is None else row.get("max_output_tokens")
     return value if type(value) is int and value > 0 else None

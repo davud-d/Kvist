@@ -798,3 +798,38 @@ def test_emit_usage_prices_each_call_with_the_agents_provider(agent_factory, mon
     assert priced["cost_usd"] == pytest.approx(0.00147)
     assert priced["cost_approx"] is False
     assert "cost_usd" not in unpriced and "cost_approx" not in unpriced
+
+
+def test_model_call_survives_missing_price_table(agent_factory, monkeypatch, tmp_path, caplog):
+    from kernel.llm import pricing
+
+    monkeypatch.setattr(pricing, "_TABLE_PATH", tmp_path / "missing.json")
+    pricing._table.cache_clear()
+    agent = agent_factory(stream=False, cache_enabled=False, max_retries=1)
+    agent.client = FakeLLMClient(content='{"thought":"ok"}')
+    agent.config.provider = "openai"
+    agent._ui = _UsageCapturingUI()
+    try:
+        with caplog.at_level("DEBUG", logger=pricing.__name__):
+            assert agent._call_model("gpt-test", "system", "user") == '{"thought":"ok"}'
+            assert agent._call_model("gpt-test", "system", "user") == '{"thought":"ok"}'
+            assert pricing.lookup_max_output_tokens("anthropic", "claude-test") == 8192
+        assert agent._ui.usages and "cost_usd" not in agent._ui.usages[-1]
+        assert sum("Model price table unavailable" in r.message for r in caplog.records) == 1
+    finally:
+        pricing._table.cache_clear()
+
+
+@pytest.mark.parametrize("content", ["{", '{"models": []}', '{"models": {"bad": {}}}'])
+def test_invalid_table_returns_unpriced_and_fallback(tmp_path, monkeypatch, content):
+    from kernel.llm import pricing
+
+    path = tmp_path / "prices.json"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(pricing, "_TABLE_PATH", path)
+    pricing._table.cache_clear()
+    try:
+        assert pricing.lookup_price("openai", "gpt-5") is None
+        assert pricing.lookup_max_output_tokens("openai", "gpt-5") == 8192
+    finally:
+        pricing._table.cache_clear()
