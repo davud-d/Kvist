@@ -137,6 +137,7 @@ a = Analysis(
     binaries=_glass_binaries + _voice_binaries + _session_binaries + _opencode_binaries,
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
+        ('kernel/llm/model_prices.json', 'kernel/llm'),
         ('kernel/themes', 'kernel/themes'),
         # Mounted into skill sandboxes as files, run by the system python3.
         ('kernel/plugins/runner', 'kernel/plugins/runner'),
