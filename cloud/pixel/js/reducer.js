@@ -329,7 +329,8 @@ export function reduce(agent, ev, { replay = false } = {}) {
     case "stream_chunk": {
       if (!replay) agent.turn.waitingSince = Date.now();
       const item = reply(agent, ev.stream_id);
-      item.text = ev.text;
+      // `append`: the next piece of the answer; without it (older cores) the whole answer.
+      item.text = ev.append === true ? item.text + ev.text : ev.text;
       touch(agent, item);
       return;
     }
@@ -348,7 +349,7 @@ export function reduce(agent, ev, { replay = false } = {}) {
     case "reasoning_chunk": {
       if (!replay) agent.turn.waitingSince = Date.now();
       const item = thought(agent, ev.stream_id);
-      item.text = ev.text;
+      item.text = ev.append === true ? item.text + ev.text : ev.text;
       touch(agent, item);
       return;
     }

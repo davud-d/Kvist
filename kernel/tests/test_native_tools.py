@@ -739,6 +739,114 @@ def test_a_final_answer_streams_its_message_and_shows_no_writing_status(agent_fa
     assert turn.tool_calls[0].name == "final_answer"
 
 
+def _live_words(agent) -> list[str]:
+    shown: list[str] = []
+
+    class _Live:
+        def __enter__(self):
+            return shown.append
+
+        def __exit__(self, *exc):
+            return False
+
+    agent._ui.streams_words = True
+    agent._ui.live_markdown = lambda: _Live()
+    return shown
+
+
+def test_words_stream_where_end_session_is_offered(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.config.end_session_enabled = True
+    shown = _live_words(agent)
+
+    def chunk(**delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(**delta))])
+
+    agent_model._native_turn_from_stream(
+        agent, iter([chunk(content="Hello there", tool_calls=None)]), time.monotonic()
+    )
+
+    assert shown and shown[-1] == "Hello there"
+
+
+def test_words_of_a_response_that_ends_in_end_session_are_taken_back(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.config.end_session_enabled = True
+    shown = _live_words(agent)
+
+    def chunk(**delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(**delta))])
+
+    stream = [
+        chunk(content="I will not continue this.", tool_calls=None),
+        chunk(content=None, tool_calls=[
+            SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="end_session", arguments='{"message_id": 1}'))
+        ]),
+    ]
+
+    agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+
+    assert shown[0] == "I will not continue this."
+    assert shown[-1] == ""
+
+
+def test_a_text_protocol_response_that_ends_in_end_session_takes_its_words_back(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.config.end_session_enabled = True
+    shown = _live_words(agent)
+    text = 'Enough.\n<tool_call>{"name": "end_session", "arguments": {"message_id": 1}}</tool_call>'
+    pieces = [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=part))]) for part in (text[:7], text[7:])]
+    agent._create_json_completion = lambda **kwargs: iter(pieces)
+
+    agent_model.call_model_streaming(agent, "m", [], json_mode=False)
+
+    assert shown[0] == "Enough."
+    assert shown[-1] == ""
+
+
+def _stream_events(agent, stream) -> list[tuple[str, str, bool | None]]:
+    from kernel.protocol.event_stream_ui import EventStreamUI
+    from kernel.protocol.frontend_protocol import FrontendChannel
+
+    channel = FrontendChannel()
+    agent._ui = EventStreamUI(channel)
+    agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+    return [
+        (event.type, event.text, getattr(event, "append", None))
+        for event in channel.drain()
+        if event.type in ("stream_chunk", "stream_commit")
+    ]
+
+
+def test_an_interactive_frontend_receives_the_words_of_an_action_response_as_they_arrive(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.config.end_session_enabled = True
+
+    def chunk(text):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text, tool_calls=None))])
+
+    events = _stream_events(agent, [chunk("Hello"), chunk(" there, "), chunk("friend.")])
+
+    assert events[-1] == ("stream_commit", "Hello there, friend.", None)
+    pieces = [text for kind, text, append in events if kind == "stream_chunk" and append]
+    assert "".join(pieces) == "Hello there, friend."
+
+
+def test_an_interactive_frontend_is_told_to_drop_words_that_end_in_end_session(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.config.end_session_enabled = True
+    call = SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="end_session", arguments='{"message_id": 1}'))
+    stream = [
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Enough.", tool_calls=None))]),
+        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[call]))]),
+    ]
+
+    events = _stream_events(agent, stream)
+
+    assert ("stream_chunk", "Enough.", True) in events
+    assert events[-2:] == [("stream_chunk", "", False), ("stream_commit", "", None)]
+
+
 def test_a_ui_without_streams_words_gets_no_live_stream(agent_factory):
     agent = agent_factory(max_steps=1)
     opened: list[str] = []

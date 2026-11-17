@@ -210,8 +210,8 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `plan` | `markdown:str` | the plan the model proposes for the person's decision (plan mode); short Markdown |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
 | `stream_start` | `stream_id:str` | a streaming response begins |
-| `stream_chunk` | `stream_id:str, text:str` | current cumulative answer text (a **snapshot**, not a delta) |
-| `stream_commit` | `stream_id:str, text:str` | final streamed answer text (once) |
+| `stream_chunk` | `stream_id:str, text:str, append:bool` | the answer **as the model writes it**, in chat and in the action loop alike. `append: true` (what the core sends): `text` is the next piece to add to what has arrived; `append: false`: the text rewound and `text` is the whole answer (it may be empty). Older cores sent no `append` and a cumulative snapshot. Show the text as it arrives: the core streams it for real, a frontend adds no reveal of its own |
+| `stream_commit` | `stream_id:str, text:str` | final streamed answer text (once), the whole of it. Empty: the answer was taken back, so remove what the stream showed |
 | `reasoning_start` | `stream_id:str` | the model started thinking; same `stream_id` as the answer it precedes |
 | `reasoning_chunk` | `stream_id:str, text:str, append:bool` | the model's **thinking**, a separate channel from the answer. `append: true` (what the core sends): `text` is the next piece to add to what has arrived; `append: false`: the text rewound and `text` is the whole thought. Older cores sent no `append` and a cumulative snapshot |
 | `reasoning_commit` | `stream_id:str, duration_seconds:number` | thinking ended (the answer is about to stream); carries how long it took |
@@ -546,6 +546,12 @@ In a chat turn the model uses it by replying with a tag and nothing else. Such a
 reply is never shown: its stream ends with an empty `stream_commit`, and the
 turn's answer arrives as the warning `message` or the closing `final`. An empty
 `stream_commit` draws nothing.
+
+In the action loop the words of a response stream before its calls, so a
+response that ends in an `end_session` call has already shown them. Its stream
+then rewinds to empty (`stream_chunk` with `append: false` and empty `text`) and
+ends with an empty `stream_commit`: remove the words. ACP (Zed) is append-only
+and cannot take them back.
 
 The warning (`message`) and the closing words (`final` with `closed: true`) are
 Kvist speaking: draw them as ordinary Kvist messages, never with a status frame,

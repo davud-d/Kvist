@@ -49,6 +49,27 @@ def test_stream_snapshots_become_deltas(translator):
     assert texts_of(second) == [" world"]
 
 
+def test_appended_pieces_go_out_as_they_are_and_the_commit_repeats_nothing(translator):
+    first = translator.translate(event("stream_chunk", stream_id="s", text="Hel", append=True))
+    second = translator.translate(event("stream_chunk", stream_id="s", text="lo", append=True))
+    commit = translator.translate(event("stream_commit", stream_id="s", text="Hello"))
+    final = translator.translate(event("final", message="Hello", outcome="done"))
+
+    assert texts_of(first) == ["Hel"]
+    assert texts_of(second) == ["lo"]
+    assert commit == []
+    assert final == []
+
+
+def test_appended_thoughts_go_out_as_they_are(translator):
+    translator.translate(event("reasoning_start", stream_id="s"))
+    first = translator.translate(event("reasoning_chunk", stream_id="s", text="hm", append=True))
+    second = translator.translate(event("reasoning_chunk", stream_id="s", text="m", append=True))
+
+    assert texts_of(first) == ["hm"]
+    assert texts_of(second) == ["m"]
+
+
 def test_stream_commit_sends_only_the_unstreamed_suffix(translator):
     translator.translate(event("stream_chunk", stream_id="s", text="Hello world"))
 

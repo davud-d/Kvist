@@ -23,15 +23,6 @@ use crate::text::{self, Line, Painter};
 use crate::water::TextView;
 use crate::theme::{self, DUSK, FOG, HOVER, INK, INK_SOFT, MIST, MOON, MOSS, NIGHT, ROSEHIP};
 
-/// Typewriter speed for the agent's words, characters per second.
-const REVEAL_PER_SECOND: f32 = 220.0;
-/// A fast model outruns the typewriter; the reveal never trails the text by more than this many characters.
-const MAX_REVEAL_LAG: usize = 160;
-
-fn revealed_chars(total: usize, elapsed: std::time::Duration) -> usize {
-    let by_time = (elapsed.as_secs_f32() * REVEAL_PER_SECOND) as usize;
-    by_time.max(total.saturating_sub(MAX_REVEAL_LAG))
-}
 /// The most choices a dialog shows at once; the rest scroll.
 const MAX_LIST_ROWS: u16 = 14;
 /// The most lines of a dialog's explanation (or an approval's diff) shown
@@ -511,8 +502,7 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
     let mut blocks: Vec<(usize, usize, usize)> = Vec::new();
     let mut formulas: Vec<markdown::Formula> = Vec::new();
     let mut previous_tool = false;
-    let last_index = app.session.items.len().saturating_sub(1);
-    for (index, item) in app.session.items.iter().enumerate() {
+    for item in &app.session.items {
         if matches!(item, Item::Thought(thought) if thought.hidden()) {
             continue;
         }
@@ -531,15 +521,8 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
                     }
                 }
             }
-            Item::Agent { text: words, at } => {
-                // Words followed by anything else are shown whole: the work they describe has moved on.
-                let shown = if index < last_index {
-                    usize::MAX
-                } else {
-                    revealed_chars(words.chars().count(), now.saturating_duration_since(*at))
-                };
-                let visible: String = words.chars().take(shown.max(1)).collect();
-                let (rendered, found) = markdown::render_with_math(&visible, width, Some((app.grid.cw, app.grid.ch)));
+            Item::Agent { text: words, .. } => {
+                let (rendered, found) = markdown::render_with_math(words, width, Some((app.grid.cw, app.grid.ch)));
                 let base = lines.len();
                 formulas.extend(found.into_iter().map(|formula| markdown::Formula { line: formula.line + base, ..formula }));
                 lines.extend(rendered);
@@ -639,16 +622,6 @@ pub(crate) fn tool_line(kind: ToolKind, label: &str, state: &CallState, width: u
     let mut line = vec![span(icon, icon_color), span(" ", FOG), span(text::fit(label, room), MIST)];
     line.extend(tail);
     line
-}
-
-pub fn revealing(app: &App, now: Instant) -> bool {
-    app.session.items.iter().rev().take(1).any(|item| match item {
-        Item::Agent { text, at } => {
-            let total = text.chars().count();
-            revealed_chars(total, now.saturating_duration_since(*at)) < total
-        }
-        _ => false,
-    })
 }
 
 fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &mut Drawn) -> Option<Rect> {
@@ -1369,15 +1342,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn the_reveal_never_trails_a_fast_model_by_more_than_the_lag_limit() {
-        let start = std::time::Duration::ZERO;
-        assert_eq!(revealed_chars(100, start), 0);
-        assert_eq!(revealed_chars(MAX_REVEAL_LAG + 500, start), 500);
-        let later = std::time::Duration::from_secs(10);
-        assert_eq!(revealed_chars(MAX_REVEAL_LAG + 500, later), (10.0 * REVEAL_PER_SECOND) as usize);
-    }
-
     /// A fake provider at tens of thousands of tokens per second: every round of words, call and
     /// result lands in the same instant, so nothing but the redraw can be what trails the work.
     fn burst_of_rounds(rounds: usize) -> (App, Instant) {
@@ -1395,13 +1359,13 @@ mod tests {
     }
 
     #[test]
-    fn at_fifty_thousand_tokens_a_second_every_earlier_message_is_whole_at_once() {
+    fn at_fifty_thousand_tokens_a_second_every_message_is_whole_at_once() {
         let rounds = 40;
         let (app, now) = burst_of_rounds(rounds);
         let (lines, _, _) = transcript_lines(&app, 100, now, 0);
         let drawn: String = lines.iter().flatten().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
-        for round in 0..rounds - 1 {
-            assert!(drawn.contains(&format!("END{round}")), "message {round} still being typed");
+        for round in 0..rounds {
+            assert!(drawn.contains(&format!("END{round}")), "message {round} is not drawn whole");
         }
     }
 
@@ -1427,14 +1391,6 @@ mod tests {
         now += std::time::Duration::from_secs(1);
         let rows = plain(&app, now);
         assert!(rows.iter().any(|row| row.starts_with(strings().thought)) && !rows.iter().any(|row| row.contains("idea")), "{rows:?}");
-    }
-
-    #[test]
-    fn the_last_message_of_a_burst_trails_by_the_lag_limit_at_most() {
-        let (app, now) = burst_of_rounds(1);
-        let Some(Item::Agent { text, at }) = app.session.items.iter().rev().find(|item| matches!(item, Item::Agent { .. })) else { panic!("no message") };
-        let total = text.chars().count();
-        assert!(total - revealed_chars(total, now.saturating_duration_since(*at)) <= MAX_REVEAL_LAG);
     }
 
     #[test]

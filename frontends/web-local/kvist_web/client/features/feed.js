@@ -300,12 +300,14 @@ function messageOf(block) {
 
 // A thought that ended in under a second with nothing to read says nothing ("thought for 0.0s").
 const emptyThought = block => block.kind === 'reasoning' && !block.streaming && block.text.trim() === '' && !(block.seconds >= 1);
+// A streamed answer that ended empty was taken back (end_session spoke instead): it has no row.
+const emptyAnswer = block => block.kind === 'text' && block.source === 'stream' && !block.streaming && block.text.trim() === '';
 
 // The rows a state shows, in order: [key, kind, block].
 function rowsOf(blocks) {
     const list = [];
     for (const block of blocks) {
-        if (emptyThought(block)) continue;
+        if (emptyThought(block) || emptyAnswer(block)) continue;
         if (block.kind === 'tool' || block.kind === 'reasoning') list.push([block.id, block.kind, block]);
         else if (messageOf(block)) list.push([block.id, 'message', block]);
         else if (block.kind === 'notice' && noticeText(block) !== null) list.push([block.id, 'notice', block]);

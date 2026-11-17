@@ -842,32 +842,25 @@ test("a session_title for the session on screen becomes its window title; anothe
   assert.equal(switched.info.title, undefined)
 })
 
-test("a reply is shown whole once anything follows it, so a fast model is not trailed by the typewriter", () => {
-  const running = feed(hello, { type: "live_start" } as CoreEvent, { type: "message", markdown: "running the tests now" })
-  const answer = (state: State) => state.items.find((item) => item.kind === "answer")
-  assert.equal(answer(running)?.kind === "answer" && answer(running)?.fresh, true)
-  const called = reduce(running, { type: "event", event: stepEvent("run_shell", { command: "pytest" }), now: 1000 })
-  const moved = reduce(called, { type: "event", event: result(1, "run_shell", { exit_code: 0 }), now: 1000 })
-  const first = answer(moved)
-  assert.ok(first?.kind === "answer" && !first.fresh)
-})
-
-// A fake provider at tens of thousands of tokens per second: every round of words, call and result
-// reaches the reducer in the same millisecond, so only the redraw can trail the work.
-function fastProviderRounds(rounds: number): CoreEvent[] {
-  const events: CoreEvent[] = [hello, { type: "live_start" } as CoreEvent]
-  for (let round = 0; round < rounds; round++) {
-    events.push(stepEvent("run_shell", { command: "pytest" }, { step: round + 1, user_message: `${"word ".repeat(2500)} END${round}` }))
-    events.push(result(round + 1, "run_shell", { exit_code: 0 }))
-  }
-  return events
-}
-
-test("at fifty thousand tokens a second only the last message of the feed is still being revealed", () => {
-  const state = feed(...fastProviderRounds(40))
-  const says = state.items.filter((item) => item.kind === "say")
-  assert.equal(says.length, 40)
-  assert.deepEqual(says.slice(0, -1).filter((item) => item.kind === "say" && item.fresh), [])
+test("streamed deltas add up to the live answer, and an answer that ends empty is taken back", () => {
+  const live = feed(
+    hello,
+    { type: "live_start" } as CoreEvent,
+    { type: "stream_start", stream_id: "s" },
+    { type: "stream_chunk", stream_id: "s", text: "Hel", append: true },
+    { type: "stream_chunk", stream_id: "s", text: "lo", append: true },
+  )
+  assert.equal(live.live?.answer, "Hello")
+  const taken = feed(
+    hello,
+    { type: "live_start" } as CoreEvent,
+    { type: "stream_start", stream_id: "s" },
+    { type: "stream_chunk", stream_id: "s", text: "Enough.", append: true },
+    { type: "stream_chunk", stream_id: "s", text: "", append: false },
+    { type: "stream_commit", stream_id: "s", text: "" },
+  )
+  assert.equal(taken.live, null)
+  assert.deepEqual(taken.items.filter((item) => item.kind === "answer"), [])
 })
 
 test("calls the model has finished writing are counted until their step arrives", () => {

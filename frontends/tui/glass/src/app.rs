@@ -1033,7 +1033,6 @@ impl App {
             || self.session.busy
             || self.command.is_some()
             || tweens.iter().any(|t| t.running(now))
-            || view::revealing(self, now)
             || self.session.thinking_moves(now)
             || self.image_pending
             || self.log.as_ref().is_some_and(|log| matches!(log.state, LogState::Loading))
@@ -1606,7 +1605,7 @@ impl App {
             // `/tui` belongs to the launcher: it picks the interface.
             "tui" => self.ask_frontend(now),
             "quit" => self.quit = true,
-            "help" => self.session.note(slash::help_text(), now),
+            "help" => self.session.note(slash::help_text()),
             "copy" => self.copy_answer(args, now),
             "clear" if self.session.busy => self.notify(strings().core_busy.to_string(), true, now),
             "clear" => {

@@ -90,7 +90,10 @@
       }
 
       if (event.type === "stream_chunk" || event.type === "stream_commit") {
-        const text = typeof event.text === "string" ? event.text : ""
+        const piece = typeof event.text === "string" ? event.text : ""
+        // A chunk with `append` is the next piece; without it (older cores, a commit) the whole text.
+        const append = event.type === "stream_chunk" && event.append === true
+        const text = append ? (this.streams.get(event.stream_id) || "") + piece : piece
         this.streams.set(event.stream_id, text)
         return {
           kind: "stream_snapshot",

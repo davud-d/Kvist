@@ -19,15 +19,14 @@ export type Item =
   | { id: number; kind: "tool"; step: number; planStep: string; action: string; args: Record<string, unknown>; result: ActionResult; batchIndex: number }
   | { id: number; kind: "thought"; seconds: number; text: string }
   | { id: number; kind: "explored"; counts: ExploreCounts; names: string[] }
-  // fresh: it arrived while a turn ran, so a view may reveal it gradually; replayed history is not.
-  | { id: number; kind: "answer"; text: string; done: boolean; fresh?: boolean }
+  | { id: number; kind: "answer"; text: string; done: boolean }
   | { id: number; kind: "note"; tone: Tone; text: string }
   // The closing line of a live turn: how long it ran and when it ended. `role`, `russian` and
   // `seed` (the turn's start) let a view word it; a replayed journal has no such line.
   | { id: number; kind: "done"; seconds: number; at: number; role: string; russian: boolean; seed: number; interrupted: boolean }
   // The words a model response carries for the person, shown once, before the calls
   // of that response.
-  | { id: number; kind: "say"; text: string; fresh?: boolean }
+  | { id: number; kind: "say"; text: string }
   // A background job ended. `seconds` is how long it ran; `russian` picks the card's words.
   | { id: number; kind: "job"; jobId: string; command: string[]; purpose: string; status: JobEnd; exitCode: number | null; output: string; seconds: number; russian: boolean }
   // What the model was told about background jobs before a request, shown dimmed.
@@ -308,15 +307,7 @@ function push(state: State, item: (id: number) => Item): State {
 
 function append(state: State, item: (id: number) => Item): State {
   const added = item(state.nextId)
-  return { ...state, items: [...settleReveal(state.items, added), added], nextId: state.nextId + 1 }
-}
-
-// A fast model moves on while the last words are still being revealed; once something follows them
-// they are shown whole, so the screen never trails the work it describes.
-function settleReveal(items: Item[], next: Item): Item[] {
-  const last = items.at(-1)
-  if (next.kind === "note" || !last || !("fresh" in last) || !last.fresh) return items
-  return [...items.slice(0, -1), { ...last, fresh: false }]
+  return { ...state, items: [...state.items, added], nextId: state.nextId + 1 }
 }
 
 // A result names its call; a core older than call ids only names its step.
@@ -366,7 +357,7 @@ function ensureLive(state: State, streamId: string): Live {
 function commitLive(state: State, text: string): State {
   const next = { ...state, live: null }
   if (!text.trim()) return next
-  return push(next, (id) => ({ id, kind: "answer", text, done: true, fresh: state.running }))
+  return push(next, (id) => ({ id, kind: "answer", text, done: true }))
 }
 
 function lastAnswerText(state: State): string | null {
@@ -560,7 +551,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       const withThought = shown ? push(settled, (id) => ({ id, kind: "thought", seconds, text })) : settled
       // The response's words precede the calls they introduce, reads included.
       const say = event.user_message.trim()
-      const next = say ? push(withThought, (id) => ({ id, kind: "say", text: say, fresh: state.running })) : withThought
+      const next = say ? push(withThought, (id) => ({ id, kind: "say", text: say })) : withThought
       if (kind) {
         const weight = exploreWeight(kind, args)
         const label = `${event.action_type}  ${actionTarget(args)}`.trim()
@@ -602,11 +593,11 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return { ...result, justReasoned: true, thought: event.duration_seconds >= 1 ? { seconds: event.duration_seconds, at: now } : null }
     }
     case "message":
-      return push(state, (id) => ({ id, kind: "answer", text: event.markdown, done: true, fresh: state.running }))
+      return push(state, (id) => ({ id, kind: "answer", text: event.markdown, done: true }))
     case "final": {
       // A streamed reply and its `final` carry the same text: show it once.
       if (lastAnswerText(state) === event.message.trim()) return state
-      return push(state, (id) => ({ id, kind: "answer", text: event.message, done: true, fresh: state.running }))
+      return push(state, (id) => ({ id, kind: "answer", text: event.message, done: true }))
     }
     case "usage": {
       const u = state.usage

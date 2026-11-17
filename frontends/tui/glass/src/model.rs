@@ -1,7 +1,6 @@
 // What the interface knows about the session, built from the core's events
 // (docs/UI_API.md §7) after protocol.rs has turned them into `CoreEvent`s.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::arena::{Arena, ArenaDiff, Council, CouncilVerdict, Finished, Member, Risk, Spend, Started, Status, Usage, Verdict};
@@ -35,8 +34,9 @@ pub enum CoreEvent {
     ThoughtText { text: String, append: bool },
     /// The thinking ended, after this many seconds (`reasoning_commit`).
     ThinkingDone { seconds: f32 },
-    /// The cumulative text of a streamed answer (a snapshot, not a delta).
-    Stream { id: String, text: String },
+    /// A piece of a streamed answer: `append` puts it after what arrived, otherwise it is the whole
+    /// text. `done` ends the stream; an answer that ends empty is taken back (end_session spoke).
+    Stream { id: String, text: String, append: bool, done: bool },
     Say(String),
     Step { call: String, kind: ToolKind, label: String },
     /// A call the model has finished writing while it writes the next (`call_begin`); its `Step` follows later.
@@ -93,8 +93,8 @@ pub enum CallState {
 #[derive(Clone, Debug)]
 pub enum Item {
     User(String),
-    /// The agent's words; `at` drives the typewriter reveal.
-    Agent { text: String, at: Instant },
+    /// The agent's words; `stream` is the id of the core stream still writing them.
+    Agent { text: String, stream: Option<String> },
     Tool { call: String, kind: ToolKind, label: String, state: CallState },
     /// The model's thinking, if the provider passes it on.
     Thought(Thought),
@@ -153,8 +153,6 @@ pub struct Session {
     pub thinking_since: Option<Instant>,
     /// Set once the session is closed: the notice and when it arrived.
     pub closed: Option<(String, Instant)>,
-    /// Stream id -> index of its item in `items`.
-    streams: HashMap<String, usize>,
     /// Calls shown from `call_begin` that no `Step` has confirmed yet.
     early: Vec<String>,
 }
@@ -199,8 +197,8 @@ impl Session {
             }
             CoreEvent::ThoughtText { text, append } => self.open_thought(now).push(&text, append),
             CoreEvent::ThinkingDone { seconds } => self.end_thought(now, seconds),
-            CoreEvent::Stream { id, text } => self.stream(id, text, now),
-            CoreEvent::Say(text) => self.say(text, now),
+            CoreEvent::Stream { id, text, append, done } => self.stream(id, text, append, done),
+            CoreEvent::Say(text) => self.say(text),
             CoreEvent::CallBegin { call, kind, label } => {
                 let known = self.items.iter().any(|item| matches!(item, Item::Tool { call: c, .. } if *c == call));
                 if !known {
@@ -331,14 +329,13 @@ impl Session {
     }
 
     /// A word from this interface itself (`/help`), set in the conversation like the agent's own.
-    pub fn note(&mut self, text: String, now: Instant) {
-        self.items.push(Item::Agent { text, at: now });
+    pub fn note(&mut self, text: String) {
+        self.items.push(Item::Agent { text, stream: None });
     }
 
     /// `/clear`: the conversation on screen starts over; files, helpers and spending stay.
     pub fn clear_view(&mut self) {
         self.items.clear();
-        self.streams.clear();
         self.early.clear();
     }
 
@@ -396,21 +393,34 @@ impl Session {
         self.items.iter().rev().take(3).any(|item| matches!(item, Item::Thought(t) if t.active() || t.folding(now)))
     }
 
-    fn stream(&mut self, id: String, text: String, now: Instant) {
+    fn stream(&mut self, id: String, text: String, append: bool, done: bool) {
         self.thinking_since = None;
-        if let Some(&index) = self.streams.get(&id)
-            && let Some(Item::Agent { text: shown, .. }) = self.items.get_mut(index)
-        {
+        let found = self.items.iter().rposition(|item| matches!(item, Item::Agent { stream: Some(s), .. } if *s == id));
+        let Some(index) = found else {
+            if !text.is_empty() {
+                let stream = (!done).then_some(id);
+                self.items.push(Item::Agent { text, stream });
+            }
+            return;
+        };
+        let Item::Agent { text: shown, stream } = &mut self.items[index] else { unreachable!("found as an answer") };
+        if append {
+            shown.push_str(&text);
+        } else {
             *shown = text;
+        }
+        if !done {
             return;
         }
-        self.streams.insert(id, self.items.len());
-        self.items.push(Item::Agent { text, at: now });
+        *stream = None;
+        if shown.trim().is_empty() {
+            self.items.remove(index);
+        }
     }
 
     /// The agent's words; a final answer that repeats the reply just streamed
     /// is not shown twice.
-    fn say(&mut self, text: String, now: Instant) {
+    fn say(&mut self, text: String) {
         self.thinking_since = None;
         if text.trim().is_empty() {
             return;
@@ -429,8 +439,8 @@ impl Session {
             .iter()
             .position(|item| matches!(item, Item::Tool { call, .. } if self.early.contains(call)));
         match first_early {
-            Some(at) => self.items.insert(at, Item::Agent { text, at: now }),
-            None => self.items.push(Item::Agent { text, at: now }),
+            Some(at) => self.items.insert(at, Item::Agent { text, stream: None }),
+            None => self.items.push(Item::Agent { text, stream: None }),
         }
     }
 
@@ -627,10 +637,33 @@ mod tests {
     fn stream_snapshots_replace_the_text_of_one_message() {
         let now = Instant::now();
         let mut session = Session::default();
-        session.apply(CoreEvent::Stream { id: "s".into(), text: "При".into() }, now);
-        session.apply(CoreEvent::Stream { id: "s".into(), text: "Привет".into() }, now);
+        session.apply(CoreEvent::Stream { id: "s".into(), text: "При".into(), append: false, done: false }, now);
+        session.apply(CoreEvent::Stream { id: "s".into(), text: "Привет".into(), append: false, done: false }, now);
         assert_eq!(session.items.len(), 1);
         assert!(matches!(&session.items[0], Item::Agent { text, .. } if text == "Привет"));
+    }
+
+    #[test]
+    fn stream_deltas_add_up_to_one_message() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        for piece in ["При", "вет", ", мир"] {
+            session.apply(CoreEvent::Stream { id: "s".into(), text: piece.into(), append: true, done: false }, now);
+        }
+        session.apply(CoreEvent::Stream { id: "s".into(), text: "Привет, мир".into(), append: false, done: true }, now);
+        assert_eq!(session.items.len(), 1);
+        assert!(matches!(&session.items[0], Item::Agent { text, stream: None } if text == "Привет, мир"));
+    }
+
+    #[test]
+    fn an_answer_that_ends_empty_is_taken_back() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        session.submit("q".into(), now);
+        session.apply(CoreEvent::Stream { id: "s".into(), text: "Хватит.".into(), append: true, done: false }, now);
+        session.apply(CoreEvent::Stream { id: "s".into(), text: String::new(), append: false, done: false }, now);
+        session.apply(CoreEvent::Stream { id: "s".into(), text: String::new(), append: false, done: true }, now);
+        assert!(!session.items.iter().any(|item| matches!(item, Item::Agent { .. })));
     }
 
     #[test]
@@ -638,7 +671,7 @@ mod tests {
         let now = Instant::now();
         let mut session = Session::default();
         session.submit("q".into(), now);
-        session.apply(CoreEvent::Stream { id: "s".into(), text: "Готово.".into() }, now);
+        session.apply(CoreEvent::Stream { id: "s".into(), text: "Готово.".into(), append: false, done: true }, now);
         session.apply(CoreEvent::Say("Готово.".into()), now);
         assert_eq!(session.items.len(), 2);
         session.apply(CoreEvent::Say("Ещё одно.".into()), now);

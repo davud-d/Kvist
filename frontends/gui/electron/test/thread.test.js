@@ -32,6 +32,21 @@ test("a streamed answer grows in place and an empty commit draws nothing", () =>
   assert.equal(thread.items.length, 2)
 })
 
+test("appended pieces add up, and an answer that ends empty is taken back", () => {
+  const thread = new Thread()
+  thread.addUser("hi")
+  thread.apply(ev("reasoning_start", { stream_id: "s" }))
+  thread.apply(ev("reasoning_chunk", { stream_id: "s", text: "hm", append: true }))
+  thread.apply(ev("reasoning_chunk", { stream_id: "s", text: "m", append: true }))
+  assert.equal(thread.items.find((item) => item.kind === "thinking").text, "hmm")
+  thread.apply(ev("stream_chunk", { stream_id: "s", text: "Hel", append: true }))
+  thread.apply(ev("stream_chunk", { stream_id: "s", text: "lo", append: true }))
+  assert.equal(thread.items.find((item) => item.kind === "assistant").text, "Hello")
+  thread.apply(ev("stream_chunk", { stream_id: "s", text: "", append: false }))
+  thread.apply(ev("stream_commit", { stream_id: "s", text: "" }))
+  assert.equal(thread.items.some((item) => item.kind === "assistant"), false)
+})
+
 test("thinking comes before the answer it precedes", () => {
   const thread = new Thread()
   thread.addUser("q")

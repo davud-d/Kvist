@@ -79,6 +79,22 @@ test("a streamed answer is one item that ends settled", () => {
   assert.equal(agent.items[0].live, false);
 });
 
+test("appended pieces of an answer and a thought add up", () => {
+  const agent = createAgent("a1", "/w");
+  feed(
+    agent,
+    { type: "reasoning_start", stream_id: "s" },
+    { type: "reasoning_chunk", stream_id: "s", text: "hm", append: true },
+    { type: "reasoning_chunk", stream_id: "s", text: "m", append: true },
+    { type: "stream_chunk", stream_id: "s", text: "Hel", append: true },
+    { type: "stream_chunk", stream_id: "s", text: "lo", append: true },
+  );
+  assert.equal(agent.items.find((item) => item.kind === "thought").text, "hmm");
+  assert.equal(agent.items.find((item) => item.kind === "reply").text, "Hello");
+  feed(agent, { type: "stream_chunk", stream_id: "s", text: "", append: false }, { type: "stream_commit", stream_id: "s", text: "" });
+  assert.equal(agent.items.some((item) => item.kind === "reply"), false);
+});
+
 test("an empty stream_commit draws nothing", () => {
   const agent = createAgent("a1", "/w");
   feed(agent, { type: "stream_start", stream_id: "s" }, { type: "stream_commit", stream_id: "s", text: "" });

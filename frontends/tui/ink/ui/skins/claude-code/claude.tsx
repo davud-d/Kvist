@@ -400,7 +400,7 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
       return <ExploredLine counts={item.counts} />
     case "say":
     case "answer":
-      return item.fresh ? <FreshMessage text={item.text} /> : <Message text={item.text} />
+      return <Message text={item.text} />
     case "done":
       return (
         <Box marginTop={1}>
@@ -452,61 +452,13 @@ function tokenCount(count: number): string {
 }
 
 // The end of the transcript that is still changing: the read group, the call
-// waiting for its result and the answer as it streams.
-// Reveals a growing text at a steady pace. The core sends what it has about nine times a second
-// and a fast model is done in half a second, so shown as it arrives the text lands in a few blocks.
-const REVEAL_MS = 33
-const CATCH_UP = 5
-// A long report would otherwise open with a fifth of itself in one tick.
-const MAX_STEP = 24
-// A model at 1000 tokens/s outruns MAX_STEP, so the reveal may trail the text by this much at most;
-// otherwise the answer keeps typing for seconds after the turn is marked done.
-const MAX_LAG = 160
-
-// What the live answer had shown when it was committed: the settled answer continues from there
-// instead of retyping from the first character.
-let lastLiveShown = ""
-
-function useTypewriter(text: string, start = 0): string {
-  const [revealed, setRevealed] = useState(Math.min(start, text.length))
-  const goal = useRef(text.length)
-  goal.current = text.length
-  useEffect(() => {
-    const timer = setInterval(() => {
-      // Each tick closes a fifth of the gap, so a burst is spread over about half a second.
-      setRevealed((n) =>
-        n > goal.current
-          ? goal.current
-          : Math.max(n + Math.min(MAX_STEP, Math.ceil((goal.current - n) / CATCH_UP)), goal.current - MAX_LAG),
-      )
-    }, REVEAL_MS)
-    return () => clearInterval(timer)
-  }, [])
-  return text.slice(0, revealed)
-}
-
+// waiting for its result and the answer as it streams. The text is shown as the core sends it.
 function LiveThought({ text }: { text: string }) {
   return (
     <Box marginTop={1} paddingLeft={2}>
-      <Text color={color.thought} italic>{renderInline(useTypewriter(text))}</Text>
+      <Text color={color.thought} italic>{renderInline(text)}</Text>
     </Box>
   )
-}
-
-function LiveAnswer({ text }: { text: string }) {
-  const shown = useTypewriter(text)
-  lastLiveShown = shown
-  return <Message text={shown} />
-}
-
-// An answer that arrived during the turn: revealed gradually, from where the live stream stopped.
-function FreshMessage({ text }: { text: string }) {
-  const [start] = useState(() => {
-    const from = text.startsWith(lastLiveShown) ? lastLiveShown.length : 0
-    lastLiveShown = ""
-    return from
-  })
-  return <Message text={useTypewriter(text, start)} />
 }
 
 const COMMAND_LINES = 4
@@ -549,7 +501,7 @@ export function ClaudeLiveBody({ state }: { state: State }) {
           {requestIsRussian(state) ? `⎿  Записано вызовов: ${state.queued.length}` : `⎿  ${state.queued.length} calls written`} · {state.queued.at(-1)?.action} {state.queued.at(-1)?.target}
         </Text>
       ) : null}
-      {state.running && !state.pending && state.live?.answer ? <LiveAnswer text={state.live.answer} /> : null}
+      {state.running && !state.pending && state.live?.answer ? <Message text={state.live.answer} /> : null}
     </>
   )
 }

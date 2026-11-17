@@ -19,7 +19,6 @@ import { Prompt, type PromptRef } from "./prompt"
 import { Sidebar, SidebarOverlay, sidebarDocked } from "./sidebar"
 import {
   Answer,
-  stillTyping,
   AssistantFooter,
   ExploredGroup,
   JobBlock,
@@ -57,11 +56,6 @@ export function visibleItems(items: readonly Item[], showDebug = false): Item[] 
   })
 }
 
-// Calls and thoughts come after the words that introduce them; they appear once those words are out.
-function heldWhileTyping(kind: Item["kind"]): boolean {
-  return kind === "tool" || kind === "step" || kind === "explored" || kind === "thought" || kind === "job"
-}
-
 function ItemRow(props: { item: Item }) {
   const item = () => props.item
   return (
@@ -70,7 +64,7 @@ function ItemRow(props: { item: Item }) {
         <UserMessage text={(item() as Extract<Item, { kind: "user" }>).text} />
       </Match>
       <Match when={item().kind === "say" || item().kind === "answer"}>
-        <Answer text={(item() as Extract<Item, { kind: "say" }>).text} fresh={(item() as Extract<Item, { kind: "say" }>).fresh} />
+        <Answer text={(item() as Extract<Item, { kind: "say" }>).text} />
       </Match>
       <Match when={item().kind === "thought"}>
         <Thought text={(item() as Extract<Item, { kind: "thought" }>).text} seconds={(item() as Extract<Item, { kind: "thought" }>).seconds} />
@@ -128,20 +122,18 @@ function LiveRows() {
           </text>
         </box>
       </Show>
-      <Show when={state().exploringNames.length && !stillTyping()}>
+      <Show when={state().exploringNames.length}>
         <box marginTop={1} flexShrink={0}>
           <ExploredGroup names={state().exploringNames} counts={counts()} completed={false} />
         </box>
       </Show>
-      <Show when={!stillTyping()}>
-        <For each={calls()}>
-          {(call) => (
-            <box marginTop={1} flexShrink={0}>
-              <ToolPart part={partOfCall(call)} />
-            </box>
-          )}
-        </For>
-      </Show>
+      <For each={calls()}>
+        {(call) => (
+          <box marginTop={1} flexShrink={0}>
+            <ToolPart part={partOfCall(call)} />
+          </box>
+        )}
+      </For>
       <Show when={state().live?.thinking}>
         <box marginTop={1} flexShrink={0}>
           <Thought text={state().live?.reasoning ?? ""} seconds={0} live />
@@ -222,11 +214,9 @@ export function Session(props: {
             >
               <For each={items()}>
                 {(item) => (
-                  <Show when={!(stillTyping() && heldWhileTyping(item.kind))}>
-                    <box marginTop={1} flexShrink={0}>
-                      <ItemRow item={item} />
-                    </box>
-                  </Show>
+                  <box marginTop={1} flexShrink={0}>
+                    <ItemRow item={item} />
+                  </box>
                 )}
               </For>
               <LiveRows />

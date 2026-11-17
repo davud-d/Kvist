@@ -28,7 +28,14 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         "reasoning_commit" => {
             vec![CoreEvent::ThinkingDone { seconds: event.get("duration_seconds").and_then(Value::as_f64).unwrap_or(0.0) as f32 }]
         }
-        "stream_chunk" | "stream_commit" => vec![CoreEvent::Stream { id: text("stream_id"), text: text("text") }],
+        // Older cores sent no `append` and a cumulative snapshot; a commit always carries the whole answer.
+        "stream_chunk" => vec![CoreEvent::Stream {
+            id: text("stream_id"),
+            text: text("text"),
+            append: event.get("append").and_then(Value::as_bool).unwrap_or(false),
+            done: false,
+        }],
+        "stream_commit" => vec![CoreEvent::Stream { id: text("stream_id"), text: text("text"), append: false, done: true }],
         "plan" => vec![CoreEvent::Say(text("markdown"))],
         "message" => vec![CoreEvent::Say(text("markdown"))],
         "final" => vec![CoreEvent::Say(text("message"))],

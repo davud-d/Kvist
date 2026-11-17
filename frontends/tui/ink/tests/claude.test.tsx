@@ -340,8 +340,6 @@ test("the thought and the answer grow down from the request, and the spinner sta
       ),
     ),
   )
-  // The live text is revealed at a steady pace, so give it time to arrive.
-  await new Promise((resolve) => setTimeout(resolve, 700))
   await tick()
   await tick()
   const rows = plain(app.lastFrame()).split("\n")
@@ -411,23 +409,12 @@ test("a tip about a Kvist command sits under the spinner, in the request's langu
   assert.ok(TIPS_RU.some((tip) => russian.includes(`Совет: ${tip.slice(0, 30)}`)), russian)
 })
 
-test("a live thought is revealed at a steady pace instead of landing in one block", async () => {
+test("a live thought and answer are drawn whole as they arrived, with no reveal of their own", () => {
   const reasoning = "thinking about the request ".repeat(8).trim()
-  const state: State = { ...agent(), running: true, startedAt: Date.now(), live: { streamId: "s", answer: "", reasoning, thinking: true, thinkingSince: Date.now() } }
-  const app = render(createElement(ViewContext.Provider, { value: view }, createElement(ClaudeLiveBody, { state })))
-  const length = (frame: string | undefined) => plain(frame).replace(/\s+/g, " ").trim().length
-  // The reveal moves once per timer tick, so its duration follows the platform's timer (Windows
-  // stretches a 33 ms interval to three 15.6 ms quanta): wait for the end, not for a fixed time.
-  const deadline = Date.now() + 10_000
-  while (length(app.lastFrame()) < reasoning.length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20))
-  const lengths = app.frames.map(length)
-  app.unmount()
-  assert.equal(lengths.at(-1), reasoning.length)
-  assert.deepEqual(lengths, [...lengths].sort((a, b) => a - b), "the shown text never shrinks")
-  // This text takes about twenty ticks to reveal; two ticks share a frame only when the event loop
-  // stalls past a whole tick, so a text that lands in one or two blocks shows fewer partial frames.
-  const partial = new Set(lengths.filter((n) => n > 0 && n < reasoning.length))
-  assert.ok(partial.size >= 3, `partial frames: ${[...partial].join(", ")}`)
+  const thinking: State = { ...agent(), running: true, startedAt: Date.now(), live: { streamId: "s", answer: "", reasoning, thinking: true, thinkingSince: Date.now() } }
+  assert.ok(plain(frame(createElement(ClaudeLiveBody, { state: thinking }))).replace(/\s+/g, " ").includes(reasoning))
+  const answering: State = { ...thinking, live: { streamId: "s", answer: "Hello there", reasoning: "", thinking: false, thinkingSince: null } }
+  assert.match(plain(frame(createElement(ClaudeLiveBody, { state: answering }))), /Hello there/)
 })
 
 test("the tip changes every three seconds and cycles through all of them", () => {

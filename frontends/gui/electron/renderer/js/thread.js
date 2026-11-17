@@ -331,7 +331,7 @@
     reasoning_chunk(event) {
       const item = this.find((entry) => entry.kind === "thinking" && entry.streamId === event.stream_id)
         || this.push({ kind: "thinking", streamId: event.stream_id, text: "", seconds: 0, done: false })
-      item.text = event.text || ""
+      item.text = event.append === true ? item.text + (event.text || "") : event.text || ""
       this.emit(item)
     },
 
@@ -551,8 +551,10 @@
   }
 
   function updateStream(thread, event, committed, ts) {
-    const text = String(event.text || "")
+    const piece = String(event.text || "")
     let item = thread.find((entry) => entry.kind === "assistant" && entry.streamId === event.stream_id)
+    // A chunk with `append` is the next piece of the answer; without it (older cores, a commit) the whole answer.
+    const text = item && !committed && event.append === true ? item.text + piece : piece
     if (!item) {
       // Empty text: nothing to draw yet (and an empty commit is end_session's hidden tag).
       if (!text.trim()) return

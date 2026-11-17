@@ -168,6 +168,17 @@ class AcpEventTranslator:
         buffers[key] = _StreamState(snapshot)
         return snapshot
 
+    def _piece(self, buffers: dict[str, _StreamState], key: str, event: Any) -> str:
+        """What a chunk adds: its text when it carries ``append``, else the suffix of its snapshot.
+
+        The core sends appended pieces; older cores and every commit carry the whole text.
+        """
+        if not getattr(event, "append", False):
+            return self._delta(buffers, key, event.text)
+        state = buffers.setdefault(key, _StreamState())
+        state.text += event.text
+        return event.text
+
     # Message-bearing events share one rule: only text the client has not been
     # shown goes out. `message` and `final` are whole bodies rather than
     # snapshots, so they are deduplicated against committed stream bodies.
@@ -226,10 +237,10 @@ class AcpEventTranslator:
         return []
 
     def _on_stream_chunk(self, event: Any) -> list[AcpUpdate]:
-        suffix = self._delta(self._streams, event.stream_id, event.text)
+        suffix = self._piece(self._streams, event.stream_id, event)
         if not suffix:
             return []
-        self._committed_bodies.add(event.text)
+        self._committed_bodies.add(self._streams[event.stream_id].text)
         return [AcpUpdate("agent_message_chunk", helpers.update_agent_message(self._text(suffix)))]
 
     def _on_stream_commit(self, event: Any) -> list[AcpUpdate]:
@@ -244,7 +255,7 @@ class AcpEventTranslator:
         return []
 
     def _on_reasoning_chunk(self, event: Any) -> list[AcpUpdate]:
-        suffix = self._delta(self._thoughts, event.stream_id, event.text)
+        suffix = self._piece(self._thoughts, event.stream_id, event)
         if not suffix:
             return []
         return [AcpUpdate("agent_thought_chunk", helpers.update_agent_thought(self._text(suffix)))]

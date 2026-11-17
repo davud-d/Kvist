@@ -54,7 +54,7 @@ from kernel.plan import plan_mode
 from kernel.agent.agent_state import RunCancelled
 from kernel.agent.cancellable_call import call_cancellable, iterate_cancellable
 from kernel.protocol.frontend_protocol import UsageSource
-from kernel.protocol.parser import speakable_prefix
+from kernel.protocol.parser import parse_model_response, speakable_prefix
 from kernel.agent.native_tools import (
     NativeToolsRejected,
     NativeTurn,
@@ -1060,7 +1060,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 + "".join(call["arguments"] for call in calls.values()),
             )
     finally:
-        spoken.close(_spoken_with_answer("".join(content), calls))
+        ends_session = _calls_end_session(entry["name"] for entry in calls.values())
+        spoken.close("" if ends_session else _spoken_with_answer("".join(content), calls))
         close = getattr(stream, "close", None)
         if close is not None:
             try:
@@ -1544,16 +1545,20 @@ def call_model(
 
 def words_are_streamed(agent: Any) -> bool:
     """Whether a response's words reach the person while the response arrives."""
-    ui_streams = bool(getattr(agent._ui, "streams_words", False))
-    return ui_streams and not end_session.available(agent, agent._state.current_agent_role)
+    return bool(getattr(agent._ui, "streams_words", False))
+
+
+def _calls_end_session(names: Any) -> bool:
+    return any(name == end_session.ACTION for name in names)
 
 
 class _SpokenStream:
     """Shows the words of a streaming response to a UI that takes them live.
 
     Only the words are shown: ``speakable_prefix`` drops tool-call tags and a
-    JSON-protocol object. Disabled where the response may still be replaced by
-    the end_session tool, whose words never reach the person.
+    JSON-protocol object. The end_session call comes after the words, so it
+    cannot be known while they stream: a response that ends in it closes with
+    no words, which takes back what was shown (the tool speaks for itself).
     """
 
     def __init__(self, agent: Any) -> None:
@@ -1677,7 +1682,9 @@ def call_model_streaming(
                         preview_shown = True
                         print(f"  [streaming] {rendered[:120]}...", flush=True)
     finally:
-        spoken.close(speakable_prefix("".join(chunks)))
+        text = "".join(chunks)
+        ends_session = _calls_end_session(call.name for call in parse_model_response(text).calls)
+        spoken.close("" if ends_session else speakable_prefix(text))
         # An abandoned HTTP stream would otherwise hold its connection open;
         # applies to cancellation, provider failure, and normal completion.
         close = getattr(stream, "close", None)
