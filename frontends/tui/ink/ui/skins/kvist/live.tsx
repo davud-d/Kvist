@@ -80,6 +80,7 @@ export function Live({ state }: { state: State }) {
       {exploring}
       {pendingAction}
       {written}
+      {state.aside ? <Text color={color.dim}>· {state.aside.text}</Text> : null}
       {live?.answer ? (
         <Box paddingLeft={2} marginBottom={1}>
           <Markdown text={lastLines(live.answer, budget)} />

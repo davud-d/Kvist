@@ -551,6 +551,16 @@ export function Notice(props: { tone: "info" | "warn" | "error" | "debug"; text:
   )
 }
 
+// A line a fast model said in the agent's voice; muted, so it reads as a side remark and not as an answer.
+export function Aside(props: { text: string }) {
+  const theme = useTheme()
+  return (
+    <box paddingLeft={3}>
+      <text fg={theme.text.muted} wrapMode="word">· {props.text}</text>
+    </box>
+  )
+}
+
 export function PlanBlock(props: { markdown: string }) {
   const theme = useTheme()
   const syntax = useThemes().currentSyntax

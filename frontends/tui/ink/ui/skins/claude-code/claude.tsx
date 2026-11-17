@@ -401,6 +401,8 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
     case "say":
     case "answer":
       return <Message text={item.text} />
+    case "aside":
+      return <Text color={color.dim}>· {item.text}</Text>
     case "done":
       return (
         <Box marginTop={1}>
@@ -502,6 +504,7 @@ export function ClaudeLiveBody({ state }: { state: State }) {
         </Text>
       ) : null}
       {state.running && !state.pending && state.live?.answer ? <Message text={state.live.answer} /> : null}
+      {state.running && state.aside ? <Text color={color.dim}>· {state.aside.text}</Text> : null}
     </>
   )
 }

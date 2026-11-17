@@ -19,6 +19,7 @@ import { Prompt, type PromptRef } from "./prompt"
 import { Sidebar, SidebarOverlay, sidebarDocked } from "./sidebar"
 import {
   Answer,
+  Aside,
   AssistantFooter,
   ExploredGroup,
   JobBlock,
@@ -37,6 +38,7 @@ export function isEmptyItem(item: Item): boolean {
       return !item.text.trim() && item.seconds < 1
     case "say":
     case "answer":
+    case "aside":
     case "note":
       return !item.text.trim()
     default:
@@ -100,6 +102,9 @@ function ItemRow(props: { item: Item }) {
       <Match when={item().kind === "job_notice"}>
         <Notice tone="info" text={(item() as Extract<Item, { kind: "job_notice" }>).text} />
       </Match>
+      <Match when={item().kind === "aside"}>
+        <Aside text={(item() as Extract<Item, { kind: "aside" }>).text} />
+      </Match>
     </Switch>
   )
 }
@@ -143,6 +148,9 @@ function LiveRows() {
         <box marginTop={1} flexShrink={0}>
           <Answer text={state().live?.answer ?? ""} live />
         </box>
+      </Show>
+      <Show when={state().aside}>
+        <Aside text={state().aside?.text ?? ""} />
       </Show>
     </>
   )

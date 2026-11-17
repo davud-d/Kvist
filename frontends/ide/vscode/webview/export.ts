@@ -113,6 +113,8 @@ function itemText(item: Item): string {
       return `_${item.text}_`
     case "answer":
       return item.text.trim()
+    case "aside":
+      return `_· ${item.text}_`
     case "note":
       return item.tone === "debug" ? "" : item.text
     case "done":

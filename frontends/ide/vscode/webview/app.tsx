@@ -473,6 +473,7 @@ export function App() {
         {workspacePage && running?.action === "run_shell" ? <Working action="run_shell" label="Running" target={commandLine(running.args)} hint={liveOutput?.step === running.step ? outputLines(liveOutput.text).filter((line) => line.trim()).at(-1) ?? "" : ""} /> : null}
         {thinking ? <Thinking reasoning={state.live?.reasoning ?? ""} since={state.live?.thinkingSince ?? null} /> : null}
         {state.live?.answer ? <Markdown text={state.live.answer} /> : null}
+        {state.aside ? <div class="note aside">· {state.aside.text}</div> : null}
         {state.pending && !watching ? <Dialog key={state.pending.request_id} request={state.pending} answer={answer} /> : null}
         <div ref={bottom} />
       </main>

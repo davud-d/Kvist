@@ -605,6 +605,8 @@ export function TranscriptItem({ item, uid, settled, items }: { item: Item; uid:
       return <Say text={item.text} settled={settled} />
     case "answer":
       return <Answer item={item} items={items} />
+    case "aside":
+      return <div class="note aside">· {item.text}</div>
     case "note":
       return <div class={`note ${item.tone}`}>{item.text}</div>
     case "job":

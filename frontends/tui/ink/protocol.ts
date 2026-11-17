@@ -77,6 +77,10 @@ export type CoreEvent =
   | { type: "artifact"; name: string; mime: string; path: string; caption: string; skill: string; preview?: string }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number; context_limit: number; model: string; kind: string; step: number }
   | { type: "context"; context_tokens: number; context_limit: number; prompt: number; generated: number; pending: number }
+  // A line a fast model says in the agent's own voice while the agent works (never the action model's
+  // words: `from_model` is always false). While `done` is false `text` is the next piece to append to the
+  // line `aside_id` names; when it is true `text` is the whole line. Live-only: a journal never holds it.
+  | { type: "aside"; aside_id: string; text: string; done: boolean; from_model: false }
   | { type: "debug"; message: string }
   | { type: "error"; message: string }
   | ({ type: "input_request" } & InputRequest)

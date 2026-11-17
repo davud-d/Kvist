@@ -160,6 +160,29 @@ test("a response's words are shown once as a say line before its calls, reads in
   assert.deepEqual(read.exploring, { reads: 1, searches: 0, lists: 0, git: 0 })
 })
 
+test("an aside grows in state.aside, then lands as one item after the reads it follows", () => {
+  const aside = (text: string, done: boolean): CoreEvent => ({ type: "aside", aside_id: "a1", text, done, from_model: false })
+  const streaming = feed(stepEvent("read_file", { path: "a.py" }), aside("i found", false), aside(" it", false))
+  assert.deepEqual(streaming.aside, { id: "a1", text: "i found it" })
+  assert.equal(streaming.items.some((item) => item.kind === "aside"), false)
+
+  const done = reduce(streaming, { type: "event", event: aside("i found it", true) })
+  assert.equal(done.aside, null)
+  assert.deepEqual(done.items.map((i) => i.kind), ["explored", "aside"])
+  assert.equal(done.items.at(-1)?.kind === "aside" && done.items.at(-1)?.text, "i found it")
+})
+
+test("an aside never settles a call that is still running", () => {
+  const running = feed(stepEvent("write_file", { path: "a.py" }))
+  const next = reduce(running, { type: "event", event: { type: "aside", aside_id: "a1", text: "writing it", done: true, from_model: false } })
+  assert.equal(next.inflight.length, 1)
+})
+
+test("a turn that ends mid-line drops the unfinished aside", () => {
+  const state = feed({ type: "aside", aside_id: "a1", text: "i fou", done: false, from_model: false }, { type: "turn_end" })
+  assert.equal(state.aside, null)
+})
+
 test("usage sums spend and takes the core's context size as given", () => {
   const usage = (input: number, context: number, limit: number): CoreEvent => ({
     type: "usage", input_tokens: input, output_tokens: 1, context_tokens: context, context_limit: limit, model: "m", kind: "action", step: 1,

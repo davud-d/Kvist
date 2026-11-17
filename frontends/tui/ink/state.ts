@@ -27,6 +27,9 @@ export type Item =
   // The words a model response carries for the person, shown once, before the calls
   // of that response.
   | { id: number; kind: "say"; text: string }
+  // A line a fast model said in the agent's voice while the agent worked, shown dimmed after "· ".
+  // It is not the action model's own words.
+  | { id: number; kind: "aside"; text: string }
   // A background job ended. `seconds` is how long it ran; `russian` picks the card's words.
   | { id: number; kind: "job"; jobId: string; command: string[]; purpose: string; status: JobEnd; exitCode: number | null; output: string; seconds: number; russian: boolean }
   // What the model was told about background jobs before a request, shown dimmed.
@@ -100,6 +103,8 @@ export interface State {
   epoch: number
   items: Item[]
   live: Live | null
+  // The aside line that is still streaming; it is committed as an item when it ends.
+  aside: { id: string; text: string } | null
   // A run of read-only steps still growing. Static items cannot change once
   // printed, so the group lives here and is committed as one item when
   // anything else arrives.
@@ -186,6 +191,7 @@ export function initialState(effort = "", banner = false): State {
     epoch: 0,
     items: banner ? [{ id: 1, kind: "banner" }] : [],
     live: null,
+    aside: null,
     exploring: null,
     exploringNames: [],
     exploreSteps: [],
@@ -268,6 +274,19 @@ function flushExploring(state: State): State {
   if (!state.exploring) return state
   const item: Item = { id: state.nextId, kind: "explored", counts: state.exploring, names: state.exploringNames }
   return { ...state, exploring: null, exploringNames: [], items: [...state.items, item], nextId: state.nextId + 1 }
+}
+
+// A static item cannot change once printed, so the line grows in `state.aside` and is committed whole when
+// it ends. It arrives while the strong model's next call is already running: it must not settle the calls
+// still in flight, and the reads gathered so far are closed first so the line lands after them.
+function onAside(state: State, event: Extract<CoreEvent, { type: "aside" }>): State {
+  if (!event.done) {
+    const text = state.aside?.id === event.aside_id ? state.aside.text + event.text : event.text
+    return { ...state, aside: { id: event.aside_id, text } }
+  }
+  const cleared = state.aside?.id === event.aside_id ? { ...state, aside: null } : state
+  if (!event.text) return cleared
+  return append(flushExploring(cleared), (id) => ({ id, kind: "aside", text: event.text }))
 }
 
 // The step line an action gets when no result ever arrives for it (blocked by
@@ -431,7 +450,7 @@ function commandNotes(state: State, event: Extract<CoreEvent, { type: "command_r
 // The core refused a command that is a turn (no question, a count out of range, a command it does not know):
 // no turn ran and no `turn_end` follows, so the run shown for it ends here.
 function refusedTurn(state: State): State {
-  return { ...state, turnCommand: null, running: false, startedAt: null, waitingSince: null, interrupted: false, thought: null, live: null, status: null }
+  return { ...state, turnCommand: null, running: false, startedAt: null, waitingSince: null, interrupted: false, thought: null, live: null, aside: null, status: null }
 }
 
 function onCommandResult(state: State, event: Extract<CoreEvent, { type: "command_result" }>): State {
@@ -613,6 +632,8 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
     }
     case "context":
       return { ...state, usage: { ...state.usage, context: event.context_tokens, limit: event.context_limit } }
+    case "aside":
+      return onAside(state, event)
     case "debug":
       return push(state, (id) => ({ id, kind: "note", tone: "debug", text: event.message }))
     case "error":
@@ -665,7 +686,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       // the input box disabled forever.
       // Jobs keep their state: a stopped one already reported job_finished, and one still
       // running was left running by an answered turn and reports its end later.
-      return { ...settle(state), exploreSteps: [], queued: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, turnCommand: null, screen: state.taskState === "paused" ? state.screen : null }
+      return { ...settle(state), exploreSteps: [], queued: [], batch: null, running: false, live: null, aside: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, turnCommand: null, screen: state.taskState === "paused" ? state.screen : null }
     default:
       return state
   }
@@ -772,7 +793,7 @@ export function reduce(state: State, action: Action): State {
     case "answered":
       return { ...state, pending: null }
     case "core_exit": {
-      const next = { ...settle(state), jobs: stopRunning(state.jobs, Date.now()), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, command: null, turnCommand: null }
+      const next = { ...settle(state), jobs: stopRunning(state.jobs, Date.now()), exploreSteps: [], batch: null, running: false, live: null, aside: null, status: null, pending: null, command: null, turnCommand: null }
       if (action.expected) return next
       return push(next, (id) => ({ id, kind: "note", tone: "error", text: `The Kvist core stopped unexpectedly (exit code ${action.code ?? "?"}).` }))
     }

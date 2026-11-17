@@ -630,6 +630,20 @@ class TerminalBannerUI:
             return
         self.console.print(Text(f"» {sanitize_display_text(text)}", style="bright_white"))
 
+    def print_aside(self, aside_id: str, text: str, done: bool) -> None:
+        """A line a fast model says in the agent's voice, grey after a "· ".
+
+        The scrollback cannot grow a line in place, so only the whole line is printed, when it ends.
+        """
+        _ = aside_id
+        if not done or not text.strip():
+            return
+        line = f"· {sanitize_display_text(text.strip())}"
+        if self._plain:
+            print(line)
+            return
+        self.console.print(Text(line, style="bright_black"))
+
     def print_final(
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:

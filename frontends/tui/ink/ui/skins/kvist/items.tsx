@@ -124,6 +124,8 @@ export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }
       return <Text color={color.dim}>→ Explored – {exploreSummary(item.counts)}</Text>
     case "say":
       return <Text color={color.dim}>» {item.text}</Text>
+    case "aside":
+      return <Text color={color.dim}>· {item.text}</Text>
     case "answer":
       return (
         <Box marginTop={1} marginBottom={1} paddingLeft={2}>

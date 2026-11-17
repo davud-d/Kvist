@@ -751,6 +751,16 @@ def test_classic_ui_prints_a_batch_text_once_above_its_calls(capsys):
     assert capsys.readouterr().out.splitlines() == ["» Читаю оба файла"]
 
 
+def test_classic_ui_prints_an_aside_whole_and_only_when_it_ends(capsys):
+    ui = AgentUI(console=Console(force_terminal=False), verbose=False)
+
+    ui.print_aside("a1", "нашла, где", False)
+    ui.print_aside("a1", "нашла, где парсер теряет stage", True)
+    ui.print_aside("a2", "   ", True)
+
+    assert capsys.readouterr().out.splitlines() == ["· нашла, где парсер теряет stage"]
+
+
 def test_classic_ui_marks_a_final_answer_that_is_not_done(capsys):
     ui = AgentUI(console=Console(force_terminal=False), verbose=False)
 
