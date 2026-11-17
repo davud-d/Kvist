@@ -757,22 +757,58 @@ def test_json_mode_warning_prints_once_per_run_not_once_per_step():
     assert len(warnings) == 2, "a new run must warn again"
 
 
-def test_manual_provider_reasoning_rejection_is_debug_only():
-    """Optional effort controls must not surface as a red run error on gateways."""
-    from kernel.agent import agent_model
-    warnings: list[str] = []
+def _reasoning_agent(tmp_path, provider):
+    notices: list[tuple] = []
+    errors: list[str] = []
     debug: list[str] = []
     agent = SimpleNamespace(
-        config=SimpleNamespace(provider="anymodel", reasoning_effort="max"),
-        _ui=SimpleNamespace(print_error=warnings.append, debug_print=debug.append),
+        config=SimpleNamespace(provider=provider, reasoning_effort="max"),
+        executor=SimpleNamespace(workspace=tmp_path),
+        _ui=SimpleNamespace(
+            print_error=errors.append,
+            print_notice=lambda *args: notices.append(args),
+            debug_print=debug.append,
+        ),
+    )
+    return agent, notices, errors, debug
+
+
+def test_manual_provider_reasoning_rejection_is_silent_for_the_person(tmp_path):
+    """Optional effort controls must not surface on gateways: they are logged, not shown."""
+    agent, notices, errors, _debug = _reasoning_agent(tmp_path, "anymodel")
+
+    agent_model._warn_reasoning_unsupported(agent, ("anymodel", "mimo"))
+
+    assert notices == [] and errors == []
+
+
+def test_reasoning_rejection_is_one_quiet_line_not_an_error(tmp_path):
+    agent, notices, errors, _debug = _reasoning_agent(tmp_path, "anthropic")
+
+    agent_model._warn_reasoning_unsupported(agent, ("anthropic", "claude-haiku-5-5"))
+
+    assert errors == []
+    assert len(notices) == 1 and "\n" not in notices[0][0]
+    assert "Модель не приняла этот уровень размышлений, запрос ушёл без него" in notices[0][0]
+
+
+def test_reasoning_rejection_text_reaches_the_file_log_without_the_key(tmp_path):
+    import json
+
+    agent, _notices, _errors, _debug = _reasoning_agent(tmp_path, "anthropic")
+    secret = "sk-ant-api03-" + "A1b2C3d4E5" * 4
+
+    agent_model._record_reasoning_rejection(
+        agent,
+        RuntimeError(f"Anthropic bad request: thinking.budget_tokens is not supported (key {secret})"),
+        ("anthropic", "claude-haiku-5-5"),
     )
 
-    agent_model._warn_reasoning_unsupported(
-        agent, RuntimeError("Unsupported parameter: reasoning_effort"), ("anymodel", "mimo")
-    )
-
-    assert warnings == []
-    assert debug
+    log = tmp_path / agent_model.REASONING_REJECTION_LOG
+    entry = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert entry["provider"] == "anthropic" and entry["model"] == "claude-haiku-5-5"
+    assert "thinking.budget_tokens is not supported" in entry["error"]
+    assert secret not in log.read_text(encoding="utf-8")
 
 
 _PRICE_FIXTURE = {

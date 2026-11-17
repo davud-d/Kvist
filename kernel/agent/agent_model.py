@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -77,6 +78,7 @@ from kernel.context.system_context import workspace_instructions_context
 from kernel.llm.prompt_prefix import SELECTED_STYLE_MARKER
 from kernel.session.agent_logging import session_root
 from kernel.sandbox.redaction import redact_text, redact_value
+from kernel.session.durable_json import JsonStorageError, append_private_bytes
 from kernel.protocol.render_throttle import ThrottledRenderer
 
 try:
@@ -1716,38 +1718,61 @@ def call_model_streaming(
     return "".join(chunks)
 
 
-def _warn_reasoning_unsupported(self, error: Exception | None, key: tuple[str, str]) -> None:
-    """Surface that reasoning effort was dropped, once per (provider, model) per run.
+REASONING_REJECTION_LOG = Path(".kvist") / "logs" / "debug" / "reasoning-rejections.jsonl"
+
+
+def _record_reasoning_rejection(self, error: Exception, key: tuple[str, str]) -> None:
+    """Keep the provider's own words for a refused reasoning control, always.
+
+    The person sees one line; what the provider said is the only evidence of
+    which field it refused, so it goes to a file whether or not debug output is
+    on. The text passes through ``redact_text`` first: a provider can echo part
+    of a request back into its error.
+    """
+    text = redact_text(str(error))
+    self._ui.debug_print(f"[reasoning] rejected: {text}")
+    entry = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "provider": key[0],
+        "model": key[1],
+        "error": text,
+    }
+    workspace = self.executor.workspace
+    line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        append_private_bytes(workspace / REASONING_REJECTION_LOG, line, boundary=workspace)
+    except (JsonStorageError, OSError) as failure:
+        self._ui.debug_print(f"[reasoning] could not write the rejection log: {redact_text(str(failure))}")
+
+
+def _warn_reasoning_unsupported(self, key: tuple[str, str]) -> None:
+    """Tell the person once per (provider, model) per run that reasoning effort was dropped.
 
     The rejection itself is cached at process scope (``_REASONING_UNSUPPORTED``)
     so the request is not repeated, but a fresh run is a fresh chance to notice
     the warning — de-duplication instead lives on ``RunState``, which a new run
-    replaces. ``error`` is ``None`` when the drop came from the cache rather
-    than a fresh rejection this call.
+    replaces.
     """
     warned = getattr(getattr(self, "_state", None), "warned_reasoning_unsupported", None)
     if warned is not None:
         if key in warned:
-            if error is not None:
-                self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")
             return
         warned.add(key)
-    level = normalize_effort(self.config.reasoning_effort)
-    message = (
-        f"Provider rejected reasoning effort '{level}' — retrying this request "
-        "without it. Pick a level the provider supports with /effort."
-    )
     # Manual-tier endpoints are arbitrary OpenAI-compatible gateways.  They
     # often reject the optional reasoning parameter even when the underlying
-    # model can reason; dropping it is capability negotiation, not a run error.
-    # Keep the diagnostic in debug logs without painting the whole run red.
-    printer = getattr(self._ui, "print_error", None)
-    if self.config.provider not in MANUAL_MODEL_PROVIDERS and not is_custom_provider(
-        self.config.provider
-    ) and callable(printer):
-        printer(message)
-    if error is not None:
-        self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")
+    # model can reason; dropping it is capability negotiation, not a run error,
+    # so it is one quiet line, and none at all for those endpoints.
+    notify = getattr(self._ui, "print_notice", None)
+    if (
+        self.config.provider in MANUAL_MODEL_PROVIDERS
+        or is_custom_provider(self.config.provider)
+        or not callable(notify)
+    ):
+        return
+    notify(
+        "The model did not accept this reasoning level; the request went without it. / "
+        "Модель не приняла этот уровень размышлений, запрос ушёл без него."
+    )
 
 
 # (provider, model) -> the provider has already rejected a reasoning-control
@@ -1776,7 +1801,7 @@ def _retry_other_thinking_style(self, request_kwargs: dict[str, Any], key: tuple
     except Exception as error:
         if not is_reasoning_error(error):
             raise
-        self._ui.debug_print(f"[reasoning] {style} thinking rejected too: {redact_text(str(error))}")
+        _record_reasoning_rejection(self, error, key)
         return None
     _ANTHROPIC_THINKING_STYLE[key] = style
     return response
@@ -1794,7 +1819,7 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
     stripped = strip_reasoning_kwargs(request_kwargs)
     key = (self.config.provider, str(request_kwargs.get("model", "")))
     if stripped != request_kwargs and key in _REASONING_UNSUPPORTED:
-        _warn_reasoning_unsupported(self, None, key)
+        _warn_reasoning_unsupported(self, key)
         return self.client.chat.completions.create(**stripped)
     anthropic = "reasoning_effort" in request_kwargs and uses_anthropic_protocol(self.config.provider)
     if anthropic and key in _ANTHROPIC_THINKING_STYLE:
@@ -1804,13 +1829,13 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
     except Exception as error:
         if not is_reasoning_error(error):
             raise
+        _record_reasoning_rejection(self, error, key)
         if anthropic and THINKING_STYLE_KEY not in request_kwargs:
-            self._ui.debug_print(f"[reasoning] first form rejected: {redact_text(str(error))}")
             response = _retry_other_thinking_style(self, request_kwargs, key)
             if response is not None:
                 return response
         _REASONING_UNSUPPORTED.add(key)
-        _warn_reasoning_unsupported(self, error, key)
+        _warn_reasoning_unsupported(self, key)
         return self.client.chat.completions.create(**stripped)
 
 

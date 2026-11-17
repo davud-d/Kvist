@@ -466,15 +466,15 @@ def test_reasoning_rejection_retries_without_it_and_keeps_warning(agent_factory)
 
     agent = agent_factory(stream=False, reasoning_effort="high", cache_enabled=False)
     agent.client = Rejecting()
-    warnings: list[str] = []
-    agent._ui.print_error = lambda message: warnings.append(message)
+    notices: list[str] = []
+    agent._ui.print_notice = lambda message, level="info": notices.append(message)
 
     out = agent._call_model("gpt-test", "system", "user")
 
     assert out == '{"thought":"ok"}'
     assert len(agent.client.requests) == 2
     assert "reasoning_effort" not in agent.client.requests[1]
-    assert warnings and "high" in warnings[0]
+    assert notices and "Модель не приняла" in notices[0]
 
 
 def test_anthropic_false_is_raised_to_the_minimum_not_disabled():
@@ -536,8 +536,8 @@ def test_rejected_thinking_form_is_answered_with_the_other_form_and_keeps_effort
     agent_factory, monkeypatch
 ):
     agent = _anthropic_agent(agent_factory, monkeypatch, accepts="adaptive")
-    warnings: list[str] = []
-    agent._ui.print_error = warnings.append
+    notices: list[str] = []
+    agent._ui.print_notice = lambda message, level="info": notices.append(message)
 
     # The name list calls this model old, so the first request carries the budget form.
     assert agent._call_model("claude-haiku-4-5", "system", "user") == '{"thought":"ok"}'
@@ -547,12 +547,12 @@ def test_rejected_thinking_form_is_answered_with_the_other_form_and_keeps_effort
     # First guess (no style), the other form, then the remembered form at once.
     assert [r.get("thinking_style") for r in requests] == [None, "adaptive", "adaptive"]
     assert all(r["reasoning_effort"] == "low" for r in requests)
-    assert warnings == []
+    assert notices == []
 
 
 def test_effort_is_dropped_only_when_both_forms_are_rejected(agent_factory, monkeypatch):
     agent = _anthropic_agent(agent_factory, monkeypatch, accepts="neither")
-    agent._ui.print_error = lambda message: None
+    agent._ui.print_notice = lambda message, level="info": None
 
     assert agent._call_model("claude-haiku-4-5", "system", "user") == '{"thought":"ok"}'
 
