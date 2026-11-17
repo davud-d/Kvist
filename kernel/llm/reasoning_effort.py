@@ -363,9 +363,24 @@ _REASONING_ERROR_MARKERS: tuple[str, ...] = (
     "reasoning effort",
     "reasoning.effort",
     "reasoning_tokens",
+    "output_config.effort",
     "thinking",
     "budget_tokens",
     "extended thinking",
+)
+
+
+# Errors that name thinking but are about the thinking blocks of the replayed
+# history (a bad signature, an edited block, a missing leading block), not about
+# the reasoning control. Dropping the control does not repair the history; the
+# request would silently run without thinking and the broken history would stay.
+_THINKING_HISTORY_MARKERS: tuple[str, ...] = (
+    "signature",
+    "cannot be modified",
+    "redacted_thinking",
+    "prefix mismatch",
+    "block_binding",
+    "must start with a thinking block",
 )
 
 
@@ -376,6 +391,8 @@ def is_reasoning_error(error: Exception) -> bool:
     # does not support this tool_choice": it names thinking but rejects the tool
     # parameter, and dropping the effort would not fix it.
     if "tool_choice" in text:
+        return False
+    if any(marker in text for marker in _THINKING_HISTORY_MARKERS):
         return False
     if not any(marker in text for marker in _REASONING_ERROR_MARKERS):
         return False

@@ -129,6 +129,8 @@ def test_strip_keeps_unrelated_extra_body_keys():
         "Unsupported parameter: 'reasoning_effort'",
         "invalid request: thinking.budget_tokens exceeds max_tokens",
         "model does not support extended thinking",
+        "Anthropic bad request: Error code: 400 - output_config.effort: 'low' is not supported for this model",
+        'Anthropic bad request: Error code: 400 - "thinking.type.enabled" is not supported for this model',
     ],
 )
 def test_is_reasoning_error_true_for_rejections(message):
@@ -142,6 +144,14 @@ def test_is_reasoning_error_true_for_rejections(message):
         "the assistant was still thinking about it",
         "connection reset",
         "Error code: 400 - Thinking mode does not support this tool_choice",
+        # Thinking blocks of the replayed history: another cause, and dropping the
+        # effort would hide it by running the request without thinking.
+        "Anthropic bad request: 400 - messages.3.content.0.thinking.signature: Invalid signature in thinking block",
+        "Anthropic bad request: 400 - `thinking` or `redacted_thinking` blocks in the latest assistant "
+        "message cannot be modified",
+        "Anthropic bad request: 400 - Expected `thinking` or `redacted_thinking`, but found `tool_use`. "
+        "When `thinking` is enabled, a final `assistant` message must start with a thinking block",
+        "Anthropic bad request: 400 - thinking block prefix mismatch",
     ],
 )
 def test_is_reasoning_error_false_otherwise(message):
@@ -574,3 +584,23 @@ def test_wrapper_uses_the_requested_thinking_form_over_the_name_guess():
     assert record["thinking"] == {"type": "adaptive"}
     assert record["output_config"] == {"effort": "low"}
     assert "thinking_style" not in record
+
+
+def test_history_signature_error_is_not_answered_by_dropping_effort(agent_factory, monkeypatch):
+    class BadSignature(FakeLLMClient):
+        def create(self, **kwargs):
+            self.requests.append(kwargs)
+            raise RuntimeError(
+                "Anthropic bad request: 400 - messages.3.content.0.thinking.signature: "
+                "Invalid signature in thinking block"
+            )
+
+    agent = _anthropic_agent(agent_factory, monkeypatch, accepts="adaptive")
+    agent.client = BadSignature()
+
+    with pytest.raises(RuntimeError):
+        agent._call_model("claude-haiku-5-5", "system", "user")
+
+    # Every attempt kept its effort and the other thinking form was never tried.
+    assert agent.client.requests
+    assert all("reasoning_effort" in r and "thinking_style" not in r for r in agent.client.requests)
