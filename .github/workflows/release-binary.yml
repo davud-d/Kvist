@@ -118,7 +118,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/build -w /build termux/termux-docker:aarch64 bash -euxc '
             pkg update -y
-            pkg install -y python nodejs rust clang make binutils libffi openssl git
+            pkg install -y python nodejs rust clang make binutils libffi openssl git ldd
             python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
             (cd frontends/tui/ink && npm ci && npm run build)
             (cd kernel/session-rs && cargo build --release --locked)
