@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs Kvist from the single-binary release, on Linux and macOS, with nothing but bash and
+# Installs Kvist from the single-binary release, on Linux, macOS and Termux, with nothing but bash and
 # curl (the system bash 3.2 of macOS is enough). The binary carries the core, the terminal UI, the
 # Node.js it runs on and the native session program, so this is the whole install:
 #   * ~/.local/share/kvist/kvist-core, checked against the release's SHA256SUMS;
@@ -36,6 +36,11 @@ case "$(uname -m)" in
 	*) die "there is no Kvist binary for the processor $(uname -m)" ;;
 esac
 asset="kvist-${os}-${arch}"
+# Termux is Linux on bionic: the glibc build cannot run there, it has its own binary.
+if [[ "$(uname -o 2>/dev/null)" == "Android" ]]; then
+	[[ "$arch" == "arm64" ]] || die "on Android the only binary is for aarch64; this phone reports $(uname -m)"
+	asset="kvist-termux-arm64"
+fi
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
 

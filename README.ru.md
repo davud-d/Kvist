@@ -97,6 +97,10 @@ Node.js для него и нативная программа сессий. У�
 curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.sh | bash
 ```
 
+Та же команда работает в Termux на aarch64-телефоне: `install.sh` сам берёт сборку для Termux
+(`kvist-termux-arm64`), потому что Linux arm64 требует glibc, а в Android bionic.
+Сначала поставь `curl` (`pkg install curl`).
+
 ```powershell
 irm https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.ps1 | iex
 ```

@@ -812,7 +812,8 @@ def test_executor_ids_are_e1_to_en():
 # where the allowlist offers type, findstr and cd instead.
 READ = ("type",) if os.name == "nt" else ("cat",)
 MISSING = ("findstr", "hello") if os.name == "nt" else ("grep", "hello")
-WHERE = ("cd",) if os.name == "nt" else ("pwd",)
+# `cd` is not in the safe list; echo is, and cmd expands %CD% itself.
+WHERE = ("echo", "%CD%") if os.name == "nt" else ("pwd",)
 PYTHON = "python" if os.name == "nt" else "python3"
 
 
@@ -915,6 +916,9 @@ def test_set_check_runs_the_real_command_when_each_executor_ends(agent_factory, 
     assert [pool.summary(e)["tests"] for e in ("e1", "e2")] == [{"state": "passed", "summary": "hello"}] * 2
 
 
+# The sandbox refuses a path-qualified interpreter and its PATH lacks the runner's python on Windows;
+# the approval flow itself does not depend on the platform.
+@pytest.mark.skipif(os.name == "nt", reason="the sandbox PATH on Windows has no python to run")
 def test_a_command_that_needs_approval_goes_to_the_main_gate_and_without_one_the_check_is_unknown(
         agent_factory, repo):
     gate = RecordingGate(approve=True)

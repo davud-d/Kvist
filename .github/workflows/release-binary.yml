@@ -101,11 +101,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Termux on a phone is aarch64 Linux with bionic instead of glibc, so kvist-linux-arm64 cannot run
+  # there. PyInstaller does not cross-compile: the binary is built inside Termux's own userland (the
+  # official image, on a native arm runner) with Termux's Python, Node.js and Rust.
+  termux:
+    name: Binary for kvist-termux-arm64
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build and smoke-test inside Termux
+        run: |
+          docker run --rm -v "$PWD":/build -w /build termux/termux-docker:aarch64 bash -euxc '
+            pkg update -y
+            pkg install -y python nodejs rust clang make binutils libffi openssl git
+            python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
+            (cd frontends/tui/ink && npm ci && npm run build)
+            (cd kernel/session-rs && cargo build --release --locked)
+            export KVIST_BUNDLE_NODE="$(command -v node)"
+            python -m PyInstaller kvist.spec --noconfirm
+            python scripts/release/binary/smoke.py dist/kvist
+          '
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: binary-kvist-termux-arm64
+          path: dist/kvist
+          if-no-files-found: error
+          retention-days: 1
+
   # Published only when every system built: a release that lacks one platform would send that
   # platform's installer to a 404.
   publish:
     name: Publish the rolling release
-    needs: build
+    needs: [build, termux]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
@@ -130,7 +164,7 @@ jobs:
           for folder in binaries/binary-*; do
             cp "$folder"/kvist* "release/${folder#binaries/binary-}"
           done
-          chmod +x release/kvist-linux-* release/kvist-macos-*
+          chmod +x release/kvist-linux-* release/kvist-macos-* release/kvist-termux-*
           cp scripts/release/binary/install.sh scripts/release/binary/install.ps1 release/
           chmod +x release/install.sh
           (cd release && sha256sum kvist-* > SHA256SUMS)
@@ -148,7 +182,7 @@ jobs:
             **One file, everything in it:** the agent core, the terminal interface, the Node.js it runs on and the native session program. The installer downloads this file, checks it against `SHA256SUMS`, puts it in place and opens the first-run setup. It needs no Python, no Node.js, no administrator rights and no system packages.
 
             ```sh
-            # Linux (x64, arm64) and macOS (arm64, x64)
+            # Linux (x64, arm64), macOS (arm64, x64) and Termux on Android (aarch64)
             curl -fsSL https://github.com/${{ github.repository }}/releases/download/latest-binary-build/install.sh | bash
             ```
 
@@ -163,6 +197,7 @@ jobs:
             | --- | --- |
             | `install.sh`, `install.ps1` | Download the binary for this system and install it. |
             | `kvist-linux-x64`, `kvist-linux-arm64` | Linux. Needs glibc 2.35 or newer. |
+            | `kvist-termux-arm64` | Termux on an aarch64 Android phone (bionic, not glibc); `install.sh` picks it there. |
             | `kvist-macos-arm64`, `kvist-macos-x64` | macOS (Apple Silicon, Intel). |
             | `kvist-windows-x64.exe` | Windows. |
             | `SHA256SUMS` | The checksums the installers verify. |
@@ -174,6 +209,7 @@ jobs:
             release/kvist-linux-arm64
             release/kvist-macos-arm64
             release/kvist-macos-x64
+            release/kvist-termux-arm64
             release/kvist-windows-x64.exe
             release/install.sh
             release/install.ps1

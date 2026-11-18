@@ -782,7 +782,7 @@ def test_recover_marks_an_executor_with_a_deleted_worktree_lost_and_prunes_git(r
     assert {key: info.status for key, info in found[0].executors.items()} == {"e1": "lost", "e2": "ready"}
     assert worktrees.load_run(repo, "r1").executors["e1"].status == "lost"
     assert str(gone) not in git(repo, "worktree", "list", "--porcelain")
-    assert str(run.worktree("e2")) in git(repo, "worktree", "list", "--porcelain")
+    assert run.worktree("e2").as_posix() in git(repo, "worktree", "list", "--porcelain")
 
 
 def test_recover_skips_an_unreadable_run_file_and_logs_it(repo, caplog):

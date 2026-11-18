@@ -97,6 +97,10 @@ the other interfaces are downloaded by hand from the release above.
 curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.sh | bash
 ```
 
+The same command works in Termux on an aarch64 Android phone: `install.sh` picks the
+Termux build (`kvist-termux-arm64`), because the Linux arm64 one needs glibc and Android has bionic.
+Install `curl` first (`pkg install curl`).
+
 ```powershell
 irm https://github.com/davud-d/Kvist/releases/download/latest-binary-build/install.ps1 | iex
 ```
