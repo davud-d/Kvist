@@ -24,6 +24,25 @@ KIMI_PROVIDER = "kimi"
 # lookup below keys off MANUAL_OPENAI_PROVIDERS / MANUAL_MODEL_PROVIDERS
 # instead of a dedicated per-provider branch.
 MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
+    # The two OpenCode gateways. One Console key fits both, but they are
+    # different services with their own endpoint and billing (Go: a monthly
+    # subscription over /inference/go/openai/v1; Zen: pay-as-you-go over
+    # /zen/v1), and opencode.ai lists them as separate providers, so they stay
+    # separate here too. Both answer OpenAI-style chat completions; Go asks for
+    # an x-opencode-session header (stable per conversation) but answers
+    # without it.
+    "opencode-go": {
+        "label": "OpenCode Go",
+        "api_key_key": "opencode_go_api_key",
+        "base_url_key": "opencode_go_base_url",
+        "default_base_url": "https://opencode.ai/inference/go/openai/v1",
+    },
+    "opencode-zen": {
+        "label": "OpenCode Zen",
+        "api_key_key": "opencode_zen_api_key",
+        "base_url_key": "opencode_zen_base_url",
+        "default_base_url": "https://opencode.ai/zen/v1",
+    },
     "qwen": {
         "label": "Qwen (DashScope)",
         "api_key_key": "qwen_api_key",

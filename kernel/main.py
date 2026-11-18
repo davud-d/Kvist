@@ -781,6 +781,8 @@ from kernel.llm.llm_clients import (
     MODEL_ROLES,
     OPENAI_API_KEY_KEY,
     OPENAI_PROVIDER,
+    OPENCODE_GO_PROVIDER,
+    OPENCODE_ZEN_PROVIDER,
     OMNIROUTE_PROVIDER,
     OPENROUTER_PROVIDER,
     provider_supports_streaming,
@@ -2389,7 +2391,8 @@ def choose_provider(
         ui = TerminalBannerUI(console=console, verbose=verbose)
 
     # Built-in providers in order: AnyModel first (partner provider and blank-start
-    # default), then OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute.
+    # default), then OpenAI, Anthropic, DeepSeek, the two OpenCode gateways,
+    # OpenRouter, OmniRoute.
     options: list[dict[str, str]] = [
         {
             "value": ANYMODEL_PROVIDER,
@@ -2410,6 +2413,16 @@ def choose_provider(
             "value": "deepseek",
             "label": "DeepSeek",
             "description": "Native DeepSeek models (V4 Pro, V4 Flash)",
+        },
+        {
+            "value": OPENCODE_GO_PROVIDER,
+            "label": "OpenCode Go",
+            "description": "OpenCode's coding subscription — opencode.ai/inference/go/openai/v1",
+        },
+        {
+            "value": OPENCODE_ZEN_PROVIDER,
+            "label": "OpenCode Zen",
+            "description": "OpenCode's pay-as-you-go models — opencode.ai/zen/v1",
         },
         {
             "value": "openrouter",
@@ -2436,8 +2449,8 @@ def choose_provider(
     # Third-party OpenAI-compatible providers — one API key, manual model entry
     # (same tier as OmniRoute above; see MANUAL_OPENAI_PROVIDERS in llm_clients.py).
     for slug, config in MANUAL_OPENAI_PROVIDERS.items():
-        if slug == ANYMODEL_PROVIDER:
-            # Already listed first above; skip it so it is not offered twice.
+        if slug in (ANYMODEL_PROVIDER, OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER):
+            # Already listed above; skip them so none is offered twice.
             continue
         options.append({
             "value": slug,

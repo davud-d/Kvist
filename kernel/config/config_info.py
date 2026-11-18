@@ -24,6 +24,8 @@ from kernel.llm.llm_clients import (
     MODEL_ROLES,
     OMNIROUTE_PROVIDER,
     OPENAI_PROVIDER,
+    OPENCODE_GO_PROVIDER,
+    OPENCODE_ZEN_PROVIDER,
     OPENROUTER_PROVIDER,
     get_model_options,
     normalize_provider,
@@ -49,12 +51,16 @@ _BUILTIN_PROVIDERS = (
     OPENAI_PROVIDER,
     ANTHROPIC_PROVIDER,
     DEEPSEEK_PROVIDER,
+    OPENCODE_GO_PROVIDER,
+    OPENCODE_ZEN_PROVIDER,
     OPENROUTER_PROVIDER,
     OMNIROUTE_PROVIDER,
     FREEFLOW_PROVIDER,
     "chatgpt",
 ) + tuple(
-    provider for provider in MANUAL_OPENAI_PROVIDERS if provider != ANYMODEL_PROVIDER
+    provider
+    for provider in MANUAL_OPENAI_PROVIDERS
+    if provider not in (ANYMODEL_PROVIDER, OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER)
 )
 
 

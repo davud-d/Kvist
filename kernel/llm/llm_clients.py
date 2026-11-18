@@ -40,6 +40,8 @@ OMNIROUTE_PROVIDER = "omniroute"
 OPENROUTER_PROVIDER = "openrouter"
 ANTHROPIC_PROVIDER = "anthropic"
 DEEPSEEK_PROVIDER = "deepseek"
+OPENCODE_GO_PROVIDER = "opencode-go"
+OPENCODE_ZEN_PROVIDER = "opencode-zen"
 
 # API key environment keys.
 OPENAI_API_KEY_KEY = "openai_api_key"
@@ -78,9 +80,12 @@ MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
 # the manual tail to keep the tuple free of duplicates.
 SUPPORTED_LLM_PROVIDERS = (
     ANYMODEL_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
+    OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER,
     FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER, CHATGPT_PROVIDER,
 ) + tuple(
-    provider for provider in MANUAL_OPENAI_PROVIDERS if provider != ANYMODEL_PROVIDER
+    provider
+    for provider in MANUAL_OPENAI_PROVIDERS
+    if provider not in (ANYMODEL_PROVIDER, OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER)
 )
 
 # Manual-tier providers with more than one known regional/mirror endpoint. A
@@ -575,6 +580,11 @@ def normalize_provider(provider: str | None) -> str:
     # DeepSeek aliases
     if candidate in {"deepseek", "ds"}:
         return DEEPSEEK_PROVIDER
+    # OpenCode gateways (Console calls them Go and Zen)
+    if candidate in {"opencode go", "opencode_go", "oc-go"}:
+        return OPENCODE_GO_PROVIDER
+    if candidate in {"opencode zen", "opencode_zen", "oc-zen"}:
+        return OPENCODE_ZEN_PROVIDER
     # Custom provider: "custom" alone is a placeholder that triggers the wizard;
     # "custom:<name>" is a concrete provider and passes through as-is below.
     if candidate.startswith(CUSTOM_PROVIDER_PREFIX):

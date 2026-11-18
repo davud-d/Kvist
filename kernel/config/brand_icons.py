@@ -19,6 +19,8 @@ _PROVIDER_BRANDS: dict[str, str] = {
     "chatgpt": "openai",
     "anthropic": "anthropic",
     "deepseek": "deepseek",
+    "opencode-go": "opencode",
+    "opencode-zen": "opencode",
     "openrouter": "openrouter",
     "omniroute": "omniroute",
     "freeflow": "freeflow",

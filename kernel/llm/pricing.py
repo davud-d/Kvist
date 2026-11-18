@@ -21,6 +21,7 @@ _UNPRICED = frozenset({"chatgpt", "kimi", "anymodel", "omniroute", "freeflow"})
 # kvist provider -> the ``provider`` value of that vendor's rows in the table.
 _TABLE_PROVIDER = {
     "openai": "openai", "anthropic": "anthropic", "deepseek": "deepseek", "gemini": "gemini",
+    "opencode-go": "opencode_go",
     "xai": "xai", "mistral": "mistral", "groq": "groq", "moonshot": "moonshot", "zai": "zai",
     "together": "together_ai", "fireworks": "fireworks_ai", "cerebras": "cerebras",
     "cohere": "cohere", "perplexity": "perplexity", "deepinfra": "deepinfra", "nebius": "nebius",
