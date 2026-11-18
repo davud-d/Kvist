@@ -225,6 +225,13 @@ the ones that could let arbitrary code through: shells, a bare interpreter, `npx
 installs, pushes, `curl`, `rm`, a wildcard in the middle. A pattern never covers a
 pipeline.
 
+The same step names skills and MCP servers. The code lists the ones that would ask
+for approval for the first time and run inside a sandbox, and the classifier picks
+from that list the ones the request plainly needs, so they attach without a
+question. It cannot name anything off the list. Skills that reach your own machine
+(`host.*` permissions), servers run without a sandbox and anything approved before
+whose content changed are never on it: their dialog is judged as usual.
+
 The classifier works beside the agent, not in front of it. The patterns are chosen
 while the agent's own first model call runs (a command that asks before they are
 ready waits for them, then is matched against them, or classified on its own if

@@ -719,10 +719,14 @@ class LocalAgent:
     def auto_approval(self) -> bool:
         return bool(getattr(self.executor.approvals, "auto_active", False))
 
-    def confirm_capability(self, title: str, body: str) -> bool:
-        """Ask for a skill's or tool server's permissions: the classifier first in auto mode, else the person."""
+    def confirm_capability(self, title: str, body: str, identity: str = "") -> bool:
+        """Ask for a skill's or tool server's permissions: the classifier first in auto mode, else the person.
+
+        ``identity`` names a first-time approval (a skill id or ``mcp:<server>``) so a choice made at the
+        start of the task can answer it; leave it empty when the content changed since an earlier approval.
+        """
         if self.auto_approval:
-            return self.executor.approvals.confirm(title, body, "")
+            return self.executor.approvals.confirm_capability(identity, title, body)
         return bool(self._ui.confirm(title, body))
 
     def stop_helper(self, agent_id: str) -> dict[str, Any]:
@@ -979,7 +983,9 @@ class LocalAgent:
         except (KeyboardInterrupt, InterruptedError):
             return self._report_stop_before_loop(user_goal)
         if self.auto_approval:
-            self.executor.approvals.preapprove(user_goal, workspace_facts(self.executor.workspace))
+            self.executor.approvals.preapprove(
+                user_goal, workspace_facts(self.executor.workspace), self.skills.preapprovable(),
+            )
         result = self._run_loop(user_goal, start_step=1)
         self._record_run_turn(user_goal, result)
         return result

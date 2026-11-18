@@ -360,6 +360,92 @@ def test_a_proposal_is_vetted_by_code_not_trusted():
     assert all(rejected.values())
 
 
+# ── skills and tool servers chosen at the start of a task ────────────
+
+def chosen(*names):
+    return json.dumps({"patterns": [], "capabilities": [{"name": name, "reason": "needed"} for name in names]})
+
+
+OFFERED = {"browser": "drives a web browser", "mcp:github": "issues and pull requests"}
+
+
+def test_a_skill_chosen_at_the_start_is_approved_without_a_call():
+    gate, person, calls = gate_with(chosen("browser"))
+
+    gate.preapprove("check the page", "facts", OFFERED)
+    gate.wait_for_preapproval()
+
+    assert gate.confirm_capability("browser", "Allow the skill?", "it can reach the network") is True
+    assert len(calls) == 1 and person.asked == []
+
+
+def test_the_model_sees_the_offered_names_as_untrusted_text():
+    gate, _, calls = gate_with(chosen())
+
+    gate.preapprove("check the page", "facts", OFFERED)
+    gate.wait_for_preapproval()
+
+    user = calls[0][1]["content"]
+    assert "- browser: drives a web browser" in user and "- mcp:github: issues and pull requests" in user
+    assert 'source="capabilities"' in user
+
+
+def test_no_names_are_offered_when_nothing_would_ask():
+    gate, _, calls = gate_with(chosen())
+
+    gate.preapprove("check the page", "facts")
+    gate.wait_for_preapproval()
+
+    assert "would ask for approval" not in calls[0][1]["content"]
+
+
+def test_a_name_the_code_did_not_offer_is_dropped():
+    gate, _, calls = gate_with(
+        lambda n: chosen("browser", "mcp:made_up", "host_control") if n == 1 else verdicts(("deny", "no")),
+        Person(answer=False),
+    )
+    logged: list = []
+    gate.notify = logged.append
+
+    gate.preapprove("task", "facts", {"browser": "drives a web browser"})
+    gate.wait_for_preapproval()
+
+    rejected = [entry["subject"] for entry in logged if entry["decision"] == "rejected"]
+    assert rejected == ["mcp:made_up", "host_control"]
+    assert gate.confirm_capability("host_control", "Allow?", "body") is False
+    assert len(calls) == 2  # the dropped name went to the classifier on its own
+
+
+def test_a_skill_approved_before_whose_content_changed_is_judged_on_its_dialog():
+    gate, _, calls = gate_with(
+        lambda n: chosen("browser") if n == 1 else verdicts(("unsure", "new content")), Person(answer=False),
+    )
+    gate.preapprove("task", "facts", OFFERED)
+
+    assert gate.confirm_capability("", "Allow the skill?", "new version, more access") is False
+    assert len(calls) == 2
+
+
+def test_the_names_of_the_last_task_do_not_outlive_it():
+    gate, _, calls = gate_with(
+        lambda n: chosen("browser") if n == 1 else "{}", Person(answer=False),
+    )
+    gate.preapprove("one", "facts", OFFERED)
+    gate.wait_for_preapproval()
+    gate.preapprove("two", "facts")
+    gate.wait_for_preapproval()
+
+    assert gate.confirm_capability("browser", "Allow?", "body") is False
+
+
+def test_without_a_classifier_a_capability_goes_to_the_person():
+    person = Person()
+    gate = AutoApprovalGate(person)
+
+    assert gate.confirm_capability("browser", "Allow?", "body") is True
+    assert person.asked == [("confirm", "Allow?", None)]
+
+
 @pytest.mark.parametrize("pattern", [
     ".venv/bin/python -m pytest *", "python3 -m unittest", "npm run build *", "npm test",
     "cargo test *", "ruff check *", "git add *", "git status", "make test",

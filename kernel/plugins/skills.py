@@ -278,6 +278,29 @@ class SkillManager:
                     f"- {tool['name']}: {tool['summary']} Arguments: {tool['parameters']}" for tool in tools))
         return "\n\n".join(parts)
 
+    def preapprovable(self) -> dict[str, str]:
+        """Name -> one line, of the skills and tool servers auto mode may approve at the start of a task.
+
+        Only first-time approvals of what runs inside a sandbox: a skill that reaches the person's own
+        machine (``host.*``), a server run without a sandbox, or anything approved before whose content
+        changed is left to the classifier's judgement of the actual dialog.
+        """
+        language = self._language()
+        offered: dict[str, str] = {}
+        for name, server in sorted(self._mcp_servers().items()):
+            if server.sandbox == "bwrap" and not self.grants.granted_digests(f"mcp:{name}"):
+                offered[f"mcp:{name}"] = server.description or "tools of a configured MCP server"
+        for entry in self.catalog():
+            manifest = entry.manifest
+            if manifest is None or manifest.kind != KIND_TOOLS or not entry.available or sys.platform not in manifest.platforms:
+                continue
+            if self.awaits_restart(entry.id) or self.grants.granted_digests(entry.id):
+                continue
+            if any(name.startswith("host.") for name in manifest.required_capabilities()):
+                continue
+            offered[entry.id] = entry.short(language) or entry.label(language)
+        return offered
+
     def _grant_for(self, entry: CatalogEntry, language: str):
         assert entry.manifest is not None
         existing = self.grants.get(entry.id, entry.digest, Path(self._agent.executor.workspace))
@@ -289,10 +312,11 @@ class SkillManager:
                 f"{entry.id} {entry.version} needs the person's approval before it can run, and nobody can answer "
                 f"here. Approve it in an interactive Kvist or with: kvist --skill-op approve {entry.id}"
             )
-        title, body = approval_text(entry, language, self.grants.granted_digests(entry.id))
+        earlier = self.grants.granted_digests(entry.id)
+        title, body = approval_text(entry, language, earlier)
         self._agent.control.awaiting_input(True)
         try:
-            approved = self._agent.confirm_capability(title, body)
+            approved = self._agent.confirm_capability(title, body, "" if earlier else entry.id)
         finally:
             self._agent.control.awaiting_input(False)
         if not approved:
@@ -550,7 +574,8 @@ class SkillManager:
             title, body = _mcp_approval_text(server, tools, self._language())
             agent.control.awaiting_input(True)
             try:
-                approved = agent.confirm_capability(title, body)
+                earlier = self.grants.granted_digests(f"mcp:{name}")
+                approved = agent.confirm_capability(title, body, "" if earlier else f"mcp:{name}")
             finally:
                 agent.control.awaiting_input(False)
             if not approved:

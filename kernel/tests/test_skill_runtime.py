@@ -171,6 +171,34 @@ def test_a_declined_approval_attaches_nothing(agent_factory, registry, tmp_path)
 
 
 @requires_runner
+def test_auto_mode_offers_only_first_time_sandboxed_skills_for_the_start_of_a_task(agent_factory, registry, tmp_path):
+    install(registry, write_skill(tmp_path / "src", "echo"))
+    install(registry, write_skill(tmp_path / "src", "opener", capabilities=["host.open"]))
+    install(registry, write_skill(tmp_path / "src", "known"))
+    install(registry, write_skill(tmp_path / "src", "style", kind="instructions"))
+    agent, _ = _agent(agent_factory)
+    grant_all(agent.skills.grants, registry, "known", agent.executor.workspace)
+
+    assert list(agent.skills.preapprovable()) == ["echo"]
+
+
+@requires_runner
+def test_a_skill_chosen_at_the_start_of_an_auto_mode_task_attaches_without_a_question(agent_factory, registry, tmp_path):
+    install(registry, write_skill(tmp_path / "src"))
+    agent, ui = _agent(agent_factory)
+    agent.client.content = json.dumps({"patterns": [], "capabilities": [{"name": "echo", "reason": "the task says so"}]})
+    agent.set_auto_approval(True)
+    gate = agent.executor.approvals
+
+    gate.preapprove("say hello with the echo skill", "facts", agent.skills.preapprovable())
+    gate.wait_for_preapproval()
+    result = agent.skills.attach("echo")
+
+    assert result["attached"] == "echo"
+    assert ui.confirms == [] and len(agent.client.requests) == 1
+
+
+@requires_runner
 def test_without_a_person_a_tools_skill_cannot_be_approved(agent_factory, registry, tmp_path):
     install(registry, write_skill(tmp_path / "src"))
     agent, ui = _agent(agent_factory, interactive=False)

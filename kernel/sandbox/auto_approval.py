@@ -22,9 +22,10 @@ Questions of one response are classified in one model call (``prefetch``). Two
 things keep the classifier from being called for the same thing twice, both for
 the session only and both written to the run log: a command it allowed once is
 allowed again for the same request, and at the start of a task it may name
-command patterns (``preapprove``) that are certain to be needed. Those patterns
-are vetted by code (``vet_pattern``), so a pattern that would let arbitrary code
-run is dropped whatever the model proposed.
+command patterns and the skills and tool servers (``preapprove``) that are certain
+to be needed. Patterns are vetted by code (``vet_pattern``), so one that would let
+arbitrary code run is dropped whatever the model proposed; a skill or server is
+accepted only when it is on the list the code itself offered.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ import hashlib
 import json
 import shlex
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ from kernel.sandbox.terminal_types import TerminalError
 
 USER_DECISION_SECONDS = 120.0
 MAX_PREAPPROVED = 12
+MAX_PREAPPROVED_CAPABILITIES = 5
 # How long a command that must ask waits for an answer already being fetched, before it asks itself.
 PREAPPROVAL_WAIT_SECONDS = 60.0
 PREFETCH_WAIT_SECONDS = 60.0
@@ -88,12 +90,21 @@ class Question:
     # reason a command stops for approval is only known once it runs.
     key: str = ""
     argv: tuple[str, ...] = ()  # a command's own words, to match against the task's patterns
+    capability: str = ""  # a skill id or "mcp:<server>" asking for its first approval, to match the task's names
 
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
     decision: str  # "allow" | "deny" | "unsure"
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class Proposal:
+    """What the model thinks the task will certainly need, as ``(name, reason)`` pairs."""
+
+    commands: tuple[tuple[str, str], ...] = ()
+    capabilities: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,8 +138,12 @@ class Classifier:
             return [Verdict("unsure", f"the classifier did not answer: {error}")] * len(questions)
         return _parse_verdicts(reply, len(questions))
 
-    def propose(self, goal: str, facts: str) -> list[tuple[str, str]]:
-        """``(pattern, reason)`` pairs the model thinks the task will need; ``[]`` when it cannot say."""
+    def propose(self, goal: str, facts: str, capabilities: Mapping[str, str] | None = None) -> Proposal:
+        """What the model thinks the task will need; empty when it cannot say.
+
+        ``capabilities`` maps the name of each skill or tool server that would ask for approval
+        to a line describing it: the only names the model may pick from.
+        """
         background = self._background()
         user = f"The person's request (JSON string):\n{json.dumps(goal, ensure_ascii=False)}\n\n"
         if background.earlier:
@@ -136,6 +151,9 @@ class Classifier:
         if background.instructions:
             user += background.instructions + "\n\n"
         user += "Facts about the project:\n" + _untrusted("project_facts", facts)
+        if capabilities:
+            listing = "\n".join(f"- {name}: {line}" for name, line in capabilities.items())
+            user += "\n\nSkills and tool servers that would ask for approval:\n" + _untrusted("capabilities", listing)
         messages = [
             {"role": "system", "content": _PREAPPROVAL_PROMPT_PATH.read_text(encoding="utf-8")},
             {"role": "user", "content": user},
@@ -143,8 +161,8 @@ class Classifier:
         try:
             reply = self._ask(messages)
         except ClassifierError:
-            return []
-        return _parse_patterns(reply)
+            return Proposal()
+        return _parse_proposal(reply)
 
     def _messages(self, questions: list[Question]) -> list[dict[str, str]]:
         actions = json.dumps(
@@ -178,22 +196,31 @@ def _untrusted(source: str, text: str) -> str:
     )
 
 
-def _parse_patterns(reply: str) -> list[tuple[str, str]]:
+def _parse_proposal(reply: str) -> Proposal:
     start, end = reply.find("{"), reply.rfind("}")
     if start < 0 or end < start:
-        return []
+        return Proposal()
     try:
-        items = json.loads(reply[start:end + 1]).get("patterns")
-    except (json.JSONDecodeError, AttributeError):
-        return []
+        document = json.loads(reply[start:end + 1])
+    except json.JSONDecodeError:
+        return Proposal()
+    if not isinstance(document, dict):
+        return Proposal()
+    return Proposal(
+        _named_items(document.get("patterns"), "pattern"),
+        _named_items(document.get("capabilities"), "name"),
+    )
+
+
+def _named_items(items: object, field: str) -> tuple[tuple[str, str], ...]:
     if not isinstance(items, list):
-        return []
+        return ()
     found = []
     for item in items:
-        if isinstance(item, dict) and isinstance(item.get("pattern"), str):
+        if isinstance(item, dict) and isinstance(item.get(field), str):
             reason = item.get("reason")
-            found.append((" ".join(item["pattern"].split()), reason.strip() if isinstance(reason, str) else ""))
-    return found
+            found.append((" ".join(item[field].split()), reason.strip() if isinstance(reason, str) else ""))
+    return tuple(found)
 
 
 def vet_pattern(pattern: str) -> str:
@@ -283,6 +310,7 @@ class AutoApprovalGate:
         self._futures: dict[str, Future[Verdict | None]] = {}  # verdicts being fetched ahead, by key
         self._allowed: set[str] = set()  # keys of commands and fetches the classifier allowed
         self._patterns: tuple[str, ...] = ()  # vetted patterns of the current task
+        self._capabilities: frozenset[str] = frozenset()  # skills and servers chosen for the current task
         self._preapproval: threading.Event | None = None  # set when the patterns are chosen
         self._generation = 0  # a task's patterns land only if no newer task started meanwhile
         self._local = threading.local()
@@ -301,14 +329,17 @@ class AutoApprovalGate:
             self._futures = {}
             self._allowed = set()
             self._patterns = ()
+            self._capabilities = frozenset()
             self._generation += 1
 
-    def preapprove(self, goal: str, facts: str) -> None:
-        """At the start of a task: let the classifier name the commands it will certainly need.
+    def preapprove(self, goal: str, facts: str, capabilities: Mapping[str, str] | None = None) -> None:
+        """At the start of a task: let the classifier name what it will certainly need.
 
-        Runs beside the agent's own first model call, which usually takes longer. A command
-        that asks before it is done waits for it (``wait_for_preapproval``), then is matched
-        against the patterns, or classified on its own when none fits.
+        Commands are named as patterns; skills and tool servers by a name picked from
+        ``capabilities`` (name -> one line), the ones that would ask for approval for the first time.
+        Runs beside the agent's own first model call, which usually takes longer. A question
+        that comes before it is done waits for it (``wait_for_preapproval``), then is matched
+        against the choices, or classified on its own when none fits.
         """
         classifier = self.classifier
         done = threading.Event()
@@ -316,6 +347,7 @@ class AutoApprovalGate:
             self._generation += 1
             generation = self._generation
             self._patterns = ()
+            self._capabilities = frozenset()
             self._futures = {}
             # "continue" reads the same in two tasks: what was allowed for a request ends with its run.
             self._allowed = set()
@@ -324,8 +356,8 @@ class AutoApprovalGate:
             done.set()
             return
         threading.Thread(
-            target=self._choose_patterns, args=(classifier, generation, goal, facts, done), daemon=True,
-            name="kvist-preapproval",
+            target=self._choose, args=(classifier, generation, goal, facts, dict(capabilities or {}), done),
+            daemon=True, name="kvist-preapproval",
         ).start()
 
     def wait_for_preapproval(self) -> None:
@@ -333,18 +365,26 @@ class AutoApprovalGate:
         if done is not None:
             done.wait(PREAPPROVAL_WAIT_SECONDS)
 
-    def _choose_patterns(self, classifier: Classifier, generation: int, goal: str, facts: str,
-                         done: threading.Event) -> None:
+    def _choose(self, classifier: Classifier, generation: int, goal: str, facts: str,
+                offered: dict[str, str], done: threading.Event) -> None:
         try:
-            kept = []
-            for pattern, reason in classifier.propose(goal, facts)[:MAX_PREAPPROVED]:
+            proposal = classifier.propose(goal, facts, offered)
+            patterns = []
+            for pattern, reason in proposal.commands[:MAX_PREAPPROVED]:
                 problem = vet_pattern(pattern)
                 self._note("preapproval", "rejected" if problem else "allow", pattern, problem or reason)
                 if not problem:
-                    kept.append(pattern)
+                    patterns.append(pattern)
+            names = []
+            for name, reason in proposal.capabilities[:MAX_PREAPPROVED_CAPABILITIES]:
+                problem = "" if name in offered else "it is not one of the skills or servers offered"
+                self._note("preapproval", "rejected" if problem else "allow", name, problem or reason)
+                if not problem:
+                    names.append(name)
             with self._lock:
                 if generation == self._generation:
-                    self._patterns = tuple(kept)
+                    self._patterns = tuple(patterns)
+                    self._capabilities = frozenset(names)
         finally:
             done.set()
 
@@ -373,12 +413,25 @@ class AutoApprovalGate:
     def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         if self.classifier is None:
             return self._inner.confirm(title, body, question)
-        outcome = self._screen(Question("confirm", f"{title}\n{body}\n{question}"), may_allow=True)
+        return self._decide(
+            Question("confirm", f"{title}\n{body}\n{question}"),
+            lambda: self._inner.confirm(title, body, question, timeout=USER_DECISION_SECONDS),
+        )
+
+    def confirm_capability(self, identity: str, title: str, body: str) -> bool:
+        """A skill or tool server asks for its permissions; ``identity`` is "" when it must be judged on its body."""
+        if self.classifier is None:
+            return self._inner.confirm(title, body, "")
+        return self._decide(
+            Question("confirm", f"{title}\n{body}", capability=identity),
+            lambda: self._inner.confirm(title, body, "", timeout=USER_DECISION_SECONDS),
+        )
+
+    def _decide(self, question: Question, ask_inner: Callable[[], bool]) -> bool:
+        outcome = self._screen(question, may_allow=True)
         if outcome != "ask":
             return outcome == "allow"
-        return self._ask_person(
-            lambda: self._inner.confirm(title, body, question, timeout=USER_DECISION_SECONDS), False
-        )
+        return self._ask_person(ask_inner, False)
 
     def confirm_fetch_domain(self, host: str, url: str, timeout: float | None = None) -> FetchDecision:
         if self.classifier is None:
@@ -472,6 +525,9 @@ class AutoApprovalGate:
             if key in self._allowed:
                 return Verdict("allow", "allowed earlier for the same request")
             patterns = self._patterns
+            capabilities = self._capabilities
+        if question.capability in capabilities:
+            return Verdict("allow", f"'{question.capability}' was chosen at the start of the task")
         if question.argv and not any(token in _SHELL_OPERATORS for token in question.argv):
             for pattern in patterns:
                 if grants(pattern, list(question.argv)):
