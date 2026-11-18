@@ -75,6 +75,9 @@ packages = [
     "kernel.skills_bundled.app_screen",
     "kernel.skills_bundled.app_screen.icons.kvist",
     "kernel.skills_bundled.app_screen.icons.kvist.cursors",
+    "kernel.skills_bundled.app_screen.theme",
+    "kernel.skills_bundled.app_screen.theme.buttons",
+    "kernel.skills_bundled.app_screen.theme.wallpaper",
     "kernel.skills_bundled.test_runner",
     "kernel.skills_bundled.documents",
     "kernel.skills_bundled.code_nav",
@@ -118,6 +121,9 @@ kvist_web = "frontends/web-local/kvist_web"
 "kernel.skills_bundled.app_screen" = ["manifest.json", "SKILL.md"]
 "kernel.skills_bundled.app_screen.icons.kvist" = ["index.theme"]
 "kernel.skills_bundled.app_screen.icons.kvist.cursors" = ["*"]
+"kernel.skills_bundled.app_screen.theme" = ["glyphs.json"]
+"kernel.skills_bundled.app_screen.theme.buttons" = ["*.svg"]
+"kernel.skills_bundled.app_screen.theme.wallpaper" = ["*.jpg"]
 "kernel.skills_bundled.test_runner" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
 "kernel.skills_bundled.documents" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
 "kernel.skills_bundled.code_nav" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]

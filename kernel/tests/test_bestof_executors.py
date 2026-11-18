@@ -812,8 +812,7 @@ def test_executor_ids_are_e1_to_en():
 # where the allowlist offers type, findstr and cd instead.
 READ = ("type",) if os.name == "nt" else ("cat",)
 MISSING = ("findstr", "hello") if os.name == "nt" else ("grep", "hello")
-# `cd` is not in the safe list; echo is, and cmd expands %CD% itself.
-WHERE = ("echo", "%CD%") if os.name == "nt" else ("pwd",)
+WHERE = ("pwd",)
 PYTHON = "python" if os.name == "nt" else "python3"
 
 
@@ -848,8 +847,10 @@ def test_with_the_flag_a_command_in_a_workspace_under_kvist_runs(kvist_folder):
 
     assert result.ok and result.data["returncode"] == 0 and result.data["stdout"].strip() == "hello"
     # A line that names the workspace's own absolute path (a test run's traceback) is not dropped as "internal".
-    where = _shell(sandbox, [*WHERE])
-    assert Path(where.data.get("stdout", "").strip()) == kvist_folder, where.data
+    # Windows has no argv-only command that prints the directory (cmd does not expand %CD% here), so POSIX only.
+    if os.name != "nt":
+        where = _shell(sandbox, [*WHERE])
+        assert Path(where.data.get("stdout", "").strip()) == kvist_folder, where.data
 
 
 @pytest.mark.parametrize("attempt", [
