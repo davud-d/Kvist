@@ -9,6 +9,9 @@ pkg install -y python nodejs rust clang make binutils libffi openssl git ldd
 
 # The NDK headers mark strtok deprecated and PyInstaller's bootloader builds with -Werror.
 export CFLAGS="-Wno-deprecated-declarations"
+# maturin (jiter, pydantic-core, ...) asks Android's getprop for the API level, which the image lacks;
+# 24 is the level Termux's own packages are built for.
+export ANDROID_API_LEVEL=24
 python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
 
 (cd frontends/tui/ink && npm ci && npm run build)
