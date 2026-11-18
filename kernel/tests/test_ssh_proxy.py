@@ -222,7 +222,8 @@ def test_a_message_typed_while_disconnected_is_refused_loudly(server_tools, tmp_
     time.sleep(0.3)
 
     frontend.say("anyone there?")
-    time.sleep(0.3)
+    # Wait for the refusal itself: a fixed sleep lost the race on a loaded macOS runner.
+    frontend.wait_for(lambda line: line["type"] == "notice" and "your message was not sent" in line["text"])
     frontend.leave()
     thread.join(timeout=10)
 
