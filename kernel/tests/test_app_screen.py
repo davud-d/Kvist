@@ -544,10 +544,10 @@ def test_the_live_preview_is_full_size_sharp_fast_while_the_pointer_moves_and_qu
     assert Image.open(io.BytesIO(moving[-1])).size == (1920, 1080)   # native size, not scaled down
 
 
-def test_the_screen_theme_puts_the_skills_buttons_and_a_centered_dock_into_the_jwm_config():
+def test_the_screen_theme_puts_the_skills_buttons_and_a_menu_bar_into_the_jwm_config():
     from kernel.plugins.runner import kvist_display
 
-    config = kvist_display._jwm_config("/skill/theme", 1920, 1080)
+    config = kvist_display._jwm_config("/skill/theme", 1920)
     assert "<ButtonClose>/skill/theme/buttons/close.svg</ButtonClose>" in config
-    assert 'x="730" y="992" width="460"' in config
-    assert "<ButtonClose>" not in kvist_display._jwm_config("", 1920, 1080)
+    assert 'x="0" y="0" width="1920" height="28"' in config
+    assert "<ButtonClose>" not in kvist_display._jwm_config("", 1920)

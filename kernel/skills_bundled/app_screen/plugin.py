@@ -17,6 +17,7 @@ import subprocess
 import time
 from typing import Any
 
+import dock
 import motion
 
 BUDGET_MIB = 65.0  # was 40 before the wallpaper (about +14 MiB); the rest keeps the preview smooth at 60 fps
@@ -50,6 +51,7 @@ class Screen:
         self._free_keycodes: list[int] = []
         self._cursor_image: dict[str, Any] = {}
         self._published_at = 0.0
+        self._dock: Any = None
 
     # --- connection ------------------------------------------------------
 
@@ -63,9 +65,22 @@ class Screen:
             if not self.dpy.has_extension(extension):
                 raise ScreenError(f"the virtual screen has no {extension} extension")
         self.dpy.xfixes_query_version()
+        self._start_dock()
         return self.dpy
 
+    def _start_dock(self) -> None:
+        import kvist_display
+
+        theme = kvist_display.theme_directory()
+        if not theme or self._dock is not None or not os.path.exists(os.path.join(theme, "glyphs.json")):
+            return
+        self._dock = dock.Dock(os.environ["DISPLAY"], theme)
+        self._dock.start()
+
     def reconnect(self) -> None:
+        if self._dock is not None:  # it talks to the server that is about to be replaced
+            self._dock.stop()
+            self._dock = None
         if self.dpy is not None:
             from Xlib.error import ConnectionClosedError
 

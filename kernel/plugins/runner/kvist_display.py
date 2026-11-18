@@ -29,8 +29,8 @@ hide_edge_borders both
 focus_follows_mouse no
 workspace_layout tabbed
 """
-# A macOS-like look: light frames with round traffic-light buttons, a menu bar on top, a floating dock at the bottom.
-# JWM cannot round a tray or blur what is behind it: the dock gets a frosted flat colour and `_round_dock` cuts its corners.
+# A macOS-like look: light frames with round traffic-light buttons and a menu bar on top. The dock is the skill's own
+# window (app_screen/dock.py): JWM can neither round a tray nor draw app tiles.
 _JWM_CONFIG = """\
 <?xml version="1.0"?>
 <JWM>
@@ -75,14 +75,10 @@ _JWM_CONFIG = """\
     <Spacer width="0"/>
     <Clock format="%a %e %b  %H:%M"/>
   </Tray>
-  <Tray layer="above" x="{dock_x}" y="{dock_y}" width="{dock_width}" height="{dock_height}" layout="horizontal" autohide="off">
-    <TaskList labeled="false" maxwidth="72"/>
-  </Tray>
 </JWM>
 """
 _BUTTON_TAGS = {"ButtonClose": "close", "ButtonCloseFocus": "close", "ButtonMin": "min", "ButtonMinFocus": "min",
                 "ButtonMax": "max", "ButtonMaxFocus": "max", "ButtonMaxActive": "max", "ButtonMaxActiveFocus": "max"}
-_DOCK_WIDTH, _DOCK_HEIGHT, _DOCK_MARGIN, _DOCK_RADIUS = 460, 76, 12, 26
 _WALLPAPER_FRAME_SECONDS = 0.14  # the source clip plays at 7 frames per second
 # feh paints the root window once per call, so the loop costs nothing between frames.
 _WALLPAPER_LOOP = ('while :; do for frame in "$1"/*.jpg; do feh --no-fehbg --bg-fill "$frame"; sleep "$2"; done; done')
@@ -143,22 +139,20 @@ def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", g
             raise RuntimeError("the virtual screen (Xvfb) did not start")
         time.sleep(0.05)
     os.environ["DISPLAY"] = display
-    _children["wm"] = _start_window_manager(wm, theme, width, height)
+    _children["wm"] = _start_window_manager(wm, theme, width)
     if theme and wm == "jwm":
         _children["wallpaper"] = _start_wallpaper(Path(theme) / "wallpaper")
-        _round_dock(display, width, height)
 
 
-def _jwm_config(theme: str, width: int, height: int) -> str:
+def _jwm_config(theme: str, width: int) -> str:
     buttons = "".join(f"  <{tag}>{Path(theme) / 'buttons' / name}.svg</{tag}>\n" for tag, name in _BUTTON_TAGS.items()) if theme else ""
-    return _JWM_CONFIG.format(buttons=buttons, width=width, dock_width=_DOCK_WIDTH, dock_height=_DOCK_HEIGHT,
-                              dock_x=(width - _DOCK_WIDTH) // 2, dock_y=height - _DOCK_HEIGHT - _DOCK_MARGIN)
+    return _JWM_CONFIG.format(buttons=buttons, width=width)
 
 
-def _start_window_manager(wm: str, theme: str, width: int, height: int) -> subprocess.Popen:
+def _start_window_manager(wm: str, theme: str, width: int) -> subprocess.Popen:
     if wm == "jwm":
         config = Path("/tmp/kvist-jwm.xml")
-        config.write_text(_jwm_config(theme, width, height), encoding="utf-8")
+        config.write_text(_jwm_config(theme, width), encoding="utf-8")
         command = ["jwm", "-f", str(config)]
     else:
         config = Path("/tmp/kvist-i3.conf")
@@ -174,44 +168,9 @@ def _start_wallpaper(frames: Path) -> subprocess.Popen:
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _round_dock(display: str, width: int, height: int) -> None:
-    """Cut the dock tray's corners with the X Shape extension, once JWM has mapped it."""
-    try:
-        from Xlib import X, display as xdisplay
-        from Xlib.ext import shape
-    except ImportError as error:  # python-xlib is a dependency of the skill, not of the runner
-        print(f"the dock keeps square corners: {error}", file=sys.stderr)
-        return
-    connection = xdisplay.Display(display)
-    root = connection.screen().root
-    left, top = (width - _DOCK_WIDTH) // 2, height - _DOCK_HEIGHT - _DOCK_MARGIN
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        for window in root.query_tree().children:
-            geometry = window.get_geometry()
-            if (geometry.x, geometry.y, geometry.width, geometry.height) == (left, top, _DOCK_WIDTH, _DOCK_HEIGHT):
-                _apply_round_mask(window, X, shape)
-                connection.sync()
-                connection.close()
-                return
-        time.sleep(0.1)
-    connection.close()
-    print("the dock window did not appear; it keeps square corners", file=sys.stderr)
-
-
-def _apply_round_mask(window, X, shape) -> None:
-    mask = window.create_pixmap(_DOCK_WIDTH, _DOCK_HEIGHT, 1)
-    gc = mask.create_gc(foreground=0)
-    mask.fill_rectangle(gc, 0, 0, _DOCK_WIDTH, _DOCK_HEIGHT)
-    gc.change(foreground=1)
-    r, d = _DOCK_RADIUS, _DOCK_RADIUS * 2
-    for x, y, start in ((0, 0, 90), (_DOCK_WIDTH - d - 1, 0, 0), (0, _DOCK_HEIGHT - d - 1, 180),
-                        (_DOCK_WIDTH - d - 1, _DOCK_HEIGHT - d - 1, 270)):
-        mask.fill_arc(gc, x, y, d, d, start * 64, 90 * 64)
-    mask.fill_rectangle(gc, r, 0, _DOCK_WIDTH - d, _DOCK_HEIGHT)
-    mask.fill_rectangle(gc, 0, r, _DOCK_WIDTH, _DOCK_HEIGHT - d)
-    window.shape_mask(shape.SO.Set, shape.SK.Bounding, 0, 0, mask)
-    mask.free()
+def theme_directory() -> str:
+    """The theme folder the screen was started with, "" for a plain screen."""
+    return _last_start[5] if _last_start else ""
 
 
 def display_processes() -> dict[str, int]:
