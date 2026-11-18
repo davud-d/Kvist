@@ -19,6 +19,8 @@ class TerminalResult:
     # Set when the command was started in the background: the process is still
     # running and this is the id of its job, not an outcome.
     job_id: str = ""
+    # With job_id: the command began in the foreground and outlived the handoff limit.
+    handed_off: bool = False
 
 
 class TerminalError(Exception):

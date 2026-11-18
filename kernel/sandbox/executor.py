@@ -61,6 +61,7 @@ from kernel.sandbox.permission_policy import append_web_domain, load_policy
 from kernel.config.user_config import get_web_search_settings
 from kernel.context.system_context import AGENT_INSTRUCTIONS_FILE, CHAT_INSTRUCTIONS_FILE
 from kernel.sandbox.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
+from kernel.sandbox.terminal_handoff import FOREGROUND_HANDOFF_SECONDS
 
 
 class ExecutorError(Exception):
@@ -2446,6 +2447,7 @@ class SafeExecutor:
             if background
             else None
         )
+        handoff = None if background else BackgroundLaunch(self.jobs, self._job_purpose, self._job_call_id)
         if background:
             # The model has no feel for durations: a job's limit is the profile
             # ceiling, and its end is job_stop or the end of the turn.
@@ -2456,7 +2458,7 @@ class SafeExecutor:
             result = self._shell_terminal().run(
                 command, cwd=cwd, timeout=timeout, role=self.active_role,
                 sandbox=sandbox, network=network, justification=justification,
-                background=launch,
+                background=launch, handoff=handoff,
             )
         except JobLimitError as exc:
             raise ExecutorError(str(exc))
@@ -2490,7 +2492,11 @@ class SafeExecutor:
                     "job_id": result.job_id,
                     "started_in_background": True,
                     "max_seconds": job.max_seconds,
-                    "note": _background_note(job.max_seconds, network, self.jobs.outlives_answer),
+                    "note": (
+                        _handoff_note(self.jobs.outlives_answer)
+                        if result.handed_off
+                        else _background_note(job.max_seconds, network, self.jobs.outlives_answer)
+                    ),
                     **service,
                     **({"path_note": path_note} if path_note else {}),
                 },
@@ -3442,6 +3448,22 @@ def _config_dir_inside(workspace: Path) -> Path | None:
     if config == workspace or workspace not in config.parents:
         return None
     return config
+
+
+def _handoff_note(outlives_answer: bool) -> str:
+    seconds = f"{FOREGROUND_HANDOFF_SECONDS:g}"
+    if not outlives_answer:
+        return (
+            f"The command has run for more than {seconds} s, so it is now a background job. "
+            "Its new output is shown to you before each request; job_output with wait waits for it, "
+            "job_stop ends it. It is ended when you give your final answer."
+        )
+    return (
+        f"The command has run for more than {seconds} s, so it is now a background job. "
+        "If you can keep working in parallel, do so. If this was the last step, report briefly what you "
+        "did and what is still running, then end your turn. The system will notify you when the command "
+        "ends, and then you can report in full. job_stop ends it."
+    )
 
 
 def _background_note(max_seconds: float, network: bool, outlives_answer: bool) -> str:

@@ -133,7 +133,7 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
             "command": _ARGV, "purpose": _SHELL_PURPOSE, "cwd": _CWD,
             "timeout": {
                 "type": "number",
-                "description": "Seconds the command may run. Leave it out: the runtime picks a limit, and a command that hits it returns as timed out. Ignored for background commands.",
+                "description": "Seconds the command may run. Leave it out: the runtime picks a limit, and a command that hits it returns as timed out. A command with a limit over 90 s that is still running at 90 s continues as a background job. Ignored for background commands.",
             },
             "sandbox": {
                 "type": "string", "enum": ["default", "host"],

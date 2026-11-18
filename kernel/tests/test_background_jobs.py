@@ -392,3 +392,31 @@ def test_a_background_job_ignores_a_timeout_the_model_gave(tmp_path):
         assert started.data["max_seconds"] == executor._terminal._timeout_ceiling
     finally:
         executor._job_stop(started.data["job_id"])
+
+
+@requires_posix
+def test_a_foreground_command_past_the_handoff_limit_continues_as_a_job(tmp_path, monkeypatch):
+    monkeypatch.setattr("kernel.sandbox.terminal.FOREGROUND_HANDOFF_SECONDS", 1.0)
+    executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
+    code = "import time,sys;print('early',flush=True);time.sleep(2.5);print('late',flush=True)"
+
+    started = executor._run_shell([PYTHON, "-c", code], timeout=20, network=True, justification="test")
+
+    assert started.ok, started.data
+    assert started.data["started_in_background"] is True
+    assert "now a background job" in started.data["note"]
+    job = executor.jobs.get(started.data["job_id"])
+    assert job.done.wait(10)
+    assert "early" in job.tail and "late" in job.tail
+    assert job.exit_code == 0
+
+
+@requires_posix
+def test_a_foreground_command_within_the_handoff_limit_stays_foreground(tmp_path, monkeypatch):
+    monkeypatch.setattr("kernel.sandbox.terminal.FOREGROUND_HANDOFF_SECONDS", 5.0)
+    executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
+
+    result = executor._run_shell([PYTHON, "-c", "print('fast')"], timeout=20, network=True, justification="test")
+
+    assert result.data["stdout"].strip() == "fast"
+    assert "job_id" not in result.data

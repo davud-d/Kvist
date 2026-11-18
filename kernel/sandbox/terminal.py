@@ -31,7 +31,7 @@ from kernel.sandbox.command_policy import (
 )
 from kernel.sandbox.approvals import ApprovalGate, ApprovalTimedOut, TerminalApprovalGate
 from kernel.sandbox.auto_approval import refusal_note
-from kernel.agent.background_jobs import BackgroundLaunch
+from kernel.agent.background_jobs import BackgroundLaunch, JobLimitError
 from kernel.sandbox.permission_policy import append_allow_rule, load_policy
 from kernel.sandbox.process_tree import (
     ProcessSupervisionError,
@@ -39,6 +39,7 @@ from kernel.sandbox.process_tree import (
     run_supervised,
 )
 from kernel.sandbox.redaction import redact_text, sanitize_display_text
+from kernel.sandbox.terminal_handoff import FOREGROUND_HANDOFF_SECONDS, ForegroundRun
 from kernel.sandbox.sandbox import (
     NETWORK_UNENFORCED_NOTE,
     SandboxMode,
@@ -184,6 +185,7 @@ class TerminalExecutor(
         # True when the person's "host" rule, not the model, put this run outside the sandbox.
         self._host_by_rule = False
         self._run_background: BackgroundLaunch | None = None
+        self._run_handoff: BackgroundLaunch | None = None
         self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
         self._child_home = Path()
         self._rotate_child_home()
@@ -251,6 +253,7 @@ class TerminalExecutor(
         network: bool | None = None,
         justification: str | None = None,
         background: BackgroundLaunch | None = None,
+        handoff: BackgroundLaunch | None = None,
     ) -> TerminalResult:
         """Execute one serialized run with a fresh, private child HOME.
 
@@ -261,6 +264,8 @@ class TerminalExecutor(
         ``background`` runs the same validation and approval, then starts the
         process under ``background.jobs`` and returns a result carrying only
         its ``job_id``; the run lock is released as soon as it has started.
+        ``handoff`` lets a foreground command that outlives
+        ``FOREGROUND_HANDOFF_SECONDS`` continue as a job under ``handoff.jobs``.
         """
         with self._run_lock:
             if not isinstance(sandbox, str) or sandbox not in {"default", "host"}:
@@ -277,6 +282,7 @@ class TerminalExecutor(
             self._run_network = network
             self._run_justification = justification or ""
             self._run_background = background
+            self._run_handoff = handoff
             try:
                 return self._run_once(command, cwd, env_overrides, timeout, role)
             finally:
@@ -286,6 +292,7 @@ class TerminalExecutor(
                 self._run_justification = ""
                 self._host_by_rule = False
                 self._run_background = None
+                self._run_handoff = None
 
     def _effective_sandbox(self) -> tuple[SandboxMode, bool, str | None]:
         if self.sandbox_mode is SandboxMode.CONTAINER:
@@ -916,8 +923,8 @@ class TerminalExecutor(
                 rlimit_setter,
                 isolated_service=isolated_service,
             )
-        try:
-            outcome = run_supervised(
+        def supervise(on_output, cancel):
+            return run_supervised(
                 actual_command,
                 cwd=work_dir,
                 env=env,
@@ -926,9 +933,25 @@ class TerminalExecutor(
                 rlimit_setter=rlimit_setter,
                 is_windows=self._is_windows,
                 use_cgroup=self._cgroup_available,
-                on_output=self.output_sink,
-                cancel=self.cancel_event,
+                on_output=on_output,
+                cancel=cancel,
             )
+
+        handoff = self._run_handoff
+        try:
+            if handoff is None or effective_timeout <= FOREGROUND_HANDOFF_SECONDS:
+                outcome = supervise(self.output_sink, self.cancel_event)
+            else:
+                running = ForegroundRun(supervise, self.output_sink, self.cancel_event)
+                if not running.wait(FOREGROUND_HANDOFF_SECONDS):
+                    job_id = self._hand_to_jobs(running, handoff, command_snapshot, effective_timeout)
+                    if job_id:
+                        return TerminalResult(
+                            command=command_snapshot, returncode=0, stdout="", stderr="",
+                            job_id=job_id, handed_off=True,
+                        )
+                    running.wait_to_end()
+                outcome = running.result()
         except FileNotFoundError:
             raise TerminalError(f"Executable not found: {command_snapshot[0]}")
         except ProcessSupervisionError as exc:
@@ -950,6 +973,29 @@ class TerminalExecutor(
             stderr=stderr,
             timed_out=outcome.timed_out,
         )
+
+    def _hand_to_jobs(
+        self,
+        running: ForegroundRun,
+        handoff: BackgroundLaunch,
+        command: list[str],
+        max_seconds: float,
+    ) -> str:
+        """Job id of the adopted command, or "" when the registry is full and the run stays foreground."""
+        # Same as a background start: the next run() rotates in a fresh child
+        # HOME, which must not delete the one a running process still uses.
+        home = self._child_home_manager
+        self._child_home_manager = None
+
+        def cleanup() -> None:
+            if home is not None:
+                home.cleanup()
+
+        try:
+            return running.hand_to_jobs(handoff, command, max_seconds, cleanup).job_id
+        except JobLimitError:
+            self._child_home_manager = home
+            return ""
 
     def _start_background(
         self,
