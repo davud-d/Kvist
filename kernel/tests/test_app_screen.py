@@ -513,5 +513,5 @@ def test_the_screen_theme_puts_the_skills_buttons_and_a_centered_dock_into_the_j
 
     config = kvist_display._jwm_config("/skill/theme", 1920, 1080)
     assert "<ButtonClose>/skill/theme/buttons/close.svg</ButtonClose>" in config
-    assert 'x="750" y="1004" width="420"' in config
+    assert 'x="730" y="992" width="460"' in config
     assert "<ButtonClose>" not in kvist_display._jwm_config("", 1920, 1080)
