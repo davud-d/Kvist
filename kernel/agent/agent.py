@@ -985,6 +985,7 @@ class LocalAgent:
         if self.auto_approval:
             self.executor.approvals.preapprove(
                 user_goal, workspace_facts(self.executor.workspace), self.skills.preapprovable(),
+                self.executor.workspace,
             )
         result = self._run_loop(user_goal, start_step=1)
         self._record_run_turn(user_goal, result)

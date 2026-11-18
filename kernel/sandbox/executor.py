@@ -1188,6 +1188,10 @@ class SafeExecutor:
         # records every edit, and ``target`` is already resolved, so a link never passes for it.
         if target == self.workspace / AGENT_INSTRUCTIONS_FILE:
             return
+        # Auto mode: a file the classifier named at the start of the task as one it will certainly rewrite.
+        approvals = self._approvals
+        if isinstance(approvals, AutoApprovalGate) and approvals.covers(f"file:{target}", f"Overwrite {path}"):
+            return
 
         diff_lines = difflib.unified_diff(
             old_text.splitlines(),

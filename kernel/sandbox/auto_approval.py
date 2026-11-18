@@ -22,15 +22,17 @@ Questions of one response are classified in one model call (``prefetch``). Two
 things keep the classifier from being called for the same thing twice, both for
 the session only and both written to the run log: a command it allowed once is
 allowed again for the same request, and at the start of a task it may name
-command patterns and the skills and tool servers (``preapprove``) that are certain
-to be needed. Patterns are vetted by code (``vet_pattern``), so one that would let
-arbitrary code run is dropped whatever the model proposed; a skill or server is
-accepted only when it is on the list the code itself offered.
+command patterns, skills and tool servers, files to overwrite and hosts to fetch from
+(``preapprove``) that are certain to be needed. Code vets every choice: a pattern that
+would let arbitrary code run is dropped (``vet_pattern``), a skill or server must be on
+the list the code itself offered, a file must exist inside the project and not be a
+dotfile (``vet_file``), a host must be a plain host name (``vet_host``).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shlex
 import threading
 from collections.abc import Callable, Mapping
@@ -48,6 +50,8 @@ from kernel.sandbox.terminal_types import TerminalError
 USER_DECISION_SECONDS = 120.0
 MAX_PREAPPROVED = 12
 MAX_PREAPPROVED_CAPABILITIES = 5
+MAX_PREAPPROVED_FILES = 12
+MAX_PREAPPROVED_HOSTS = 5
 # How long a command that must ask waits for an answer already being fetched, before it asks itself.
 PREAPPROVAL_WAIT_SECONDS = 60.0
 PREFETCH_WAIT_SECONDS = 60.0
@@ -76,6 +80,7 @@ _CHANGING_WORDS = frozenset({
 _SHELL_OPERATORS = frozenset({"|", "||", "&&", "&", ";", ">", ">>", "<", "2>&1"})
 _SHELL_CHARS = ";|&<>`$()"
 _WILDCARDS = "*?["
+_HOST_NAME = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
 
 
 class ClassifierError(Exception):
@@ -90,7 +95,9 @@ class Question:
     # reason a command stops for approval is only known once it runs.
     key: str = ""
     argv: tuple[str, ...] = ()  # a command's own words, to match against the task's patterns
-    capability: str = ""  # a skill id or "mcp:<server>" asking for its first approval, to match the task's names
+    # What the task's choices are matched against: a skill id or "mcp:<server>" asking for its first
+    # approval, "web:<host>" for a fetch, "file:<resolved path>" for an overwrite. "" never matches.
+    target: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +112,8 @@ class Proposal:
 
     commands: tuple[tuple[str, str], ...] = ()
     capabilities: tuple[tuple[str, str], ...] = ()
+    files: tuple[tuple[str, str], ...] = ()  # existing files the task will overwrite
+    hosts: tuple[tuple[str, str], ...] = ()  # hosts the task will fetch pages from
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +218,8 @@ def _parse_proposal(reply: str) -> Proposal:
     return Proposal(
         _named_items(document.get("patterns"), "pattern"),
         _named_items(document.get("capabilities"), "name"),
+        _named_items(document.get("files"), "path"),
+        _named_items(document.get("hosts"), "host"),
     )
 
 
@@ -251,6 +262,39 @@ def vet_pattern(pattern: str) -> str:
     literal = [token for token in tokens if not any(char in token for char in _WILDCARDS)]
     if len(literal) < len(tokens) and len(literal) < 2 and head not in _PINNED_TOOLS:
         return "a pattern with a wildcard must name the command and what it does"
+    return ""
+
+
+def resolved_path(path: str, workspace: Path) -> Path:
+    return (workspace / path).resolve()
+
+
+def vet_file(path: str, workspace: Path) -> str:
+    """Why a file may not be overwritten without a question, or "" when it may.
+
+    One existing file, written out: no pattern, nothing outside the project, and no dotfile or
+    dot-directory (``.env``, ``.git``, ``.kvist``, CI and editor settings), which hold secrets and
+    code that runs by itself.
+    """
+    if any(char in path for char in _WILDCARDS):
+        return "a file is named exactly, without a wildcard"
+    root = workspace.resolve()
+    target = resolved_path(path, workspace)
+    if not target.is_relative_to(root):
+        return "it is outside the project"
+    if any(part.startswith(".") for part in target.relative_to(root).parts):
+        return "dotfiles and dot-directories are decided one at a time"
+    if not target.is_file():
+        return "it is not an existing file"
+    return ""
+
+
+def vet_host(host: str) -> str:
+    """Why a page may not be fetched without a question, or "" when it may: a plain public host name."""
+    if not _HOST_NAME.fullmatch(host):
+        return "it is not a lowercase host name (no scheme, port, path or wildcard)"
+    if host.rsplit(".", 1)[1].isdigit():
+        return "an address is not a host name"
     return ""
 
 
@@ -310,7 +354,7 @@ class AutoApprovalGate:
         self._futures: dict[str, Future[Verdict | None]] = {}  # verdicts being fetched ahead, by key
         self._allowed: set[str] = set()  # keys of commands and fetches the classifier allowed
         self._patterns: tuple[str, ...] = ()  # vetted patterns of the current task
-        self._capabilities: frozenset[str] = frozenset()  # skills and servers chosen for the current task
+        self._chosen: frozenset[str] = frozenset()  # skills, servers, files and hosts chosen for the current task
         self._preapproval: threading.Event | None = None  # set when the patterns are chosen
         self._generation = 0  # a task's patterns land only if no newer task started meanwhile
         self._local = threading.local()
@@ -329,14 +373,16 @@ class AutoApprovalGate:
             self._futures = {}
             self._allowed = set()
             self._patterns = ()
-            self._capabilities = frozenset()
+            self._chosen = frozenset()
             self._generation += 1
 
-    def preapprove(self, goal: str, facts: str, capabilities: Mapping[str, str] | None = None) -> None:
+    def preapprove(self, goal: str, facts: str, capabilities: Mapping[str, str] | None = None,
+                   workspace: Path | None = None) -> None:
         """At the start of a task: let the classifier name what it will certainly need.
 
         Commands are named as patterns; skills and tool servers by a name picked from
-        ``capabilities`` (name -> one line), the ones that would ask for approval for the first time.
+        ``capabilities`` (name -> one line), the ones that would ask for approval for the first time;
+        existing files of ``workspace`` it will overwrite; hosts it will fetch pages from.
         Runs beside the agent's own first model call, which usually takes longer. A question
         that comes before it is done waits for it (``wait_for_preapproval``), then is matched
         against the choices, or classified on its own when none fits.
@@ -347,7 +393,7 @@ class AutoApprovalGate:
             self._generation += 1
             generation = self._generation
             self._patterns = ()
-            self._capabilities = frozenset()
+            self._chosen = frozenset()
             self._futures = {}
             # "continue" reads the same in two tasks: what was allowed for a request ends with its run.
             self._allowed = set()
@@ -356,7 +402,8 @@ class AutoApprovalGate:
             done.set()
             return
         threading.Thread(
-            target=self._choose, args=(classifier, generation, goal, facts, dict(capabilities or {}), done),
+            target=self._choose,
+            args=(classifier, generation, goal, facts, dict(capabilities or {}), workspace, done),
             daemon=True, name="kvist-preapproval",
         ).start()
 
@@ -366,27 +413,49 @@ class AutoApprovalGate:
             done.wait(PREAPPROVAL_WAIT_SECONDS)
 
     def _choose(self, classifier: Classifier, generation: int, goal: str, facts: str,
-                offered: dict[str, str], done: threading.Event) -> None:
+                offered: dict[str, str], workspace: Path | None, done: threading.Event) -> None:
         try:
             proposal = classifier.propose(goal, facts, offered)
-            patterns = []
-            for pattern, reason in proposal.commands[:MAX_PREAPPROVED]:
-                problem = vet_pattern(pattern)
-                self._note("preapproval", "rejected" if problem else "allow", pattern, problem or reason)
-                if not problem:
-                    patterns.append(pattern)
-            names = []
-            for name, reason in proposal.capabilities[:MAX_PREAPPROVED_CAPABILITIES]:
-                problem = "" if name in offered else "it is not one of the skills or servers offered"
-                self._note("preapproval", "rejected" if problem else "allow", name, problem or reason)
-                if not problem:
-                    names.append(name)
+            patterns = self._vetted(proposal.commands, MAX_PREAPPROVED, vet_pattern)
+            names = self._vetted(
+                proposal.capabilities, MAX_PREAPPROVED_CAPABILITIES,
+                lambda name: "" if name in offered else "it is not one of the skills or servers offered",
+            )
+            files = self._vetted(
+                proposal.files, MAX_PREAPPROVED_FILES,
+                lambda path: "no workspace" if workspace is None else vet_file(path, workspace),
+            )
+            hosts = self._vetted(proposal.hosts, MAX_PREAPPROVED_HOSTS, vet_host)
             with self._lock:
                 if generation == self._generation:
                     self._patterns = tuple(patterns)
-                    self._capabilities = frozenset(names)
+                    self._chosen = frozenset(
+                        [*names, *(f"file:{resolved_path(path, workspace)}" for path in files),
+                         *(f"web:{host}" for host in hosts)]
+                    )
         finally:
             done.set()
+
+    def _vetted(self, items: tuple[tuple[str, str], ...], limit: int, vet: Callable[[str], str]) -> list[str]:
+        """The items code accepts, each decision written to the run log."""
+        kept = []
+        for item, reason in items[:limit]:
+            problem = vet(item)
+            self._note("preapproval", "rejected" if problem else "allow", item, problem or reason)
+            if not problem:
+                kept.append(item)
+        return kept
+
+    def covers(self, target: str, subject: str) -> bool:
+        """Whether ``target`` ("file:<path>") was chosen at the start of the task, for a check that is not a question."""
+        if self.classifier is None:
+            return False
+        self.wait_for_preapproval()
+        with self._lock:
+            chosen = target in self._chosen
+        if chosen:
+            self._note("confirm", "allow", subject, f"'{target}' was chosen at the start of the task")
+        return chosen
 
     def take_refusal(self) -> str:
         """The model-facing text of this thread's last refusal, once."""
@@ -423,7 +492,7 @@ class AutoApprovalGate:
         if self.classifier is None:
             return self._inner.confirm(title, body, "")
         return self._decide(
-            Question("confirm", f"{title}\n{body}", capability=identity),
+            Question("confirm", f"{title}\n{body}", target=identity),
             lambda: self._inner.confirm(title, body, "", timeout=USER_DECISION_SECONDS),
         )
 
@@ -437,7 +506,10 @@ class AutoApprovalGate:
         if self.classifier is None:
             return self._inner.confirm_fetch_domain(host, url)
         # "once" only: a classifier never makes a host trusted for good.
-        outcome = self._screen(Question("fetch", f"Fetch a web page from {host}: {url}"), may_allow=True)
+        # A query or fragment can carry data out, so only a plain address matches a chosen host.
+        plain = "?" not in url and "#" not in url
+        question = Question("fetch", f"Fetch a web page from {host}: {url}", target=f"web:{host}" if plain else "")
+        outcome = self._screen(question, may_allow=True)
         if outcome != "ask":
             return "once" if outcome == "allow" else "deny"
         return self._ask_person(
@@ -525,9 +597,9 @@ class AutoApprovalGate:
             if key in self._allowed:
                 return Verdict("allow", "allowed earlier for the same request")
             patterns = self._patterns
-            capabilities = self._capabilities
-        if question.capability in capabilities:
-            return Verdict("allow", f"'{question.capability}' was chosen at the start of the task")
+            chosen = self._chosen
+        if question.target in chosen:
+            return Verdict("allow", f"'{question.target}' was chosen at the start of the task")
         if question.argv and not any(token in _SHELL_OPERATORS for token in question.argv):
             for pattern in patterns:
                 if grants(pattern, list(question.argv)):

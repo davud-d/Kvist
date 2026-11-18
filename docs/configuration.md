@@ -232,6 +232,14 @@ question. It cannot name anything off the list. Skills that reach your own machi
 (`host.*` permissions), servers run without a sandbox and anything approved before
 whose content changed are never on it: their dialog is judged as usual.
 
+The agent's own tools that ask are settled the same way: it names the existing files
+the request plainly says to change (overwriting one asks otherwise) and the hosts it
+will fetch pages from. Code accepts a file only if it exists inside the project, is
+written out exactly and is not a dotfile or in a dot-directory (`.env`, `.git`,
+`.github`), and a host only as a plain lowercase host name. A chosen host covers a
+plain address, never one with a query string or fragment, and a fetch is always
+allowed once, never remembered.
+
 The classifier works beside the agent, not in front of it. The patterns are chosen
 while the agent's own first model call runs (a command that asks before they are
 ready waits for them, then is matched against them, or classified on its own if

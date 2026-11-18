@@ -438,6 +438,94 @@ def test_the_names_of_the_last_task_do_not_outlive_it():
     assert gate.confirm_capability("browser", "Allow?", "body") is False
 
 
+# ── files and hosts chosen at the start of a task ────────────────────
+
+def picks(*, files=(), hosts=()):
+    return json.dumps({
+        "files": [{"path": path, "reason": "needed"} for path in files],
+        "hosts": [{"host": host, "reason": "needed"} for host in hosts],
+    })
+
+
+def test_a_file_chosen_at_the_start_is_overwritten_without_a_question(tmp_path):
+    (tmp_path / "app.py").write_text("x", encoding="utf-8")
+    gate, person, calls = gate_with(picks(files=["app.py"]))
+
+    gate.preapprove("fix app.py", "facts", workspace=tmp_path)
+
+    assert gate.covers(f"file:{(tmp_path / 'app.py').resolve()}", "Overwrite app.py") is True
+    assert gate.covers(f"file:{(tmp_path / 'other.py').resolve()}", "Overwrite other.py") is False
+    assert len(calls) == 1 and person.asked == []
+
+
+def test_files_are_vetted_by_code(tmp_path):
+    (tmp_path / "src").mkdir()
+    for name in ("src/a.py", ".env", "src/b.py"):
+        (tmp_path / name).write_text("x", encoding="utf-8")
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("x", encoding="utf-8")
+    gate, _, _ = gate_with(picks(files=["src/a.py", ".env", "src/*.py", "src", "missing.py", str(outside), "../outside.txt"]))
+    logged: list = []
+    gate.notify = logged.append
+
+    gate.preapprove("task", "facts", workspace=tmp_path)
+    gate.wait_for_preapproval()
+
+    kept = [entry["subject"] for entry in logged if entry["decision"] == "allow"]
+    rejected = [entry["subject"] for entry in logged if entry["decision"] == "rejected"]
+    assert kept == ["src/a.py"]
+    assert rejected == [".env", "src/*.py", "src", "missing.py", str(outside), "../outside.txt"]
+
+
+def test_a_host_chosen_at_the_start_is_fetched_without_a_question():
+    gate, person, calls = gate_with(picks(hosts=["docs.python.org"]))
+
+    gate.preapprove("read the python docs", "facts")
+    gate.wait_for_preapproval()
+
+    assert gate.confirm_fetch_domain("docs.python.org", "https://docs.python.org/3/library/json.html") == "once"
+    assert len(calls) == 1 and person.asked == []
+
+
+def test_a_fetch_with_a_query_or_another_host_is_still_judged():
+    gate, _, calls = gate_with(
+        lambda n: picks(hosts=["docs.python.org"]) if n == 1 else verdicts(("deny", "no")), Person(),
+    )
+    gate.preapprove("read the python docs", "facts")
+
+    assert gate.confirm_fetch_domain("docs.python.org", "https://docs.python.org/?q=secret") == "deny"
+    assert gate.confirm_fetch_domain("evil.example", "https://evil.example/") == "deny"
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("host", ["https://docs.python.org", "docs.python.org/3", "docs.python.org:443", "*.python.org",
+                                  "Docs.Python.org", "localhost", "127.0.0.1", "python"])
+def test_a_host_must_be_a_plain_lowercase_name(host):
+    from kernel.sandbox.auto_approval import vet_host
+
+    assert vet_host(host) != ""
+
+
+def test_the_executor_overwrites_a_chosen_file_and_asks_about_another(agent_factory, tmp_path):
+    agent = agent_factory()
+    workspace = agent.executor.workspace
+    agent.executor.write_approval_enabled = True  # the fixture switches the gate off
+    (workspace / "chosen.py").write_text("old", encoding="utf-8")
+    (workspace / "other.py").write_text("old", encoding="utf-8")
+    agent.client.content = picks(files=["chosen.py"])
+    agent.set_auto_approval(True)
+    gate = agent.executor.approvals
+    gate.preapprove("rewrite chosen.py", "facts", workspace=workspace)
+    gate.wait_for_preapproval()
+
+    agent.executor._confirm_overwrite("chosen.py", "old", "new", (workspace / "chosen.py").resolve())
+    assert len(agent.client.requests) == 1  # no question reached the classifier
+
+    agent.client.content = verdicts(("deny", "not asked for"))
+    with pytest.raises(Exception, match="declined"):
+        agent.executor._confirm_overwrite("other.py", "old", "new", (workspace / "other.py").resolve())
+
+
 def test_without_a_classifier_a_capability_goes_to_the_person():
     person = Person()
     gate = AutoApprovalGate(person)
