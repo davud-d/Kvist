@@ -115,19 +115,7 @@ jobs:
           persist-credentials: false
 
       - name: Build and smoke-test inside Termux
-        run: |
-          docker run --rm -v "$PWD":/build -w /build termux/termux-docker:aarch64 bash -euxc '
-            pkg update -y
-            pkg install -y python nodejs rust clang make binutils libffi openssl git ldd
-            # The NDK headers mark strtok deprecated and PyInstaller's bootloader builds with -Werror.
-            export CFLAGS="-Wno-deprecated-declarations"
-            python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
-            (cd frontends/tui/ink && npm ci && npm run build)
-            (cd kernel/session-rs && cargo build --release --locked)
-            export KVIST_BUNDLE_NODE="$(command -v node)"
-            python -m PyInstaller kvist.spec --noconfirm
-            python scripts/release/binary/smoke.py dist/kvist
-          '
+        run: docker run --rm -v "$PWD":/build -w /build termux/termux-docker:aarch64 bash scripts/release/binary/termux-build.sh
 
       - name: Upload the binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
