@@ -28,6 +28,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TURN_BUDGET_SECONDS = 45
 TURN_TIMEOUT_SECONDS = 15
+# `python -m kernel`, but every thread's stack goes to stderr 13 s in: a turn that stalls with an empty
+# stderr (it did on a Windows runner) then says where, and report_failure prints it.
+CORE_WITH_STACK_DUMP = (
+    "import faulthandler, runpy; faulthandler.dump_traceback_later(13); "
+    "runpy.run_module('kernel', run_name='__main__', alter_sys=True)"
+)
 
 # `python` is what Windows installs; the others ship `python3`.
 PYTHON = "python" if sys.platform == "win32" else "python3"
@@ -209,7 +215,9 @@ class Kvist:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"no '{event_type}' event in {timeout:.0f}s; got {[e.get('type') for e in seen]}")
+                said = [json.dumps(e, ensure_ascii=False) for e in seen if e.get("type") in ("debug", "error")]
+                raise TimeoutError(f"no '{event_type}' event in {timeout:.0f}s; got {[e.get('type') for e in seen]}"
+                                   + ("; they said: " + " | ".join(said) if said else ""))
             try:
                 event = self.events.get(timeout=remaining)
             except queue.Empty:
@@ -318,7 +326,7 @@ def main() -> int:
         configure(home, provider.url)
         allow_python(workspace)
         launched = time.monotonic()
-        core = Kvist([sys.executable, "-m", "kernel", "--workspace", str(workspace)], ROOT, home)
+        core = Kvist([sys.executable, "-c", CORE_WITH_STACK_DUMP, "--workspace", str(workspace)], ROOT, home)
         try:
             core.collect_until("hello", TURN_TIMEOUT_SECONDS)
             print(f"core ready  ({time.monotonic() - launched:.1f}s after launch)")
