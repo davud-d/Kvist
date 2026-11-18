@@ -343,6 +343,23 @@ def test_no_path_marks_anything_on_a_gateway(tmp_path, path):
     assert all("cache_control" not in str(request) for request in sdk.requests)
 
 
+def test_the_classifiers_second_call_extends_the_first_so_its_prefix_can_be_read_from_the_cache(tmp_path):
+    from kernel.agent.agent_tools import auto_classifier
+    from kernel.sandbox.auto_approval import Question
+
+    agent, sdk = _agent(tmp_path)
+    classifier = auto_classifier(agent)
+
+    classifier.classify([Question("command", "ls -la")])
+    classifier.classify([Question("command", "pwd")])
+
+    first, second = sdk.requests
+    assert _marks(second) == (0, 1, 1)
+    assert second["system"] == first["system"]
+    assert second["messages"][0]["content"] == first["messages"][0]["content"]
+    assert len(second["messages"]) == 3
+
+
 def test_the_chat_system_prompt_is_split_at_its_style(tmp_path):
     agent, sdk = _agent(tmp_path)
 

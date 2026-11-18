@@ -52,6 +52,8 @@ MAX_PREAPPROVED = 12
 MAX_PREAPPROVED_CAPABILITIES = 5
 MAX_PREAPPROVED_FILES = 12
 MAX_PREAPPROVED_HOSTS = 5
+# A conversation that grew past this starts over from a fresh opening, so it never outgrows the model's window.
+MAX_CONVERSATION_CHARS = 160_000
 # How long a command that must ask waits for an answer already being fetched, before it asks itself.
 PREAPPROVAL_WAIT_SECONDS = 60.0
 PREFETCH_WAIT_SECONDS = 60.0
@@ -127,6 +129,22 @@ class Background:
     earlier: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class _Conversation:
+    """What the classifier has been told in this task, and what it answered.
+
+    Later calls only add to it, so every call starts with the same text as the one before and a
+    provider can read that part from its prompt cache; rewriting it per call would pay for it again.
+    """
+
+    request: str
+    earlier: str
+    instructions: str
+    steps: frozenset[str]
+    turns: tuple[dict[str, str], ...]
+    size: int  # characters in ``turns``
+
+
 class Classifier:
     """Asks the model whether the person would approve each question."""
 
@@ -139,12 +157,26 @@ class Classifier:
         self._ask = ask
         self.request = request
         self._background = background
+        # One call at a time: the next one continues from the answer of the one before.
+        self._lock = threading.Lock()
+        self._conversation: _Conversation | None = None
+        self._epoch = 0  # raised by ``reset``, so a call already running does not revive the old task
+
+    def reset(self) -> None:
+        """A new task begins: the next call opens a new conversation. Never waits for a call in flight."""
+        self._epoch += 1
+        self._conversation = None
 
     def classify(self, questions: list[Question]) -> list[Verdict]:
-        try:
-            reply = self._ask(self._messages(questions))
-        except ClassifierError as error:
-            return [Verdict("unsure", f"the classifier did not answer: {error}")] * len(questions)
+        with self._lock:
+            epoch = self._epoch
+            messages, pending = self._messages(questions)
+            try:
+                reply = self._ask(messages)
+            except ClassifierError as error:
+                return [Verdict("unsure", f"the classifier did not answer: {error}")] * len(questions)
+            if reply.strip() and epoch == self._epoch:
+                self._conversation = pending(reply)
         return _parse_verdicts(reply, len(questions))
 
     def propose(self, goal: str, facts: str, capabilities: Mapping[str, str] | None = None) -> Proposal:
@@ -173,7 +205,10 @@ class Classifier:
             return Proposal()
         return _parse_proposal(reply)
 
-    def _messages(self, questions: list[Question]) -> list[dict[str, str]]:
+    def _messages(
+        self, questions: list[Question]
+    ) -> tuple[list[dict[str, str]], Callable[[str], _Conversation]]:
+        """The messages to send, and how the conversation reads once the model answered them."""
         actions = json.dumps(
             [
                 {"id": index, "kind": item.kind, "subject": redact_text(item.subject)}
@@ -181,21 +216,66 @@ class Classifier:
             ],
             ensure_ascii=False,
         )
-        background = self._background()
-        user = f"The person's request and follow-ups (JSON string):\n{json.dumps(self.request(), ensure_ascii=False)}\n\n"
-        if background.earlier:
-            user += _untrusted("earlier_turns", background.earlier) + "\n\n"
-        if background.instructions:
-            # Already quoted by system_context with its own boundary tags and defanged there.
-            user += background.instructions + "\n\n"
-        if background.steps:
-            steps = json.dumps(list(background.steps), ensure_ascii=False)
-            user += _untrusted("agent_step_summaries", steps) + "\n\n"
+        request, background = self.request(), self._background()
+        before = self._conversation
+        if before is not None and not _continues(before, request, background):
+            before = None
+        user = _opening(request, background) if before is None else _update(before, request, background)
         user += "Actions waiting for approval:\n" + _untrusted("approval_request", actions)
-        return [
-            {"role": "system", "content": _PROMPT_PATH.read_text(encoding="utf-8")},
-            {"role": "user", "content": user},
-        ]
+        turn = {"role": "user", "content": user}
+        history = before.turns if before is not None else ()
+        messages = [{"role": "system", "content": _PROMPT_PATH.read_text(encoding="utf-8")}, *history, turn]
+
+        def after(reply: str) -> _Conversation:
+            seen = before.steps if before is not None else frozenset()
+            return _Conversation(
+                request, background.earlier, background.instructions, seen | frozenset(background.steps),
+                (*history, turn, {"role": "assistant", "content": reply}),
+                (before.size if before is not None else 0) + len(user) + len(reply),
+            )
+
+        return messages, after
+
+
+def _opening(request: str, background: Background) -> str:
+    """The first message of a conversation: everything the classifier needs to know about the task."""
+    user = f"The person's request and follow-ups (JSON string):\n{json.dumps(request, ensure_ascii=False)}\n\n"
+    if background.earlier:
+        user += _untrusted("earlier_turns", background.earlier) + "\n\n"
+    if background.instructions:
+        # Already quoted by system_context with its own boundary tags and defanged there.
+        user += background.instructions + "\n\n"
+    if background.steps:
+        user += _untrusted("agent_step_summaries", json.dumps(list(background.steps), ensure_ascii=False)) + "\n\n"
+    return user
+
+
+def _continues(conversation: _Conversation, request: str, background: Background) -> bool:
+    """Whether this call is the same task, grown: the request only extended, the earlier turns unchanged."""
+    return (
+        request.startswith(conversation.request)
+        and background.earlier == conversation.earlier
+        and conversation.size < MAX_CONVERSATION_CHARS
+    )
+
+
+def _update(conversation: _Conversation, request: str, background: Background) -> str:
+    """What is new since the last answer; empty when nothing is."""
+    parts = []
+    added = request[len(conversation.request):].strip()
+    if added:
+        parts.append(f"The person added to the request (JSON string):\n{json.dumps(added, ensure_ascii=False)}")
+    if background.instructions != conversation.instructions:
+        parts.append(
+            "The repository's instructions changed; they now read:\n" + background.instructions
+            if background.instructions else "The repository's instructions were removed."
+        )
+    steps = [step for step in background.steps if step not in conversation.steps]
+    if steps:
+        parts.append("New steps of the agent:\n" + _untrusted("agent_step_summaries", json.dumps(steps, ensure_ascii=False)))
+    if not parts:
+        return ""
+    return "New since your last answer:\n\n" + "\n\n".join(parts) + "\n\n"
 
 
 def _untrusted(source: str, text: str) -> str:
@@ -389,6 +469,8 @@ class AutoApprovalGate:
         """
         classifier = self.classifier
         done = threading.Event()
+        if classifier is not None:
+            classifier.reset()  # a new task is a new conversation
         with self._lock:
             self._generation += 1
             generation = self._generation

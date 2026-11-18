@@ -240,6 +240,16 @@ written out exactly and is not a dotfile or in a dot-directory (`.env`, `.git`,
 plain address, never one with a query string or fragment, and a fetch is always
 allowed once, never remembered.
 
+Within one task the classifier keeps a single conversation that is only ever added
+to. The first call carries the request, the earlier turns, `KVIST.md` and the
+agent's step summaries; a later call sends only what is new since the last answer
+(a longer request, changed instructions, newer steps) and the actions waiting, and
+the answers so far stay in the history. Every call therefore starts with the same
+text as the one before, so a provider's prompt cache can read it instead of
+charging for it again. A new task, a request that is not an extension of the old
+one, different earlier turns, or a conversation past 160 000 characters starts a
+new one; a call that fails leaves it as it was. Calls run one after another.
+
 The classifier works beside the agent, not in front of it. The patterns are chosen
 while the agent's own first model call runs (a command that asks before they are
 ready waits for them, then is matched against them, or classified on its own if

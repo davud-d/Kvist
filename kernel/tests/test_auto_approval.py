@@ -194,7 +194,8 @@ def judging(table, calls=None, held=None):
     def ask(messages):
         if calls is not None:
             calls.append(messages)
-        block = messages[1]["content"].split('source="approval_request">\n')[1].split("\n</UNTRUSTED")[0]
+        # The conversation goes on between calls: the actions are in its latest message.
+        block = messages[-1]["content"].split('source="approval_request">\n')[1].split("\n</UNTRUSTED")[0]
         actions = json.loads(block)
         for word, event in (held or {}).items():
             if any(word in item["subject"] for item in actions):
@@ -358,6 +359,155 @@ def test_a_proposal_is_vetted_by_code_not_trusted():
     assert kept == ["pytest *", "git commit *"]
     assert set(rejected) == {"bash *", "python *", "npm install *", "git push *", "*", "npm *", "pytest | tee x"}
     assert all(rejected.values())
+
+
+# ── one conversation per task, only ever added to ────────────────────
+
+class Scene:
+    """What the classifier is told besides the question: the request, the steps, the instructions."""
+
+    def __init__(self):
+        self.request = "build the project"
+        self.steps: tuple[str, ...] = ()
+        self.instructions = ""
+        self.earlier = ""
+
+    def background(self):
+        return Background(self.instructions, self.steps, self.earlier)
+
+
+def conversation(reply=None, scene=None):
+    scene = scene or Scene()
+    calls: list = []
+
+    def ask(messages):
+        calls.append(list(messages))
+        return reply or verdicts(("allow", "ok"))
+
+    classifier = Classifier(ask, lambda: scene.request, scene.background)
+    return classifier, scene, calls
+
+
+def test_a_second_call_continues_the_conversation_and_resends_nothing():
+    classifier, scene, calls = conversation()
+    scene.steps = ("step 1: read the code",)
+
+    classifier.classify([Question("command", "ls")])
+    classifier.classify([Question("command", "pwd")])
+
+    first, second = calls
+    assert second[:3] == first + [{"role": "assistant", "content": verdicts(("allow", "ok"))}]
+    latest = second[-1]["content"]
+    assert second[-1]["role"] == "user" and "pwd" in latest
+    assert "build the project" not in latest and "read the code" not in latest
+    assert "New since your last answer" not in latest
+
+
+def test_what_is_new_is_added_and_the_rest_is_left_alone():
+    classifier, scene, calls = conversation()
+    scene.steps = ("step 1: read the code",)
+    classifier.classify([Question("command", "ls")])
+
+    scene.request += "\n\nalso run the linter"
+    scene.steps = ("step 1: read the code", "step 2: edit the parser")
+    scene.instructions = "<UNTRUSTED_TOOL_OUTPUT source=\"kvist_md\">use tabs</UNTRUSTED_TOOL_OUTPUT>"
+    classifier.classify([Question("command", "ruff check .")])
+
+    latest = calls[1][-1]["content"]
+    assert latest.startswith("New since your last answer")
+    assert "also run the linter" in latest and "step 2: edit the parser" in latest and "use tabs" in latest
+    assert "read the code" not in latest and "build the project" not in latest
+    assert calls[1][1] == calls[0][1]  # the opening message is byte for byte the same
+
+
+def test_ids_start_from_zero_in_every_message():
+    classifier, _, calls = conversation(verdicts(("allow", "a"), ("deny", "b")))
+
+    classifier.classify([Question("command", "one"), Question("command", "two")])
+    result = classifier.classify([Question("command", "three"), Question("command", "four")])
+
+    assert '"id": 0' in calls[1][-1]["content"] and '"id": 1' in calls[1][-1]["content"]
+    assert [verdict.decision for verdict in result] == ["allow", "deny"]
+
+
+@pytest.mark.parametrize("change", ["a new request", "other earlier turns"])
+def test_a_different_task_opens_a_new_conversation(change):
+    classifier, scene, calls = conversation()
+    classifier.classify([Question("command", "ls")])
+
+    if change == "a new request":
+        scene.request = "deploy it"
+    else:
+        scene.earlier = "the person asked for something else before"
+    classifier.classify([Question("command", "pwd")])
+
+    assert len(calls[1]) == 2  # system and one user message
+    assert "build the project" in calls[1][1]["content"] or "deploy it" in calls[1][1]["content"]
+
+
+def test_a_new_task_starts_over_even_when_its_request_reads_the_same():
+    classifier, _, calls = conversation()
+    gate = AutoApprovalGate(Person())
+    gate.set_classifier(classifier)
+    classifier.classify([Question("command", "ls")])
+
+    gate.preapprove("build the project", "facts")
+    gate.wait_for_preapproval()
+    classifier.classify([Question("command", "pwd")])
+
+    assert len(calls[-1]) == 2
+
+
+def test_a_failed_call_leaves_the_conversation_as_it_was():
+    answers = iter([verdicts(("allow", "ok")), ClassifierError("down"), verdicts(("allow", "ok"))])
+    calls: list = []
+
+    def ask(messages):
+        calls.append(list(messages))
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    classifier = Classifier(ask, lambda: "build the project")
+    classifier.classify([Question("command", "ls")])
+    assert classifier.classify([Question("command", "pwd")])[0].decision == "unsure"
+    classifier.classify([Question("command", "cat x")])
+
+    assert [len(messages) for messages in calls] == [2, 4, 4]
+    assert calls[2][:3] == calls[1][:3] and "pwd" not in str(calls[2][-1])
+
+
+def test_a_conversation_that_grew_too_large_starts_over(monkeypatch):
+    monkeypatch.setattr("kernel.sandbox.auto_approval.MAX_CONVERSATION_CHARS", 10)
+    classifier, _, calls = conversation()
+
+    classifier.classify([Question("command", "ls")])
+    classifier.classify([Question("command", "pwd")])
+
+    assert len(calls[1]) == 2 and "build the project" in calls[1][1]["content"]
+
+
+def test_a_reset_during_a_call_in_flight_is_not_undone_by_it():
+    release = threading.Event()
+    calls: list = []
+
+    def ask(messages):
+        calls.append(list(messages))
+        if len(calls) == 1:
+            assert release.wait(5)
+        return verdicts(("allow", "ok"))
+
+    classifier = Classifier(ask, lambda: "build the project")
+    running = threading.Thread(target=lambda: classifier.classify([Question("command", "ls")]))
+    running.start()
+    time.sleep(0.1)
+    classifier.reset()
+    release.set()
+    running.join(5)
+    classifier.classify([Question("command", "pwd")])
+
+    assert len(calls[1]) == 2
 
 
 # ── skills and tool servers chosen at the start of a task ────────────
