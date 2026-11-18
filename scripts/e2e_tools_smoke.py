@@ -283,10 +283,26 @@ def run_turns(core: Kvist, workspace: Path) -> float:
     return time.monotonic() - started
 
 
-def report_failure(error: Exception, core: Kvist, provider: FakeProvider) -> int:
+def print_log_tails(home: Path) -> None:
+    """The core's own logs say why a turn stalled when its stderr is empty (as it was on Windows)."""
+    for log in sorted(home.rglob("*.jsonl")):
+        try:
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as error:
+            print(f"--- {log.name}: unreadable ({error})")
+            continue
+        print(f"--- {log.name}, last {min(len(lines), 15)} of {len(lines)} lines:\n" + "\n".join(lines[-15:]))
+
+
+def report_failure(error: Exception, core: Kvist, provider: FakeProvider, home: Path) -> int:
     print(f"FAIL: {error}")
     print("--- core stderr:\n" + "\n".join(core.stderr_lines[-40:]))
+    for number, request in enumerate(provider.requests, 1):
+        tools = sorted(tool["function"]["name"] for tool in request.get("tools") or [])
+        roles = [message.get("role") for message in request.get("messages") or []]
+        print(f"--- provider request {number}: tools={tools} roles={roles}")
     print(f"--- provider saw {len(provider.requests)} requests")
+    print_log_tails(home)
     return 1
 
 
@@ -294,7 +310,8 @@ def main() -> int:
     started = time.monotonic()
     provider = FakeProvider()
     print(f"provider ready  ({time.monotonic() - started:.1f}s)")
-    with tempfile.TemporaryDirectory(prefix="kvist-smoke-") as scratch:
+    # Windows keeps a killed core's log open for a moment; that must not bury the failure above it.
+    with tempfile.TemporaryDirectory(prefix="kvist-smoke-", ignore_cleanup_errors=True) as scratch:
         home, workspace = Path(scratch, "home"), Path(scratch, "workspace")
         home.mkdir()
         workspace.mkdir()
@@ -307,7 +324,7 @@ def main() -> int:
             print(f"core ready  ({time.monotonic() - launched:.1f}s after launch)")
             elapsed = run_turns(core, workspace)
         except (AssertionError, TimeoutError) as error:
-            return report_failure(error, core, provider)
+            return report_failure(error, core, provider, home)
         finally:
             core.stop()
             provider.server.shutdown()
