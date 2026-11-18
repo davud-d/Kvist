@@ -115,7 +115,10 @@ jobs:
           persist-credentials: false
 
       - name: Build and smoke-test inside Termux
-        run: docker run --rm -v "$PWD":/build -w /build termux/termux-docker:aarch64 bash scripts/release/binary/termux-build.sh
+        # The image runs as Termux's own user, which does not own the runner's checkout.
+        run: |
+          chmod -R a+rwX "$PWD"
+          docker run --rm -v "$PWD":/build -w /build termux/termux-docker:aarch64 bash scripts/release/binary/termux-build.sh
 
       - name: Upload the binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

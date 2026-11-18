@@ -23,3 +23,5 @@ KVIST_BUNDLE_NODE="$(command -v node)"
 export KVIST_BUNDLE_NODE
 python -m PyInstaller kvist.spec --noconfirm
 python scripts/release/binary/smoke.py dist/kvist
+# The runner (another user) uploads the result.
+chmod -R a+rX dist
