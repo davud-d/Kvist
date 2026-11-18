@@ -4,6 +4,14 @@
 # glibc, so the build has to happen in Termux's own userland.
 set -euxo pipefail
 
+# Left alone, pkg picks a random mirror, and one stalled the download for 40 minutes: pin the main
+# one and bound every request.
+TERMUX_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+if [ -e "$TERMUX_PREFIX/etc/termux/mirrors/default" ]; then
+	ln -sf "$TERMUX_PREFIX/etc/termux/mirrors/default" "$TERMUX_PREFIX/etc/termux/chosen_mirrors"
+fi
+printf 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "5";\n' >"$TERMUX_PREFIX/etc/apt/apt.conf.d/99ci"
+
 pkg update -y
 pkg install -y python nodejs rust clang make binutils libffi openssl git ldd libjpeg-turbo libsodium
 
