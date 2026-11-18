@@ -637,7 +637,7 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
-        "strime", "revert", "bug", "feedback", "commit-message", "web-search-provider", "context", "memory", "doctor",
+        "strime", "headers", "revert", "bug", "feedback", "commit-message", "web-search-provider", "context", "memory", "doctor",
         "permissions", "machines", "remote", "update", "gmail", "telegram",
     }
     for handler in main.STDIO_COMMANDS.values():
@@ -952,6 +952,23 @@ def test_strime_toggles_and_persists_for_a_custom_provider(home, agent_factory):
     result, _, _ = _run_handler("strime", agent, args=["<false>"])
     assert result.effects == {"stream": False} and agent.config.stream is False
     assert _run_handler("strime", agent, args=["maybe"])[0].ok is False
+
+
+def test_headers_command_sets_lists_and_removes_for_the_active_provider(home, agent_factory):
+    agent = _custom_agent(agent_factory, stream=False)
+    assert _run_handler("headers", agent, args=["set", "X-Route-Session", "{session}"])[0].ok
+    assert _run_handler("headers", agent, args=["set", "X-Token", "hunter2"])[0].ok
+    assert _saved("provider_headers")["custom:gw"] == {"X-Route-Session": "{session}", "X-Token": "hunter2"}
+
+    listing = _run_handler("headers", agent)[0].message
+    assert "X-Route-Session" in listing and "X-Token" in listing and "hunter2" not in listing
+
+    assert _run_handler("headers", agent, args=["remove", "x-token"])[0].ok
+    assert _run_handler("headers", agent, args=["remove", "x-token"])[0].ok is False
+    assert _run_handler("headers", agent, args=["set", "Bad Name", "v"])[0].ok is False
+    assert _run_handler("headers", agent, args=["bogus"])[0].ok is False
+    assert _run_handler("headers", agent, args=["clear"])[0].ok
+    assert _saved("provider_headers")["custom:gw"] == {}
 
 
 def _fake_baseline(monkeypatch, paths):

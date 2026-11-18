@@ -23,7 +23,7 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 25] = [
+pub const COMMANDS: [Command; 26] = [
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
     Command { needs_argument: true, ..command("rename", "Set the active session's title", "Задать название сессии") },
@@ -44,6 +44,7 @@ pub const COMMANDS: [Command; 25] = [
     command("change-api", "Change the API key of the provider", "Сменить ключ провайдера"),
     command("settings-api", "Request pacing, timeouts, context window", "Темп запросов, таймауты, окно контекста"),
     command("strime", "Streaming for a custom provider (on | off)", "Потоковый ответ своего провайдера (on | off)"),
+    command("headers", "Extra HTTP headers the provider requires (set | remove | clear)", "Доп. HTTP-заголовки, которые требует провайдер (set | remove | clear)"),
     command("del-provider", "Delete the active custom provider", "Удалить текущего своего провайдера"),
     command("full-reset", "Erase every saved provider and key", "Стереть всех провайдеров и ключи"),
     command("machines", "Saved machines: add one, choose where to work", "Сохранённые машины: добавить, выбрать, где работать"),

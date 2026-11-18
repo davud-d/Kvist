@@ -33,8 +33,10 @@ from kernel.context.context_budget import (
     note_input_overflow,
 )
 from kernel.context.context_utils import trim_history
+from kernel.llm.provider_headers import SESSION_PLACEHOLDER, demanded_session_header, set_header
 from kernel.llm.llm_clients import (
     request_session_headers,
+    takes_request_headers,
     AnthropicCompatibleClient,
     fallback_candidates_for_model,
     FREEFLOW_PROVIDER,
@@ -1815,6 +1817,36 @@ def _retry_other_thinking_style(self, request_kwargs: dict[str, Any], key: tuple
     return response
 
 
+def _retry_with_demanded_header(self, request_kwargs: dict[str, Any], error: Exception):
+    """Resend once with the conversation-id header a gateway says is missing, and remember it for this provider.
+
+    ``None`` when the refusal names no such header, or the header was already sent and refused anyway. A
+    second refusal propagates and nothing is remembered: the header was not what the gateway wanted.
+    """
+    name = demanded_session_header(error)
+    if name is None or not takes_request_headers(self.config.provider):
+        return None
+    sent = request_kwargs.get("extra_headers") or {}
+    if any(known.lower() == name for known in sent):
+        return None
+    self._ui.debug_print(f"[headers] the gateway asked for {name}; retrying with it")
+    response = self.client.chat.completions.create(
+        **{**request_kwargs, "extra_headers": {**sent, name: self.llm_session_id}}
+    )
+    notify = getattr(self._ui, "print_notice", None)
+    try:
+        set_header(self.config.provider, name, SESSION_PLACEHOLDER)
+    except RuntimeError as save_error:
+        if callable(notify):
+            notify(f"The gateway needs {name} and the request went through, but it could not be saved: {save_error} / "
+                   f"Шлюзу нужен {name}, запрос прошёл, но сохранить не удалось: {save_error}")
+        return response
+    if callable(notify):
+        notify(f"The gateway asked for {name}: sent it and saved it for {self.config.provider} (see /headers). / "
+               f"Шлюз потребовал {name}: отправила и сохранила для {self.config.provider} (см. /headers).")
+    return response
+
+
 def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, Any]):
     """Create a completion; on a reasoning-control rejection, warn and retry
     once without any reasoning kwargs. Other errors propagate unchanged.
@@ -1838,6 +1870,9 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
     try:
         return self.client.chat.completions.create(**request_kwargs)
     except Exception as error:
+        repaired = _retry_with_demanded_header(self, request_kwargs, error)
+        if repaired is not None:
+            return repaired
         if not is_reasoning_error(error):
             raise
         _record_reasoning_rejection(self, error, key)

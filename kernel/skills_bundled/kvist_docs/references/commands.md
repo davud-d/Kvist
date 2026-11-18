@@ -24,6 +24,7 @@ exist; do not invent subcommands. Some interfaces offer a few more of their own.
 | `/style` | Agent style (the chat style follows it) |
 | `/web-search-provider` | Tavily, Brave or SearXNG for `web_search`, and its key |
 | `/strime` | Toggle streaming for the active custom provider |
+| `/headers` | Extra HTTP headers the provider's gateway requires: `/headers set <Name> <value>` (`{session}` = this conversation's id), `/headers remove <Name>`, `/headers clear`; bare shows names |
 | `/verbose true|false` | Verbose runtime output |
 | `/tui` | Choose the terminal interface for the next launch |
 | `/changes` | What the agent changed, across sessions |

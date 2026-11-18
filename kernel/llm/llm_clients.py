@@ -1348,10 +1348,33 @@ SESSION_HEADER_PLACEHOLDER = "{session}"
 _REQUEST_SESSION_HEADERS = {OPENCODE_GO_PROVIDER: "x-opencode-session"}
 
 
+def takes_request_headers(provider: str) -> bool:
+    """Whether the provider's client is an OpenAI-style one that accepts ``extra_headers`` on a request."""
+    from kernel.llm.reasoning_effort import uses_anthropic_protocol
+
+    key = normalize_provider(provider)
+    return key not in (CHATGPT_PROVIDER, FREEFLOW_PROVIDER) and not uses_anthropic_protocol(key)
+
+
 def request_session_headers(provider: str, session_id: str) -> dict[str, str]:
-    """Per-request headers that identify one conversation to a gateway that requires it; empty for the rest."""
-    name = _REQUEST_SESSION_HEADERS.get(normalize_provider(provider))
-    return {name: session_id} if name else {}
+    """Per-request headers for ``provider``: the one its gateway is known to require, then the person's ``/headers``.
+
+    ``{session}`` in a configured value becomes ``session_id``. Empty for a provider whose client does not take
+    per-request headers.
+    """
+    from kernel.llm.provider_headers import SESSION_PLACEHOLDER, configured_headers
+
+    key = normalize_provider(provider)
+    if not takes_request_headers(key):
+        return {}
+    headers: dict[str, str] = {}
+    if key in _REQUEST_SESSION_HEADERS:
+        headers[_REQUEST_SESSION_HEADERS[key]] = session_id
+    for name, value in configured_headers(key).items():
+        for known in [known for known in headers if known.lower() == name.lower()]:
+            del headers[known]
+        headers[name] = value.replace(SESSION_PLACEHOLDER, session_id)
+    return headers
 
 
 def _expand_session_headers(headers: dict[str, str]) -> dict[str, str]:

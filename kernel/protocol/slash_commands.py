@@ -86,6 +86,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("doctor", "Check modules, frontends, provider, API keys and settings"),
     SlashCommand("update", "Install the newest Kvist build (restart afterwards)"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
+    SlashCommand("headers", "Set extra HTTP headers the provider's gateway requires"),
     SlashCommand(
         "del-provider",
         "Delete the active custom provider",
@@ -173,6 +174,7 @@ def slash_commands_context() -> str:
         "portable: do not assume it is available. /role offers auto, coder, reader, "
         "devops, chat and universal. Known portable argument forms are "
         "/verbose true|false, /strime true|false (custom providers only), "
+        "/headers set <Name> <value> (value {session} = this conversation's id), /headers remove <Name>, /headers clear, "
         "/memory status|pause|resume, /memory inspect <words>, /memory why <id>, /memory forget <id>, "
         "/memory remember <text> (this project), /memory remember-global <text> (every project), "
         "/memory process (pick what is worth keeping from this session; asks consent once), "

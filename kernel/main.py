@@ -763,6 +763,7 @@ from kernel.protocol.event_stdio import CommandContext, CommandHandler, CommandR
 from kernel.sandbox.executor import SafeExecutor
 from interactive_screen import InteractiveScreen
 from kernel.context.language_utils import choose_localized_text, detect_request_language
+from kernel.llm.provider_headers import headers_command
 from kernel.llm.llm_clients import (
     create_llm_client,
     configured_freeflow_backends,
@@ -2342,6 +2343,7 @@ def render_startup_banner(
     console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
     console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
+    console.print("[dim]Command '/headers' — extra HTTP headers the provider's gateway requires.[/dim]")
     console.print("[dim]Command /about — to get more info about agent.[/dim]")
     console.print("[dim]Enter your task.[/dim]")
 
@@ -4683,6 +4685,11 @@ def _stdio_settings_api(ctx: CommandContext) -> CommandResult:
     )
 
 
+def _stdio_headers(ctx: CommandContext) -> CommandResult:
+    ok, message = headers_command(ctx.session.agent.config.provider, ctx.args)
+    return CommandResult(ok, message)
+
+
 def _stdio_strime(ctx: CommandContext) -> CommandResult:
     agent = ctx.session.agent
     if not is_custom_provider(agent.config.provider):
@@ -4881,6 +4888,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "full-reset": _stdio_full_reset,
     "settings-api": _stdio_settings_api,
     "strime": _stdio_strime,
+    "headers": _stdio_headers,
     "revert": _stdio_revert,
     "bug": _stdio_bug,
     "feedback": _stdio_feedback,
@@ -5485,6 +5493,11 @@ def main() -> None:
                 console.print(
                     _display_text(f"Verbose mode {state}.", "green")
                 )
+                continue
+
+            if user_goal and user_goal.split(maxsplit=1)[0].casefold() == "/headers":
+                ok, message = headers_command(config.provider, user_goal.split()[1:])
+                console.print(_display_text(message, "green" if ok else "yellow"))
                 continue
 
             if (
