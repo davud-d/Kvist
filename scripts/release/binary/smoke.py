@@ -61,6 +61,9 @@ def check_setup_screen_without_node(binary: Path) -> None:
 
     with tempfile.TemporaryDirectory() as config, tempfile.TemporaryDirectory() as workspace:
         environment = {"PATH": os.devnull, "HOME": config, "KVIST_CONFIG_DIR": config, "TERM": "xterm-256color", "LANG": "C.UTF-8"}
+        # Termux has no /tmp: a onefile binary unpacks into TMPDIR, which every Termux shell sets.
+        if "TMPDIR" in os.environ:
+            environment["TMPDIR"] = os.environ["TMPDIR"]
         pid, descriptor = pty.fork()
         if pid == 0:
             os.execve(str(binary), [str(binary), "--workspace", workspace, "--frontend", "tui"], environment)

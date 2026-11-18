@@ -14,7 +14,12 @@ export CFLAGS="-Wno-deprecated-declarations"
 export ANDROID_API_LEVEL=24
 # PyNaCl's bundled libsodium sources have no configure script here; link Termux's own instead.
 export SODIUM_INSTALL=system
-python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
+# Android's linker will not resolve libpython symbols (PyLong_Type, ...) unless an extension links it
+# explicitly; maturin-built wheels (cryptography, pydantic-core, jiter, bcrypt) do not by default.
+PYLIB="python$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+RUSTFLAGS="-C link-arg=-l${PYLIB}" python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
+# Fail here, not three steps later inside PyInstaller, if a compiled dependency cannot be loaded.
+python -c "import cryptography.hazmat.bindings._rust, pydantic_core, jiter, bcrypt, nacl.bindings, PIL._imaging"
 
 (cd frontends/tui/ink && npm ci && npm run build)
 (cd kernel/session-rs && cargo build --release --locked)
