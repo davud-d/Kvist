@@ -206,6 +206,8 @@ def test_responses_request_preserves_tools_history_and_images():
         "tool_choice": {"type": "function", "function": {"name": "read_file"}},
         "reasoning_effort": "max", "temperature": 0.1, "max_tokens": 400, "stream": False})
     assert request["stream"] is True and request["store"] is False
+    assert request["reasoning"] == {"summary": "auto", "effort": "max"}
+    assert transport._request({"model": "m", "messages": []})["reasoning"] == {"summary": "auto"}
     assert request["instructions"] == "system instructions"
     assert "temperature" not in request and "max_output_tokens" not in request
     assert request["input"][0]["content"][1]["type"] == "input_image"

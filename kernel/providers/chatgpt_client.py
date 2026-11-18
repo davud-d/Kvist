@@ -54,8 +54,10 @@ def _request(kwargs: dict) -> dict:
         request["instructions"] = instructions
     if kwargs.get("timeout") is not None:
         request["timeout"] = kwargs["timeout"]
+    # The plan backend sends no reasoning-summary events unless the request asks for them.
+    request["reasoning"] = {"summary": "auto"}
     if kwargs.get("reasoning_effort"):
-        request["reasoning"] = {"effort": kwargs["reasoning_effort"]}
+        request["reasoning"]["effort"] = kwargs["reasoning_effort"]
     if kwargs.get("response_format"):
         request["text"] = {"format": kwargs["response_format"]}
     if kwargs.get("tools"):
