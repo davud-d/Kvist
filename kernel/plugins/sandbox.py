@@ -88,6 +88,7 @@ class RunnerSpec:
     screen_wm: str = "i3"
     screen_glx: bool = False
     screen_cursors: str = ""
+    screen_theme: str = ""
 
 
 def build_runner_argv(spec: RunnerSpec) -> list[str]:
@@ -144,6 +145,8 @@ def build_runner_argv(spec: RunnerSpec) -> list[str]:
             runner_args.append("--screen-glx")
         if spec.screen_cursors:
             runner_args += ["--screen-cursors", f"{SANDBOX_ROOT}/skill/{spec.screen_cursors}"]
+        if spec.screen_theme:
+            runner_args += ["--screen-theme", f"{SANDBOX_ROOT}/skill/{spec.screen_theme}"]
     argv += ["--chdir", f"{SANDBOX_ROOT}/skill", "--", python, "-I", "-B",
              f"{SANDBOX_ROOT}/runner/skill_runner.py", *runner_args]
     return argv

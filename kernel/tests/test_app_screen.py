@@ -506,3 +506,12 @@ def test_the_live_preview_is_full_size_sharp_fast_while_the_pointer_moves_and_qu
     assert len(still) <= 8                      # a still screen is not streamed at 60: a few repeats keep the read alive
     assert len(moving) >= 1.5 * 40              # at least 40 frames a second while the pointer moves (60 asked)
     assert Image.open(io.BytesIO(moving[-1])).size == (1920, 1080)   # native size, not scaled down
+
+
+def test_the_screen_theme_puts_the_skills_buttons_and_a_centered_dock_into_the_jwm_config():
+    from kernel.plugins.runner import kvist_display
+
+    config = kvist_display._jwm_config("/skill/theme", 1920, 1080)
+    assert "<ButtonClose>/skill/theme/buttons/close.svg</ButtonClose>" in config
+    assert 'x="750" y="1004" width="420"' in config
+    assert "<ButtonClose>" not in kvist_display._jwm_config("", 1920, 1080)

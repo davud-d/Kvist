@@ -188,6 +188,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--screen-wm", default="i3")
     parser.add_argument("--screen-glx", action="store_true")
     parser.add_argument("--screen-cursors", default="")
+    parser.add_argument("--screen-theme", default="")
     parser.add_argument("--proxy-socket", default="")
     parser.add_argument("--proxy-port", type=int, default=0)
     return parser.parse_args(argv)
@@ -204,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             site_module.addsitedir(site)
         if args.display:
             start_display(args.display, args.screen_dir, args.screen_size, wm=args.screen_wm, glx=args.screen_glx,
-                          cursors=args.screen_cursors)
+                          cursors=args.screen_cursors, theme=args.screen_theme)
         if args.proxy_socket and args.proxy_port:
             start_tcp_to_unix_bridge(args.proxy_port, args.proxy_socket)
             proxy = f"http://127.0.0.1:{args.proxy_port}"

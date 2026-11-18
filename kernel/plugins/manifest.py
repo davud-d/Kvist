@@ -400,16 +400,23 @@ _SCREEN_MANAGERS = frozenset({"i3", "jwm"})
 _SCREEN_SIZE = re.compile(r"^([0-9]{3,4})x([0-9]{3,4})$")
 
 
+def _package_folder(value: Any) -> bool:
+    return (isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,63}", value) is not None
+            and ".." not in value.split("/"))
+
+
 def _display_options(value: Any) -> dict[str, Any]:
     """How a skill's own virtual screen is built; absent keys keep the shared defaults (1280x800, i3, no GLX)."""
     if value is None:
         return {}
-    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx", "cursors"}:
-        raise ManifestError("display may only have: cursors, glx, size, wm")
+    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx", "cursors", "theme"}:
+        raise ManifestError("display may only have: cursors, glx, size, theme, wm")
     cursors = value.get("cursors")
-    if cursors is not None and not (isinstance(cursors, str) and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_./-]{0,63}", cursors)
-                                    and ".." not in cursors.split("/")):
+    if cursors is not None and not _package_folder(cursors):
         raise ManifestError("display.cursors must be a folder of the package holding an Xcursor theme named kvist")
+    theme = value.get("theme")
+    if theme is not None and not _package_folder(theme):
+        raise ManifestError("display.theme must be a folder of the package holding wallpaper/*.jpg and buttons/*.svg")
     size = value.get("size")
     if size is not None:
         found = _SCREEN_SIZE.match(size) if isinstance(size, str) else None

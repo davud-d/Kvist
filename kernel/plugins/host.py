@@ -142,6 +142,7 @@ class RunnerHost:
             screen_size=self.manifest.display.get("size", self._screen_size),
             screen_wm=self.manifest.display.get("wm", "i3"), screen_glx=bool(self.manifest.display.get("glx", False)),
             screen_cursors=self.manifest.display.get("cursors", ""),
+            screen_theme=self.manifest.display.get("theme", ""),
         )
         self.process = ManagedProcess(
             build_runner_argv(spec),

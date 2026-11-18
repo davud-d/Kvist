@@ -29,7 +29,8 @@ hide_edge_borders both
 focus_follows_mouse no
 workspace_layout tabbed
 """
-# No panel, tray, menu, desktop or background: JWM draws only window frames.
+# A macOS-like look: light frames with round traffic-light buttons, a menu bar on top, a floating dock at the bottom.
+# JWM cannot round a tray or blur what is behind it, so the dock is a plain light bar.
 _JWM_CONFIG = """\
 <?xml version="1.0"?>
 <JWM>
@@ -37,12 +38,54 @@ _JWM_CONFIG = """\
   <DoubleClickSpeed>500</DoubleClickSpeed>
   <StartupCommand></StartupCommand>
   <WindowStyle>
-    <Font>DejaVu Sans-9</Font>
-    <Width>2</Width>
-    <Height>20</Height>
+    <Font>Inter-10:bold</Font>
+    <Width>1</Width>
+    <Height>34</Height>
+    <Corner>14</Corner>
+    <Foreground>#9a9aa2</Foreground>
+    <Background>#e6e6ea</Background>
+    <Outline>#d4d4da</Outline>
+    <Active>
+      <Foreground>#2b2b30</Foreground>
+      <Background>#f4f4f6</Background>
+      <Outline>#c8c8ce</Outline>
+    </Active>
   </WindowStyle>
+{buttons}  <TrayStyle>
+    <Font>Inter-10</Font>
+    <Background>#eceef2</Background>
+    <Foreground>#2b2b30</Foreground>
+  </TrayStyle>
+  <ClockStyle>
+    <Font>Inter-10:bold</Font>
+    <Foreground>#2b2b30</Foreground>
+    <Background>#eceef2</Background>
+  </ClockStyle>
+  <TaskListStyle>
+    <Font>Inter-9</Font>
+    <Foreground>#2b2b30</Foreground>
+    <Background>#eceef2</Background>
+    <Active>
+      <Foreground>#2b2b30</Foreground>
+      <Background>#cfd3dc</Background>
+    </Active>
+  </TaskListStyle>
+  <Tray layer="above" x="0" y="0" width="{width}" height="28" layout="horizontal" autohide="off">
+    <TrayButton label="Kvist">exec:true</TrayButton>
+    <Spacer width="0"/>
+    <Clock format="%a %e %b  %H:%M"/>
+  </Tray>
+  <Tray layer="above" x="{dock_x}" y="{dock_y}" width="{dock_width}" height="{dock_height}" layout="horizontal" autohide="off">
+    <TaskList labeled="false" maxwidth="56"/>
+  </Tray>
 </JWM>
 """
+_BUTTON_TAGS = {"ButtonClose": "close", "ButtonCloseFocus": "close", "ButtonMin": "min", "ButtonMinFocus": "min",
+                "ButtonMax": "max", "ButtonMaxFocus": "max", "ButtonMaxActive": "max", "ButtonMaxActiveFocus": "max"}
+_DOCK_WIDTH, _DOCK_HEIGHT, _DOCK_MARGIN = 420, 64, 12
+_WALLPAPER_FRAME_SECONDS = 0.14  # the source clip plays at 7 frames per second
+# feh paints the root window once per call, so the loop costs nothing between frames.
+_WALLPAPER_LOOP = ('while :; do for frame in "$1"/*.jpg; do feh --no-fehbg --bg-fill "$frame"; sleep "$2"; done; done')
 _START_TIMEOUT = 15.0
 _MESA_EGL = "/usr/share/glvnd/egl_vendor.d/50_mesa.json"
 
@@ -56,13 +99,13 @@ def software_gl_environment() -> dict[str, str]:
     return environment
 
 _children: dict[str, subprocess.Popen] = {}
-_last_start: tuple[str, str, str, str, str] = ()  # display, screen_dir, size, wm, cursors
+_last_start: tuple[str, str, str, str, str, str] = ()  # display, screen_dir, size, wm, cursors, theme
 
 
 def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", glx: bool = False,
-                  cursors: str = "") -> None:
+                  cursors: str = "", theme: str = "") -> None:
     global _last_start
-    _last_start = (display, screen_dir, size, wm, cursors)
+    _last_start = (display, screen_dir, size, wm, cursors, theme)
     if cursors:
         # libXcursor reads these, so the window manager and every program started later use the skill's own pointer.
         os.environ.update({"XCURSOR_PATH": cursors, "XCURSOR_THEME": "kvist", "XCURSOR_SIZE": "32"})
@@ -91,13 +134,21 @@ def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", g
             raise RuntimeError("the virtual screen (Xvfb) did not start")
         time.sleep(0.05)
     os.environ["DISPLAY"] = display
-    _children["wm"] = _start_window_manager(wm)
+    _children["wm"] = _start_window_manager(wm, theme, width, height)
+    if theme and wm == "jwm":
+        _children["wallpaper"] = _start_wallpaper(Path(theme) / "wallpaper")
 
 
-def _start_window_manager(wm: str) -> subprocess.Popen:
+def _jwm_config(theme: str, width: int, height: int) -> str:
+    buttons = "".join(f"  <{tag}>{Path(theme) / 'buttons' / name}.svg</{tag}>\n" for tag, name in _BUTTON_TAGS.items()) if theme else ""
+    return _JWM_CONFIG.format(buttons=buttons, width=width, dock_width=_DOCK_WIDTH, dock_height=_DOCK_HEIGHT,
+                              dock_x=(width - _DOCK_WIDTH) // 2, dock_y=height - _DOCK_HEIGHT - _DOCK_MARGIN)
+
+
+def _start_window_manager(wm: str, theme: str, width: int, height: int) -> subprocess.Popen:
     if wm == "jwm":
         config = Path("/tmp/kvist-jwm.xml")
-        config.write_text(_JWM_CONFIG, encoding="utf-8")
+        config.write_text(_jwm_config(theme, width, height), encoding="utf-8")
         command = ["jwm", "-f", str(config)]
     else:
         config = Path("/tmp/kvist-i3.conf")
@@ -107,6 +158,12 @@ def _start_window_manager(wm: str) -> subprocess.Popen:
     return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr)
 
 
+def _start_wallpaper(frames: Path) -> subprocess.Popen:
+    # JWM resets the root background when it starts, so this runs after it.
+    return subprocess.Popen(["sh", "-c", _WALLPAPER_LOOP, "wallpaper", str(frames), str(_WALLPAPER_FRAME_SECONDS)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def display_processes() -> dict[str, int]:
     """Pids of the screen's own processes (server, window manager), for memory accounting."""
     return {name: child.pid for name, child in _children.items() if child.poll() is None}
@@ -114,7 +171,7 @@ def display_processes() -> dict[str, int]:
 
 def stop_display() -> None:
     """End the window manager and the server so the screen can be started again with other options."""
-    for name in ("wm", "server"):
+    for name in ("wallpaper", "wm", "server"):
         child = _children.pop(name, None)
         if child is None or child.poll() is not None:
             continue
@@ -128,10 +185,10 @@ def stop_display() -> None:
 
 def restart_display(*, glx: bool) -> None:
     """Start the same screen again with or without GLX; whatever was running on it is gone."""
-    display, screen_dir, size, wm, cursors = _last_start
+    display, screen_dir, size, wm, cursors, theme = _last_start
     stop_display()
     socket_path = Path("/tmp/.X11-unix") / f"X{display.lstrip(':')}"
     deadline = time.monotonic() + 3
     while socket_path.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
-    start_display(display, screen_dir, size, wm=wm, glx=glx, cursors=cursors)
+    start_display(display, screen_dir, size, wm=wm, glx=glx, cursors=cursors, theme=theme)
