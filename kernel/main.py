@@ -1366,6 +1366,36 @@ def _opencode_command() -> list[str] | None:
     return [bun, str(_OPENCODE_ENTRY)]
 
 
+def _frontend_selection_args(args: argparse.Namespace) -> list[str]:
+    """``--provider/--fast-model/--smart-model`` for the interface's core, read from the config once, now.
+
+    The core starts seconds after the launcher and builds its agent from whatever the config holds
+    by then; another Kvist that changed the model in between would change this one's too. Naming
+    the choice here fixes it for the life of this launch (it is an override, never saved back).
+    Nothing is pinned when the provider or a model is unknown yet: the core's own first-run
+    path asks for it.
+    """
+    if args.remote:
+        # The server's core reads the server's config.
+        return []
+    provider = args.provider or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider_or_none()
+    if not provider:
+        return []
+    provider = normalize_provider(provider)
+    selection = ["--provider", provider]
+    if args.fast_model and args.smart_model:
+        return selection + ["--fast-model", args.fast_model, "--smart-model", args.smart_model]
+    if is_custom_provider(provider):
+        info = get_custom_provider_by_name(extract_custom_provider_name(provider))
+        saved = info.get("models", {}) if info else {}
+    else:
+        saved = get_saved_models(provider)
+    models, _warnings = resolve_models_for_provider(provider, saved)
+    if not all(models.get(role) for role in MODEL_ROLES):
+        return selection
+    return selection + ["--fast-model", models["fast"], "--smart-model", models["smart"]]
+
+
 def launch_opencode(args: argparse.Namespace) -> int | None:
     """Run the OpenCode-style interface with this program as its core; None when it cannot run here.
 
@@ -1391,10 +1421,7 @@ def launch_opencode(args: argparse.Namespace) -> int | None:
     ]
     if args.resume:
         command += ["--resume", str(args.resume) if isinstance(args.resume, str) else ""]
-    if args.provider:
-        command += ["--provider", args.provider]
-    if args.fast_model and args.smart_model:
-        command += ["--fast-model", args.fast_model, "--smart-model", args.smart_model]
+    command += _frontend_selection_args(args)
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
         env = _frontend_environment(args, core, KVIST_SWITCH_FILE=str(switch_file), KVIST_COMMAND_FRONTEND="ink")
@@ -1549,15 +1576,10 @@ def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: 
         command += ["--setup", "--setup-provider-only"]
     elif needs_setup(args):
         command.append("--setup")
+    else:
+        command += _frontend_selection_args(args)
     if args.resume:
         command += ["--resume", str(args.resume) if isinstance(args.resume, str) else ""]
-    if args.provider:
-        command += ["--provider", args.provider]
-    if args.fast_model and args.smart_model:
-        command += [
-            "--fast-model", args.fast_model,
-            "--smart-model", args.smart_model,
-        ]
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:

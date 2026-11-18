@@ -376,6 +376,25 @@ def test_launch_tui_hands_node_the_core_command_and_returns_its_exit_code(monkey
     assert core[0] == main.sys.executable and core[-1].endswith("__main__.py")
 
 
+def test_launch_tui_pins_the_saved_models_it_read_at_launch(monkeypatch, tmp_path):
+    # A second Kvist that changes the model after this launch must not change this one's:
+    # the core gets the choice on its command line instead of re-reading the config.
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    calls = _make_tty(monkeypatch, entry)
+    monkeypatch.setattr(main, "get_saved_models", lambda provider: {"fast": "gpt-5.4-mini", "smart": "gpt-5.4"})
+    monkeypatch.delenv("AGENT_FAST_MODEL", raising=False)
+    monkeypatch.delenv("AGENT_SMART_MODEL", raising=False)
+    monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)
+
+    main.launch_tui(_tui_args())
+
+    command, _env = calls[0]
+    assert command[command.index("--provider") + 1] == "openai"
+    assert command[command.index("--fast-model") + 1] == "gpt-5.4-mini"
+    assert command[command.index("--smart-model") + 1] == "gpt-5.4"
+
+
 def test_tui_switch_reads_the_chosen_interface_and_hands_over(monkeypatch, tmp_path):
     entry = tmp_path / "cli.js"
     entry.write_text("")
@@ -870,11 +889,14 @@ def test_opencode_runs_bun_with_this_program_as_its_core(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(subprocess, "call", lambda command, env: calls.append((command, env)) or 0)
 
-    assert main.launch_opencode(_tui_args(frontend="opencode", role="coder", provider="openai")) == 0
+    assert main.launch_opencode(
+        _tui_args(frontend="opencode", role="coder", provider="openai", fast_model="f", smart_model="s")
+    ) == 0
 
     command, env = calls[0]
     assert command[:3] == [str(bun), str(folder / "src" / "main.ts"), "--workspace"]
-    assert command[3:] == ["ws", "--role", "coder", "--approval-mode", "ask", "--provider", "openai"]
+    assert command[3:] == ["ws", "--role", "coder", "--approval-mode", "ask",
+                          "--provider", "openai", "--fast-model", "f", "--smart-model", "s"]
     assert json.loads(env["KVIST_CORE_CMD"])[-1].endswith("__main__.py")
     assert "KVIST_SWITCH_FILE" in env
     assert env["KVIST_COMMAND_FRONTEND"] == "ink"
