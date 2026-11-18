@@ -1341,6 +1341,18 @@ def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[s
 
 SESSION_HEADER_PLACEHOLDER = "{session}"
 
+# OpenCode Go routes by this header and rejects a request without it (HTTP 400 MissingSessionID; see
+# opencode.ai/docs/go). Zen's docs do not ask for it, so Zen gets none.
+# It rides on each request, not on the client: the main agent, every helper and the auto-mode classifier
+# share one client but must each look like their own conversation to the gateway.
+_REQUEST_SESSION_HEADERS = {OPENCODE_GO_PROVIDER: "x-opencode-session"}
+
+
+def request_session_headers(provider: str, session_id: str) -> dict[str, str]:
+    """Per-request headers that identify one conversation to a gateway that requires it; empty for the rest."""
+    name = _REQUEST_SESSION_HEADERS.get(normalize_provider(provider))
+    return {name: session_id} if name else {}
+
 
 def _expand_session_headers(headers: dict[str, str]) -> dict[str, str]:
     """Fill ``{session}`` with one id per client: some gateways route and cache by it, so it must stay stable."""

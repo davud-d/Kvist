@@ -21,7 +21,8 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -137,6 +138,7 @@ class _ModelCaller:
     client: Any
     config: AgentConfig
     _ui: _StderrUI
+    llm_session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 def parse_payload(raw_text: str) -> CompletionRequest:

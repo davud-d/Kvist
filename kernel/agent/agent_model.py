@@ -34,6 +34,7 @@ from kernel.context.context_budget import (
 )
 from kernel.context.context_utils import trim_history
 from kernel.llm.llm_clients import (
+    request_session_headers,
     AnthropicCompatibleClient,
     fallback_candidates_for_model,
     FREEFLOW_PROVIDER,
@@ -1823,6 +1824,9 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
     the model name and a new model is a guess that can be wrong. Effort is only
     dropped when both forms are refused.
     """
+    headers = request_session_headers(self.config.provider, self.llm_session_id)
+    if headers and "extra_headers" not in request_kwargs:
+        request_kwargs = {**request_kwargs, "extra_headers": headers}
     stripped = strip_reasoning_kwargs(request_kwargs)
     key = (self.config.provider, str(request_kwargs.get("model", "")))
     if stripped != request_kwargs and key in _REASONING_UNSUPPORTED:

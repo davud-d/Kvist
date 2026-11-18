@@ -28,9 +28,9 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
     # different services with their own endpoint and billing (Go: a monthly
     # subscription over /inference/go/openai/v1; Zen: pay-as-you-go over
     # /zen/v1), and opencode.ai lists them as separate providers, so they stay
-    # separate here too. Both answer OpenAI-style chat completions; Go asks for
-    # an x-opencode-session header (stable per conversation) but answers
-    # without it.
+    # separate here too. Both answer OpenAI-style chat completions; Go needs
+    # an x-opencode-session header (one per conversation) or answers 400
+    # MissingSessionID; llm_clients.request_session_headers adds it.
     "opencode-go": {
         "label": "OpenCode Go",
         "api_key_key": "opencode_go_api_key",

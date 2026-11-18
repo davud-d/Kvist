@@ -285,6 +285,8 @@ class LocalAgent:
         self.control = TaskControl(self._cancel_event)
         self.control.listeners.append(self._announce_task_state)
         self.service_session = service_session
+        # Names this agent's conversation to gateways that route by it; a helper is a separate agent, so it gets its own.
+        self.llm_session_id = str(uuid.uuid4())
         self.is_helper = service_session is not None
         # Set on a helper: its runs never change the workspace, whatever role it has.
         self.force_read_only = False

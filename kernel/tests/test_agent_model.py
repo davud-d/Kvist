@@ -643,6 +643,7 @@ def test_json_mode_rejection_keeps_the_rest_of_the_request_and_warns():
             reasoning_effort="medium",
         ),
         client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        llm_session_id="test",
         _ui=SimpleNamespace(
             print_error=warnings.append,
             debug_print=lambda *a, **k: None,
@@ -699,6 +700,7 @@ def test_cached_json_mode_rejection_still_falls_through_to_a_temperature_error()
             reasoning_effort="medium",
         ),
         client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        llm_session_id="test",
         _ui=SimpleNamespace(
             print_error=lambda *a, **k: None,
             debug_print=lambda *a, **k: None,
@@ -741,6 +743,7 @@ def test_json_mode_warning_prints_once_per_run_not_once_per_step():
             reasoning_effort="medium",
         ),
         client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        llm_session_id="test",
         _ui=SimpleNamespace(
             print_error=warnings.append,
             debug_print=lambda *a, **k: None,

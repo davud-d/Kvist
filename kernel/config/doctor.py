@@ -143,7 +143,7 @@ def probe_model(make_caller: Callable[[], tuple[Any, str]], ask: Callable[[str, 
 def caller_for_agent(agent: Any) -> tuple[Any, str]:
     """The running agent's own client and fast model, with a light reasoning effort: the answer is one word."""
     config = dataclasses.replace(agent.config, reasoning_effort="low")
-    return SimpleNamespace(client=agent.client, config=config, _ui=agent._ui), agent.config.fast_model
+    return SimpleNamespace(client=agent.client, config=config, llm_session_id=agent.llm_session_id, _ui=agent._ui), agent.config.fast_model
 
 
 def render(checks: list[Check], ru: bool) -> str:

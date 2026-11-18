@@ -16,6 +16,7 @@ the user as an error.
 from __future__ import annotations
 
 import dataclasses
+import uuid
 import re
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -79,6 +80,7 @@ class _TitleCaller:
     client: Any
     config: AgentConfig
     _ui: Any
+    llm_session_id: str = dataclasses.field(default_factory=lambda: str(uuid.uuid4()))
 
 
 def fallback_session_title(text: str) -> str:

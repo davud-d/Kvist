@@ -12,7 +12,7 @@ from kernel.tests.conftest import FakeLLMClient
 def _caller(content: str = "pong") -> tuple[SimpleNamespace, str, FakeLLMClient]:
     client = FakeLLMClient(content=content)
     config = AgentConfig(provider="deepseek", persist_logs=False, stream=False)
-    caller = SimpleNamespace(client=client, config=config, _ui=SimpleNamespace(print_error=print, debug_print=print))
+    caller = SimpleNamespace(client=client, config=config, llm_session_id="test", _ui=SimpleNamespace(print_error=print, debug_print=print))
     return caller, "deepseek-flash", client
 
 

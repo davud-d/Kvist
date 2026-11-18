@@ -10,6 +10,7 @@ guards, logs and untrusted-output wrapping treat them like any other action.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from kernel.agent.feedback import FeedbackError, save_draft
@@ -347,14 +348,17 @@ def auto_classifier(agent: Any) -> Classifier:
         _sends_temperature,
         safe_extract_completion_content,
     )
-    from kernel.llm.llm_clients import provider_supports_json_mode
+    from kernel.llm.llm_clients import provider_supports_json_mode, request_session_headers
     from kernel.llm.reasoning_effort import merge_reasoning_kwargs
 
     config = agent.config
     model = config.fast_model
+    session_headers = request_session_headers(config.provider, str(uuid.uuid4()))
 
     def ask(messages: list[dict[str, str]]) -> str:
         request: dict[str, Any] = {"model": model, "messages": messages, "timeout": config.api_timeout}
+        if session_headers:
+            request["extra_headers"] = session_headers
         if _sends_temperature(agent, model):
             request["temperature"] = 0
         if provider_supports_json_mode(config.provider):
