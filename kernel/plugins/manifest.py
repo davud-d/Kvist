@@ -409,8 +409,8 @@ def _display_options(value: Any) -> dict[str, Any]:
     """How a skill's own virtual screen is built; absent keys keep the shared defaults (1280x800, i3, no GLX)."""
     if value is None:
         return {}
-    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx", "cursors", "theme"}:
-        raise ManifestError("display may only have: cursors, glx, size, theme, wm")
+    if not isinstance(value, dict) or set(value) - {"size", "wm", "glx", "cursors", "theme", "workspace"}:
+        raise ManifestError("display may only have: cursors, glx, size, theme, wm, workspace")
     cursors = value.get("cursors")
     if cursors is not None and not _package_folder(cursors):
         raise ManifestError("display.cursors must be a folder of the package holding an Xcursor theme named kvist")
@@ -424,8 +424,9 @@ def _display_options(value: Any) -> dict[str, Any]:
             raise ManifestError("display.size must look like 1920x1080 (320..3840 per side)")
     if value.get("wm", "i3") not in _SCREEN_MANAGERS:
         raise ManifestError(f"display.wm must be one of {sorted(_SCREEN_MANAGERS)}")
-    if not isinstance(value.get("glx", False), bool):
-        raise ManifestError("display.glx must be true or false")
+    for flag in ("glx", "workspace"):
+        if not isinstance(value.get(flag, False), bool):
+            raise ManifestError(f"display.{flag} must be true or false")
     return dict(value)
 
 

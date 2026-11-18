@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "app_screen",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "plugin_api": 1,
   "kind": "tools",
   "name": {
@@ -20,7 +20,7 @@
   "source": {
     "origin": "bundled",
     "author": "Kvist",
-    "revision": "0.1.2"
+    "revision": "0.1.3"
   },
   "dependencies": {
     "system": [
@@ -35,13 +35,14 @@
     "wm": "jwm",
     "glx": false,
     "cursors": "icons",
-    "theme": "theme"
+    "theme": "theme",
+    "workspace": true
   },
   "capabilities": {
     "required": [
       {
         "name": "display",
-        "reason": "the programs run on their own virtual screen, never on yours"
+        "reason": "the programs run on their own virtual screen, never on yours, and can read (not change) this project's files"
       },
       {
         "name": "permissions.request",
@@ -270,7 +271,7 @@
     },
     {
       "name": "status",
-      "summary": "Memory of the screen itself (server, window manager, this skill's process) in MiB of proportional set size, against its 40 MiB budget. Programs you started are not counted.",
+      "summary": "Memory of the screen itself (server, window manager, this skill's process) in MiB of proportional set size, against its 65 MiB budget. Programs you started are not counted.",
       "readonly": true,
       "timeout_seconds": 60,
       "parameters": {

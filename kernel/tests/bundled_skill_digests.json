@@ -1,5 +1,5 @@
 {
-  "app_screen": {"version": "0.1.2", "digest": "sha256:6fbf19b3f5b4467e374a081c5388f10722f4bebd2a5a5cdea85cbad5fac5a98b"},
+  "app_screen": {"version": "0.1.3", "digest": "sha256:287f9d97d3f03c97196d73cfced3856136ef4f57564e18cfcd757967992e45d3"},
   "browser": {"version": "0.2.7", "digest": "sha256:63257447e29282791081665b2c17656564b92706e45e5c4f388000969abad74b"},
   "code_nav": {"version": "0.1.0", "digest": "sha256:5d118c6ebcf101d0b4930ca41d73d967e77b436f8972777331f16f032b823ce6"},
   "debugging": {"version": "0.1.0", "digest": "sha256:3a7fcac2c719895558fdd6060c3cb477e6893010aaa11b5cb5e7db285217d4d3"},

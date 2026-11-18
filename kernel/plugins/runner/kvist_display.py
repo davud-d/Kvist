@@ -98,6 +98,13 @@ def software_gl_environment() -> dict[str, str]:
         environment["__EGL_VENDOR_LIBRARY_FILENAMES"] = _MESA_EGL
     return environment
 
+def webview_environment() -> dict[str, str]:
+    """WebKitGTK (Tauri, GTK web views) tries GPU composition and DMA-BUF, which has no device in this sandbox and
+    died on machines with an NVIDIA driver; the software paths work everywhere."""
+    return {"WEBKIT_DISABLE_COMPOSITING_MODE": "1", "WEBKIT_DISABLE_DMABUF_RENDERER": "1", "GDK_BACKEND": "x11",
+            "NO_AT_BRIDGE": "1", **software_gl_environment()}
+
+
 _children: dict[str, subprocess.Popen] = {}
 _last_start: tuple[str, str, str, str, str, str] = ()  # display, screen_dir, size, wm, cursors, theme
 
@@ -121,7 +128,9 @@ def start_display(display: str, screen_dir: str, size: str, *, wm: str = "i3", g
         command += ["-extension", "GLX"]
     if screen_dir:
         command += ["-fbdir", screen_dir]
-    environment = {**os.environ, **software_gl_environment()} if glx else None
+    # Every wallpaper frame is an 8 MiB pixmap. glibc raises its mmap threshold as such blocks are freed and then keeps
+    # them on the heap: the server grew from 15 to 39 MiB. A fixed threshold returns each one, holding it at 23 MiB.
+    environment = {**os.environ, "MALLOC_MMAP_THRESHOLD_": "1000000", **(software_gl_environment() if glx else {})}
     server = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr,
                               env=environment)
     _children["server"] = server

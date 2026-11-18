@@ -429,6 +429,7 @@ class SkillManager:
                       kind="skill", skill=f"{skill.id}@{skill.version}")
         host = RunnerHost(skill.entry, skill.grant, resources=agent.resources, owner=owner, registry=self.registry,
                           services=agent.executor.task_services, screen_size=self.screen_size,
+                          workspace=Path(agent.executor.workspace),
                           on_screen=lambda screen: self._announce_screen(skill, screen))
         skill.host = host
         try:

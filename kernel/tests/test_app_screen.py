@@ -274,12 +274,12 @@ def test_a_program_that_is_not_allowed_never_starts(screen):
 
 
 @needs_x
-def test_status_reports_memory_against_the_forty_mib_budget(screen):
+def test_status_reports_memory_against_the_budget(screen):
     plugin, _ = screen
 
     status = plugin._status({}, None)
 
-    assert status["budget_mib"] == 40.0
+    assert status["budget_mib"] == 65.0
     assert status["screen"] == "1920x1080"
     assert status["pss_mib"]["skill_process"] > 0
 
@@ -336,12 +336,48 @@ def test_the_skill_runs_in_the_sandbox_and_the_project_rules_decide_what_may_sta
     status, launched, clicked, typed, shot, denied = results
     assert status["screen"] == "1920x1080"
     assert status["pss_mib"]["server"] > 0 and status["pss_mib"]["wm"] > 0
+    assert status["within_budget"], status  # the animated wallpaper loop counts too
     assert (status["cursor"]["width"], status["cursor"]["height"]) == (56, 56)  # the window manager's own pointer is the theme's
     assert launched["ok"] is True, launched
     assert launched["authorized_by"] == "rule" and launched["windows"]
     assert clicked["pointer"] == [400, 300] and typed["ok"] is True
     assert shot["ok"] is True and (shot["width"], shot["height"]) == (1920, 1080) and shot["pointer"] == [400, 300]
     assert denied["ok"] is False and "permissions.json" in denied["error"]
+
+
+def test_a_program_of_the_project_starts_from_the_read_only_workspace(agent_factory, tmp_path, monkeypatch):
+    from kernel.plugins.registry import SkillRegistry
+    from kernel.plugins.sandbox import runner_unavailable_reason
+    from kernel.tests.skill_fixtures import install
+    from kernel.tests.test_skill_runtime import _agent, _call, _feedback, _script
+
+    if shutil.which("Xvfb") is None or shutil.which("xeyes") is None:
+        pytest.skip("needs Xvfb and xeyes")
+    if runner_unavailable_reason():
+        pytest.skip(runner_unavailable_reason())
+    config = tmp_path / "config"
+    config.mkdir()
+    monkeypatch.setenv("KVIST_CONFIG_DIR", str(config))
+    registry = SkillRegistry(config / "plugins" / "skill")
+    install(registry, _shipped_with_available_wm(tmp_path / "pkg"))
+    agent, ui = _agent(agent_factory)
+    workspace = Path(agent.executor.workspace)
+    app = workspace / "app.sh"
+    app.write_text("#!/bin/sh\nexec xeyes\n", encoding="utf-8")
+    app.chmod(0o755)
+    rules = workspace / ".kvist" / "permissions.json"
+    rules.parent.mkdir(parents=True, exist_ok=True)
+    rules.write_text('{"allow": ["./app.sh"]}', encoding="utf-8")
+    _script(agent, [
+        _call("skills", {"op": "attach", "skill": "app_screen"}),
+        _call("app_screen__launch", {"command": ["./app.sh"], "reason": "the project's own program"}),
+        "Done.",
+    ])
+
+    agent._run_loop("start the project's program", start_step=1)
+
+    (launched,) = [log["feedback"]["data"]["result"] for log in _feedback(agent, "skill_call")]
+    assert launched["ok"] is True and launched["windows"], launched
 
 
 def test_a_gl_terminal_needs_the_screen_restarted_with_glx_and_then_runs(agent_factory, tmp_path, monkeypatch):

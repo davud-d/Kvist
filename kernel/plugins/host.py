@@ -85,6 +85,7 @@ class RunnerHost:
         registry: SkillRegistry,
         services: TaskServices,
         screen_size: str = "1280x800",
+        workspace: Path | None = None,
         on_screen: Callable[[ScreenViewer], None] | None = None,
     ) -> None:
         assert entry.manifest is not None and entry.version_dir is not None
@@ -96,6 +97,7 @@ class RunnerHost:
         self._registry = registry
         self._services = services
         self._screen_size = screen_size
+        self._workspace = workspace
         self._on_screen = on_screen
         self.process: ManagedProcess | None = None
         self.process_resource: Resource | None = None
@@ -143,6 +145,7 @@ class RunnerHost:
             screen_wm=self.manifest.display.get("wm", "i3"), screen_glx=bool(self.manifest.display.get("glx", False)),
             screen_cursors=self.manifest.display.get("cursors", ""),
             screen_theme=self.manifest.display.get("theme", ""),
+            screen_workspace=self._workspace if self.manifest.display.get("workspace") else None,
         )
         self.process = ManagedProcess(
             build_runner_argv(spec),

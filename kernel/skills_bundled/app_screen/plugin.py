@@ -19,7 +19,7 @@ from typing import Any
 
 import motion
 
-BUDGET_MIB = 40.0
+BUDGET_MIB = 65.0  # was 40 before the wallpaper (about +14 MiB); the rest keeps the preview smooth at 60 fps
 # Where the core's viewer looks for the pointer to draw on the live preview (the sandbox shares this directory).
 CURSOR_FILE = os.path.join(os.environ.get("KVIST_SCREEN_DIR", "/kvist/screen"), "cursor.json")
 _PUBLISH_EVERY = 0.02
@@ -365,19 +365,22 @@ class Screen:
                 "xhot": reply.xhot, "yhot": reply.yhot, "pixels": base64.b64encode(pixels).decode("ascii")}
 
     def launch(self, command: list[str], *, gl: bool) -> dict[str, Any]:
-        executable = shutil.which(command[0])
+        workspace = os.environ.get("KVIST_WORKSPACE", "")
+        # A path such as ./src-tauri/target/debug/app is the project's, not the runner's working directory's.
+        program = os.path.join(workspace, command[0]) if workspace and "/" in command[0] and not command[0].startswith("/") else command[0]
+        executable = shutil.which(program)
         if executable is None:
             raise ScreenError(f"{command[0]!r} is not installed in the skill's sandbox")
         before = {info["id"] for info in self.windows()}
         # The sandbox's passwd entry names /usr/bin/false as the shell, which makes a terminal exit at once.
         home = "/tmp/home" if os.path.isdir("/tmp/home") else os.environ.get("HOME", "/tmp")
-        environment = {**os.environ, "HOME": home, "DISPLAY": os.environ["DISPLAY"], "LANG": "C.UTF-8",
-                       "SHELL": shutil.which("bash") or "/bin/sh", "TERM": "xterm-256color"}
-        if gl:
-            import kvist_display
+        import kvist_display
 
-            environment.update(kvist_display.software_gl_environment())
-        process = subprocess.Popen([executable, *command[1:]], env=environment, cwd=home,
+        environment = {**os.environ, "HOME": home, "DISPLAY": os.environ["DISPLAY"], "LANG": "C.UTF-8",
+                       "SHELL": shutil.which("bash") or "/bin/sh", "TERM": "xterm-256color",
+                       **kvist_display.webview_environment()}
+        # The project is mounted read-only when the sandbox grants it; a program starts in the project's folder.
+        process = subprocess.Popen([executable, *command[1:]], env=environment, cwd=workspace or home,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    start_new_session=True)
         self.apps.append({"pid": process.pid, "command": command, "process": process})

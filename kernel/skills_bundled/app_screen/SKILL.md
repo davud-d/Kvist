@@ -25,11 +25,17 @@ screen lives inside a sandbox with its own display, network and files.
   most GPU toolkits refuse to start without it ("GLX extension not found"), and with it the server
   loads a software renderer and takes about 39 MiB. So `launch` takes `gl: true` only for programs
   that need it; the screen restarts once for that, which closes programs already running (`apps`
-  lists them). `status` shows the real numbers against the 40 MiB budget (programs you start are
+  lists them). `status` shows the real numbers against the 65 MiB budget (programs you start are
   not counted).
-- **The program runs in the sandbox, not in the workspace.** It has an empty home and no project
-  files, so a program of the person's own project cannot be started here unless it is installed
-  system-wide. Say so rather than working around it.
+- **The program runs in the sandbox, with the project mounted read-only.** The workspace is there at its
+  real path and a program starts in it, so `launch` takes `./path/to/binary` of the project (a built Tauri
+  app, a script) the way a shell would. It cannot change project files; build first with your normal
+  shell, then launch the result. Its home is empty and writable only until the screen closes, `.kvist/`
+  and `.env*` are hidden, and there is no network. Only what the system has installed is available beyond
+  the project.
+- **No GPU.** WebKitGTK (Tauri, GTK web views) and GL programs run on software rendering: the screen
+  sets the flags that stop them from reaching for an NVIDIA driver. A window that does not appear means
+  the program failed, not that the graphics are missing; `launch` reports an early exit.
 - **Click positions are screen pixels** of the screenshot (0,0 is the top left). The pointer
   moves along a curved path and arrives exactly; do not expect an instant jump, and give a
   `slow` move for drags that a program tracks.

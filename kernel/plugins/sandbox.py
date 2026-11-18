@@ -89,6 +89,20 @@ class RunnerSpec:
     screen_glx: bool = False
     screen_cursors: str = ""
     screen_theme: str = ""
+    screen_workspace: Path | None = None
+
+
+def _workspace_mounts(workspace: Path) -> list[str]:
+    """The project, read-only and at its real path so commands match what the agent sees. Session logs and `.env*`
+    files stay hidden: a program on the screen needs the code, not the person's secrets."""
+    root = str(workspace)
+    argv = ["--ro-bind", root, root, "--setenv", "KVIST_WORKSPACE", root]
+    if (workspace / ".kvist").is_dir():
+        argv += ["--tmpfs", f"{root}/.kvist"]
+    for secret in sorted(workspace.glob(".env*")):
+        if secret.is_file():
+            argv += ["--ro-bind", "/dev/null", str(secret)]
+    return argv
 
 
 def build_runner_argv(spec: RunnerSpec) -> list[str]:
@@ -145,6 +159,8 @@ def build_runner_argv(spec: RunnerSpec) -> list[str]:
             runner_args.append("--screen-glx")
         if spec.screen_cursors:
             runner_args += ["--screen-cursors", f"{SANDBOX_ROOT}/skill/{spec.screen_cursors}"]
+        if spec.screen_workspace is not None:
+            argv += _workspace_mounts(spec.screen_workspace)
         if spec.screen_theme:
             runner_args += ["--screen-theme", f"{SANDBOX_ROOT}/skill/{spec.screen_theme}"]
     argv += ["--chdir", f"{SANDBOX_ROOT}/skill", "--", python, "-I", "-B",
