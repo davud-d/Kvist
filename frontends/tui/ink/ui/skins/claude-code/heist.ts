@@ -6,8 +6,10 @@ import { detectLocale, type Locale } from "../../../setup/strings.js"
 const NOVEMBER = 10
 const DAY = 19
 
-// KVIST_HEIST=1 shows it on any day, so it can be checked before the date.
+// KVIST_HEIST=1 shows it on any day, so it can be checked before the date; KVIST_HEIST=0 turns it
+// off on the day too (the tests that need the everyday squirrel say so, and so can anyone else).
 export function isHeistDay(now: Date = new Date(), env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.KVIST_HEIST === "0") return false
   return env.KVIST_HEIST === "1" || (now.getMonth() === NOVEMBER && now.getDate() === DAY)
 }
 

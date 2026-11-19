@@ -29,6 +29,10 @@ test("KVIST_HEIST=1 shows it on any day", () => {
   assert.equal(isHeistDay(new Date(2026, 0, 1), { KVIST_HEIST: "0" }), false)
 })
 
+test("KVIST_HEIST=0 turns it off on the day itself", () => {
+  assert.equal(isHeistDay(new Date(2026, 10, 19), { KVIST_HEIST: "0" }), false)
+})
+
 test("the heist set has the same frames, in the same size, as the everyday one", () => {
   assert.equal(HEIST_QUADRANTS.length, MASCOT_QUADRANTS.length)
   assert.equal(HEIST_OCTANTS.length, MASCOT_OCTANTS.length)
