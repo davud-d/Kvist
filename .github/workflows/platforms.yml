@@ -376,9 +376,11 @@ jobs:
   agent-smoke:
     # The agent end to end: a fake provider on a local port answers with tool
     # calls (create a file, edit it, run a command) and the script checks the
-    # workspace after each turn. Runs last, only when everything above passed.
+    # workspace after each turn. It takes minutes and needs nothing the jobs above
+    # produce, so it runs beside them: waiting for the slowest test job first cost
+    # twenty minutes of feedback on every round.
     name: Agent tools smoke on ${{ matrix.os }}
-    needs: [plan, python, ink, package]
+    needs: plan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     strategy:

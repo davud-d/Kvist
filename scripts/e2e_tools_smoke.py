@@ -304,7 +304,8 @@ def print_log_tails(home: Path) -> None:
 
 def report_failure(error: Exception, core: Kvist, provider: FakeProvider, home: Path) -> int:
     print(f"FAIL: {error}")
-    print("--- core stderr:\n" + "\n".join(core.stderr_lines[-40:]))
+    # All of it: the stack dump's top frames, the ones that say what a stalled thread waits on, come first.
+    print("--- core stderr:\n" + "\n".join(core.stderr_lines))
     for number, request in enumerate(provider.requests, 1):
         tools = sorted(tool["function"]["name"] for tool in request.get("tools") or [])
         roles = [message.get("role") for message in request.get("messages") or []]
