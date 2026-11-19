@@ -346,10 +346,11 @@ describe("arrows", () => {
     app = await mount({ height: 40 })
     await app.waitFor("Not sure where to start")
     app.press("down")
-    await app.settle(100)
+    // The marker is what the choice looks like; Tab before it moves would take the first suggestion.
+    await app.waitFor("▸ Set up a new project here")
     app.press("tab")
-    // Wait for the redraw itself: a fixed 100 ms lost the race on a loaded CI runner.
-    await app.waitFor("Set up a new project here")
+    // The list is gone and the choice is in the box (the list itself also holds the sentence).
+    await app.waitFor(/^(?![\s\S]*Not sure where to start)[\s\S]*Set up a new project here/)
     expect(app.frame()).not.toContain("Not sure where to start")
   })
 
