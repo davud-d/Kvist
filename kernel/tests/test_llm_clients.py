@@ -951,6 +951,11 @@ def test_anymodel_streams_unlike_the_rest_of_the_manual_tier():
     assert llm_clients.provider_supports_streaming("moonshot") is False
 
 
+def test_opencode_go_streams_because_its_reasoning_arrives_only_in_the_stream():
+    """Its non-streaming reply carries no reasoning; the deltas do."""
+    assert llm_clients.provider_supports_streaming("opencode-go") is True
+
+
 # Providers with no single working default base URL (every workspace/tenant
 # has its own). These require the matching *_base_url override to be usable
 # at all; create_llm_client and _discovery_endpoints raise/skip accordingly.

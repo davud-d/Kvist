@@ -1154,7 +1154,9 @@ def provider_supports_streaming(provider: str) -> bool:
 
     AnyModel is listed because it is the blank-start default and its streaming
     was verified live. Kimi Code documents streaming Chat Completions on its
-    membership endpoint; the remaining manual tier stays unverified.
+    membership endpoint. OpenCode Go streams reasoning and sends none without
+    it (see the entry in the return below); the remaining manual tier stays
+    unverified.
     """
     normalized = normalize_provider(provider)
     if is_custom_provider(normalized):
@@ -1171,6 +1173,14 @@ def provider_supports_streaming(provider: str) -> bool:
         DEEPSEEK_PROVIDER,
         ANYMODEL_PROVIDER,
         KIMI_PROVIDER,
+        # OpenCode Go hands reasoning out only in the stream: the deltas carry
+        # ``reasoning_content`` and a non-streaming reply carries none, so with
+        # streaming off its thinking column stays empty (the same endpoint
+        # added as a custom provider with streaming on shows it). The stream is
+        # a plain OpenAI SSE response, and the x-opencode-session header rides
+        # on the request either way. Zen is left on the safe default until its
+        # own stream is checked.
+        OPENCODE_GO_PROVIDER,
     )
 
 
