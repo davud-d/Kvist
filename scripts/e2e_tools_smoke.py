@@ -183,6 +183,9 @@ class Kvist:
         env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), PYTHONUTF8="1",
                    PYTHONUNBUFFERED="1", AGENT_WRITE_APPROVAL="0", AGENT_API_INTERVAL="0",
                    AGENT_SANDBOX_NET="allow",
+                   # The phone link would start a controller listening on every address, and on a Windows
+                   # runner it stalled the turn's first git call (see the stack dump this smoke prints).
+                   KVIST_PHONE="0",
                    NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost")
         self.process = subprocess.Popen(
             argv + ["--frontend", "stdio-multi", "--provider", "custom:fake", "--role", "coder"],
