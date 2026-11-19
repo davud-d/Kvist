@@ -30,7 +30,7 @@ SILENCE = "SILENCE"
 # Silence is measured two ways: a few sequential responses are a lot of work with
 # nothing said, and so is one response that fans out into many parallel calls.
 SILENT_STEPS = 3
-SILENT_CALLS = 15
+SILENT_CALLS = 4
 # Its own recent lines, so it does not say the same thing twice.
 _REMEMBERED_LINES = 6
 _KEPT_CALLS = 60
