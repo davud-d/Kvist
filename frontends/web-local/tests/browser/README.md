@@ -158,3 +158,13 @@ command, an unknown command shows a hint, keeps the text and sends nothing (no r
 ```sh
 node frontends/web-local/tests/browser/onboarding.mjs
 ```
+
+`tablet.mjs` checks the phone page (`/m/`, shared by the Android and iOS apps) on a tablet: the shape chosen from the
+window (phone, upright, lying down, a phone on its side), the three panes, the placeholder, the desk's tabs
+(waiting request, tool calls with their output, changes), the request moving between the desk and the
+conversation when the window is rotated, answering from the desk, the drawer, and the hardware keyboard. It serves
+the client from disk and mocks the API in the page, so it needs no running Kvist.
+
+```sh
+node frontends/web-local/tests/browser/tablet.mjs
+```

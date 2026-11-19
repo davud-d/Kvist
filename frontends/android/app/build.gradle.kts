@@ -32,7 +32,7 @@ val webClient = layout.projectDirectory.dir("../../web-local/kvist_web/client")
 val copyWebClient by tasks.registering(Sync::class) {
     from(webClient) {
         include(
-            "mobile/pixel.css", "mobile/season.js", "mobile/i18n.js", "mobile/mascot.js", "mobile/snow.js",
+            "mobile/pixel.css", "mobile/tablet.css", "mobile/season.js", "mobile/i18n.js", "mobile/mascot.js", "mobile/snow.js",
             "mobile/sprites/**", "mobile/fonts/**", "fonts/JetBrainsMono.woff2", "kvist-mark.svg",
         )
     }

@@ -10,6 +10,9 @@ import { createFeed } from './feed.js';
 import { renderRequest } from './request.js';
 import { createControls } from './controls.js';
 import { counts, renderHome, stateWord } from './home.js';
+import { closeMenu } from './menu.js';
+import { createLayout } from './layout.js';
+import { createDesk } from './desk.js';
 
 // The phone's Kvist: a pixel interface over the same HTTP/SSE contract as the browser one. It shows and
 // steers the agent that runs on the computer; nothing runs here. Blocks come from the shared pure reducer,
@@ -39,9 +42,20 @@ const app = {
 const screens = { home: $('#home'), chat: $('#chat') };
 const homeMascot = createMascot($('#home-mascot'), { winter });
 const chatMascot = createMascot($('#chat-mascot'), { winter });
+createMascot($('#pick-mascot'), { winter });
 const feedBox = $('#feed'), prompt = $('#prompt'), sheet = $('#request');
 const feed = createFeed(feedBox, { onRetry: block => retry(block) });
 if (winter) startSnow($('#snow'));
+
+// On a tablet the sessions, the conversation and the desk share the window (see tablet.css); a phone shows one screen.
+const layout = createLayout(mode => { desk.setMode(mode); desk.update(); show(currentScreen); });
+const desk = createDesk($('#desk'), {
+    state: () => ({ selection: app.selection, blocks: app.feedState.blocks, pending: pendingRequest(), inbox: app.navigation.inbox || [] }),
+    open: selection => go(selection),
+    toast: message => toast(message),
+    request: sheet, chat: $('#chat'), composer: $('#composer'), toggle: $('#desk-toggle'),
+});
+desk.setMode(layout.mode);
 
 // The core's own words about the open session: models, reasoning and role, kept current by command_result.
 const controls = createControls({
@@ -111,6 +125,7 @@ function paint() {
     paintHeader();
     paintSheet();
     paintComposer();
+    desk.update();
     if (follow) feedBox.scrollTop = feedBox.scrollHeight;
 }
 
@@ -250,19 +265,26 @@ function scheduleRefresh() {
 
 // ---- screens ----------------------------------------------------------------------------------------
 
+let currentScreen = 'home';
+
+// A phone shows one screen; a tablet shows both, and the conversation has a placeholder until a session is open.
 function show(name) {
-    for (const [key, node] of Object.entries(screens)) node.hidden = key !== name;
+    currentScreen = name;
+    const split = layout.mode !== 'narrow';
+    for (const [key, node] of Object.entries(screens)) node.hidden = !split && key !== name;
+    $('#chat').classList.toggle('empty', !app.selection);
     scrollTo(0, 0);
 }
 
 function paintHome() {
-    renderHome($('#home-list'), app.navigation, { open: go, create: selection => createSession(selection).catch(error => toast(error.message)) });
+    renderHome($('#home-list'), app.navigation, { open: go, selected: app.selection, create: selection => createSession(selection).catch(error => toast(error.message)) });
     const { waiting, working } = counts(app.navigation);
     const line = waiting ? (winter ? t('winterWaiting', waiting) : t('waiting', waiting))
         : working ? t('working', working) : winter ? t('winterGreeting') : t('quiet');
     $('#bubble').textContent = line;
     homeMascot.setMood(waiting ? 'wait' : working ? 'work' : 'idle');
     paintLink();
+    desk.update();
 }
 
 function paintLink() {
@@ -289,6 +311,7 @@ function route() {
     }
     const [serverId, workspace, session] = parts;
     guard(openSession({ serverId, workspace, session }));
+    paintHome();
 }
 
 let creating = null;
@@ -385,6 +408,13 @@ $('#more').onclick = () => controls.main();
 $('#slash').onclick = () => controls.main();
 prompt.addEventListener('input', () => { autosize(); paintComposer(); });
 $('#back').onclick = () => history.back();
+// A hardware keyboard on a tablet: Cmd/Ctrl+Enter sends, Cmd/Ctrl+K opens the commands, Escape closes them.
+addEventListener('keydown', event => {
+    if (layout.mode === 'narrow') return;
+    if (event.key === 'Escape') closeMenu();
+    else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && document.activeElement === prompt && !BUSY.has(app.execution)) $('#composer').requestSubmit();
+    else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); controls.main(); }
+});
 $('#pause').onclick = () => { if (app.selection) guard(api.control(app.selection, 'pause')); };
 $('#new-after-close').onclick = () => {
     if (app.selection) guard(createSession({ serverId: app.selection.serverId, workspace: app.selection.workspace }));
@@ -475,5 +505,6 @@ $('#boot-text').textContent = t('connecting');
 $('#back').ariaLabel = t('back');
 $('#pause').textContent = t('pause');
 $('#closed-text').textContent = t('closed');
+$('#pick-text').textContent = t('pickSession');
 $('#new-after-close').textContent = t('newSession');
 boot();

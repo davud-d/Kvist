@@ -47,6 +47,9 @@ computer until that one is restarted with `--lan`.
 The phone app (`frontends/android`, or a phone browser at `http://<computer>:9671/m/`) gets a pixel interface
 of its own (`client/mobile/`) over the same API, so a trusted phone can do what the browser can: start and
 switch sessions, stop the agent, answer requests, type `/` commands, change model, reasoning and role.
+On a tablet (a window at least 700 px wide and 560 px tall: an iPad, an Android tablet) the same page shows the
+sessions beside the conversation and a desk with the waiting request, every tool call's output and the changes
+(`tablet.css`, `layout.js`, `desk.js`); `frontends/ios` is the iPhone and iPad app.
 
 `/council <question>` and `/best-of [N] <task>` (the core's commands that are turns of the agent) are typed in
 the browser and on the phone as a line that goes to the core as a goal; the answer is the session's final

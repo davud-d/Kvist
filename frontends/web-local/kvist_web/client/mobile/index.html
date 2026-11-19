@@ -8,6 +8,7 @@
   <title>Kvist</title>
   <link rel="icon" href="/assets/kvist-mark.svg">
   <link rel="stylesheet" href="/assets/mobile/pixel.css">
+  <link rel="stylesheet" href="/assets/mobile/tablet.css">
 </head>
 <body>
   <canvas id="snow" aria-hidden="true" hidden></canvas>
@@ -40,9 +41,14 @@
         <p id="chat-state" class="chat-state"></p>
       </div>
       <button id="pause" class="btn small" type="button" hidden></button>
+      <button id="desk-toggle" class="btn small desk-toggle" type="button">▤</button>
       <button id="more" class="btn small" type="button">⋯</button>
       <img id="chat-mascot" class="sprite" alt="" width="48" height="48">
     </header>
+    <div id="pick" class="pick">
+      <img id="pick-mascot" class="sprite big" alt="" width="96" height="96">
+      <p id="pick-text" class="speech"></p>
+    </div>
     <p id="status" class="status" hidden></p>
     <main id="feed" class="feed" aria-live="polite"></main>
     <section id="request" class="sheet" aria-label="Kvist" hidden></section>
@@ -56,6 +62,8 @@
       <button id="new-after-close" class="btn primary" type="button"></button>
     </div>
   </section>
+
+  <aside id="desk" class="desk" hidden></aside>
 
   <div id="menu" class="menu" hidden></div>
   <div id="toasts" class="toasts" aria-live="polite"></div>

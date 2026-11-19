@@ -1,0 +1,149 @@
+/* Kvist on a tablet. A phone shows one screen at a time; a tablet has room to show the work. Held upright
+   ("medium") the sessions sit beside the conversation and the desk slides in from the right; lying down
+   ("wide") the desk stays: the request that waits for the person at full size, every tool call with its whole
+   output, and what the agent changed. layout.js sets data-layout on <html>; with "narrow" nothing here applies. */
+
+:root[data-layout="wide"], :root[data-layout="medium"] { --rail: 320px; --desk-w: 410px; --column: 800px; }
+:root[data-layout="medium"] { --rail: 280px; }
+
+:root:not([data-layout="narrow"]) body {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
+}
+:root[data-layout="wide"] body { grid-template-columns: var(--rail) minmax(0, 1fr) var(--desk-w); }
+
+/* ---- the rail: sessions ------------------------------------------------------------------------ */
+
+:root:not([data-layout="narrow"]) #home {
+  grid-column: 1;
+  min-height: 0;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  box-shadow: var(--o) 0 0 0 var(--ink);
+}
+:root:not([data-layout="narrow"]) #home .sprite.big { width: 72px; height: 72px; }
+:root:not([data-layout="narrow"]) #home .wordmark { font-size: 32px; }
+:root:not([data-layout="narrow"]) .speech { margin-left: 34px; }
+.session[aria-current="true"] { background: var(--raise); box-shadow: 0 0 0 var(--o) var(--accent); }
+
+/* ---- the conversation ------------------------------------------------------------------------ */
+
+:root:not([data-layout="narrow"]) #chat { grid-column: 2; height: 100dvh; min-width: 0; }
+:root:not([data-layout="narrow"]) #back { display: none; }
+/* The text keeps a reading width in the middle of the pane, however wide the pane is. */
+:root:not([data-layout="narrow"]) .feed,
+:root:not([data-layout="narrow"]) .composer,
+:root:not([data-layout="narrow"]) .chat > .sheet {
+  padding-left: max(24px, calc((100% - var(--column)) / 2));
+  padding-right: max(24px, calc((100% - var(--column)) / 2));
+}
+:root:not([data-layout="narrow"]) .chat > .sheet { margin-left: 0; margin-right: 0; }
+:root:not([data-layout="narrow"]) .msg { max-width: 82%; }
+
+/* Nothing is open yet. */
+.pick { display: none; }
+.chat.empty > :not(.pick) { display: none; }
+.chat.empty > .pick { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; }
+.pick .speech { margin: 0; max-width: 360px; text-align: center; }
+.pick .speech::before { left: calc(50% - 3px); }
+
+.desk-toggle { display: none; }
+:root[data-layout="medium"] .desk-toggle { display: inline-flex; }
+
+/* ---- the desk ---------------------------------------------------------------------------------- */
+
+.desk {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  background: var(--surface);
+  box-shadow: calc(var(--o) * -1) 0 0 0 var(--ink);
+}
+:root[data-layout="wide"] .desk { grid-column: 3; }
+/* Upright: a drawer over the conversation. */
+:root[data-layout="medium"] .desk { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; width: min(430px, 92vw); box-shadow: calc(var(--o) * -1) 0 0 0 var(--ink), -24px 0 48px rgba(5, 4, 12, 0.5); }
+.desk-close { display: none; }
+:root[data-layout="medium"] .desk-close { display: inline-flex; }
+
+.desk-head { flex: none; display: flex; gap: 10px; align-items: center; padding: 10px 12px; box-shadow: 0 var(--o) 0 0 var(--ink); margin-bottom: var(--o); }
+.tabs { flex: 1; min-width: 0; display: flex; gap: 6px; }
+.tab {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 8px;
+  border: 0;
+  background: var(--shade);
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.tab[data-alert]:not([aria-selected="true"]) { color: var(--pink); animation: blink 0.8s steps(2, jump-none) infinite; }
+
+.pane { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; overscroll-behavior: contain; }
+.pane.activity { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+
+.desk .sheet { margin: 0 0 14px; max-height: none; overflow: visible; }
+.desk .subject-code { max-height: 38dvh; }
+.desk .diff { max-height: 48dvh; font-size: 12px; }
+.desk-empty { color: var(--dim); font-size: 13px; padding: 8px 2px; }
+.desk-others .label { margin: 18px 0 10px; }
+
+.desk-calls { flex: none; max-height: 42%; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 3px; }
+.desk-call {
+  display: grid;
+  grid-template-columns: 12px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.desk-call.current { background: var(--raise); box-shadow: 0 0 0 2px var(--accent); }
+.desk-output {
+  flex: 1;
+  min-height: 80px;
+  margin: 3px;
+  padding: 10px;
+  overflow: auto;
+  background: var(--shade);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.desk-output[data-empty="true"] { color: var(--dim); }
+.desk-report { margin-top: 12px; }
+.desk-report .diff { max-height: none; }
+.desk-report .diff-row { white-space: pre; }
+
+/* ---- touch and pointer ---------------------------------------------------------------------------- */
+
+@media (hover: hover) {
+  :root:not([data-layout="narrow"]) .session:hover, .desk-call:hover, .menu-row:hover { background: var(--raise); }
+  :root:not([data-layout="narrow"]) .tab:not([aria-selected="true"]):hover { color: var(--text); }
+}
+
+/* The commands sheet floats at the bottom centre of a tablet, not across the whole width. */
+:root:not([data-layout="narrow"]) .menu-sheet { left: 50%; right: auto; width: min(560px, calc(100vw - 28px)); transform: translateX(-50%); }
+
+/* The connect screen of the apps (no layout.js there): on a tablet it is a centred column, not a stretched phone. */
+@media (min-width: 700px) and (min-height: 560px) {
+  #connect { max-width: 560px; margin: 0 auto; }
+}

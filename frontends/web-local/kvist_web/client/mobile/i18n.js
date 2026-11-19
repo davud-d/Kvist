@@ -26,6 +26,9 @@ const STRINGS = {
         cooldown: 'Wait half a minute and try again.', forgotten: 'This computer no longer knows the phone. Tap it to ask again.',
         expired: 'Nobody answered on the computer in time.', hintCommand: 'kvist', unreachable: 'Cannot reach that computer.', lostSaved: name => `Cannot reach ${name}. Looking for it…`,
         savedMark: 'paired', switchComputer: 'Change computer',
+        tabActivity: 'ACTIVITY', tabChanges: 'CHANGES', nothingNeeds: 'Nothing needs you right now.', otherSessions: 'OTHER SESSIONS',
+        noCalls: 'No tool calls yet.', noOutput: 'No output.', refresh: 'Refresh', openDesk: 'Activity and changes',
+        pickSession: 'Pick a session on the left, or start a new one.',
     },
     ru: {
         tagline: 'твой агент с дивана', quiet: 'Тишина.', waiting: n => `Тебя ждут: ${n}!`,
@@ -53,6 +56,9 @@ const STRINGS = {
         cooldown: 'Подожди полминуты и попробуй снова.', forgotten: 'Компьютер больше не знает этот телефон. Нажми на него, чтобы спросить заново.',
         expired: 'На компьютере не ответили вовремя.', hintCommand: 'kvist', unreachable: 'Не достучаться до компьютера.', lostSaved: name => `Не достучаться до ${name}. Ищу…`,
         savedMark: 'знакомый', switchComputer: 'Другой компьютер',
+        tabActivity: 'ДЕЙСТВИЯ', tabChanges: 'ПРАВКИ', nothingNeeds: 'Сейчас от тебя ничего не нужно.', otherSessions: 'ДРУГИЕ СЕССИИ',
+        noCalls: 'Вызовов пока нет.', noOutput: 'Вывода нет.', refresh: 'Обновить', openDesk: 'Действия и правки',
+        pickSession: 'Выбери сессию слева или начни новую.',
     },
 };
 

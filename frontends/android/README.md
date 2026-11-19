@@ -56,6 +56,12 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 In an emulator the computer is `10.0.2.2`. `?winter=1` on the connect or `/m/` page shows the winter look in
 any month; `?winter=0` turns it off in the season.
 
+## Tablets
+
+The page the computer serves adapts to the window: from 700 × 560 px it shows the sessions beside the conversation and
+a desk (waiting request, tool call output, changes), from 1000 px all three at once. The connect screen becomes a
+centred column. The same page serves the iPhone/iPad app (`frontends/ios`).
+
 ## Not done yet
 
 Push notification when the agent waits for you (the app is a live window, it does not run in the background),
