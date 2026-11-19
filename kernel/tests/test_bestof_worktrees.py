@@ -90,6 +90,24 @@ def assert_bilingual(message: str) -> None:
 
 # ------------------------------------------------------------------ preflight
 
+def test_git_does_not_inherit_the_cores_stdin_unless_it_is_given_input(repo, monkeypatch):
+    # On Windows a child that shares the pipe another thread is blocked reading waits for that read; the
+    # first `git rev-parse` of a turn then stalled the whole agent. Only a real feed may reach git's stdin.
+    seen = []
+    real_run = subprocess.run
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs)
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(worktrees.subprocess, "run", spy)
+    worktrees._git(repo, "rev-parse", "HEAD")
+    worktrees._git(repo, "hash-object", "--stdin", stdin=b"x\n")
+
+    assert seen[0].get("stdin") is subprocess.DEVNULL and "input" not in seen[0]
+    assert seen[1].get("input") == b"x\n" and "stdin" not in seen[1]
+
+
 def test_preflight_refuses_when_git_is_not_installed(repo, monkeypatch):
     monkeypatch.setattr(worktrees.shutil, "which", lambda name: None)
     with pytest.raises(BestOfRefused) as refused:

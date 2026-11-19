@@ -205,9 +205,13 @@ def _git(
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
     command = ["git", "-c", "core.quotepath=off", "-c", f"core.hooksPath={_no_hooks_dir()}", *args]
+    # Without input git must not inherit this process's stdin: on Windows the core's own thread is blocked
+    # reading that pipe (the frontend's channel), and a child touching the same pipe waits until a line
+    # arrives. A Windows runner sat in the first `git rev-parse` of a turn for the whole 600 s.
+    feed = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
     try:
         done = subprocess.run(
-            command, cwd=cwd, env=_git_environment(env), input=stdin,
+            command, cwd=cwd, env=_git_environment(env), **feed,
             capture_output=True, timeout=GIT_TIMEOUT, check=False,
         )
     except FileNotFoundError as error:
