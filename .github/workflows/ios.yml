@@ -49,6 +49,21 @@ jobs:
           xcodegen generate
           xcodebuild -project Kvist.xcodeproj -scheme Kvist -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build
+      # For sideloading without a Mac: AltStore, SideStore, Sideloadly or Sideloader sign this with the owner's own
+      # Apple ID and install it. Unsigned here on purpose: no certificate is kept in CI.
+      - name: Unsigned .ipa for sideloading
+        working-directory: frontends/ios
+        run: |
+          xcodebuild -project Kvist.xcodeproj -scheme Kvist -configuration Release -sdk iphoneos \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Kvist.app Payload/
+          zip -qry Kvist-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kvist-unsigned-ipa
+          path: frontends/ios/Kvist-unsigned.ipa
+          retention-days: 14
       - name: The bundle holds the connect screen and its assets
         working-directory: frontends/ios
         run: |
