@@ -348,8 +348,8 @@ describe("arrows", () => {
     app.press("down")
     await app.settle(100)
     app.press("tab")
-    await app.settle(100)
-    expect(app.frame()).toContain("Set up a new project here")
+    // Wait for the redraw itself: a fixed 100 ms lost the race on a loaded CI runner.
+    await app.waitFor("Set up a new project here")
     expect(app.frame()).not.toContain("Not sure where to start")
   })
 

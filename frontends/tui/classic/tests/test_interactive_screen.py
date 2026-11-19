@@ -758,7 +758,14 @@ def test_resize_hides_banner_atomically_and_restores_it(
     screen_runtime.output.columns = columns
     screen_runtime.output.rows = rows
     screen_runtime.screen.invalidate()
-    _wait_until(lambda: not any("╭" in line for line in _rendered_lines(screen_runtime)))
+
+    # An unrendered screen reads as blank lines, which has no banner either: wait for a frame that
+    # shows the prompt, or a slow first render satisfied "no banner" before anything was drawn.
+    def prompt_without_banner() -> bool:
+        lines = _rendered_lines(screen_runtime)
+        return any("❯" in line for line in lines) and not any("╭" in line for line in lines)
+
+    _wait_until(prompt_without_banner, timeout=5.0)
 
     narrow_lines = _rendered_lines(screen_runtime)
     assert not any("▀" in line or "╭" in line for line in narrow_lines)
