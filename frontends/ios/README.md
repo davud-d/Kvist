@@ -74,6 +74,13 @@ xcodebuild -scheme Kvist -destination 'generic/platform=iOS Simulator' CODE_SIGN
 On a real device the first search asks for permission to find devices on the local network: allow it.
 In a simulator the computer is the Mac itself (`127.0.0.1` by address).
 
+## Without a Mac
+
+The `Mobile Release` workflow (`.github/workflows/mobile-release.yml`) builds the Android APK and an **unsigned** `.ipa` on
+its own runners and publishes both to the rolling release `latest-mobile-build` (on pushes to `main`).
+Sign and install the `.ipa` with
+AltStore, SideStore, Sideloadly or Sideloader and your own Apple ID (a free one lasts 7 days, 3 apps).
+
 ## Tests
 
 ```bash

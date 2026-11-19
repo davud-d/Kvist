@@ -1,0 +1,152 @@
+name: Mobile Release
+
+# The phone apps as installable files, in a release of their own: the Android APK and the iPhone/iPad .ipa.
+# Each is built on its own runner (Linux for Android, macOS for iOS, which can only be built there).
+# Every relevant push builds both; only a push to main (or a manual run on main) publishes the rolling
+# release `latest-mobile-build`, and only when both built.
+#
+# Neither file is store-ready. The APK is signed with the debug key, which Android accepts for a manual
+# install. The .ipa is unsigned on purpose, no certificate is kept in CI: sideload it with AltStore, SideStore,
+# Sideloadly or Sideloader, which sign it with your own Apple ID (frontends/ios/README.md).
+on:
+  push:
+    paths:
+      - "frontends/android/**"
+      - "frontends/ios/**"
+      - "frontends/web-local/kvist_web/client/mobile/**"
+      - ".github/workflows/mobile-release.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Android SDK platform 36
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: Unit tests and debug APK
+        working-directory: frontends/android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Name the file
+        run: |
+          mkdir out
+          cp frontends/android/app/build/outputs/apk/debug/app-debug.apk out/Kvist-android.apk
+
+      - name: Keep the APK for the release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mobile-android
+          path: out/Kvist-android.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  ios:
+    name: iPhone and iPad .ipa
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: KvistCore tests
+        working-directory: frontends/ios
+        run: swift test
+
+      - name: Build for devices, unsigned
+        working-directory: frontends/ios
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild -project Kvist.xcodeproj -scheme Kvist -configuration Release -sdk iphoneos \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+          app=build/Build/Products/Release-iphoneos/Kvist.app
+          # The connect screen and the assets it shares are copied in by a build phase: a bundle without them is a blank app.
+          test -f "$app/web/connect.html" && test -f "$app/web/connect.js" && test -f "$app/web/mobile/pixel.css"
+          mkdir -p Payload ../../out
+          cp -R "$app" Payload/
+          zip -qry ../../out/Kvist-ios-unsigned.ipa Payload
+
+      - name: Keep the .ipa for the release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mobile-ios
+          path: out/Kvist-ios-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 1
+
+  # Published only when both built: a release that lacks one app would point its readers at a 404.
+  publish:
+    name: Publish the rolling release
+    needs: [android, ios]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download both apps
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: mobile-*
+          path: apps
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd apps
+          sha256sum Kvist-android.apk Kvist-ios-unsigned.ipa | tee SHA256SUMS
+
+      - name: Publish/update rolling release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: latest-mobile-build
+          name: "Phone apps (rolling, from main)"
+          body: |
+            Rebuilt from `${{ github.sha }}` on every change to the phone apps on `main`.
+
+            **Nothing runs on the phone.** The apps show the agent that runs on your computer: start Kvist there, open the app on the same Wi-Fi, tap the computer and allow the phone in the window that appears on the computer.
+
+            | Asset | What it is |
+            | --- | --- |
+            | `Kvist-android.apk` | Android 8+. Signed with the debug key: allow installing from this source and open the file. |
+            | `Kvist-ios-unsigned.ipa` | iPhone and iPad, iOS 16+. **Unsigned**: install it with AltStore, SideStore, Sideloadly or Sideloader, which sign it with your own Apple ID (a free one lasts 7 days). |
+            | `SHA256SUMS` | Checksums of both files. |
+
+            On an iPad the page shows three panes (sessions, conversation, desk); on a phone, one screen. Details: [frontends/ios](https://github.com/${{ github.repository }}/blob/main/frontends/ios/README.md), [frontends/android](https://github.com/${{ github.repository }}/blob/main/frontends/android/README.md).
+          make_latest: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
+            apps/Kvist-android.apk
+            apps/Kvist-ios-unsigned.ipa
+            apps/SHA256SUMS

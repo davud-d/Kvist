@@ -75,6 +75,12 @@ xcodebuild -scheme Kvist -destination 'generic/platform=iOS Simulator' CODE_SIGN
 На настоящем устройстве первый поиск спросит разрешение искать устройства в локальной сети: разреши.
 В симуляторе компьютер — сам Mac (по адресу `127.0.0.1`).
 
+## Без Mac
+
+Воркфлоу `Mobile Release` (`.github/workflows/mobile-release.yml`) собирает Android APK и **неподписанный** `.ipa` на
+своих раннерах и публикует оба файла в плавающий релиз `latest-mobile-build` (при пуше в `main`). Подпиши и установи
+`.ipa` через AltStore, SideStore, Sideloadly или Sideloader со своим Apple ID (бесплатный живёт 7 дней, до 3 приложений).
+
 ## Тесты
 
 ```bash
