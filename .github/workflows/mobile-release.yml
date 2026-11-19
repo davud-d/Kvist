@@ -1,7 +1,8 @@
 name: Mobile Release
 
 # The phone apps as installable files, in a release of their own: the Android APK and the iPhone/iPad .ipa.
-# Each is built on its own runner (Linux for Android, macOS for iOS, which can only be built there).
+# Each is built on its own runner (Linux for Android, macOS for iOS, which can only be built there). The Swift
+# core is also tested on Linux. This one workflow is the whole iOS and Android CI.
 # Every relevant push builds both; only a push to main (or a manual run on main) publishes the rolling
 # release `latest-mobile-build`, and only when both built.
 #
@@ -25,6 +26,22 @@ permissions:
   contents: read
 
 jobs:
+  # The Swift core is plain Foundation and BSD sockets: a Linux runner checks it in a minute, before a macOS one is needed.
+  core-linux:
+    name: KvistCore tests (Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    container: swift:6.0-jammy
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: swift test
+        working-directory: frontends/ios
+        run: swift test
+
   android:
     name: Android APK
     runs-on: ubuntu-22.04
@@ -106,7 +123,7 @@ jobs:
   # Published only when both built: a release that lacks one app would point its readers at a 404.
   publish:
     name: Publish the rolling release
-    needs: [android, ios]
+    needs: [core-linux, android, ios]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 15

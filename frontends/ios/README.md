@@ -98,7 +98,7 @@ sockets and `URLSession` (`SWIFT_IN_PODMAN=<image>` runs the Swift side in a con
 - **Not yet run on a device or simulator.** `App/` was written without Xcode at hand: the WebKit and Keychain code
   has not been compiled, and these assumptions need a real run: ES modules from the `kvist-assets` scheme,
   Basic-auth challenges of the computer's page reaching `didReceive challenge` for sub-resources and the event
-  stream, and the local-network permission prompt. CI (`.github/workflows/ios.yml`) builds it on macOS.
+  stream, and the local-network permission prompt. CI (`.github/workflows/mobile-release.yml`) builds it on macOS.
 - Push notification when the agent waits for you (the app is a live window, it does not run in the background),
   several trusted computers at once, TLS, an App Store build and signing, Bonjour discovery.
 - The device's name sent to the computer's question is the model (`iPad`, `iPhone`): iOS 16+ hides the name
