@@ -1,0 +1,56 @@
+name: iOS
+
+# The iPhone/iPad app (frontends/ios). Runs only when something it is made of changes, or on demand: a macOS
+# minute counts ten times a Linux minute on a private repository. The Linux job runs the Swift package's tests
+# (the same code as the app's core, real UDP sockets included); the macOS job builds the app itself, which is the
+# only place its UIKit/WebKit code is compiled.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "frontends/ios/**"
+      - "frontends/android/app/src/main/assets/connect.*"
+      - "frontends/web-local/kvist_web/client/mobile/**"
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-linux:
+    name: KvistCore tests (Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    container: swift:6.0-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: frontends/ios
+        run: swift test
+
+  app-macos:
+    name: App build and KvistCore tests (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: swift test
+        working-directory: frontends/ios
+        run: swift test
+      - name: Build the app for the simulator
+        working-directory: frontends/ios
+        run: |
+          xcodegen generate
+          xcodebuild -project Kvist.xcodeproj -scheme Kvist -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
+      - name: The bundle holds the connect screen and its assets
+        working-directory: frontends/ios
+        run: |
+          app="$(find ~/Library/Developer/Xcode/DerivedData -name 'Kvist.app' -path '*Debug-iphonesimulator*' | head -1)"
+          test -f "$app/web/connect.html" && test -f "$app/web/connect.js" && test -f "$app/web/mobile/pixel.css" && test -f "$app/web/mobile/tablet.css"

@@ -1,0 +1,54 @@
+# Generated into Kvist.xcodeproj by XcodeGen (`brew install xcodegen && xcodegen generate`); the project file is
+# not kept in git, so there is one place that says what the app is. See README.md.
+name: Kvist
+options:
+  bundleIdPrefix: site.kvist
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  KvistCore:
+    path: .
+targets:
+  Kvist:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: KvistCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: site.kvist.ios
+        PRODUCT_NAME: Kvist
+        # iPhone and iPad: one app, the page it shows adapts to the window (see the README).
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Kvist
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, ru]
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # The computer is on the local network and speaks plain HTTP there; this opens exactly that and nothing else.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    postBuildScripts:
+      - name: Copy web assets
+        script: '"$SRCROOT/scripts/copy-web-assets.sh"'
+        basedOnDependencyAnalysis: false
