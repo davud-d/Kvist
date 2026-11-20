@@ -216,14 +216,32 @@ def other_thinking_style(model: str, tried: str | None = None) -> str:
     return THINKING_LEGACY if tried == THINKING_ADAPTIVE else THINKING_ADAPTIVE
 
 
-def _custom_protocol(provider: str) -> str:
+def _custom_provider_info(provider: str) -> dict[str, Any]:
     if not is_custom_provider(provider):
-        return ""
+        return {}
     from kernel.llm.llm_clients import extract_custom_provider_name
     from kernel.config.user_config import get_custom_provider_by_name
 
-    info = get_custom_provider_by_name(extract_custom_provider_name(provider))
-    return str((info or {}).get("protocol", "openai")).strip().casefold()
+    return get_custom_provider_by_name(extract_custom_provider_name(provider)) or {}
+
+
+def _custom_protocol(provider: str) -> str:
+    if not is_custom_provider(provider):
+        return ""
+    info = _custom_provider_info(provider)
+    return str(info.get("protocol", "openai")).strip().casefold()
+
+
+# Ollama's OpenAI endpoint keeps thinking on for "minimal" (it has no such
+# level) and turns it off only for "none". Its default port or name in the URL
+# is how a custom provider is recognized as Ollama.
+_OLLAMA_URL_RE = re.compile(r"ollama|:11434(?!\d)", re.IGNORECASE)
+
+
+def is_ollama_provider(provider: str) -> bool:
+    """Whether a custom provider points at an Ollama server."""
+    base_url = str(_custom_provider_info(provider).get("base_url", ""))
+    return bool(_OLLAMA_URL_RE.search(base_url))
 
 
 def uses_anthropic_protocol(provider: str) -> bool:
@@ -293,6 +311,9 @@ def reasoning_request_kwargs(provider: str, level: str) -> dict[str, Any]:
             "reasoning_effort": _DEEPSEEK_SCALE[normalized_level],
             "extra_body": {"thinking": {"type": "enabled"}},
         }
+
+    if normalized_level == "false" and is_ollama_provider(normalized_provider):
+        return {"reasoning_effort": "none"}
 
     # openai, omniroute, and custom OpenAI-protocol providers.
     if normalized_provider in (OPENAI_PROVIDER, OMNIROUTE_PROVIDER) or is_custom_provider(
@@ -437,6 +458,9 @@ def effort_advisory(provider: str, level: str) -> str | None:
         if mapped != normalized_level:
             return f"Kimi Code: '{normalized_level}' is sent as '{mapped}'."
         return None
+
+    if normalized_level == "false" and is_ollama_provider(normalized_provider):
+        return "Ollama: 'false' is sent as 'none' and turns thinking off."
 
     if is_custom_provider(normalized_provider):
         return (

@@ -604,3 +604,23 @@ def test_history_signature_error_is_not_answered_by_dropping_effort(agent_factor
     # Every attempt kept its effort and the other thinking form was never tried.
     assert agent.client.requests
     assert all("reasoning_effort" in r and "thinking_style" not in r for r in agent.client.requests)
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("http://localhost:11434/v1", "none"),
+        ("https://ollama.example/v1", "none"),
+        ("https://api.example.com/v1", "minimal"),
+    ],
+)
+def test_false_turns_thinking_off_on_ollama(monkeypatch, base_url, expected):
+    from kernel.config import user_config
+
+    monkeypatch.setattr(
+        user_config,
+        "get_custom_provider_by_name",
+        lambda name: {"base_url": base_url, "protocol": "openai"},
+    )
+    assert reasoning_request_kwargs("custom:local", "false") == {"reasoning_effort": expected}
+    assert reasoning_request_kwargs("custom:local", "low") == {"reasoning_effort": "low"}
