@@ -60,6 +60,7 @@ pub struct Strings {
     pub core_gone: &'static str,
     pub core_log: &'static str,
     pub core_busy: &'static str,
+    pub plugin_skipped: &'static str,
     pub help_title: &'static str,
     /// `/copy` before the agent has said anything.
     pub no_answer: &'static str,
@@ -207,6 +208,7 @@ pub const RU: Strings = Strings {
     core_gone: "Ядро остановилось",
     core_log: "журнал",
     core_busy: "Ядро сейчас занято, повтори, когда оно закончит",
+    plugin_skipped: "Плагин пропущен",
     help_title: "Команды",
     no_answer: "Пока нечего копировать",
     no_core: "Ядро не подключено",
@@ -353,6 +355,7 @@ pub const EN: Strings = Strings {
     core_gone: "The core stopped",
     core_log: "log",
     core_busy: "The core is busy; try again when it finishes",
+    plugin_skipped: "Plugin skipped",
     help_title: "Commands",
     no_answer: "Nothing to copy yet",
     no_core: "The core is not connected",

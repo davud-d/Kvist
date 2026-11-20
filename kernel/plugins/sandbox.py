@@ -26,7 +26,7 @@ from kernel.sandbox.sandbox import RUNTIME_MOUNT_ROOTS, _trusted_system_binary, 
 RUNNER_DIR = Path(__file__).resolve().parent / "runner"
 SYSTEM_PYTHON = Path("/usr/bin/python3")
 SANDBOX_ROOT = "/kvist"
-_ETC_FILES = ("/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/localtime")
+ETC_FILES = ("/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/localtime")
 _DISPLAY_ETC = ("/etc/fonts",)
 _TLS_ETC = ("/etc/ssl", "/etc/ca-certificates", "/etc/pki")
 
@@ -123,7 +123,7 @@ def build_runner_argv(spec: RunnerSpec) -> list[str]:
     for root in RUNTIME_MOUNT_ROOTS:
         if Path(root).exists():
             argv += ["--ro-bind", root, root]
-    for path in _ETC_FILES:
+    for path in ETC_FILES:
         if Path(path).exists():
             argv += ["--ro-bind", str(Path(path).resolve()), path]
     argv += [

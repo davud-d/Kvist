@@ -2,7 +2,7 @@ import { Box, Static, Text, useApp, useInput } from "ink"
 import { writeFileSync } from "node:fs"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
-import { CLASSIC_COMMAND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs, setConnectedServices, suggest } from "../commands.js"
+import { CLASSIC_COMMAND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs, setConnectedServices, setPluginCommands, suggest } from "../commands.js"
 import { copyToClipboard } from "../clipboard.js"
 import { restoreWindowTitle, setWindowTitle } from "../window-title.js"
 import { KvistCore, type CoreCommand } from "../core.js"
@@ -132,6 +132,8 @@ export function App(props: AppProps) {
       if (event.type === "manifest") {
         const visible = new Set(event.slash_commands.map((command) => command.name))
         setConnectedServices(["gmail", "telegram"].filter((name) => !visible.has(name)))
+        setPluginCommands(event.plugin_commands ?? [])
+        for (const problem of event.plugin_problems ?? []) note(`Plugin skipped: ${problem}`, "warn")
       }
       if (event.type === "command_result" && event.ok && Array.isArray(event.effects?.connected_services)) {
         setConnectedServices(event.effects.connected_services as string[])

@@ -6,7 +6,7 @@ import { writeFileSync } from "node:fs"
 
 import { batch, createContext, createSignal, onCleanup, onMount, useContext, type Accessor, type ParentProps } from "solid-js"
 
-import { parseSlash, routeOf, sessionArgs } from "../../ink/commands.js"
+import { parseSlash, routeOf, sessionArgs, setPluginCommands } from "../../ink/commands.js"
 import { KvistCore, type CoreCommand, type CoreOptions } from "../../ink/core.js"
 import { englishOnly } from "../../ink/format.js"
 import { relaunchOf } from "../../ink/remote.js"
@@ -21,6 +21,9 @@ export interface Manifest {
   styles: { value: string; description: string }[]
   // `via: "core"`: the running core carries it out; absent: only Classic Legacy has it, so it is not offered (UI_API.md, manifest).
   slash_commands: { name: string; description: string; aliases?: string[]; via?: "core" }[]
+  // Plain plugins (docs/PLUGINS.md), sent as an ordinary request the core expands.
+  plugin_commands?: { name: string; description: string }[]
+  plugin_problems?: string[]
 }
 
 export interface CommandResult {
@@ -109,7 +112,12 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
 
   const apply = (event: CoreEvent) => {
     const type = (event as { type: string }).type
-    if (type === "manifest") return setManifest(event as unknown as Manifest)
+    if (type === "manifest") {
+      const manifest = event as unknown as Manifest
+      setPluginCommands(manifest.plugin_commands ?? [])
+      for (const problem of manifest.plugin_problems ?? []) note(`Plugin skipped: ${problem}`, "warn")
+      return setManifest(manifest)
+    }
     dispatch({ type: "event", event })
     if (event.type === "hello" && options.core.resume !== undefined) dispatch({ type: "resume_start" })
     if (event.type === "command_result") settle(event)
@@ -179,10 +187,22 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
       case "turn":
       case "core":
         return runQuietly(name, name === "session" ? sessionArgs(args) : name === "new" ? args.slice(0, 1) : args)
+      case "goal":
+        // The core expands `/name request` itself (a prompt command or a plugin), so the line goes as it was typed.
+        return goal(text.trim())
       case "classic":
         return note(CLASSIC_NOTE, "warn")
       default:
         return note(`Unknown command /${name}.`, "warn")
+    }
+  }
+
+  const goal = (text: string) => {
+    try {
+      core.send(text)
+      dispatch({ type: "submit", text, request: text })
+    } catch (error) {
+      note(error instanceof Error ? error.message : String(error), "error")
     }
   }
 
@@ -192,12 +212,7 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
     setHistory((old) => [...old, text])
     void addInputHistory(options.command, options.core.workspace, text)
     if (text.startsWith("/")) return slash(text)
-    try {
-      core.send(text)
-      dispatch({ type: "submit", text, request: text })
-    } catch (error) {
-      note(error instanceof Error ? error.message : String(error), "error")
-    }
+    goal(text)
   }
 
   const answer = (request: InputRequest, value: boolean | string | null, remember = false) => {

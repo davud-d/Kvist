@@ -47,6 +47,7 @@ from kernel.llm.llm_clients import (
     required_secret_keys_for_provider,
     resolve_models_for_provider,
 )
+from kernel.plugins.plain_plugins import plugin_folders
 from kernel.llm.reasoning_effort import is_reasoning_error, merge_reasoning_kwargs, strip_reasoning_kwargs
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_value
 from kernel.config.user_config import (
@@ -72,11 +73,14 @@ MAX_RAW_FIELD_CHARS = 200_000
 # The reply that means "nothing sensible continues here". A bare empty message is
 # not usable: models narrate instead ("I'm returning an empty continuation").
 NO_COMPLETION = "NO_COMPLETION"
+# The plain-plugin API, given to the model for a plugin file so it completes against the real API.
+PLUGIN_API_FILE = Path(__file__).resolve().parents[1] / "prompts" / "plugin_api.md"
 # DeepSeek's tool-call markup (``</｜DSML｜parameter>``) and chat-template tokens
 # leak into the content when the model tries to call a tool it was not given.
 # Plain ``<|`` is not matched: Haskell and Elixir use it as an operator.
+# A model also closes the cursor it was shown with a made-up ``</cursor>`` tag.
 _TOOL_MARKUP_RE = re.compile(
-    r"</?｜|<\|(?:DSML|tool_call|im_start|im_end)|</?(?:UNTRUSTED_TOOL_OUTPUT|PROJECT_INSTRUCTIONS)"
+    r"</?｜|<\|(?:DSML|tool_call|im_start|im_end)|</?(?:UNTRUSTED_TOOL_OUTPUT|PROJECT_INSTRUCTIONS)|</?cursor>"
 )
 # The tail of a possible tool-markup tag that has not fully arrived yet.
 _PARTIAL_TAG_RE = re.compile(r"<[/|｜\w]{0,12}$")
@@ -293,7 +297,30 @@ def cursor_line(prefix: str, suffix: str) -> str:
     return f"{typed}{CURSOR_MARK}{rest}"
 
 
-def build_user_prompt(request: CompletionRequest, resolved_imports: list[ResolvedImport]) -> str:
+def is_plain_plugin(request: CompletionRequest, target_file: Path, workspace: Path, raw_imports: list[str]) -> bool:
+    """A file the plain-plugin API applies to: Python inside a plugin's folder, or one that imports ``kvist``."""
+    if request.language != "python":
+        return False
+    if any(_inside_a_plugin(target_file, root) for root in plugin_folders(workspace)):
+        return True
+    return any(re.match(r"(import|from)\s+kvist\b", line) for line in raw_imports)
+
+
+def _inside_a_plugin(target_file: Path, root: Path) -> bool:
+    """``<root>/<plugin>/...``: a plugin's folder, never a file lying loose in ``root``."""
+    try:
+        return len(target_file.resolve().relative_to(root.resolve()).parts) >= 2
+    except ValueError:
+        return False
+
+
+def plugin_api_reference() -> str:
+    return PLUGIN_API_FILE.read_text(encoding="utf-8").strip()
+
+
+def build_user_prompt(
+    request: CompletionRequest, resolved_imports: list[ResolvedImport], plugin_api: bool = False
+) -> str:
     prefix = request.prefix[-MAX_PREFIX_CHARS:]
     suffix = request.suffix[:MAX_SUFFIX_CHARS]
     sections = [
@@ -301,6 +328,8 @@ def build_user_prompt(request: CompletionRequest, resolved_imports: list[Resolve
         f"File: {request.file_path}",
         f"Cursor: {cursor_facts(prefix, suffix, request.language)}",
     ]
+    if plugin_api:
+        sections.append(f"Kvist plugin API:\n{plugin_api_reference()}")
     imports_block = _render_imports_block(resolved_imports)
     if imports_block:
         sections.append(imports_block)
@@ -710,9 +739,10 @@ def prepare_completion(request: CompletionRequest, workspace: Path) -> list[dict
     target_file = _resolve_target_file(workspace, request.file_path)
     raw_imports = extract_raw_imports(request.prefix[:IMPORT_SCAN_CHARS], request.language)
     resolved_imports = resolve_project_imports(workspace, target_file, raw_imports, request.language)
+    plugin_api = is_plain_plugin(request, target_file, workspace, raw_imports)
     return [
         {"role": "system", "content": _system_prompt(request)},
-        {"role": "user", "content": build_user_prompt(request, resolved_imports)},
+        {"role": "user", "content": build_user_prompt(request, resolved_imports, plugin_api)},
     ]
 
 

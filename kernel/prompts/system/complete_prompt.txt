@@ -20,6 +20,7 @@ Reply with ONLY the literal text to insert at the cursor. No JSON, no markdown f
 - `Language` and `File`: the file being edited.
 - `<UNTRUSTED_TOOL_OUTPUT source="cursor_line">`: the cursor's own line with the ⟦cursor⟧ mark where your reply will be inserted.
 - `Cursor`: facts about the cursor's line (what is already typed before it, the indentation of the line above, how the file indents).
+- `Kvist plugin API` (optional): present when the file is a Kvist plugin. It is the complete, authoritative API of such a file and of the `kvist` module; call only what it lists, with the arguments it states, and follow its rules (for example, `command()` only returns a literal string). Never invent other `kvist` functions.
 - `<UNTRUSTED_TOOL_OUTPUT source="project_imports">` (optional): for imports in this file that resolve to OTHER files inside this same project (never third-party libraries or stdlib), the public top-level signatures of that file — not its full body. Use these to call project functions/classes with the right name, arguments and return type instead of guessing. Absence of a module here means either the file has no such imports, or the import is a third-party/stdlib package you should already know from training — do not treat that absence as "the module has no functions."
 - `<UNTRUSTED_TOOL_OUTPUT source="prefix">`: the file's content before the cursor (may be truncated at the top).
 - `<UNTRUSTED_TOOL_OUTPUT source="suffix">`: the file's content after the cursor (may be truncated at the bottom).

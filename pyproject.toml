@@ -71,6 +71,7 @@ packages = [
     "kernel.themes",
     "kernel.plugins",
     "kernel.plugins.runner",
+    "kernel.plugins.plain",
     "kernel.skills_bundled.browser",
     "kernel.skills_bundled.app_screen",
     "kernel.skills_bundled.app_screen.icons.kvist",
@@ -189,6 +190,7 @@ kvist_web = [
     "client/mobile/sprites/squirrel-winter-2.png",
     "client/mobile/sprites/squirrel-winter-3.png",
 ]
+"kernel.prompts" = ["plugin_api.md"]
 "kernel.prompts.system" = ["*.txt"]
 "kernel.prompts.bestof" = ["*.txt"]
 "kernel.prompts.styles" = ["*.txt"]

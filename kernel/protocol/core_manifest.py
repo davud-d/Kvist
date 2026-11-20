@@ -47,6 +47,7 @@ def build_manifest(
         "default_models": _default_models(),
         "action_types": _action_types(),
         "slash_commands": _slash_commands(frozenset(commands)),
+        **_plugin_commands(workspace),
         "api_settings": _api_settings(),
         "styles": _styles(),
         "themes": _themes(workspace, include_full=include_themes),
@@ -141,6 +142,23 @@ def _slash_commands(served: frozenset[str]) -> list[dict[str, Any]]:
             entry["via"] = "core"
         result.append(entry)
     return result
+
+
+def _plugin_commands(workspace: str | None) -> dict[str, list[Any]]:
+    """The plain plugins of the global and the project ``plugins`` folders (docs/PLUGINS.md).
+
+    A frontend offers each next to its own commands and sends it as an ordinary request, which the core expands;
+    ``plugin_problems`` are the files that declare no usable command, shown so their author learns why.
+    """
+    if workspace is None:
+        return {"plugin_commands": [], "plugin_problems": []}
+    from pathlib import Path
+
+    from kernel.plugins.plain_plugins import discover
+
+    found = discover(Path(workspace))
+    commands = [{"name": c.name, "description": c.description, "path": str(c.path)} for c in found.commands.values()]
+    return {"plugin_commands": commands, "plugin_problems": found.problems}
 
 
 def _api_settings() -> list[dict[str, Any]]:

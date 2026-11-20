@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 from rich.console import Console
@@ -120,6 +121,7 @@ from kernel.sandbox.executor import SafeExecutor
 from kernel.agent.helpers import HelperManager
 from kernel.agent.image_generation import ImageJobs
 from kernel.agent.prompt_commands import expand_prompt_command
+from kernel.plugins.plain_plugins import PluginError, expand as expand_plugin_command, typed_command as typed_plugin_command
 from kernel.agent.scheduler import Scheduler
 from kernel.plugins.skills import SkillManager
 from kernel.plugins.resources import Owner, ResourceManager
@@ -836,11 +838,19 @@ class LocalAgent:
             self.helpers.person_wrote()
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
         typed_goal = user_goal
+        plugin = typed_plugin_command(user_goal, Path(self.executor.workspace))
         user_goal, language_text = expand_prompt_command(user_goal)
         note_pending(self, typed_goal)
         self._journal.begin_turn(f"{typed_goal} {labels}".strip())
         self._announce_turn_started()
         try:
+            if plugin is not None:
+                command, language_text = plugin
+                try:
+                    user_goal = expand_plugin_command(self, command, language_text)
+                except PluginError as error:
+                    self._ui.print_final(str(error), [], outcome="incomplete")
+                    return str(error)
             if active_task:
                 return self._resume_turn(user_goal, attachments)
             return self._run_turn(user_goal, routed_role, attachments, language_text=language_text)

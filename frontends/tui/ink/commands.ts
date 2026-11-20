@@ -84,8 +84,22 @@ export const FRONTEND_REQUEST_ID = "local:frontend"
 
 export const CLASSIC_COMMAND = "python -m kernel --frontend terminal"
 
+// Plain plugins (docs/PLUGINS.md): the core lists them in its manifest; each is a "goal" the core expands.
+let pluginCommands: SlashCommand[] = []
+
+export function setPluginCommands(plugins: readonly { name: string; description: string }[]): void {
+  const builtIn = new Set(ALL_COMMANDS.map((command) => command.name))
+  pluginCommands = plugins
+    .filter((plugin) => !builtIn.has(plugin.name))
+    .map((plugin) => ({ name: plugin.name, route: "goal", hint: plugin.description || "Plugin" }))
+}
+
+export function offeredCommands(): readonly SlashCommand[] {
+  return pluginCommands.length ? [...ALL_COMMANDS, ...pluginCommands] : ALL_COMMANDS
+}
+
 export function routeOf(name: string): Route | null {
-  return ALL_COMMANDS.find((command) => command.name === name)?.route ?? null
+  return offeredCommands().find((command) => command.name === name)?.route ?? null
 }
 
 // The core takes `switch|new|delete [NAME]`; a bare name means switch.
@@ -101,7 +115,7 @@ export function setConnectedServices(names: readonly string[]): void {
   connectedServices = new Set(names)
 }
 
-export function suggest(text: string, commands: readonly SlashCommand[] = ALL_COMMANDS): SlashCommand[] {
+export function suggest(text: string, commands: readonly SlashCommand[] = offeredCommands()): SlashCommand[] {
   if (!text.startsWith("/") || text.includes(" ")) return []
   const prefix = text.slice(1).toLowerCase()
   return commands.filter((command) => !connectedServices.has(command.name) && command.name.startsWith(prefix))
@@ -153,7 +167,7 @@ export function visibleBoxRows(rows: number): number {
 export type EnterAction = { kind: "submit"; text: string } | { kind: "fill"; text: string }
 
 // What Enter does for the text in the box while the suggestion list is open.
-export function resolveEnter(text: string, selected: number, commands: readonly SlashCommand[] = ALL_COMMANDS): EnterAction {
+export function resolveEnter(text: string, selected: number, commands: readonly SlashCommand[] = offeredCommands()): EnterAction {
   const command = suggest(text, commands)[selected]
   if (!command) return { kind: "submit", text }
   if (command.needsArgument) return { kind: "fill", text: `/${command.name} ` }

@@ -17,6 +17,8 @@ def test_build_manifest_keys():
         "default_models",
         "action_types",
         "slash_commands",
+        "plugin_commands",
+        "plugin_problems",
         "api_settings",
         "styles",
         "themes",

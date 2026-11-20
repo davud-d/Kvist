@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 // The slash commands offered while the input starts with `/`. The behaviour
 // is the Ink app's (frontends/tui/ink/commands.ts `suggest` / `resolveEnter`):
 // the list narrows to the names that start with what was typed, the arrows
@@ -73,7 +75,7 @@ pub const COMMANDS: [Command; 38] = [
 /// What `/help` prints: every command and what it does, as Markdown.
 pub fn help_text() -> String {
     let russian = crate::strings::russian();
-    let rows: Vec<String> = COMMANDS.iter().map(|command| format!("- `/{}` — {}", command.name, command.hint(russian))).collect();
+    let rows: Vec<String> = offered().into_iter().map(|command| format!("- `/{}` — {}", command.name, command.hint(russian))).collect();
     format!("**{}**\n\n{}", crate::strings::strings().help_title, rows.join("\n"))
 }
 
@@ -91,11 +93,41 @@ pub fn suggest(text: &str) -> Vec<&'static Command> {
         return Vec::new();
     }
     let prefix = prefix.to_lowercase();
-    COMMANDS.iter().filter(|command| command.name.starts_with(&prefix)).collect()
+    offered().into_iter().filter(|command| command.name.starts_with(&prefix)).collect()
+}
+
+// The plain plugins (docs/PLUGINS.md) the core listed in its last manifest.
+static PLUGINS: Mutex<Vec<&'static Command>> = Mutex::new(Vec::new());
+
+/// Replace the plugin commands with the manifest's `plugin_commands` (name, description).
+pub fn set_plugins(plugins: &[(String, String)]) {
+    *PLUGINS.lock().unwrap() = plugin_commands(plugins);
+}
+
+/// True for a typed name the core expands itself, so the line travels as an ordinary request.
+pub fn is_goal(name: &str) -> bool {
+    name == "website" || PLUGINS.lock().unwrap().iter().any(|command| command.name == name)
+}
+
+// The strings live as long as the program: a manifest arrives a few times per run with a handful of names.
+fn plugin_commands(plugins: &[(String, String)]) -> Vec<&'static Command> {
+    plugins
+        .iter()
+        .filter(|(name, _)| !COMMANDS.iter().any(|command| command.name == name))
+        .map(|(name, description)| {
+            let hint: &'static str = Box::leak(if description.is_empty() { "Plugin".into() } else { description.clone().into_boxed_str() });
+            let name: &'static str = Box::leak(name.clone().into_boxed_str());
+            &*Box::leak(Box::new(command(name, hint, hint)))
+        })
+        .collect()
+}
+
+fn offered() -> Vec<&'static Command> {
+    COMMANDS.iter().chain(PLUGINS.lock().unwrap().iter().copied()).collect()
 }
 
 pub fn name_width() -> usize {
-    COMMANDS.iter().map(|command| command.name.len()).max().unwrap_or(0)
+    offered().into_iter().map(|command| command.name.len()).max().unwrap_or(0)
 }
 
 #[derive(Debug, PartialEq)]
@@ -193,6 +225,13 @@ mod tests {
         assert_eq!(canonical("Bye"), "quit");
         assert_eq!(canonical("exit"), "quit");
         assert_eq!(canonical("New"), "new");
+    }
+
+    #[test]
+    fn a_plugin_is_offered_unless_it_takes_a_built_in_name() {
+        let plugins = plugin_commands(&[("novibecode".into(), "Teach".into()), ("new".into(), String::new()), ("x".into(), String::new())]);
+        let shown: Vec<(&str, &str)> = plugins.iter().map(|command| (command.name, command.en)).collect();
+        assert_eq!(shown, [("novibecode", "Teach"), ("x", "Plugin")]);
     }
 
     #[test]

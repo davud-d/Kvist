@@ -79,13 +79,13 @@ def _stream_events(session: EventSession, out_stream) -> None:
         out_stream.flush()
 
 
-def _write_manifest(out_stream, commands: list[str] | None = None) -> None:
+def _write_manifest(out_stream, commands: list[str] | None = None, workspace: str | None = None) -> None:
     """The catalogue of roles, providers, effort levels, commands and so on, sent once after ``hello`` so
     frontends fill their pickers and their slash list from the core instead of keeping their own lists."""
     from kernel.protocol.core_manifest import build_manifest
     from kernel.protocol.frontend_protocol import ManifestEvent
 
-    out_stream.write(json.dumps(ManifestEvent(manifest=build_manifest(commands=commands or ())).to_dict()) + "\n")
+    out_stream.write(json.dumps(ManifestEvent(manifest=build_manifest(workspace=workspace, commands=commands or ())).to_dict()) + "\n")
     out_stream.flush()
 
 
@@ -104,7 +104,7 @@ def pump(
     """
     out_stream.write(json.dumps((hello_event or HelloEvent()).to_dict()) + "\n")
     out_stream.flush()
-    _write_manifest(out_stream)
+    _write_manifest(out_stream, workspace=_workspace_of(session.agent))
 
     reader = threading.Thread(
         target=_read_responses,
@@ -444,7 +444,7 @@ def _run_command(
         out_stream,
     )
     if result.ok and "connected_services" in result.effects:
-        _write_manifest(out_stream, commands=sorted(handlers))
+        _write_manifest(out_stream, commands=sorted(handlers), workspace=_workspace_of(session.agent))
 
 
 def _run_turn_command(session: EventSession, command: _Command, out_stream) -> None:
@@ -634,7 +634,7 @@ def serve_session_multi(
     )
     out_stream.write(json.dumps(hello.to_dict()) + "\n")
     out_stream.flush()
-    _write_manifest(out_stream, served)
+    _write_manifest(out_stream, served, workspace=_workspace_of(session.agent))
 
     goal_queue: queue.Queue = queue.Queue()
     if resume:

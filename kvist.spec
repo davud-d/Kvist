@@ -141,6 +141,7 @@ a = Analysis(
         ('kernel/themes', 'kernel/themes'),
         # Mounted into skill sandboxes as files, run by the system python3.
         ('kernel/plugins/runner', 'kernel/plugins/runner'),
+        ('kernel/plugins/plain', 'kernel/plugins/plain'),
         ('kernel/plugins/telegram_service.py', 'kernel/plugins'),
         ('kernel/plugins/service_browser.py', 'kernel/plugins'),
         ('kernel/skills_bundled', 'kernel/skills_bundled'),

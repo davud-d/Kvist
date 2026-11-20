@@ -19,7 +19,7 @@ back, and repeats until done. Several frontends drive the same Python core.
   `kernel/session/native.py` hands requests to it, Python serves them when it is missing).
 - `frontends/` — `tui/{classic,ink,opencode,glass}`, `gui/{electron,tauri}`, `ide/{vscode,jetbrains}`, `android` and `ios` (iPhone/iPad; phone windows onto a computer's `kvist-web --lan`, one `/m/` page that turns into a three-pane tablet layout), `zed`,
   `voice`, `kvide`, `tray`. Ink's TS modules are also imported by VS Code and OpenCode: check both sides.
-- `scripts/` (installers, e2e smokes), `docs/` (`UI_API.md` = frontend protocol, `SKILLS.md`, `remote.md`),
+- `scripts/` (installers, e2e smokes), `docs/` (`UI_API.md` = frontend protocol, `SKILLS.md`, `PLUGINS.md` = one-file plugins, `remote.md`),
   `branding/`, `site/`.
 - Imports are `kernel.<subpackage>.<module>`; the classic terminal and Zed frontend are imported by bare name
   (`kernel/__init__.py` and `pytest.ini` add them to `sys.path`).

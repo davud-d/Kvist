@@ -167,5 +167,8 @@ export function createCommands(deps: CommandDeps): KeymapCommand[] {
       const aliases = [...(command.aliases ?? []), ...(HABITS[command.name] ?? [])].filter((alias) => !typed.has(alias))
       return named({ id: `kvist.${command.name}`, title: command.description, group: "Kvist", slash: { name: command.name, aliases }, run: (input) => core(command.name, words(input)) })
     })
-  return [...own, ...rest]
+  const plugins = (kvist.manifest()?.plugin_commands ?? [])
+    .filter((plugin) => !typed.has(plugin.name))
+    .map((plugin) => named({ id: `plugin.${plugin.name}`, title: plugin.description || `Plugin /${plugin.name}`, group: "Plugins", slash: { name: plugin.name }, run: (input) => kvist.slash(`/${plugin.name} ${input ?? ""}`.trim()) }))
+  return [...own, ...rest, ...plugins]
 }
