@@ -11,6 +11,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.parse import parse_qs, urlencode
@@ -177,8 +178,13 @@ def _telegram(root: Path) -> dict:
 
 def _telegram_login(command: list[str]) -> None:
     """Relay helper prompts through the frontend, never through the agent or stdout protocol."""
-    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                               text=True, encoding="utf-8")
+    with tempfile.TemporaryFile("w+", encoding="utf-8") as errors:
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
+                                   text=True, encoding="utf-8")
+        _relay_login(process, errors)
+
+
+def _relay_login(process: subprocess.Popen, errors) -> None:
     try:
         for line in process.stdout:
             event = json.loads(line)
@@ -189,7 +195,11 @@ def _telegram_login(command: list[str]) -> None:
             elif event.get("type") == "browser":
                 _launch(event["url"])
         if process.wait(timeout=10):
-            raise RuntimeError("Telegram login failed or expired. Use /telegram to retry.")
+            # The helper's last stderr line says why (invalid number, flood wait, ...); without it
+            # a failed code request looked like a code that simply never arrived.
+            errors.seek(0)
+            lines = errors.read().strip().splitlines()
+            raise RuntimeError(lines[-1] if lines else "Telegram login failed or expired. Use /telegram to retry.")
     finally:
         if process.poll() is None:
             process.terminate()

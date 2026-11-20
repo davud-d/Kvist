@@ -267,14 +267,30 @@ def test_helper_secrets_are_relayed_only_to_child_stdin(monkeypatch):
     assert writes == ['"private"\n']
 
 
+def test_helper_failure_reason_reaches_the_person(monkeypatch):
+    def popen(*_a, stderr, **_kw):
+        stderr.write("Telegram PhoneNumberInvalidError (The phone number is invalid): connection failed\n")
+        return SimpleNamespace(stdout=io.StringIO(), stdin=io.StringIO(), wait=lambda timeout: 1, poll=lambda: 1)
+    monkeypatch.setattr(connect.subprocess, "Popen", popen)
+    with pytest.raises(RuntimeError, match="phone number is invalid"):
+        connect._telegram_login(["helper"])
+
+
 @pytest.mark.parametrize('two_factor', [False, True])
 def test_telegram_code_login_without_qr_and_with_optional_password(monkeypatch, two_factor):
     import sys
     class PasswordNeeded(Exception):
         pass
     monkeypatch.setitem(sys.modules, 'telethon', SimpleNamespace(errors=SimpleNamespace(SessionPasswordNeededError=PasswordNeeded)))
-    answers = iter(['+123456789', '12345', 'private-password'])
-    monkeypatch.setattr(telegram, '_login_prompt', lambda title, secret: next(answers) if secret else pytest.fail('Login secrets must be hidden'))
+    answers = iter([('+1 234-567-89', False), ('12345', True), ('private-password', True)])
+
+    def prompt(title, secret=False):
+        # The phone number is an identifier the person must see while typing; code and password stay hidden.
+        value, hidden = next(answers)
+        assert secret is hidden, title
+        return value
+
+    monkeypatch.setattr(telegram, '_login_prompt', prompt)
     calls = []
     class Client:
         async def send_code_request(self, phone):

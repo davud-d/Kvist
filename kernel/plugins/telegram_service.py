@@ -73,7 +73,10 @@ def _login_browser(url):
 async def phone_login(client):
     from telethon import errors
 
-    phone = _login_prompt("Telegram phone number with country code / Номер с кодом страны: ", secret=True).strip()
+    phone = _login_prompt("Telegram phone number with country code / Номер с кодом страны: ").strip()
+    if phone.startswith("+"):
+        # People type numbers the way they are printed: "+7 999 123-45-67".
+        phone = "+" + "".join(filter(str.isdigit, phone))
     if not phone.startswith("+") or not phone[1:].isdigit():
         raise ValueError("Enter the phone number with + and country code")
     sent = await client.send_code_request(phone)
@@ -99,7 +102,9 @@ async def login(path: Path):
     api_hash = _login_prompt("Telegram API hash: ", secret=True).strip()
     if api_id <= 0 or not api_hash:
         raise ValueError("API ID and hash are required")
-    client = TelegramClient(StringSession(), api_id, api_hash, request_retries=0, flood_sleep_threshold=0)
+    # A fresh session starts on a default data center; Telegram answers the first login request with
+    # PHONE_MIGRATE and Telethon needs a second attempt on the right DC, so retries must stay enabled here.
+    client = TelegramClient(StringSession(), api_id, api_hash, flood_sleep_threshold=0)
     await client.connect()
     try:
         method = _login_prompt("Login method / Способ входа: 1 = code / код (no QR), 2 = QR [1]: ").strip() or "1"
@@ -239,5 +244,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception as error:
-        print(f"Telegram {type(error).__name__}: connection failed; enter /telegram in Kvist to reconnect.", file=sys.stderr)
+        # Login errors name what to fix (bad number, flood wait, wrong code) and carry no secrets;
+        # serve errors stay opaque because they may echo message content.
+        detail = f" ({error})" if sys.argv[1:2] in (["login"], ["login-ui"]) else ""
+        print(f"Telegram {type(error).__name__}{detail}: connection failed; enter /telegram in Kvist to reconnect.",
+              file=sys.stderr)
         sys.exit(1)
