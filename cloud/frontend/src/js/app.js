@@ -4,6 +4,7 @@ import { readBoot } from "./boot.js";
 import { append, h, replace } from "./dom.js";
 import { detectLocale, locale, rememberLocale, setLocale, t } from "./i18n.js";
 import { banScreen, bellButton } from "./notifications.js";
+import { termsScreen } from "./screens/terms.js";
 import { errorBox } from "./ui.js";
 import { routes } from "./routes.js";
 
@@ -50,6 +51,8 @@ function header(active, funnel) {
 function footer() {
   return h("footer.foot", {},
     h("div.wrap.row", {},
+      h("a", { href: "/terms", text: t("common.terms") }),
+      h("a", { href: "/privacy", text: t("common.privacy") }),
       h("a", { href: "https://kvist.site", text: t("common.site") }),
       h("a", { href: "https://github.com/davud-d/Kvist/tree/main/cloud", text: t("common.source") })));
 }
@@ -71,10 +74,17 @@ async function render() {
   const found = match(path);
   const app = document.getElementById("app");
   const main = h("main.wrap", { id: "main", tabindex: "-1" });
-  replace(app, header(found ? found.route.nav : null, found ? found.route.funnel : false), main, footer());
+  // Before the terms are accepted there is one way forward, as in the funnel: no navigation, no bell.
+  const needTerms = Boolean(state.me && !state.me.terms_accepted);
+  replace(app, header(found ? found.route.nav : null, needTerms || (found ? found.route.funnel : false)), main, footer());
   if (state.me && state.me.ban) {
     // A blocked account sees why and nothing else: every call would answer "banned" anyway.
     banScreen(main, state.me.ban, signOut);
+    return;
+  }
+  if (needTerms) {
+    // A new account has nothing but the two boxes until they are ticked; the server refuses everything else too.
+    termsScreen(main, async () => { await refreshMe(); render(); });
     return;
   }
   if (!found) {

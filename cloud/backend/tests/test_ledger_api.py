@@ -6,7 +6,7 @@ from conftest import dev_login, make_task, settle
 from sqlalchemy import select
 
 from kvist_cloud import ledger
-from kvist_cloud.db import make_session_factory, session_scope
+from kvist_cloud.db import make_session_factory, session_scope, utcnow
 from kvist_cloud.models import Dispute, Machine, TaskStatus, User
 
 T0 = 1_800_000_000.0
@@ -41,7 +41,7 @@ def test_cannot_dispute_someone_elses_task(client_factory, engine):
     dev_login(client)
     settle(client)
     with session_scope(make_session_factory(engine)) as db:
-        stranger = User(github_id=77, github_login="stranger")
+        stranger = User(github_id=77, github_login="stranger", terms_accepted_at=utcnow())
         db.add(stranger)
         db.flush()
         task_id = make_task(db, stranger, db.scalars(select(Machine)).one()).id

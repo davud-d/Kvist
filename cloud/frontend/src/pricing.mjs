@@ -69,6 +69,8 @@ ${table(t, catalog.plans)}
 </section>
 </main>
 <footer class="foot"><div class="wrap row">
+<a href="/terms">${esc(t.common.terms)}</a>
+<a href="/privacy">${esc(t.common.privacy)}</a>
 <a href="https://kvist.site">${esc(t.common.site)}</a>
 <a href="https://github.com/davud-d/Kvist/tree/main/cloud">${esc(t.common.source)}</a>
 </div></footer>

@@ -8,7 +8,7 @@ from conftest import dev_login, eventually, make_subscription, settle
 from sqlalchemy import select
 from starlette.websockets import WebSocketDisconnect
 
-from kvist_cloud.db import make_session_factory, session_scope
+from kvist_cloud.db import make_session_factory, session_scope, utcnow
 from kvist_cloud.models import FunnelEvent, Task, TaskStatus, User
 
 KEY = "sk-tasks-canary-0123456789abcdef"
@@ -160,7 +160,7 @@ def test_stream_refuses_other_origins_and_other_people(client_factory, engine):
 def test_someone_elses_task_is_not_found(client_factory, engine):
     client = signed_in(client_factory, engine)
     with session_scope(make_session_factory(engine)) as db:
-        stranger = User(github_id=99, github_login="stranger")
+        stranger = User(github_id=99, github_login="stranger", terms_accepted_at=utcnow())
         db.add(stranger)
         db.flush()
         machine_id = db.scalars(select(Task.machine_id)).first()

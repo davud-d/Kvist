@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from conftest import dev_login
+from conftest import accept_terms, dev_login
 
 from kvist_cloud.auth import safe_next
 from kvist_cloud.config import ConfigError, load_settings
@@ -51,6 +51,7 @@ def test_github_login_round_trip(client_factory):
     assert "kc_session" in response.cookies
     me = client.get("/api/me").json()
     assert (me["login"], me["name"]) == ("octocat", "Octo Cat")
+    assert client.post("/api/me/terms", json={"terms": True, "privacy": True}).status_code == 200
     assert client.get("/api/billing/eligibility").json()["trial_eligible"]
     assert [request.url.path for request in seen] == ["/login/oauth/access_token", "/user"]
 
@@ -135,6 +136,7 @@ def test_public_and_private_repositories_are_listed(client_factory, engine):
     client = client_factory(github, **GITHUB)
     state = start_login(client)
     client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
+    accept_terms(client)
     body = client.get("/api/github/repos").json()
     assert body == {"repos": [{"name": "octocat/hello", "url": "https://github.com/octocat/hello.git",
                                "description": "", "private": False},
@@ -200,6 +202,7 @@ def test_real_github_dev_checkout_checks_account_age(client_factory):
     client = client_factory(fake_github([]), AUTH_DEV_LOGIN="true", **GITHUB)
     state = start_login(client)
     client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
+    accept_terms(client)
     with session_scope(client.app.state.session_factory) as db:
         db.get(User, 1).github_created_at = utcnow() - timedelta(days=10)
     response = client.post("/api/billing/dev/skip-checkout")
@@ -208,3 +211,34 @@ def test_real_github_dev_checkout_checks_account_age(client_factory):
     with session_scope(client.app.state.session_factory) as db:
         db.get(User, 1).github_created_at = utcnow() - timedelta(days=60)
     assert client.post("/api/billing/dev/skip-checkout").status_code == 200
+
+
+def test_new_account_is_closed_until_both_boxes_are_ticked(client_factory):
+    client = client_factory(fake_github([]), **GITHUB)
+    state = start_login(client)
+    client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
+    assert client.get("/api/me").json()["terms_accepted"] is False
+    assert client.get("/api/billing/eligibility").json()["error"]["code"] == "terms_required"
+    for payload in ({"terms": True, "privacy": False}, {"terms": False, "privacy": True}):
+        refused = client.post("/api/me/terms", json=payload)
+        assert refused.status_code == 400 and refused.json()["error"]["code"] == "terms_both"
+    assert client.get("/api/me").json()["terms_accepted"] is False
+    assert client.post("/api/me/terms", json={"terms": True, "privacy": True}).json()["terms_accepted"] is True
+    assert client.get("/api/billing/eligibility").json()["trial_eligible"]
+
+
+def test_second_login_does_not_ask_again(client_factory):
+    client = client_factory(fake_github([]), **GITHUB)
+    for _ in range(2):
+        state = start_login(client)
+        client.get(f"/auth/github/callback?code=good-code&state={state}", follow_redirects=False)
+        client.post("/api/me/terms", json={"terms": True, "privacy": True})
+    assert client.get("/api/me").json()["terms_accepted"] is True
+
+
+def test_legal_documents_are_public(client_factory):
+    client = client_factory(fake_github([]), **GITHUB)
+    for path, kind in (("/terms", "text/html"), ("/privacy", "text/html"), ("/terms.pdf", "application/pdf"),
+                       ("/privacy.pdf", "application/pdf")):
+        response = client.get(path)
+        assert response.status_code == 200 and response.headers["content-type"].startswith(kind), path

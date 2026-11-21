@@ -19,7 +19,20 @@
     "signOut": "Sign out",
     "supportCode": "Code for support: {code}",
     "source": "Source code (AGPL)",
-    "site": "kvist.site"
+    "site": "kvist.site",
+    "terms": "Terms",
+    "privacy": "Privacy"
+  },
+  "terms": {
+    "title": "Terms of use",
+    "lead": "Before you start, accept the terms. This is asked once.",
+    "acceptTerms": "I accept the {link}",
+    "termsLink": "terms of service",
+    "acceptPrivacy": "I accept the {link}",
+    "privacyLink": "privacy policy",
+    "continue": "Continue",
+    "needBoth": "Tick both boxes to continue.",
+    "docsRu": "The documents are in Russian."
   },
   "nav": { "dashboard": "Dashboard", "newTask": "New task", "pixel": "Workspace", "settings": "Settings", "admin": "Admin" },
   "units": { "min": "{m} min", "hm": "{h} h {m} min", "h": "{h} h" },
@@ -67,6 +80,7 @@
     "no_key": "There is no model key. Add one in Settings."
   },
   "errors": {
+    "terms_both": "Tick both boxes.",
     "reset_failed": "The machine could not be reset right now. Try again in a minute.",
     "no_machine": "Connect your machine first: Dashboard, Connect my machine.",
     "own_machine": "This plan runs on your own machine: connect it on the dashboard.",

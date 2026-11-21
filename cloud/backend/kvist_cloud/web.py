@@ -18,6 +18,9 @@ from .funnel import record_pricing_view
 from .models import Task, User
 
 router = APIRouter()
+LEGAL_DIR = Path(__file__).resolve().parents[2] / "legal"
+LEGAL_FILES = {"/terms": "terms.html", "/privacy": "privacy.html",
+               "/terms.pdf": "terms.pdf", "/privacy.pdf": "privacy.pdf"}
 APP_PATHS = ("/start", "/onboarding", "/dashboard", "/settings", "/admin")
 
 
@@ -141,6 +144,15 @@ def _app_page(request: Request) -> Response:
     return HTMLResponse(html)
 
 
+def _legal_route(name: str):
+    media = "application/pdf" if name.endswith(".pdf") else "text/html; charset=utf-8"
+
+    def serve() -> Response:
+        return FileResponse(LEGAL_DIR / name, media_type=media)
+
+    return serve
+
+
 @router.get("/new", include_in_schema=False)
 def new_task() -> Response:
     """Tasks are written in the workspace now; an old bookmark or link lands there."""
@@ -150,3 +162,6 @@ def new_task() -> Response:
 for _path in APP_PATHS:
     router.add_api_route(_path, _app_page, methods=["GET"], include_in_schema=False)
 router.add_api_route("/tasks/{task_id}", _app_page, methods=["GET"], include_in_schema=False)
+for _path, _name in LEGAL_FILES.items():
+    # Public on purpose: the documents must be readable before anyone signs in, and by the payment provider.
+    router.add_api_route(_path, _legal_route(_name), methods=["GET"], include_in_schema=False)

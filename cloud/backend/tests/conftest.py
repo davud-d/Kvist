@@ -245,10 +245,17 @@ def dev_login(client) -> None:
     """Signs in through the dev path of the GitHub button."""
     response = client.get("/auth/github/login", follow_redirects=True)
     assert response.history, "the login did not redirect"
+    accept_terms(client)
+
+
+def accept_terms(client) -> None:
+    """The box screen after the first sign-in; everything else is closed until it is done."""
+    response = client.post("/api/me/terms", json={"terms": True, "privacy": True}, headers={"X-Kvist-Client": "1"})
+    assert response.status_code == 200, response.text
 
 
 def make_user(db, login: str = "octo", github_id: int = 1) -> User:
-    user = User(github_id=github_id, github_login=login)
+    user = User(github_id=github_id, github_login=login, terms_accepted_at=dbmod.utcnow())
     db.add(user)
     db.flush()
     return user

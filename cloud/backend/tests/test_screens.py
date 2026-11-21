@@ -13,7 +13,7 @@ from test_tasks_api import browser_headers, relay, runner, signed_in
 
 from kvist_cloud import screens
 from kvist_cloud.auth import SESSION_COOKIE, _serializer
-from kvist_cloud.db import make_session_factory, session_scope
+from kvist_cloud.db import make_session_factory, session_scope, utcnow
 from kvist_cloud.models import Task, TaskEvent, User
 
 TOKEN = "SCREEN-TOKEN-0123456789abcdef"
@@ -37,7 +37,7 @@ def frame_message(task_id: int, jpeg: bytes = JPEG, screen_id: str = "desktop") 
 def sign_in_as(client, engine, login: str, github_id: int, admin: bool = False) -> int:
     """Swaps the client's session cookie for another account's; returns that account's id."""
     with session_scope(make_session_factory(engine)) as db:
-        user = User(github_id=github_id, github_login=login)
+        user = User(github_id=github_id, github_login=login, terms_accepted_at=utcnow())
         db.add(user)
         db.flush()
         user_id, version = user.id, user.session_version

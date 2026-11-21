@@ -491,3 +491,7 @@ pre.code {
   border-radius: var(--r-2);
   user-select: all;
 }
+
+.consent { display: flex; gap: var(--s-2); align-items: flex-start; cursor: pointer; }
+.consent input { margin-top: .3em; flex: none; }
+.consent a { color: var(--tx); text-decoration: underline; }

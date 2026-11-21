@@ -122,6 +122,9 @@ def current_user(user: User = Depends(signed_user)) -> User:
     view = ban_view(user)
     if view is not None:
         raise ApiError(403, "banned", "This account is blocked. / Аккаунт заблокирован.", ban=view)
+    if user.terms_accepted_at is None:
+        raise ApiError(403, "terms_required",
+                       "Accept the terms and the privacy policy first. / Сначала прими соглашение и политику.")
     return user
 
 
@@ -265,6 +268,7 @@ def me(request: Request, user: User = Depends(signed_user)) -> dict[str, object]
         "is_admin": is_admin(request.app.state.settings, user),
         "is_owner": is_owner(request.app.state.settings, user),
         "ban": ban_view(user),
+        "terms_accepted": user.terms_accepted_at is not None,
     }
 
 
@@ -306,6 +310,24 @@ def update_me(
 ) -> dict[str, object]:
     user.locale = payload.locale
     db.commit()
+    return me(request, user)
+
+
+class TermsIn(InputModel):
+    terms: bool
+    privacy: bool
+
+
+@router.post("/api/me/terms")
+def accept_terms(
+    payload: TermsIn, request: Request, user: User = Depends(signed_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    """Both boxes, ticked by the person: one without the other is not an acceptance."""
+    if not (payload.terms and payload.privacy):
+        raise ApiError(400, "terms_both", "Tick both boxes. / Отметь обе галочки.")
+    if user.terms_accepted_at is None:
+        user.terms_accepted_at = utcnow()
+        db.commit()
     return me(request, user)
 
 

@@ -19,6 +19,7 @@ from websockets.sync.client import connect
 
 from kvist_cloud import ledger
 from kvist_cloud.config import CLOUD_ROOT, REPO_ROOT
+from kvist_cloud.db import utcnow
 from kvist_cloud.models import FunnelEvent, Task, TaskStatus, User
 
 KEY = "dev-key-e2e-0123456789"
@@ -158,7 +159,7 @@ def test_the_agents_screen_reaches_only_its_owner_through_a_real_runner(live_sta
     # A signed-out visitor, and another account, learn nothing.
     assert httpx.get(stack.url + frame_url, headers={"X-Kvist-Client": "1"}).status_code == 401
     with stack.db() as db:
-        stranger = User(github_id=777, github_login="stranger")
+        stranger = User(github_id=777, github_login="stranger", terms_accepted_at=utcnow())
         db.add(stranger)
         db.commit()
         session = {"u": stranger.id, "v": stranger.session_version}

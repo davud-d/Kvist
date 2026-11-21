@@ -9,7 +9,7 @@ from conftest import dev_login, eventually, make_task, settle
 from sqlalchemy import select
 from test_gateway import _start_hanging_task, _status
 
-from kvist_cloud.db import make_session_factory, session_scope
+from kvist_cloud.db import make_session_factory, session_scope, utcnow
 from kvist_cloud.models import Export, Machine, TaskStatus, User
 
 
@@ -75,7 +75,7 @@ def test_someone_elses_export_is_not_found(client_factory, engine):
     dev_login(client)
     settle(client)
     with session_scope(make_session_factory(engine)) as db:
-        stranger = User(github_id=55, github_login="stranger")
+        stranger = User(github_id=55, github_login="stranger", terms_accepted_at=utcnow())
         db.add(stranger)
         db.flush()
         export = Export(user_id=stranger.id, machine_id=1, status="ready")
