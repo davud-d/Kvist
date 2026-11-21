@@ -223,7 +223,8 @@ async def login_in_browser(path: Path):
                     [("api_id", "API ID", "text", form.get("api_id", "")),
                      ("api_hash", "API hash", "password", form.get("api_hash", "")),
                      ("phone", "Phone with country code / Номер с кодом страны", "text", form.get("phone", ""))],
-                    [("code", "Get a code / Получить код"), ("qr", "Sign in with QR / Войти по QR")], error))
+                    # QR first: it needs no code, so it works when Telegram's code never arrives.
+                    [("qr", "Sign in with QR (recommended) / Войти по QR"), ("code", "Get a code / Получить код")], error))
                 error = ""
                 try:
                     api_id, api_hash = int(form["api_id"]), form["api_hash"].strip()
