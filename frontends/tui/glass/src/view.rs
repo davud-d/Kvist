@@ -1003,18 +1003,19 @@ fn status_parts(app: &App) -> (Line, Option<usize>) {
         (Some(_), false) => None,
         _ => spend.label(s.ru),
     };
+    // The total the session has cost sits left of the window, in grey: it is a balance, not a state.
+    if let Some(spend) = spend_label {
+        if !info.is_empty() {
+            info.push(span("  ", DUSK));
+        }
+        info.push(span(spend, DUSK));
+    }
     if let Some(window) = &app.session.window {
         if !info.is_empty() {
             info.push(span("  ", DUSK));
         }
         window_at = Some(info.len());
         info.push(span(window_label(window, s), MIST));
-    }
-    if let Some(spend) = spend_label {
-        if !info.is_empty() {
-            info.push(span("  ", DUSK));
-        }
-        info.push(span(spend, MIST));
     }
     (info, window_at)
 }

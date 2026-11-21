@@ -3375,6 +3375,10 @@ mod tests {
         let line: String = view::status_info(&app).iter().map(|(text, _)| text.as_str()).collect();
         assert!(line.contains("27.3k / 400.0k · 85%"), "{line}");
         assert!(!line.contains("total"), "{line}");
+        feed(&mut app, &[json!({"type": "usage", "input_tokens": 10, "output_tokens": 1, "cost_usd": 0.5, "cost_approx": false,
+            "context_tokens": 27300, "context_limit": 400000})]);
+        let line: String = view::status_info(&app).iter().map(|(text, _)| text.as_str()).collect();
+        assert!(line.find("$0.50").is_some_and(|money| money < line.find("context").unwrap_or(0)), "{line}");
         // The cache's lifetime counts from the end of the call.
         let window = app.session.window.clone().expect("a window");
         assert_eq!(window.cache_left(window.at).as_secs(), 300);
