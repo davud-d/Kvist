@@ -150,3 +150,14 @@ def test_new_run_is_durable_before_vision(agent_factory, monkeypatch):
 
 def test_pasted_prose_ending_in_image_extension_is_plain_text():
     assert path_image("Please inspect the file screenshot.png") is None
+
+
+def test_vision_request_carries_the_gateways_session_header(agent_factory):
+    agent = agent_factory(provider="opencode-go", smart_model="kimi-k3.1-pro")
+    seen = {}
+    def create(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Red square"))])
+    agent.client.chat.completions.create = create
+    assert describe_images(agent, [attachment()]) == "Red square"
+    assert seen["extra_headers"] == {"x-opencode-session": agent.llm_session_id}

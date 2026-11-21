@@ -123,6 +123,7 @@ def vision_instruction(agent) -> str:
 
 def describe_images(agent, images: list[dict], question: str = "") -> str:
     from openai import APIError
+    from kernel.llm.llm_clients import request_session_headers
 
     model = vision_model(agent)
     if model_supports_vision(agent.config.provider, model) is False:
@@ -136,14 +137,20 @@ def describe_images(agent, images: list[dict], question: str = "") -> str:
         raise InterruptedError("Image analysis cancelled")
     started = time.monotonic()
     limit_key = "max_completion_tokens" if model.lower().split("/")[-1].startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")) else "max_tokens"
+    # Gateways such as OpenCode Go refuse a request without its session header (400 MissingSessionID).
+    session_headers = request_session_headers(agent.config.provider, agent.llm_session_id)
+    extra = {"extra_headers": session_headers} if session_headers else {}
     try:
         reply = agent.client.chat.completions.create(
             model=model, messages=[{"role": "user", "content": content}],
-            timeout=agent.config.api_timeout, **{limit_key: 8192},
+            timeout=agent.config.api_timeout, **{limit_key: 8192}, **extra,
         )
     except (APIError, RuntimeError) as error:
-        # Provider errors may echo the base64 request or credentials.
-        return f"Vision failed for {model} ({type(error).__name__}) / Не удалось прочитать изображение. Check model image support and provider connection."
+        # Only the status and the provider's own message: the exception's request/body may echo base64 or credentials.
+        status = getattr(error, "status_code", None)
+        reason = str(getattr(error, "message", "") or "").strip()
+        detail = f"{type(error).__name__}" + (f" {status}" if status else "") + (f": {reason}" if reason else "")
+        return f"Vision failed for {model} ({detail}) / Не удалось прочитать изображение. Check model image support and provider connection."
     usage = getattr(reply, "usage", None)
     if usage is not None:
         from kernel.agent.agent_model import _emit_usage
