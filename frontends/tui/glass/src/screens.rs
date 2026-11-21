@@ -851,7 +851,7 @@ mod tests {
         assert!(failed.contains("style-e1") && failed.contains("read only") && failed.contains("The core is not connected"));
         log.state = LogState::Loading;
         assert!(all(&log_sheet(&log, 80, &EN, 0)).contains("Reading the executor's journal"));
-        log.session.apply(crate::model::CoreEvent::Step { call: "c1".into(), kind: crate::model::ToolKind::Shell, label: "runs pytest".into(), batch: String::new(), input: String::new() }, std::time::Instant::now());
+        log.session.apply(crate::model::CoreEvent::Step { call: "c1".into(), kind: crate::model::ToolKind::Shell, label: "runs pytest".into(), input: String::new() }, std::time::Instant::now());
         log.session.apply(crate::model::CoreEvent::Result { call: "c1".into(), ok: true, summary: "exit 0".into(), diff: None, output: String::new() }, std::time::Instant::now());
         log.state = LogState::Ready { older: true };
         let ready = all(&log_sheet(&log, 80, &EN, 0));

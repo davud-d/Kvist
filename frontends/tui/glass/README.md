@@ -176,7 +176,7 @@ helper or an executor leaves the thinking out.
 
 ## The model's calls
 
-The calls of one model response (`batch_id` of the `step` event) are one group.
+The calls that follow one another with nothing between them (no words, no thought, no error) are one group (the core's `batch_id` is not used: it splits one response's writes and commands).
 While the model works the group is open: every call is a row with its icon and
 description. Once the model's next request begins (it starts thinking, answers or
 calls again) the group stays in view for two seconds and then folds, with an

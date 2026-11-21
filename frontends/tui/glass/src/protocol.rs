@@ -277,9 +277,8 @@ fn step(event: &Value) -> Vec<CoreEvent> {
     if ENDINGS.contains(&action) {
         return out;
     }
-    let batch = event.get("batch_id").and_then(Value::as_str).unwrap_or("").to_string();
     let input = input_text(action, event.get("action_args"));
-    out.push(CoreEvent::Step { call: call_id(event), kind: kind(action), label: label(event, action), batch, input });
+    out.push(CoreEvent::Step { call: call_id(event), kind: kind(action), label: label(event, action), input });
     out
 }
 
@@ -402,11 +401,11 @@ mod tests {
 
     #[test]
     fn a_call_carries_what_the_model_sent_and_what_came_back() {
-        let step = json!({"type": "step", "step": 1, "call_id": "c1", "batch_id": "b1", "action_type": "run_shell",
+        let step = json!({"type": "step", "step": 1, "call_id": "c1", "action_type": "run_shell",
             "action_args": {"command": "cargo --version"}, "action_description": "version", "user_message": ""});
         assert_eq!(
             translate(&step),
-            vec![CoreEvent::Step { call: "c1".into(), kind: ToolKind::Shell, label: "version".into(), batch: "b1".into(), input: "cargo --version".into() }]
+            vec![CoreEvent::Step { call: "c1".into(), kind: ToolKind::Shell, label: "version".into(), input: "cargo --version".into() }]
         );
         let read = json!({"type": "step", "step": 2, "call_id": "c2", "action_type": "read_file", "action_args": {"path": "a.py"}});
         assert!(matches!(&translate(&read)[0], CoreEvent::Step { input, .. } if input == "path: a.py"));
@@ -418,7 +417,7 @@ mod tests {
     fn a_write_carries_the_cores_line_counts_to_its_file() {
         let step = json!({"type": "step", "step": 3, "call_id": "c3", "action_type": "replace_in_file",
             "action_description": "edits a.py", "user_message": ""});
-        assert_eq!(translate(&step), vec![CoreEvent::Step { call: "c3".into(), kind: ToolKind::Write, label: "edits a.py".into(), batch: String::new(), input: String::new() }]);
+        assert_eq!(translate(&step), vec![CoreEvent::Step { call: "c3".into(), kind: ToolKind::Write, label: "edits a.py".into(), input: String::new() }]);
         let result = json!({"type": "action_result", "call_id": "c3", "ok": true, "summary": "Replaced",
             "path": "a.py", "lines_added": 3, "lines_removed": 2, "patch": "@@ -1 +1 @@\n-x\n+y"});
         assert_eq!(
@@ -451,7 +450,7 @@ mod tests {
         let out = translate(&json!({"type": "step", "call_id": "c", "action_type": "final_answer", "user_message": "Готово"}));
         assert_eq!(out, vec![CoreEvent::Say("Готово".into())]);
         let out = translate(&json!({"type": "step", "step": 2, "action_type": "run_shell", "user_message": "Запускаю", "action_description": ""}));
-        assert_eq!(out, vec![CoreEvent::Say("Запускаю".into()), CoreEvent::Step { call: "step-2".into(), kind: ToolKind::Shell, label: "run_shell".into(), batch: String::new(), input: String::new() }]);
+        assert_eq!(out, vec![CoreEvent::Say("Запускаю".into()), CoreEvent::Step { call: "step-2".into(), kind: ToolKind::Shell, label: "run_shell".into(), input: String::new() }]);
     }
 
     #[test]

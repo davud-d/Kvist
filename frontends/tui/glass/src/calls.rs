@@ -51,23 +51,34 @@ impl Flip {
 
 #[derive(Debug, Default)]
 pub struct Folds {
-    /// When each group (by its first call) was passed by something later, so its hold began.
-    settled: HashMap<String, Instant>,
+    /// When each group (by its first call) was passed by something later, so its hold began, and how many calls it had.
+    settled: HashMap<String, (Instant, usize)>,
+    /// Groups that were folding or folded when another call joined them: they open again, not with a jump.
+    reopened: HashMap<String, Flip>,
     /// What the person opened or folded by hand; it overrides the group's own folding.
     flips: HashMap<Fold, Flip>,
 }
 
 impl Folds {
-    /// Starts the hold of every group that is finished and followed by something (or by the end of the turn).
+    /// Starts the hold of every group that is finished and followed by something (or by the end of the turn);
+    /// a group that got another call after that opens again.
     pub fn settle(&mut self, items: &[Item], busy: bool, now: Instant) {
         for run in runs(items) {
             let Some(Item::Tool { call, .. }) = items.get(run.start) else { continue };
-            if self.settled.contains_key(call) {
-                continue;
+            let tools = || items[run.clone()].iter().filter(|item| matches!(item, Item::Tool { .. }));
+            let count = tools().count();
+            if let Some((_, had)) = self.settled.get(call).copied() {
+                if had == count {
+                    continue;
+                }
+                let from = self.openness(&Fold::Group(call.clone()), now);
+                self.settled.remove(call);
+                self.reopened.insert(call.clone(), Flip { from, to: 1.0, at: now });
             }
-            let done = items[run.clone()].iter().all(|item| matches!(item, Item::Tool { state: CallState::Done { .. }, .. }));
+            let done = tools().all(|item| matches!(item, Item::Tool { state: CallState::Done { .. }, .. }));
             if done && (run.end < items.len() || !busy) {
-                self.settled.insert(call.clone(), now);
+                self.reopened.remove(call);
+                self.settled.insert(call.clone(), (now, count));
             }
         }
     }
@@ -80,8 +91,8 @@ impl Folds {
         match fold {
             Fold::Call(_) => 0.0,
             Fold::Group(first) => match self.settled.get(first) {
-                None => 1.0,
-                Some(at) => {
+                None => self.reopened.get(first).map_or(1.0, |flip| flip.value(now)),
+                Some((at, _)) => {
                     let t = (now.saturating_duration_since(*at).as_secs_f32() - HOLD.as_secs_f32()) / FOLD.as_secs_f32();
                     1.0 - Ease::OutCubic.apply(t.clamp(0.0, 1.0))
                 }
@@ -97,36 +108,33 @@ impl Folds {
 
     /// True while a hold counts down or something folds, so the screen keeps redrawing.
     pub fn moving(&self, now: Instant) -> bool {
-        self.settled.values().any(|at| now.saturating_duration_since(*at) < HOLD + FOLD) || self.flips.values().any(|flip| flip.running(now))
+        self.settled.values().any(|(at, _)| now.saturating_duration_since(*at) < HOLD + FOLD) || self.flips.values().chain(self.reopened.values()).any(|flip| flip.running(now))
     }
 }
 
-/// The maximal runs of calls that came from one model response. A call whose step has not arrived has no
-/// response named yet and joins the run before it.
+/// The maximal runs of calls with nothing the person reads between them. The core's `batch_id` is not used: it
+/// splits one response's writes and commands into separate batches. A thought that ends with no words shows
+/// nothing and does not break a run; the run ends at its last call.
 pub fn runs(items: &[Item]) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
-    let mut batch = "";
+    let mut last = 0;
     for (index, item) in items.iter().enumerate() {
-        let Item::Tool { batch: own, .. } = item else {
-            if let Some(first) = start.take() {
-                out.push(first..index);
+        match item {
+            Item::Tool { .. } => {
+                start.get_or_insert(index);
+                last = index;
             }
-            continue;
-        };
-        let new_response = !own.is_empty() && !batch.is_empty() && own != batch;
-        if new_response && let Some(first) = start.replace(index) {
-            out.push(first..index);
-        }
-        if start.is_none() {
-            start = Some(index);
-        }
-        if !own.is_empty() || new_response {
-            batch = own;
+            Item::Thought(thought) if thought.hidden() => {}
+            _ => {
+                if let Some(first) = start.take() {
+                    out.push(first..last + 1);
+                }
+            }
         }
     }
     if let Some(first) = start {
-        out.push(first..items.len());
+        out.push(first..last + 1);
     }
     out
 }
@@ -140,8 +148,8 @@ pub struct Rendered {
 
 pub fn render(app: &App, run: &[Item], width: usize, now: Instant, ms: u128) -> Rendered {
     let folds = &app.session.folds;
-    let grouped = run.len() > 1;
-    let Some(Item::Tool { call: first, .. }) = run.first() else {
+    let grouped = run.iter().filter(|item| matches!(item, Item::Tool { .. })).count() > 1;
+    let Some(Item::Tool { call: first, .. }) = run.iter().find(|item| matches!(item, Item::Tool { .. })) else {
         return Rendered { lines: Vec::new(), folds: Vec::new(), blocks: Vec::new() };
     };
     let indent = if grouped { 2 } else { 0 };
@@ -186,8 +194,9 @@ fn indented(mut line: Line, by: usize) -> Line {
 /// "▾ 4 calls · 1 failed": the arrow turns as the group opens.
 fn header(run: &[Item], open: f32) -> Line {
     let s = strings();
+    let total = run.iter().filter(|item| matches!(item, Item::Tool { .. })).count();
     let failed = run.iter().filter(|item| matches!(item, Item::Tool { state: CallState::Done { ok: false, .. }, .. })).count();
-    let mut text = if s.ru { format!("Вызовов: {}", run.len()) } else { format!("{} calls", run.len()) };
+    let mut text = if s.ru { format!("Вызовов: {total}") } else { format!("{total} calls") };
     if failed > 0 {
         text.push_str(&if s.ru { format!(" · ошибок: {failed}") } else { format!(" · {failed} failed") });
     }
@@ -232,28 +241,31 @@ mod tests {
     use super::*;
     use crate::model::ToolKind;
 
-    fn tool(call: &str, batch: &str, done: bool) -> Item {
+    fn tool(call: &str, done: bool) -> Item {
         let state = if done { CallState::Done { ok: true, summary: String::new(), diff: None } } else { CallState::Running };
-        Item::Tool { call: call.into(), kind: ToolKind::Shell, label: call.into(), state, batch: batch.into(), input: String::new(), output: String::new() }
+        Item::Tool { call: call.into(), kind: ToolKind::Shell, label: call.into(), state, input: String::new(), output: String::new() }
     }
 
     #[test]
-    fn calls_of_one_response_form_a_run_and_a_new_response_starts_another() {
-        let items = [tool("a", "b1", true), tool("b", "b1", true), tool("c", "b2", true)];
-        assert_eq!(runs(&items), vec![0..2, 2..3]);
+    fn calls_with_nothing_read_between_them_are_one_run() {
+        let items = [tool("a", true), tool("b", true), Item::Error("x".into()), tool("c", true)];
+        assert_eq!(runs(&items), vec![0..2, 3..4]);
     }
 
     #[test]
-    fn a_call_without_its_step_yet_joins_the_run_before_it() {
-        let items = [tool("a", "b1", true), tool("b", "", false)];
-        assert_eq!(runs(&items), vec![0..2]);
+    fn a_thought_without_words_does_not_break_a_run() {
+        let t0 = Instant::now();
+        let mut thought = crate::thought::Thought::new(t0);
+        thought.finish(t0, 1.0);
+        let items = [tool("a", true), Item::Thought(thought), tool("b", true)];
+        assert_eq!(runs(&items), vec![0..3]);
     }
 
     #[test]
     fn a_group_holds_two_seconds_after_something_follows_then_folds() {
         let t0 = Instant::now();
         let mut folds = Folds::default();
-        let mut items = vec![tool("a", "b1", true), tool("b", "b1", true)];
+        let mut items = vec![tool("a", true), tool("b", true)];
         folds.settle(&items, true, t0);
         assert_eq!(folds.openness(&Fold::Group("a".into()), t0 + Duration::from_secs(9)), 1.0, "the last group of a running turn stays open");
         items.push(Item::Error("next".into()));
@@ -267,9 +279,27 @@ mod tests {
     fn a_group_with_a_running_call_never_folds() {
         let t0 = Instant::now();
         let mut folds = Folds::default();
-        let items = [tool("a", "b1", true), tool("b", "b1", false), Item::Error("x".into())];
+        let items = [tool("a", true), tool("b", false), Item::Error("x".into())];
         folds.settle(&items, true, t0);
         assert_eq!(folds.openness(&Fold::Group("a".into()), t0 + Duration::from_secs(9)), 1.0);
+    }
+
+    #[test]
+    fn a_folded_group_opens_again_when_a_call_joins_it_and_folds_when_that_one_is_passed_too() {
+        let t0 = Instant::now();
+        let mut folds = Folds::default();
+        let group = Fold::Group("a".into());
+        let mut hidden = crate::thought::Thought::new(t0);
+        hidden.finish(t0, 1.0);
+        let mut items = vec![tool("a", true), Item::Thought(hidden), tool("b", true)];
+        folds.settle(&items[..2], true, t0);
+        assert_eq!(folds.openness(&group, t0 + Duration::from_secs(5)), 0.0);
+        let later = t0 + Duration::from_secs(5);
+        folds.settle(&items, true, later);
+        assert!(folds.openness(&group, later + Duration::from_secs(1)) > 0.99, "a new call opens the group");
+        items.push(Item::Error("next".into()));
+        folds.settle(&items, true, later + Duration::from_secs(1));
+        assert_eq!(folds.openness(&group, later + Duration::from_secs(4)), 0.0);
     }
 
     #[test]

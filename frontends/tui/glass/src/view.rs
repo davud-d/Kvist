@@ -1422,7 +1422,7 @@ mod tests {
             let words = format!("{} END{round}", "word ".repeat(2500));
             app.session.apply(CoreEvent::Say(words), now);
             let call = format!("c{round}");
-            app.session.apply(CoreEvent::Step { call: call.clone(), kind: ToolKind::Shell, label: "pytest".into(), batch: String::new(), input: String::new() }, now);
+            app.session.apply(CoreEvent::Step { call: call.clone(), kind: ToolKind::Shell, label: "pytest".into(), input: String::new() }, now);
             app.session.apply(CoreEvent::Result { call, ok: true, summary: String::new(), diff: None, output: String::new() }, now);
         }
         (app, now)
@@ -1436,7 +1436,7 @@ mod tests {
         let mut app = App::new(layout::Grid { cols: 120, rows: 36, cw: 10, ch: 20 }, now, std::path::Path::new("/tmp"));
         app.session.submit("hi".into(), now);
         for (call, command) in [("c1", "cargo --version"), ("c2", "python -V")] {
-            let step = CoreEvent::Step { call: call.into(), kind: ToolKind::Shell, label: command.into(), batch: "b1".into(), input: command.into() };
+            let step = CoreEvent::Step { call: call.into(), kind: ToolKind::Shell, label: command.into(), input: command.into() };
             app.session.apply(step, now);
             app.session.apply(CoreEvent::Result { call: call.into(), ok: true, summary: String::new(), diff: None, output: format!("out of {command}") }, now);
         }
