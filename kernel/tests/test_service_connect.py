@@ -311,3 +311,37 @@ def test_telegram_rejects_invalid_number_before_requesting_code(monkeypatch):
     monkeypatch.setattr(telegram, '_login_prompt', lambda *a, **kw: 'invalid')
     with pytest.raises(ValueError, match='country code'):
         asyncio.run(telegram.phone_login(object()))
+
+
+def test_telegram_code_can_be_resent_by_the_next_method(monkeypatch):
+    import sys
+    resend_module = SimpleNamespace(ResendCodeRequest=lambda phone, code_hash: ('resend', phone, code_hash))
+    monkeypatch.setitem(sys.modules, 'telethon', SimpleNamespace(errors=SimpleNamespace()))
+    monkeypatch.setitem(sys.modules, 'telethon.tl', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'telethon.tl.functions', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'telethon.tl.functions.auth', resend_module)
+    answers = iter(['+123456789', 'r', '54321'])
+    titles = []
+
+    def prompt(title, secret=False):
+        titles.append(title)
+        return next(answers)
+
+    monkeypatch.setattr(telegram, '_login_prompt', prompt)
+    calls = []
+
+    class Client:
+        async def send_code_request(self, phone):
+            return SimpleNamespace(phone_code_hash='first', type=SimpleNamespace(), next_type=object())
+
+        async def __call__(self, request):
+            calls.append(request)
+            return SimpleNamespace(phone_code_hash='second', type=SimpleNamespace(), next_type=None)
+
+        async def sign_in(self, **kw):
+            calls.append(kw)
+
+    asyncio.run(telegram.phone_login(Client()))
+    assert calls == [('resend', '+123456789', 'first'),
+                     {'phone': '+123456789', 'code': '54321', 'phone_code_hash': 'second'}]
+    assert "'r'" in titles[1] and "'r'" not in titles[2]

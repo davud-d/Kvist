@@ -80,9 +80,18 @@ async def phone_login(client):
     if not phone.startswith("+") or not phone[1:].isdigit():
         raise ValueError("Enter the phone number with + and country code")
     sent = await client.send_code_request(phone)
-    code = _login_prompt(
-        "Login code / Код входа (check the Telegram service chat on your signed-in computer; "
-        "delivery by SMS is decided by Telegram): ", secret=True).strip()
+    while True:
+        # Telegram picks the channel itself (service chat in another signed-in app, SMS, call); naming it
+        # tells the person where to look, and "r" asks Telegram for the next channel when nothing arrived.
+        delivery = type(getattr(sent, "type", None)).__name__.removeprefix("SentCodeType")
+        resend = " 'r' = resend by next method / повторить другим способом;" if getattr(sent, "next_type", None) else ""
+        code = _login_prompt(
+            f"Login code / Код входа (sent via {delivery}: the Telegram service chat in another signed-in app, "
+            f"or SMS;{resend}): ", secret=True).strip()
+        if code.lower() != "r" or not resend:
+            break
+        from telethon.tl.functions.auth import ResendCodeRequest
+        sent = await client(ResendCodeRequest(phone, sent.phone_code_hash))
     if not code:
         raise ValueError("Login code is required")
     try:
