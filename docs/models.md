@@ -34,6 +34,14 @@ The base models are current open instruct models of these sizes (Qwen3-4B / Qwen
 class, or newer when training starts). Each one is compared with its own untrained base,
 never only with large models.
 
+**The first goal: a trained 4B that does the work of an untrained 8B.** On the same
+held-out tasks, with the same Kvist commit, three models run: the base 4B, the trained
+4B and the base 8B of the same family. The goal is met when the trained 4B solves at
+least as many tasks as the base 8B and does better on the environment's measures
+(invalid calls, refused batches, answers before the work was checked). This is the bet
+of the whole series in one test: a small model loses mostly on the environment, and the
+environment can be taught. The base 8B is only evaluated for this, not trained.
+
 ## Data
 
 Every example is a real Kvist run recorded with `KVIST_TRAJECTORY_DIR`: each model call
