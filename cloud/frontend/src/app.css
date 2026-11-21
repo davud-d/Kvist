@@ -495,3 +495,12 @@ pre.code {
 .consent { display: flex; gap: var(--s-2); align-items: flex-start; cursor: pointer; }
 .consent input { margin-top: .3em; flex: none; }
 .consent a { color: var(--tx); text-decoration: underline; }
+
+/* -- pricing page: dollars or rubles, no script ------------------------------- */
+.cur-box { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.cur-switch { cursor: pointer; display: inline-flex; gap: .3em; }
+.cur-box:focus-visible ~ header .cur-switch { outline: 2px solid var(--tx); outline-offset: 2px; }
+.rub, .rub-note { display: none; }
+.cur-box:checked ~ * .usd { display: none; }
+.cur-box:checked ~ * .rub { display: inline; }
+.cur-box:checked ~ * .rub-note { display: block; }

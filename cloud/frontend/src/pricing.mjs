@@ -9,11 +9,21 @@ function duration(minutes, t) {
   return t.units.min.replace("{m}", minutes);
 }
 
+// About 82.2 RUB per USD (the Central Bank of Russia, 19 Nov 2026), rounded to ten. Only what the page shows:
+// the amount charged is the server's PLATEGA_PRICE_*, shown again on the payment screen.
+const RUB = { start: 1230, pro: 3210, max: 8140 };
+const spaced = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+
+function price(t, plan) {
+  const p = t.pricing;
+  return `<span class="usd">${esc(p.perMonth.replace("{p}", plan.price_usd))}</span><span class="rub">${esc(p.perMonthRub.replace("{p}", spaced(RUB[plan.id])))}</span>`;
+}
+
 function table(t, plans) {
   const p = t.pricing;
   const rows = plans.map((plan) => `<tr>
 <th scope="row">${esc(p.planNames[plan.id])}</th>
-<td${plan.id === "trial" ? ' class="now"' : ""}>${esc(plan.id === "trial" ? p.trialPerWeek : p.perMonth.replace("{p}", plan.price_usd))}</td>
+<td${plan.id === "trial" ? ' class="now"' : ""}>${plan.id === "trial" ? esc(p.trialPerWeek) : price(t, plan)}</td>
 <td>${plan.hours}</td>
 <td>${plan.vcpu} vCPU (shared) · ${plan.memory_gb} GB</td>
 <td>${plan.disk_gb} GB</td>
@@ -31,14 +41,15 @@ ${rows}
 function paidCards(t, plans) {
   const p = t.pricing;
   const cards = plans.filter((plan) => plan.id !== "trial").map((plan) => `<div class="card">
-<p class="spread"><span class="h3">${esc(p.planNames[plan.id])}</span><span class="price">${esc(p.perMonth.replace("{p}", plan.price_usd))}</span></p>
+<p class="spread"><span class="h3">${esc(p.planNames[plan.id])}</span><span class="price">${price(t, plan)}</span></p>
 <ul class="facts"><li>${esc(p.paidHours.replace("{h}", plan.hours))}</li><li>${plan.vcpu} vCPU (shared) · ${plan.memory_gb} GB RAM · ${plan.disk_gb} GB</li></ul>
 <p><a class="btn ghost wide" href="/auth/github/login?next=/start">${esc(p.pay)}</a></p>
 </div>`).join("\n");
   return `<h2 class="section-title" id="paid-title">${esc(p.paidTitle)}</h2>
 <div class="stack">
 ${cards}
-</div>`;
+</div>
+<p class="small rub-note">${esc(p.rubNote)}</p>`;
 }
 
 export function renderPricing(t, catalog, styles) {
@@ -56,9 +67,10 @@ export function renderPricing(t, catalog, styles) {
 </head>
 <body>
 <a class="skip" href="#main">${esc(t.common.skip)}</a>
+<input class="cur-box" type="checkbox" id="cur" aria-label="${esc(p.curSwitch)}">
 <header class="top"><div class="wrap top-row">
 <a class="mark" href="/"><span class="dot" aria-hidden="true"></span>${esc(t.common.brand)}<span class="sub">${esc(t.common.cloud)}</span></a>
-<nav class="nav" aria-label="language"><a class="chip" href="/?lang=${other}" hreflang="${other}" lang="${other}" aria-label="${esc(t.common.otherLangName)}">${esc(t.common.otherLang)}</a></nav>
+<nav class="nav" aria-label="language"><label class="chip cur-switch" for="cur" title="${esc(p.curSwitch)}"><span class="usd">$</span><span class="rub">₽</span> ⇄</label> <a class="chip" href="/?lang=${other}" hreflang="${other}" lang="${other}" aria-label="${esc(t.common.otherLangName)}">${esc(t.common.otherLang)}</a></nav>
 </div></header>
 <main class="wrap" id="main">
 <section class="hero">
