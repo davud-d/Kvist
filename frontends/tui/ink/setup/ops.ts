@@ -100,14 +100,32 @@ export function installScriptFromEnv(env: NodeJS.ProcessEnv): InstallScript | nu
   return env.KVIST_INSTALL_CACHE ? { path, cache: env.KVIST_INSTALL_CACHE } : { path }
 }
 
-function scriptArgs(script: InstallScript, rest: string[]): string[] {
-  return [script.path, ...(script.cache ? ["--cache", script.cache] : []), ...rest]
+export interface ScriptCommand {
+  command: string
+  args: string[]
+}
+
+// install.sh runs under bash; install.ps1 under the PowerShell every Windows has (5.1), with the
+// execution policy lifted for this one process, since the script was downloaded and a default
+// policy would refuse a file. Both take the same two requests, spelled the way each shell does.
+export function scriptCommand(script: InstallScript, request: { plan: true } | { only: string[] }, platform: NodeJS.Platform = process.platform): ScriptCommand {
+  if (platform === "win32") {
+    const args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script.path]
+    if (script.cache) args.push("-Cache", script.cache)
+    args.push(...("plan" in request ? ["-Plan"] : ["-Only", request.only.join(","), "-Events"]))
+    return { command: "powershell.exe", args }
+  }
+  const args = [script.path]
+  if (script.cache) args.push("--cache", script.cache)
+  args.push(...("plan" in request ? ["--plan"] : ["--only", request.only.join(","), "--events"]))
+  return { command: "bash", args }
 }
 
 export function readPlan(script: InstallScript): Promise<OpReply<PlanReply>> {
   return new Promise((resolve) => {
     let out = ""
-    const child = spawn("bash", scriptArgs(script, ["--plan"]), { stdio: ["ignore", "pipe", "ignore"] })
+    const { command, args } = scriptCommand(script, { plan: true })
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true })
     child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()))
     child.on("error", (error) => resolve({ ok: false, error: error.message }))
     child.on("close", (code) => {
@@ -126,7 +144,8 @@ export function runInstall(script: InstallScript, only: string[], onEvent: (even
   return new Promise((resolve) => {
     let buffer = ""
     let failure = ""
-    const child = spawn("bash", scriptArgs(script, ["--only", only.join(","), "--events"]), { stdio: ["ignore", "pipe", "ignore"] })
+    const { command, args } = scriptCommand(script, { only })
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"], windowsHide: true })
     signal?.addEventListener("abort", () => child.kill())
     const take = (line: string) => {
       let event: InstallEvent

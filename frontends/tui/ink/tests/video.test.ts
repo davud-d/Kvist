@@ -64,6 +64,18 @@ test("ffmpeg is KVIST_FFMPEG when it runs, else the first one on PATH, else the 
   assert.equal(findFfmpeg({ PATH: directory }, "linux", emptyHome), binary)
 })
 
+test("on Windows the installed ffmpeg is the one install.ps1 puts under %LOCALAPPDATA%\\Kvist", () => {
+  const local = mkdtempSync(join(tmpdir(), "kvist-localappdata-"))
+  const directory = join(local, "Kvist", "ffmpeg")
+  mkdirSync(directory, { recursive: true })
+  const installed = join(directory, "ffmpeg.exe")
+  writeFileSync(installed, "MZ")
+  chmodSync(installed, 0o755)
+  assert.equal(findFfmpeg({ PATH: "", LOCALAPPDATA: local }, "win32", "/nonexistent-home"), installed)
+  // Another system's folder is not looked in: the Windows one is the Windows one.
+  assert.equal(findFfmpeg({ PATH: "", LOCALAPPDATA: local }, "linux", "/nonexistent-home"), null)
+})
+
 test("each interface with a clip finds its own beside the sources", () => {
   assert.match(findClip("claude") ?? "", /claude-style\.mp4$/)
   assert.match(findClip("glass") ?? "", /classic-style\.mp4$/)

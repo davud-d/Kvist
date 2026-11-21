@@ -1526,7 +1526,9 @@ def find_node() -> str | None:
         packed = _packed_node()
         if packed is not None:
             return packed
-        installed = Path(sys.executable).resolve().parent / "node" / "bin" / "node"
+        # Node's Windows zip has node.exe at its root; the Unix tarballs keep it in bin/.
+        node_home = Path(sys.executable).resolve().parent / "node"
+        installed = node_home / "node.exe" if os.name == "nt" else node_home / "bin" / "node"
         if installed.is_file() and os.access(installed, os.X_OK):
             return str(installed)
     return shutil.which("node")

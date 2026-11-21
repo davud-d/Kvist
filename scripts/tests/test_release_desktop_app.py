@@ -100,7 +100,7 @@ def test_install_ps1_downloads_the_windows_asset_the_workflow_publishes(workflow
     assert '$AppAsset = "kvist-app-windows-x64.exe"' in script
     assert "kvist-app-windows-x64.exe" in _built_assets(workflow)
     # The app is optional: a release without it must still install the agent.
-    assert "Get-OptionalAsset $AppAsset" in script and "if ($appBinary) { Install-App $appBinary }" in script
+    assert "Get-OptionalAsset $AppAsset" in script and 'if ($appBinary) { Invoke-Component "app" { Install-App $appBinary } }' in script
     # Start menu and Desktop shortcuts, as the Electron app's installer makes them.
     assert 'Start Menu\\Programs' in script and "[Environment]::GetFolderPath(\"Desktop\")" in script
     assert 'Join-Path $appDir "kvist-app.exe"' in script

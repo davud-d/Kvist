@@ -74,14 +74,19 @@ function executable(path: string): boolean {
 }
 
 // The ffmpeg to decode with: KVIST_FFMPEG when it names a runnable file, else the first one on PATH,
-// else the one the release installer unpacked beside kvist-core (~/.local/share/kvist/ffmpeg).
+// else the one the release installer unpacked beside kvist-core (~/.local/share/kvist/ffmpeg,
+// %LOCALAPPDATA%\Kvist\ffmpeg on Windows).
 export function findFfmpeg(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform, home: string = homedir()): string | null {
   if (env.KVIST_FFMPEG) return executable(env.KVIST_FFMPEG) ? env.KVIST_FFMPEG : null
   const name = platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
   for (const directory of (env.PATH ?? "").split(delimiter)) {
     if (directory && executable(join(directory, name))) return join(directory, name)
   }
-  const installed = join(home, ".local", "share", "kvist", "ffmpeg", name)
+  // install.ps1 keeps the private tools under %LOCALAPPDATA%\Kvist, install.sh under ~/.local/share/kvist.
+  const installed =
+    platform === "win32"
+      ? join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Kvist", "ffmpeg", name)
+      : join(home, ".local", "share", "kvist", "ffmpeg", name)
   return executable(installed) ? installed : null
 }
 

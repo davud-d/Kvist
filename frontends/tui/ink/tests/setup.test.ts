@@ -5,6 +5,7 @@ import { FRAME_FILL, sampleBackdrop, sampleCells, sampleFramed } from "../setup/
 import { detectColorLevel, toXterm256 } from "../setup/color.js"
 import { choiceRows, chosenComponents, initialState, update, type Action, type SetupState, type Update } from "../setup/flow.js"
 import { parseInput } from "../setup/keys.js"
+import { scriptCommand } from "../setup/ops.js"
 import { pictureSize, renderPicture } from "../setup/picture.js"
 import { introFrame, shortPath } from "../setup/run.js"
 import { DIMMED, MIN_COLS, MIN_ROWS, renderScene } from "../setup/scene.js"
@@ -899,4 +900,21 @@ test("the step total on the provider screen is the one the key screen shows", ()
     assert.equal(total(onProvider), expected)
     assert.equal(total(send(onProvider, key("enter")).state), expected)
   }
+})
+
+test("the installer script is driven by bash on Unix and by PowerShell on Windows, with the same two requests", () => {
+  const script = { path: "/tmp/install.sh", cache: "/tmp/cache" }
+  assert.deepEqual(scriptCommand(script, { plan: true }, "linux"), { command: "bash", args: ["/tmp/install.sh", "--cache", "/tmp/cache", "--plan"] })
+  assert.deepEqual(scriptCommand({ path: "/tmp/install.sh" }, { only: ["cli", "path"] }, "darwin"), {
+    command: "bash",
+    args: ["/tmp/install.sh", "--only", "cli,path", "--events"],
+  })
+
+  const windows = { path: "C:\\Temp\\kvist-1a2b\\install.ps1", cache: "C:\\Temp\\kvist-1a2b" }
+  const plan = scriptCommand(windows, { plan: true }, "win32")
+  assert.equal(plan.command, "powershell.exe")
+  // A downloaded script must run despite the default execution policy, and must never wait for input.
+  assert.deepEqual(plan.args.slice(0, 6), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", windows.path])
+  assert.deepEqual(plan.args.slice(6), ["-Cache", windows.cache, "-Plan"])
+  assert.deepEqual(scriptCommand({ path: windows.path }, { only: ["cli", "node", "ffmpeg"] }, "win32").args.slice(6), ["-Only", "cli,node,ffmpeg", "-Events"])
 })
