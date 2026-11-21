@@ -118,9 +118,14 @@ async def qr_login(client, page, on_password):
         qr = await client.qr_login()
         svg = io.BytesIO()
         qrcode.make(qr.url, image_factory=SvgPathImage).save(svg)
-        page.show("<meta http-equiv='refresh' content='5'><h1>Connect Telegram to Kvist</h1>"
-                  "<p>On your phone: Telegram → Settings → Devices → Link Desktop Device.</p>"
-                  "<p>Scan this QR code. / На телефоне: Настройки → Устройства → Подключить устройство.</p>"
+        page.show(f"{_STYLE}<meta http-equiv='refresh' content='5'><h1>Connect Telegram to Kvist</h1>"
+                  f"<p>Already signed in to Telegram on this computer? <a href='{escape(qr.url)}'>"
+                  "Click to confirm here</a> — it opens that same link a phone camera would scan, so your "
+                  "own Telegram app can open it directly. / Уже вошли в Telegram на этом компьютере? "
+                  "Нажмите ссылку — она подтвердит вход тем же способом, что и сканирование QR.</p>"
+                  "<p>Or on a phone: Telegram → Settings → Devices → Link Desktop Device, then scan this "
+                  "code. / Либо на телефоне: Настройки → Устройства → Подключить устройство, затем "
+                  "отсканируйте код.</p>"
                   + svg.getvalue().decode().split("?>")[-1])
         try:
             await qr.wait(timeout=min(30, max(1, deadline - time.monotonic())))
