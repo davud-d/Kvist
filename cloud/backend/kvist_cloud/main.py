@@ -27,6 +27,7 @@ from . import (
     machines,
     notifications,
     projects,
+    review,
     screens,
     tasks,
     web,
@@ -127,6 +128,7 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(review.router)
     app.include_router(keys.router)
     app.include_router(chatgpt.router)
     app.include_router(machines.router)
