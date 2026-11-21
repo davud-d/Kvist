@@ -1029,6 +1029,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     flushed_calls = 0
     announced: set[str] = set()
     spoken = _SpokenStream(self)
+    words_flushed = False
     try:
         for chunk in iterate_cancellable(self._cancel_event, stream):
             if self._cancel_event.is_set():
@@ -1068,6 +1069,9 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                     spoken.feed("".join(content))
             for piece in pieces:
                 _merge_tool_call_delta(calls, piece)
+            if calls and not words_flushed:
+                words_flushed = True
+                spoken.flush("".join(content))
             if calls and _final_answer_words(calls):
                 spoken.feed_words(_spoken_with_answer("".join(content), calls))
             elif calls and _writes_a_call(calls) and time.monotonic() - last_call_push > 0.5:
@@ -1616,12 +1620,24 @@ class _SpokenStream:
     def feed_words(self, words: str) -> None:
         if not self._enabled or not words or words == self._shown:
             return
-        now = time.monotonic()
+        if self._update is not None and time.monotonic() - self._last_push < 0.1:
+            return
+        self._push(words)
+
+    def flush(self, content: str) -> None:
+        """Shows the words now, past the throttle: nothing more of them will come.
+
+        A call that begins ends the words, and the call's arguments may take minutes to arrive;
+        the last words held back by the throttle would wait for all of that.
+        """
+        words = speakable_prefix(content)
+        if self._enabled and words and words != self._shown:
+            self._push(words)
+
+    def _push(self, words: str) -> None:
         if self._update is None:
             self._update = self._stack.enter_context(self._ui.live_markdown())
-        elif now - self._last_push < 0.1:
-            return
-        self._last_push = now
+        self._last_push = time.monotonic()
         self._shown = words
         self._update(words)
 

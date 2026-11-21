@@ -708,6 +708,36 @@ def test_words_before_a_call_stream_to_a_ui_that_takes_them_and_the_call_stays_o
     assert shown and shown[-1] == "Reading the file."
 
 
+def test_the_last_words_before_a_call_are_shown_when_the_call_begins_not_when_the_response_ends(agent_factory, monkeypatch):
+    agent = agent_factory(max_steps=1)
+    shown = _live_words(agent)
+    seen_as_the_call_begins: list[str] = []
+    announce = agent_model._announce_finished_calls
+
+    def watching(self, calls, announced):
+        if calls and not seen_as_the_call_begins:
+            seen_as_the_call_begins.append(shown[-1])
+        announce(self, calls, announced)
+
+    monkeypatch.setattr(agent_model, "_announce_finished_calls", watching)
+
+    def chunk(**delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(**delta))])
+
+    stream = [
+        # Two pieces of words inside one throttle window: the second is held back by the throttle.
+        chunk(content="Built and checked. I am removing", tool_calls=None),
+        chunk(content=" the temporary scripts.", tool_calls=None),
+        chunk(content=None, tool_calls=[
+            SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="write_file", arguments='{"path": "a"'))
+        ]),
+    ]
+
+    agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+
+    assert seen_as_the_call_begins == ["Built and checked. I am removing the temporary scripts."]
+
+
 def test_a_final_answer_streams_its_message_and_shows_no_writing_status(agent_factory):
     agent = agent_factory(max_steps=1)
     agent._ui.streams_words = True
