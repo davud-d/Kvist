@@ -53,6 +53,8 @@ function footer() {
     h("div.wrap.row", {},
       h("a", { href: "/terms", text: t("common.terms") }),
       h("a", { href: "/privacy", text: t("common.privacy") }),
+      h("a", { href: "mailto:support@kvist.site", text: "support@kvist.site" }),
+      h("a", { href: "https://t.me/brmalov", text: "@brmalov" }),
       h("a", { href: "https://kvist.site", text: t("common.site") }),
       h("a", { href: "https://github.com/davud-d/Kvist/tree/main/cloud", text: t("common.source") })));
 }
