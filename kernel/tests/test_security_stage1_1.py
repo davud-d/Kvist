@@ -199,21 +199,33 @@ def test_secret_mask_digest_changes_when_secret_added(tmp_path):
     assert before != after
 
 
-def test_secret_enumeration_fails_closed_when_directory_cannot_be_scanned(
-    tmp_path,
-    monkeypatch,
-):
+def _fail_listing(monkeypatch, directory: Path, error: OSError) -> None:
+    original_iterdir = Path.iterdir
+
+    def fail(path):
+        if path == directory:
+            raise error
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", fail)
+
+
+def test_unlistable_directory_is_masked_whole(tmp_path, monkeypatch):
     hidden = tmp_path / "temporarily-unreadable"
     hidden.mkdir()
     (hidden / ".env").write_text("A=1", encoding="utf-8")
-    original_iterdir = Path.iterdir
+    _fail_listing(monkeypatch, hidden, PermissionError("fault-injected unreadable directory"))
 
-    def deny_hidden(path):
-        if path == hidden:
-            raise PermissionError("fault-injected unreadable directory")
-        return original_iterdir(path)
+    files, dirs = enumerate_secret_targets(tmp_path)
 
-    monkeypatch.setattr(Path, "iterdir", deny_hidden)
+    assert files == []
+    assert dirs == [hidden]
+
+
+def test_secret_enumeration_fails_closed_on_other_scan_errors(tmp_path, monkeypatch):
+    hidden = tmp_path / "failing-disk"
+    hidden.mkdir()
+    _fail_listing(monkeypatch, hidden, OSError(5, "fault-injected I/O error"))
 
     with pytest.raises(UnsafeSecretPathError, match="complete secret mask"):
         enumerate_secret_targets(tmp_path)

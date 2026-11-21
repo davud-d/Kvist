@@ -666,7 +666,7 @@ class LocalAgent:
         self._state.system_workspace = current_workspace_context(self.executor.workspace)
         self._state.system_scratchpad = scratchpad_context(self.executor.scratchpad)
         self._state.system_sandbox = current_sandbox_context(
-            self.executor.sandbox_mode, False
+            self.executor.sandbox_mode, False, self.executor.workspace_is_home
         )
         chain = ancestor_chain()
         self._state.system_host = describe_host(chain, detect_host(chain))

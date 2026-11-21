@@ -141,9 +141,16 @@ def current_project_context(workspace) -> str | None:
     return ", ".join(parts)
 
 
-def current_sandbox_context(sandbox_mode: str, network_allowed: bool) -> str:
+def current_sandbox_context(sandbox_mode: str, network_allowed: bool, workspace_is_home: bool = False) -> str:
     """One compact line describing the active sandbox mode and network policy."""
-    return f"{sandbox_mode}, net {'allowed' if network_allowed else 'denied'}"
+    line = f"{sandbox_mode}, net {'allowed' if network_allowed else 'denied'}"
+    if workspace_is_home and sandbox_mode != "container":
+        # Said here so the model does not plan around a sandbox that is not there.
+        line += (
+            "; the workspace is the home directory, so every run_shell runs on the host"
+            " and the person approves each one"
+        )
+    return line
 
 
 def identity_fact(provider: str, model: str, effort: str) -> str:

@@ -89,6 +89,9 @@ class ExecutableBindingMixin:
         sandbox_identity = (
             _path_identity(Path(bwrap_path)) if bwrap_path else None
         )
+        if sandbox_mode is SandboxMode.HOST:
+            # Nothing is masked on the host, so there is nothing to walk for.
+            secret_targets = ([], [])
         try:
             mask_digest = secret_mask_digest(self.workspace, secret_targets)
         except UnsafeSecretPathError as error:

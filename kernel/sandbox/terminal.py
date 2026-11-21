@@ -48,6 +48,7 @@ from kernel.sandbox.sandbox import (
     normalize_sandbox_request,
     resolve_bubblewrap_path,
     sandbox_network_allowed,
+    user_home,
     wrap_command_for_sandbox,
 )
 from kernel.sandbox.scratchpad import Scratchpad
@@ -107,6 +108,11 @@ from kernel.sandbox.terminal_validation import ArgumentValidationMixin
 # Sandbox note is printed at most once per process to avoid log spam
 # when many TerminalExecutor instances are created (tests, delegation).
 _sandbox_note_shown = False
+
+_HOME_WORKSPACE_REASON = (
+    "Kvist works in your home directory, so every command runs outside the sandbox / "
+    "Kvist работает в домашнем каталоге, поэтому каждая команда запускается вне песочницы"
+)
 
 
 class TerminalExecutor(
@@ -178,6 +184,9 @@ class TerminalExecutor(
         self._run_lock = threading.RLock()
         self._ask_user = True
         self._run_sandbox = "default"
+        # A sandbox over the whole home directory binds ~ writable anyway, and
+        # masking its secrets means walking millions of entries per command.
+        self.workspace_is_home = self.workspace == user_home()
         self._run_network: bool | None = None
         # True while a command runs where nothing can cut it off the network.
         self._run_network_unenforced = False
@@ -274,6 +283,13 @@ class TerminalExecutor(
                 raise HardDenyError("network must be a boolean")
             if justification is not None and not isinstance(justification, str):
                 raise HardDenyError("justification must be a string")
+            if (
+                sandbox == "default"
+                and self.workspace_is_home
+                and self.sandbox_mode is not SandboxMode.CONTAINER
+            ):
+                sandbox = "host"
+                justification = justification or _HOME_WORKSPACE_REASON
             if (sandbox == "host" or network) and not (justification or "").strip():
                 raise HardDenyError("Host or network access requires a justification")
             self._rotate_child_home()
@@ -840,7 +856,9 @@ class TerminalExecutor(
         self._validate_executable_boundaries(command_snapshot, work_dir, bindings)
         self._hard_validate(command_snapshot, work_dir, bindings)
         try:
-            secret_targets = enumerate_secret_targets(workspace)
+            secret_targets = (
+                ([], []) if sandbox_mode is SandboxMode.HOST else enumerate_secret_targets(workspace)
+            )
         except UnsafeSecretPathError as error:
             raise HardDenyError(
                 f"Hard security denial: cannot build a complete secret mask: {error}"

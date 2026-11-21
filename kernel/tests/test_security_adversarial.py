@@ -856,15 +856,15 @@ def test_workspace_internal_hardlink_pair_passes_executable_containment(tmp_path
     )
 
 
-def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
+def test_hardlink_hidden_in_an_unscannable_directory_stays_unproven(
     tmp_path,
     monkeypatch,
 ):
     source = tmp_path / "data.txt"
     source.write_text("boundary fixture\n", encoding="utf-8")
-    os.link(source, tmp_path / "alias.txt")
     unreadable = tmp_path / "temporarily-unreadable"
     unreadable.mkdir()
+    os.link(source, unreadable / "alias.txt")
     original_iterdir = Path.iterdir
 
     def deny_unreadable(path):
@@ -875,7 +875,7 @@ def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
     monkeypatch.setattr(Path, "iterdir", deny_unreadable)
 
     with pytest.raises(HardDenyError, match="hard links"):
-        TerminalExecutor(tmp_path)._validate(["cat", "alias.txt"])
+        TerminalExecutor(tmp_path)._validate(["cat", "data.txt"])
 
 
 def test_unresolvable_symlink_argument_fails_closed(tmp_path):

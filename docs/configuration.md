@@ -165,7 +165,16 @@ A command may ask for two separate one-time permissions: `sandbox: "host"` (host
 tools and files) and `network: true`. Each needs a justification and its own
 confirmation, project allow rules do not silence them, and neither can be
 remembered by the model. Host mode keeps a private HOME, a sanitized environment and command
-validation, and grants no administrator rights.
+validation, and grants no administrator rights. Absolute paths are hard-denied in
+sandboxed command arguments (except `/dev/null`, `/dev/stdin`, `/dev/stdout`,
+`/dev/stderr` and the scratchpad) and allowed in host mode.
+
+When the workspace is your home directory, every command runs in host mode and
+asks each time. A sandbox over the whole home would bind it writable anyway, and
+masking its secrets would mean walking millions of files before every command.
+In any other workspace, a directory the sandbox cannot open (rootless container
+storage, for example) is skipped, and one of your own that it could chmod open
+is hidden whole.
 
 `<workspace>/.kvist/permissions.json` holds `allow`, `deny`, `ask` and `host`
 patterns. Deny rules and built-in blocks always win. With no terminal or frontend to answer,

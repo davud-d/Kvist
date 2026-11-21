@@ -113,6 +113,20 @@ def _resolve_symlink_chain(entry: Path) -> tuple[Path | None, bool]:
     return None, False
 
 
+def _unreachable_for_sandbox(directory: Path, info: os.stat_result) -> bool:
+    """True when nothing inside ``directory`` can be opened by a sandboxed child.
+
+    The child runs as this same user without capabilities, so a directory this
+    user cannot traverse stays closed to it — unless the user owns it, because
+    then the child could chmod it open. Rootless container storage under a home
+    directory is full of such foreign-owned, closed directories.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None or info.st_uid == geteuid():
+        return False
+    return not os.access(directory, os.X_OK)
+
+
 _SECRET_BASENAMES_FOLDED = frozenset(name.casefold() for name in _SECRET_BASENAMES)
 _SECRET_DIR_NAMES_FOLDED = frozenset(name.casefold() for name in _SECRET_DIR_NAMES)
 
@@ -190,9 +204,20 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
                     "Cannot build a complete secret mask because a scanned "
                     "directory changed identity or escaped the workspace"
                 )
+            if _unreachable_for_sandbox(current, current_info):
+                continue
+            if not os.access(current, os.X_OK):
+                # The user's own closed directory: the child could chmod it open.
+                secret_dirs.append(current)
+                continue
             entries = list(current.iterdir())
         except UnsafeSecretPathError:
             raise
+        except PermissionError:
+            # Traversable but not listable: a guessed name inside could still
+            # be opened, so the whole directory is hidden instead of scanned.
+            secret_dirs.append(current)
+            continue
         except (OSError, RuntimeError) as error:
             raise UnsafeSecretPathError(
                 "Cannot build a complete secret mask because a workspace "
@@ -325,7 +350,13 @@ def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
     while stack:
         current = stack.pop()
         try:
+            if not os.access(current, os.X_OK):
+                continue
             entries = list(current.iterdir())
+        except PermissionError:
+            # A name there (or in an untraversable one above) goes uncounted, so the file stays unproven: an
+            # undercount refuses that one file instead of the whole workspace.
+            continue
         except (OSError, RuntimeError) as error:
             raise UnsafeSecretPathError(
                 "Cannot prove hardlink containment because a workspace "

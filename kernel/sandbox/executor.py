@@ -354,6 +354,7 @@ class SafeExecutor:
             note for note in (self._terminal._sandbox_note, self._terminal._policy_note) if note
         )
         self.sandbox_mode = self._terminal.sandbox_mode.value
+        self.workspace_is_home = self._terminal.workspace_is_home
 
         self.ignored_dirs = {
             ".git",

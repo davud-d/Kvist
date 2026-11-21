@@ -325,6 +325,21 @@ def _append_secret_masks(
         wrapped.extend(("--ro-bind", "/dev/null", str(path)))
 
 
+def user_home() -> Path | None:
+    """The account's real home directory, not whatever $HOME says."""
+    if hasattr(os, "geteuid"):
+        try:
+            import pwd
+
+            return Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve(strict=True)
+        except (KeyError, OSError):
+            pass
+    try:
+        return Path.home().resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+
+
 def validated_external_tool_path(
     path: Path,
     workspace: Path | None = None,
@@ -354,19 +369,7 @@ def validated_external_tool_path(
         if resolved == blocked or _is_relative_to(resolved, blocked):
             return None
 
-    home: Path | None = None
-    if hasattr(os, "geteuid"):
-        try:
-            import pwd
-
-            home = Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve(strict=True)
-        except (KeyError, OSError):
-            home = None
-    if home is None:
-        try:
-            home = Path.home().resolve(strict=True)
-        except OSError:
-            home = None
+    home = user_home()
     if home is not None:
         if resolved == home or _is_relative_to(home, resolved):
             return None

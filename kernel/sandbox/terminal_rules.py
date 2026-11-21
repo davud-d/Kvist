@@ -158,6 +158,12 @@ _WINDOWS_ALLOWED: dict[str, set[str] | None] = {
     "whoami": None,
 }
 
+# Absolute paths that name no file content: `curl -o /dev/null` is an idiom,
+# not an escape, and the sandbox provides its own /dev.
+_HARMLESS_DEVICE_PATHS: frozenset[str] = frozenset({
+    "/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr",
+})
+
 # Commands where absolute paths are safe in arguments (read-only inspection)
 _ABSOLUTE_PATH_SAFE_COMMANDS: frozenset[str] = frozenset({
     "cat", "ls", "grep", "head", "tail", "wc", "file", "find",

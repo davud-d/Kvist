@@ -599,15 +599,18 @@ def test_workspace_internal_hardlink_pair_stays_usable_for_file_actions(tmp_path
     assert alias_text == "console.log('replaced');\n"
 
 
-def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
+def test_hardlink_hidden_in_an_unscannable_directory_stays_unproven(
     tmp_path,
     monkeypatch,
 ):
+    # An unlistable directory (rootless container storage under a home
+    # workspace) must not block every read, only a file whose alias it hides.
     original = tmp_path / "data.txt"
     original.write_text("fixture\n", encoding="utf-8")
-    os.link(original, tmp_path / "alias.txt")
+    (tmp_path / "plain.txt").write_text("plain\n", encoding="utf-8")
     unreadable = tmp_path / "temporarily-unreadable"
     unreadable.mkdir()
+    os.link(original, unreadable / "alias.txt")
     executor = SafeExecutor(tmp_path)
     original_iterdir = Path.iterdir
 
@@ -619,7 +622,8 @@ def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
     monkeypatch.setattr(Path, "iterdir", deny_unreadable)
 
     with pytest.raises(ExecutorError, match="hard links"):
-        executor._read_file("alias.txt")
+        executor._read_file("data.txt")
+    assert "plain" in str(executor._read_file("plain.txt"))
 
 
 def test_absolute_paths_inside_the_workspace_run_in_relative_form(tmp_path):

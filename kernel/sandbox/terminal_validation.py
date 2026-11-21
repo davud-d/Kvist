@@ -28,6 +28,7 @@ from kernel.sandbox.terminal_rules import (
     _ABSOLUTE_PATH_SAFE_COMMANDS,
     _CMD_DANGEROUS_INLINE_RE,
     _FORBIDDEN_OPERATORS,
+    _HARMLESS_DEVICE_PATHS,
     _INTERNAL_TOKEN_RE,
     _POWERSHELL_COMMAND_FLAGS,
     _POWERSHELL_FILE_FLAGS,
@@ -493,7 +494,9 @@ class ArgumentValidationMixin:
             # Reapply path-boundary checks to attached option/response values;
             # ``--config=/host`` must not hide a path that ``/host`` would
             # have rejected as a standalone token.
-            docker_host_path = (
+            # A host run is approved for this exact argv and already reaches
+            # every host path, so a lexical workspace boundary guards nothing.
+            unbounded = self._run_sandbox == "host" or (
                 executable.casefold() == "docker"
                 and _docker_path_is_risk_graded(tokens, token_index)
             )
@@ -502,16 +505,17 @@ class ArgumentValidationMixin:
                     self._is_absolute_path(fragment)
                     and not allow_executable_path
                     and executable.casefold() not in _ABSOLUTE_PATH_SAFE_COMMANDS
-                    and not docker_host_path
+                    and not unbounded
+                    and fragment not in _HARMLESS_DEVICE_PATHS
                     and not self._names_scratch_path(fragment)
                 ):
                     raise HardDenyError(
                         "Hard security denial: Absolute paths are forbidden in arguments"
                     )
-                if fragment.startswith("\\\\") and not docker_host_path:
+                if fragment.startswith("\\\\") and not unbounded:
                     raise HardDenyError("Hard security denial: UNC paths are forbidden in arguments")
                 segments = [s for s in fragment.replace("\\", "/").split("/") if s]
-                if ".." in segments and not docker_host_path:
+                if ".." in segments and not unbounded:
                     raise HardDenyError("Hard security denial: Path traversal (..) is forbidden")
 
             if work_dir is not None and not allow_executable_path:
@@ -544,8 +548,11 @@ class ArgumentValidationMixin:
                 ) from error
             is_explicit_absolute = raw.is_absolute()
             candidate = raw if is_explicit_absolute else work_dir / raw
+            # Workspace containment means nothing to an approved host run;
+            # only the secret-path check below still applies to it.
+            bounded = not is_explicit_absolute and self._run_sandbox != "host"
 
-            if not is_explicit_absolute:
+            if bounded:
                 try:
                     resolved = candidate.resolve(strict=False)
                 except (OSError, RuntimeError, ValueError) as error:
@@ -579,7 +586,7 @@ class ArgumentValidationMixin:
                         "argument or symlink"
                     ) from error
                 continue
-            if not is_explicit_absolute and not _is_relative_to(
+            if bounded and not _is_relative_to(
                 canonical,
                 self.workspace,
             ):
@@ -587,7 +594,7 @@ class ArgumentValidationMixin:
                     "Hard security denial: command argument resolves outside "
                     "the workspace"
                 )
-            if not is_explicit_absolute:
+            if bounded:
                 self._check_workspace_regular_file_hardlinks(
                     canonical,
                     "command argument",

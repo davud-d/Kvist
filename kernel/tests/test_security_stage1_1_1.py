@@ -634,3 +634,156 @@ def test_launcher_chain_mutation_invalidates_approval(tmp_path, monkeypatch, tru
     with pytest.raises(HardDenyError):
         ex.run([".venv/bin/python", "script.py"])
     assert approvals
+
+
+# ──────────── Unscannable directories (a home directory as the workspace) ────────────
+
+requires_non_root = pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root traverses every directory",
+)
+
+
+def _closed_dir(ws: Path, name: str, mode: int = 0) -> Path:
+    path = ws / name
+    path.mkdir()
+    (path / "inside.txt").write_text(SECRET, encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+@requires_posix
+@requires_non_root
+def test_foreign_closed_directory_is_skipped(tmp_path, monkeypatch):
+    # Rootless container storage: owned by a sub-uid, closed to this user and
+    # to the sandboxed child alike, which cannot chmod it either.
+    closed = _closed_dir(tmp_path, "storage")
+    real_uid = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: real_uid + 1)
+    try:
+        files, dirs = enumerate_secret_targets(tmp_path)
+    finally:
+        closed.chmod(0o700)
+    assert (files, dirs) == ([], [])
+
+
+@requires_posix
+@requires_non_root
+@pytest.mark.parametrize("mode", [0, 0o100], ids=["closed", "traverse-only"])
+def test_own_unscannable_directory_is_masked_whole(tmp_path, mode):
+    closed = _closed_dir(tmp_path, "vault", mode)
+    try:
+        files, dirs = enumerate_secret_targets(tmp_path)
+    finally:
+        closed.chmod(0o700)
+    assert files == []
+    assert [path.name for path in dirs] == ["vault"]
+
+
+@requires_bwrap
+@requires_non_root
+def test_own_closed_directory_cannot_be_reopened_in_the_sandbox(tmp_path, monkeypatch):
+    (tmp_path / "reopen.py").write_text(
+        "import os\nos.chmod('vault', 0o700)\nprint(open('vault/inside.txt').read())\n",
+        encoding="utf-8",
+    )
+    closed = _closed_dir(tmp_path, "vault")
+    try:
+        ex = _bwrap_executor(tmp_path, monkeypatch)
+        result = ex.run(["python3", "reopen.py"])
+    finally:
+        closed.chmod(0o700)
+    assert SECRET not in result.stdout
+
+
+# ──────────── Absolute paths: /dev/null and approved host runs ────────────
+
+
+@requires_posix
+def test_dev_null_is_not_treated_as_an_escape(tmp_path):
+    ex = TerminalExecutor(tmp_path, timeout=5)
+    ex._hard_validate(["curl", "-sS", "-o", "/dev/null", "https://example.com/"], ex.workspace)
+    with pytest.raises(HardDenyError, match="Absolute paths"):
+        ex._hard_validate(["curl", "-o", "/etc/out", "https://example.com/"], ex.workspace)
+
+
+@requires_posix
+def test_host_run_takes_absolute_paths_but_never_secret_ones(tmp_path):
+    ex = TerminalExecutor(tmp_path, timeout=5)
+    ex._run_sandbox = "host"
+    ex._hard_validate(["curl", "-o", "/tmp/page.html", "https://example.com/"], ex.workspace)
+    ex._hard_validate(["du", "-sh", "../"], ex.workspace)
+    with pytest.raises(HardDenyError, match="secret"):
+        ex._hard_validate(["curl", "-o", "/home/someone/.ssh/id_rsa", "https://example.com/"], ex.workspace)
+
+
+@requires_posix
+def test_host_run_skips_the_workspace_secret_walk(tmp_path, monkeypatch):
+    ex = TerminalExecutor(tmp_path, timeout=5)
+
+    def no_walk(_workspace):
+        raise AssertionError("host runs mask nothing, so nothing is walked")
+
+    monkeypatch.setattr(terminal_module, "enumerate_secret_targets", no_walk)
+    monkeypatch.setattr("kernel.sandbox.secret_paths.enumerate_secret_targets", no_walk)
+    context = ex._build_execution_context(
+        ["true"], ex.workspace, "coder", {}, (),
+        sandbox_mode=SandboxMode.HOST, network_allowed=False, bwrap_path=None,
+    )
+    assert context.secret_mask_digest
+
+
+class _RecordingApprovals:
+    def __init__(self, answer: bool) -> None:
+        self.answer = answer
+        self.titles: list[str] = []
+
+    def confirm_command(self, command: list[str], reason: str) -> bool:
+        return True
+
+    def confirm(self, title: str, body: str, question: str) -> bool:
+        self.titles.append(title)
+        return self.answer
+
+    def commit_remembered_rule(self) -> None:
+        pass
+
+    def waiting_confirm_command(self) -> None:
+        return None
+
+
+def _home_workspace_executor(tmp_path, monkeypatch, answer: bool):
+    monkeypatch.setattr(terminal_module, "user_home", lambda: tmp_path.resolve())
+
+    def no_walk(_workspace):
+        raise AssertionError("a home workspace runs on the host and walks nothing")
+
+    monkeypatch.setattr(terminal_module, "enumerate_secret_targets", no_walk)
+    monkeypatch.setattr("kernel.sandbox.secret_paths.enumerate_secret_targets", no_walk)
+    approvals = _RecordingApprovals(answer)
+    return TerminalExecutor(tmp_path, timeout=5, approvals=approvals), approvals
+
+
+@requires_posix
+def test_home_workspace_runs_every_command_on_the_host_after_approval(tmp_path, monkeypatch):
+    ex, approvals = _home_workspace_executor(tmp_path, monkeypatch, answer=True)
+    assert ex.workspace_is_home
+    result = ex.run(["ls"])
+    assert result.returncode == 0, result.stderr
+    assert approvals.titles == ["Host execution / Запуск вне песочницы"]
+
+
+@requires_posix
+def test_home_workspace_command_is_denied_when_the_person_says_no(tmp_path, monkeypatch):
+    ex, approvals = _home_workspace_executor(tmp_path, monkeypatch, answer=False)
+    result = ex.run(["ls"])
+    assert result.denied
+    assert approvals.titles == ["Host execution / Запуск вне песочницы"]
+
+
+def test_sandbox_fact_tells_the_model_about_a_home_workspace():
+    from kernel.context.system_context import current_sandbox_context
+
+    assert "on the host" in current_sandbox_context("bubblewrap", False, True)
+    assert "on the host" not in current_sandbox_context("bubblewrap", False, False)
+    assert "on the host" not in current_sandbox_context("container", False, True)
