@@ -176,9 +176,9 @@ async def browser_code_login(client, page, phone):
     while True:
         hint = (f"The code was sent via <b>{escape(_delivery(sent))}</b>: look in the “Telegram” service chat "
                 "in another app where you are signed in, or wait for the SMS.")
-        buttons = [("code", "Sign in / Войти")]
-        if getattr(sent, "next_type", None):
-            buttons.append(("resend", "Send the code another way / Отправить другим способом"))
+        # Always offered: when Telegram names no next channel the click shows its real answer instead of hiding it.
+        buttons = [("code", "Sign in / Войти"),
+                   ("resend", "Send the code another way / Отправить другим способом")]
         form = await _ask(page, _form("Login code / Код входа", hint, [("code", "Code", "text", "")], buttons, error))
         error = ""
         try:

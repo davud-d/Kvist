@@ -404,5 +404,4 @@ def test_telegram_browser_login_shows_errors_and_resends_on_the_page(monkeypatch
         thread.join(timeout=10)
     assert 'CodeInvalid: The code is invalid' in replies[0]
     assert 'Send the code another way' in replies[0]
-    assert 'Send the code another way' not in replies[1]
     assert replies[2] == '<!doctype html><html><meta charset=\'utf-8\'><title>Kvist login</title><meta name=\'viewport\' content=\'width=device-width,initial-scale=1\'><body>connected</body></html>'
