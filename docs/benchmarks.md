@@ -27,6 +27,8 @@ instruction and then runs the task's tests.
 - **Logs.** `agent/kvist.txt` (the whole run, step by step) and `agent/kvist-state/`
   (session, change journal) in the trial directory. Input and output tokens are summed
   from the log into the trial result.
+- **Training data.** `agent/trajectories/` holds every model call and tool result of the
+  run, beside the verifier's reward; see [trajectories.md](trajectories.md).
 
 ## Running it
 

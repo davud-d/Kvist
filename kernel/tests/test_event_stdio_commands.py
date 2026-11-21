@@ -633,11 +633,25 @@ def test_feedback_without_a_draft_is_a_failure_not_a_dialog(home, agent_factory)
     assert not result.ok and requests == []
 
 
+def test_rate_offers_good_or_bad_and_files_the_session(home, agent_factory, monkeypatch, tmp_path):
+    from kernel.agent import trajectory
+
+    monkeypatch.setenv(trajectory.TRAJECTORY_DIR_ENV, str(tmp_path / "trajectories"))
+    agent = agent_factory()
+    agent._run_id = "run1"
+    trajectory.note_run_start(agent, "goal", 1)
+
+    result, requests, _ = _run_handler("rate", agent, answers=["good"])
+
+    assert result.ok and [option["value"] for option in requests[0].options] == ["good", "bad"]
+    assert trajectory.session_label(agent) == ("good", 1)
+
+
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
-        "strime", "headers", "revert", "bug", "feedback", "commit-message", "web-search-provider", "context", "memory", "doctor",
+        "strime", "headers", "revert", "bug", "feedback", "rate", "commit-message", "web-search-provider", "context", "memory", "doctor",
         "permissions", "machines", "remote", "update", "gmail", "telegram",
     }
     for handler in main.STDIO_COMMANDS.values():

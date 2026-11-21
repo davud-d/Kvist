@@ -91,7 +91,7 @@ from kernel.protocol.parser import (
 )
 from kernel.protocol.protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from kernel.agent import aside, image_generation
+from kernel.agent import aside, image_generation, trajectory
 from kernel.plan import end_session
 from kernel.plan import plan_mode
 from kernel.agent.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker, mentions_any
@@ -494,6 +494,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     report_rendered = False
     task_completed = False
     step = start_step
+    trajectory.note_run_start(self, user_goal, start_step)
     try:
         while True:
             if step > self._state.step_budget and not _extend_step_budget(self):
@@ -571,6 +572,12 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         final_message = _stop_by_user(self)
     finally:
         cleanup = _end_of_turn_resources(self, answered=task_completed)
+        trajectory.note_run_end(
+            self,
+            outcome=_trajectory_outcome(self, task_completed, sys.exception()),
+            final_message=final_message,
+            steps=step - start_step,
+        )
         self._finalize_run(
             user_goal,
             task_completed=task_completed,
@@ -714,6 +721,17 @@ def _final_outcome(self, task_completed: bool) -> str:
     if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not refused:
         return "done"
     return "incomplete"
+
+
+def _trajectory_outcome(self, task_completed: bool, error: BaseException | None) -> str:
+    """``_final_outcome``, told apart from a run that a pause, a stop or a crash ended."""
+    if error is not None:
+        return "error"
+    if self._state.paused_by_user:
+        return "paused"
+    if self._state.stopped_by_user:
+        return "stopped"
+    return _final_outcome(self, task_completed)
 
 
 def _stop_by_user(self) -> str:
@@ -1007,6 +1025,16 @@ def _run_turn(
     # A silent response still leaves a trace of what it set out to do.
     _keep_step_summary(self, step, response.text or _calls_note(planned))
     outcome, next_step, answers = _run_calls(self, user_goal, step, planned)
+    trajectory.note_results(self, step, [
+        {
+            "call_id": item.request.call_id,
+            "name": item.request.name,
+            "arguments": item.request.arguments,
+            "valid": item.command is not None,
+            "result": answer,
+        }
+        for item, answer in zip(planned, answers)
+    ])
     aside.note_turn(self, bool(response.text), aside.aside_calls(planned, answers))
     if turn is not None:
         for item, answer in zip(planned, answers):

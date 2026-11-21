@@ -199,6 +199,12 @@ def _isolate_home(request, monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_trajectory_recording(monkeypatch):
+    """A developer collecting training data sets KVIST_TRAJECTORY_DIR in their shell; fake runs must not land in it."""
+    monkeypatch.delenv("KVIST_TRAJECTORY_DIR", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _short_config_dir_for_daemon_sockets(request, monkeypatch):
     """A Unix socket path is limited to about 100 bytes, and macOS puts pytest's tmp_path far past that.
 

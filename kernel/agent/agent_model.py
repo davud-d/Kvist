@@ -52,7 +52,7 @@ from kernel.llm.llm_clients import (
     MANUAL_MODEL_PROVIDERS,
 )
 from kernel.plan import end_session
-from kernel.agent import image_generation
+from kernel.agent import image_generation, trajectory
 from kernel.plan import plan_mode
 from kernel.agent.agent_state import RunCancelled
 from kernel.agent.cancellable_call import call_cancellable, iterate_cancellable
@@ -823,9 +823,34 @@ def _request_native_turn(
 ) -> NativeTurn:
     origin = (self.config.provider, model)
     safe = request_messages(messages, origin=origin, send_blocks=isinstance(self.client, AnthropicCompatibleClient))
+    started = time.monotonic()
     turn = _send_native_turn(self, model, safe, tools)
     if turn.thinking_blocks:
         turn.thinking_origin = origin
+    trajectory.note_call(
+        self,
+        kind="step",
+        protocol="native",
+        model=model,
+        messages=safe,
+        tools=tools,
+        response={
+            "content": turn.content,
+            "reasoning": turn.reasoning,
+            "tool_calls": [
+                {"id": call.call_id, "name": call.name, "arguments": call.arguments} for call in turn.tool_calls
+            ],
+            "text_after_calls": turn.text_after_calls,
+            "cut_off": turn.cut_off,
+        },
+        usage={
+            "input_tokens": turn.input_tokens,
+            "output_tokens": turn.output_tokens,
+            "cache_read_tokens": turn.cache_read_tokens,
+            "source": turn.usage_source,
+        },
+        seconds=time.monotonic() - started,
+    )
     return turn
 
 
@@ -1371,6 +1396,7 @@ def call_model(
 
     # Reset so a non-thinking step never inherits the previous step's timing.
     self._last_reasoning_seconds = 0.0
+    self._last_reasoning_text = ""
 
     # ── context metrics (computed once) ──────────────────────────
     _prompt_chars = len(system_prompt) + len(trimmed_prompt)
@@ -1433,9 +1459,21 @@ def call_model(
                         content = safe_extract_completion_content(
                             response, self.config.provider, current_model
                         )
+                        self._last_reasoning_text = _completion_reasoning(response)
                 total_duration = time.monotonic() - request_start
                 if not content:
                     raise RuntimeError("Model returned an empty response")
+                trajectory.note_call(
+                    self,
+                    kind=usage_kind,
+                    protocol="text",
+                    model=current_model,
+                    messages=list(messages),
+                    tools=None,
+                    response={"content": content, "reasoning": self._last_reasoning_text},
+                    usage={"input_tokens": _input_tokens, "output_tokens": self._count_tokens(content), "source": "estimated"},
+                    seconds=total_duration,
+                )
                 if self.config.cache_enabled:
                     self._cache[cache_key] = content
                 # Real usage for this API call; cache hits emit nothing (they
@@ -1719,6 +1757,7 @@ def call_model_streaming(
     )
 
     # store streaming metrics for the parent call_model to pick up
+    self._last_reasoning_text = "".join(reasoning_chunks)
     self._last_ttft = (first_token_time - stream_start) if first_token_time is not None else None
     self._last_stream_end = stream_duration
     self._last_chunk_count = chunk_count
@@ -2454,6 +2493,12 @@ def safe_extract_completion_content(
     if content is None:
         return ""
     return content
+
+
+def _completion_reasoning(response: Any) -> str:
+    """The reasoning a non-streaming completion carried beside its content, or ""."""
+    choices = getattr(response, "choices", None) or []
+    return safe_extract_reasoning_delta(getattr(choices[0], "message", None)) if choices else ""
 
 
 def safe_extract_stream_delta(chunk: Any) -> Any | None:

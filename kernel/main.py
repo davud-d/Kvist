@@ -4384,6 +4384,14 @@ def _stdio_feedback(ctx: CommandContext) -> CommandResult:
     return CommandResult(ok, sanitize_display_text(text))
 
 
+def _stdio_rate(ctx: CommandContext) -> CommandResult:
+    from kernel.agent.trajectory import rate_dialog
+
+    agent = ctx.session.agent
+    ok, text = rate_dialog(agent, ctx.ui, _speaks_russian(agent))
+    return CommandResult(ok, sanitize_display_text(text)) if text else _command_cancelled()
+
+
 def _speaks_russian(agent) -> bool:
     """The language of the person's last request, else the system locale."""
     language = getattr(agent._state, "response_language", "") or ""
@@ -4892,6 +4900,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "revert": _stdio_revert,
     "bug": _stdio_bug,
     "feedback": _stdio_feedback,
+    "rate": _stdio_rate,
     "doctor": _stdio_doctor,
     "update": _stdio_update,
     "permissions": _stdio_permissions,
@@ -5881,6 +5890,16 @@ def main() -> None:
                 else:
                     console.clear()
                 render_new_session_notice(started)
+                continue
+
+            if user_goal.lower() == "/rate":
+                from kernel.agent.trajectory import rate_dialog
+
+                with paused_interactive_screen(interactive_screen):
+                    ok, text = rate_dialog(agent, TerminalBannerUI(console=console, verbose=verbose), _speaks_russian(agent))
+                if text:
+                    console.print(Panel(Text(sanitize_display_text(text)), title="/rate",
+                                        border_style="bright_cyan" if ok else "yellow"))
                 continue
 
             if user_goal.lower() == "/feedback":

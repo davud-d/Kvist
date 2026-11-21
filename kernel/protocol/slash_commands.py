@@ -83,6 +83,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("telegram", "Sign in to your personal Telegram account once and save the session"),
     SlashCommand("feedback", "Read the feedback Kvist drafted and send it as a GitHub issue, keep it or discard it"),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
+    SlashCommand("rate", "Mark this session as a good or a bad training example (needs KVIST_TRAJECTORY_DIR)"),
     SlashCommand("doctor", "Check modules, frontends, provider, API keys and settings"),
     SlashCommand("update", "Install the newest Kvist build (restart afterwards)"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),

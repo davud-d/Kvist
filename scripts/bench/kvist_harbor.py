@@ -78,6 +78,8 @@ class KvistAgent(BaseInstalledAgent):
             # the task's user is not always root.
             "KVIST_CONFIG_DIR": "/tmp/kvist-config",
             "PYTHONDONTWRITEBYTECODE": "1",
+            # Training data (kernel/agent/trajectory.py), kept beside the trial's verifier reward.
+            "KVIST_TRAJECTORY_DIR": "/logs/agent/trajectories",
         }
         # Kvist reads a manual-tier provider's key and endpoint from these two names.
         for name in (f"{prefix}_API_KEY", f"{prefix}_BASE_URL"):

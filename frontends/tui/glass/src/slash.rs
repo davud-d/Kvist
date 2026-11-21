@@ -25,7 +25,7 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 38] = [
+pub const COMMANDS: [Command; 39] = [
     command("help", "Show the commands", "Показать команды"),
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
@@ -51,6 +51,7 @@ pub const COMMANDS: [Command; 38] = [
     command("doctor", "Check modules, frontends, provider, keys and settings", "Проверить модули, интерфейсы, провайдера, ключи и настройки"),
     command("update", "Install the newest Kvist build (restart afterwards)", "Установить свежую сборку Kvist (потом перезапуск)"),
     command("feedback", "Read the feedback Kvist drafted: send it as a GitHub issue, keep it or discard it", "Прочитать черновик отзыва: отправить как issue на GitHub, оставить или удалить"),
+    command("rate", "Mark this session as a good or a bad training example", "Отметить сессию как хороший или плохой пример для обучения"),
     command("permissions", "Command rules (allow, host, ask, deny) and auto mode (not safe)", "Правила для команд (allow, host, ask, deny) и автоматический режим (небезопасно)"),
     command("website", "Build a website: Kvist interviews you, builds it and checks it", "Сделать сайт: Kvist расспросит, соберёт и проверит его"),
     command("gmail", "Sign in to Gmail once and save the token", "Один раз войти в Gmail и сохранить токен"),
