@@ -222,6 +222,10 @@ pub struct App {
     pub code: Vec<CodeBlock>,
     code_rects: Vec<(Rect, usize)>,
     fold_rects: Vec<(Rect, crate::calls::Fold)>,
+    /// How far the left card's list is scrolled; `None` follows its end, where the newest file is.
+    left_scroll: Option<usize>,
+    /// While the scrollbar's thumb is held: where in the thumb it was grabbed.
+    pub left_drag: Option<usize>,
     widths: Vec<usize>,
     plain: Vec<String>,
     /// The display formulas showing now, which the pictures draw over their reserved rows.
@@ -314,6 +318,8 @@ impl App {
             code: Vec::new(),
             code_rects: Vec::new(),
             fold_rects: Vec::new(),
+            left_scroll: None,
+            left_drag: None,
             widths: Vec::new(),
             plain: Vec::new(),
             formulas: Vec::new(),
@@ -330,15 +336,56 @@ impl App {
         }
     }
 
-    fn shape(&self, input_lines: u16, now: Instant) -> Shape {
+    /// Content rows of the left card: the changed files, then the helpers.
+    pub fn left_rows(&self) -> u16 {
         let files = self.session.files.len() as u16;
         let helpers = self.session.helpers.len() as u16;
-        let mut left_rows = if files > 0 { files + 1 } else { 0 };
+        let mut rows = if files > 0 { files + 1 } else { 0 };
         if helpers > 0 {
-            left_rows += helpers + 1 + u16::from(files > 0);
+            rows += helpers + 1 + u16::from(files > 0);
         }
+        rows
+    }
+
+    pub fn left_offset(&self, max: usize) -> usize {
+        self.left_scroll.map_or(max, |at| at.min(max))
+    }
+
+    fn set_left_scroll(&mut self, at: usize, max: usize) {
+        self.left_scroll = (at < max).then_some(at);
+    }
+
+    /// A press on the left card's scrollbar: the thumb is taken where it is, the track pulls it to the pointer.
+    fn press_left_bar(&mut self, hit: Option<Hit>, row: u16) -> bool {
+        let (Some(scroll), Some(card)) = (view::left_scroll(self), self.layout.left) else { return false };
+        let top = card.y as usize + 1 + scroll.pinned;
+        let (height, offset) = view::thumb(scroll, self.left_offset(scroll.max));
+        match hit {
+            Some(Hit::LeftThumb) => self.left_drag = Some((row as usize).saturating_sub(top + offset)),
+            Some(Hit::LeftTrack) => {
+                self.left_drag = Some(height / 2);
+                self.drag_left_bar(row);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn drag_left_bar(&mut self, row: u16) {
+        let (Some(scroll), Some(card), Some(grab)) = (view::left_scroll(self), self.layout.left, self.left_drag) else { return };
+        let (height, _) = view::thumb(scroll, 0);
+        let track = scroll.view.saturating_sub(height);
+        if track == 0 {
+            return;
+        }
+        let top = card.y as usize + 1 + scroll.pinned;
+        let place = (row as usize).saturating_sub(top + grab).min(track);
+        self.set_left_scroll((place * scroll.max + track / 2) / track, scroll.max);
+    }
+
+    fn shape(&self, input_lines: u16, now: Instant) -> Shape {
         Shape {
-            left_rows,
+            left_rows: self.left_rows(),
             browser: self.session.browser.as_ref().map(|_| self.web_aspect.unwrap_or(if self.image_pending { 1.0 } else { BROWSER_ASPECT })),
             input_lines,
             input_at_bottom: self.input_pos.value(now),
@@ -1914,6 +1961,9 @@ impl App {
                 _ => {}
             },
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.modal.is_none() && self.press_left_bar(hit, m.row) {
+                    return;
+                }
                 if self.toggle_fold_at(m.column, m.row, now) {
                     return;
                 }
@@ -1921,7 +1971,9 @@ impl App {
                     self.click(hit, now);
                 }
             }
+            MouseEventKind::Drag(MouseButton::Left) if self.left_drag.is_some() => self.drag_left_bar(m.row),
             MouseEventKind::Drag(MouseButton::Left) => self.pour_to(m.column, m.row),
+            MouseEventKind::Up(MouseButton::Left) if self.left_drag.take().is_some() => {}
             MouseEventKind::Up(MouseButton::Left) => self.lift_button(now),
             MouseEventKind::ScrollUp => self.wheel(-1),
             MouseEventKind::ScrollDown => self.wheel(1),
@@ -2039,6 +2091,8 @@ impl App {
     fn wheel(&mut self, delta: i32) {
         let card = self.dialog_rect;
         let over_code = self.code_under_pointer();
+        let over_left = self.layout.left.is_some_and(|card| contains(card, self.last_mouse)).then(|| view::left_scroll(self)).flatten().filter(|s| s.max > 0);
+        let left_at = over_left.map(|s| self.left_offset(s.max));
         match self.modal.as_mut() {
             // A diff to read scrolls; the buttons below it are reached by the arrows.
             Some(Modal::Ask(Some(ask))) if ask.diff.is_some() => {
@@ -2069,6 +2123,11 @@ impl App {
             None if over_code.is_some_and(|index| index < self.code.len()) => {
                 let block = &mut self.code[over_code.unwrap_or(0)];
                 block.up = (block.up as i32 - delta * 3).clamp(0, block.most_up() as i32) as usize;
+            }
+            None if over_left.is_some() => {
+                let (Some(scroll), Some(at)) = (over_left, left_at) else { return };
+                let at = (at as i32 + delta * 3).clamp(0, scroll.max as i32) as usize;
+                self.set_left_scroll(at, scroll.max);
             }
             None if delta < 0 => self.scroll += 3,
             None => self.scroll = self.scroll.saturating_sub(3),
@@ -2585,6 +2644,44 @@ mod tests {
         assert_eq!(app.diff_in.target(), 0.0);
         app.drop_closed_diff(now + Duration::from_secs(3));
         assert!(app.diff.is_none());
+    }
+
+    /// An app whose changed files do not fit the left card.
+    fn crowded_app() -> (App, Instant) {
+        let (mut app, now) = changed_app();
+        app.grid = Grid { cols: 180, rows: 24, cw: 10, ch: 20 };
+        for n in 0..40 {
+            app.session.apply(CoreEvent::FileChanged { path: format!("src/f{n}.rs"), added: 1, removed: 0, patch: None }, now);
+        }
+        draw_once(&mut app, now);
+        (app, now)
+    }
+
+    #[test]
+    fn a_crowded_left_card_keeps_its_rows_inside_and_follows_the_newest_file() {
+        let (app, _) = crowded_app();
+        let card = app.layout.left.expect("the card");
+        let rows: Vec<Rect> = app.hits.iter().filter(|(_, h)| matches!(h, Hit::File(_))).map(|(rect, _)| *rect).collect();
+        assert!(rows.len() < 41 && rows.iter().all(|r| r.y > card.y && r.bottom() < card.bottom()), "{rows:?} in {card:?}");
+        assert!(app.hits.iter().any(|(_, h)| *h == Hit::File(40)), "the newest file is in view");
+        assert!(app.hits.iter().any(|(_, h)| *h == Hit::LeftThumb));
+    }
+
+    #[test]
+    fn the_wheel_and_the_thumb_scroll_the_left_card_and_the_end_is_followed_again() {
+        let (mut app, now) = crowded_app();
+        let card = app.layout.left.expect("the card");
+        app.hit_at(card.x + 3, card.y + 3);
+        app.wheel(-1);
+        draw_once(&mut app, now);
+        assert!(!app.hits.iter().any(|(_, h)| *h == Hit::File(40)), "scrolled up, the newest is out of view");
+        let (thumb, _) = *app.hits.iter().find(|(_, h)| *h == Hit::LeftThumb).expect("a thumb");
+        app.mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), thumb.x + 1, thumb.y), now);
+        app.mouse(mouse_event(MouseEventKind::Drag(MouseButton::Left), thumb.x + 1, card.bottom()), now);
+        app.mouse(mouse_event(MouseEventKind::Up(MouseButton::Left), thumb.x + 1, card.bottom()), now);
+        draw_once(&mut app, now);
+        assert!(app.left_drag.is_none() && app.left_scroll.is_none(), "dragged to the end the list follows it again");
+        assert!(app.hits.iter().any(|(_, h)| *h == Hit::File(40)));
     }
 
     fn open_screen(id: &str, title: &str) -> CoreEvent {

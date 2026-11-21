@@ -99,6 +99,7 @@ the mouse.
 | | `O` in the opened browser | open the preview in your own browser |
 | Ctrl+T | click "Helpers" or a helper | open the helpers panel; Esc closes |
 | PageUp / PageDown | wheel | scroll the conversation |
+| | wheel over the left card, or its thumb on the right edge (drag it, or click the track) | scroll the changed files and helpers; the card follows the newest file until you scroll up |
 | | press and drag over the conversation | pour water on the text: the selection flows after the pointer and is copied when the button is released |
 | | double / triple click | pour over a word / a line and copy it |
 | Esc | click elsewhere | let the water drain (while a pool is on the glass, Esc drains it first) |

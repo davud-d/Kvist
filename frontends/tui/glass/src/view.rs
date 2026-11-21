@@ -56,6 +56,9 @@ pub enum Hit {
     /// A button of a confirmation.
     Answer(Answer),
     Input,
+    /// The scrollbar of the left card: its thumb, and the track around it.
+    LeftThumb,
+    LeftTrack,
     NewSession,
     TakeOver,
     Provider,
@@ -210,21 +213,64 @@ fn slide_cols(rect: Rect, v: f32) -> i32 {
     ((1.0 - v) * (rect.width + MARGIN_X + 1) as f32).round() as i32
 }
 
+/// How the left card's list scrolls: the rows pinned above it (the "Changed" header), the rows it shows at once,
+/// and how far it can move.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LeftScroll {
+    pub pinned: usize,
+    pub view: usize,
+    pub max: usize,
+}
+
+pub(crate) fn left_scroll(app: &App) -> Option<LeftScroll> {
+    let card = app.layout.left?;
+    let pinned = usize::from(!app.session.files.is_empty());
+    let avail = card.height.saturating_sub(2) as usize;
+    let body = (app.left_rows() as usize).saturating_sub(pinned);
+    let view = avail.saturating_sub(pinned);
+    Some(LeftScroll { pinned, view, max: body.saturating_sub(view) })
+}
+
+/// The scrollbar's thumb: its height and its offset from the top of the track.
+pub(crate) fn thumb(scroll: LeftScroll, at: usize) -> (usize, usize) {
+    let body = scroll.view + scroll.max;
+    let height = (scroll.view * scroll.view / body.max(1)).clamp(1, scroll.view.max(1));
+    let top = if scroll.max == 0 { 0 } else { (at * (scroll.view - height) + scroll.max / 2) / scroll.max };
+    (height, top)
+}
+
 fn draw_left(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let Some(card) = app.layout.left else { return };
+    let Some(scroll) = left_scroll(app) else { return };
     let off = -slide_cols(card, app.left_in.value(now));
     let s = strings();
     let x = card.x as i32 + 2 + off;
-    let right = card.right() as i32 - 2 + off;
-    let mut y = card.y as i32 + 1;
+    let bar_x = card.right() as i32 - 2 + off;
+    // The scrollbar takes the last columns only when there is something to scroll.
+    let right = if scroll.max > 0 { bar_x - 2 } else { bar_x };
+    let top = card.y as i32 + 1;
+    let body_top = top + scroll.pinned as i32;
+    let body_bottom = body_top + scroll.view as i32;
+    let at = app.left_offset(scroll.max);
+    let mut y = body_top - at as i32;
     let session = &app.session;
+    let visible = |y: i32| y >= body_top && y < body_bottom;
+    let outer = p.clip;
+    // What scrolls out of the card is cut at its edge.
+    let (left_edge, right_edge) = ((card.x as i32 + off).max(0), (card.right() as i32 + off).max(0));
+    p.clip = outer.intersection(Rect::new(left_edge as u16, body_top.max(0) as u16, (right_edge - left_edge).max(0) as u16, scroll.view as u16));
 
     if !session.files.is_empty() {
         let (added, removed) = session.totals();
-        p.text(x, y, s.files, st(MIST));
-        p.line_right(right, y, &counts(added, removed));
-        y += 1;
+        p.clip = outer;
+        p.text(x, top, s.files, st(MIST));
+        p.line_right(right, top, &counts(added, removed));
+        p.clip = outer.intersection(Rect::new(left_edge as u16, body_top.max(0) as u16, (right_edge - left_edge).max(0) as u16, scroll.view as u16));
         for (index, file) in session.files.iter().enumerate() {
+            if !visible(y) {
+                y += 1;
+                continue;
+            }
             let row = Rect::new(card.x, y as u16, card.width, 1);
             let open = app.diff.as_ref().is_some_and(|view| view.path == file.path);
             if open || app.hover == Some(Hit::File(index)) {
@@ -252,35 +298,58 @@ fn draw_left(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
         }
     }
 
-    if session.helpers.is_empty() {
-        return;
-    }
-    if !session.files.is_empty() {
-        y += 1;
-    }
-    let title_row = Rect::new(card.x, y as u16, card.width, 1);
-    let title_color = if app.hover == Some(Hit::HelpersTitle) { FOG } else { MIST };
-    let end = p.text(x, y, s.helpers, st(title_color));
-    p.text(end + 1, y, theme::I_CHEVRON, st(DUSK));
-    drawn.hits.push((title_row, Hit::HelpersTitle));
-    y += 1;
-    let ms = now.saturating_duration_since(app.started).as_millis();
-    for (index, helper) in session.helpers.iter().enumerate() {
-        let row = Rect::new(card.x, y as u16, card.width, 1);
-        if app.hover == Some(Hit::Helper(index)) {
-            p.fill(card.x as i32 + 1 + off, y, card.width as i32 - 2, HOVER);
+    if !session.helpers.is_empty() {
+        if !session.files.is_empty() {
+            y += 1;
         }
-        let (mark, color) = helper_mark(helper.state, ms);
-        let cx = p.text(x, y, mark, st(color));
-        let cx = p.text(cx + 1, y, &helper_name(index), st(FOG));
-        let task = if helper.state == HelperState::Running { helper_doing(helper) } else { state_word(helper.state) };
-        let room = (right - cx - 2).max(0) as usize;
-        if room > 3 {
-            p.text(cx + 2, y, &text::fit(task, room), st(DUSK));
+        if visible(y) {
+            let title_row = Rect::new(card.x, y as u16, card.width, 1);
+            let title_color = if app.hover == Some(Hit::HelpersTitle) { FOG } else { MIST };
+            let end = p.text(x, y, s.helpers, st(title_color));
+            p.text(end + 1, y, theme::I_CHEVRON, st(DUSK));
+            drawn.hits.push((title_row, Hit::HelpersTitle));
         }
-        drawn.hits.push((row, Hit::Helper(index)));
         y += 1;
+        let ms = now.saturating_duration_since(app.started).as_millis();
+        for (index, helper) in session.helpers.iter().enumerate() {
+            if !visible(y) {
+                y += 1;
+                continue;
+            }
+            let row = Rect::new(card.x, y as u16, card.width, 1);
+            if app.hover == Some(Hit::Helper(index)) {
+                p.fill(card.x as i32 + 1 + off, y, card.width as i32 - 2, HOVER);
+            }
+            let (mark, color) = helper_mark(helper.state, ms);
+            let cx = p.text(x, y, mark, st(color));
+            let cx = p.text(cx + 1, y, &helper_name(index), st(FOG));
+            let task = if helper.state == HelperState::Running { helper_doing(helper) } else { state_word(helper.state) };
+            let room = (right - cx - 2).max(0) as usize;
+            if room > 3 {
+                p.text(cx + 2, y, &text::fit(task, room), st(DUSK));
+            }
+            drawn.hits.push((row, Hit::Helper(index)));
+            y += 1;
+        }
     }
+    p.clip = outer;
+    if scroll.max > 0 {
+        draw_left_bar(p, app, scroll, at, bar_x, body_top, drawn);
+    }
+}
+
+/// A thin track with a thumb on the right of the left card's list; the thumb follows the pointer while it is held.
+fn draw_left_bar(p: &mut Painter, app: &App, scroll: LeftScroll, at: usize, x: i32, top: i32, drawn: &mut Drawn) {
+    let (height, offset) = thumb(scroll, at);
+    let held = app.left_drag.is_some() || app.hover == Some(Hit::LeftThumb);
+    for row in 0..scroll.view as i32 {
+        let on = (offset as i32..(offset + height) as i32).contains(&row);
+        let (glyph, color) = if on { ("┃", if held { FOG } else { MIST }) } else { ("│", INK_SOFT) };
+        p.text(x, top + row, glyph, st(color));
+    }
+    let wide = |y: i32, h: usize| Rect::new((x - 1).max(0) as u16, y.max(0) as u16, 3, h as u16);
+    drawn.hits.push((wide(top, scroll.view), Hit::LeftTrack));
+    drawn.hits.push((wide(top + offset as i32, height), Hit::LeftThumb));
 }
 
 fn helper_name(index: usize) -> String {
