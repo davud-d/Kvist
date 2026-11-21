@@ -61,10 +61,11 @@ pub enum CoreEvent {
     /// text. `done` ends the stream; an answer that ends empty is taken back (end_session spoke).
     Stream { id: String, text: String, append: bool, done: bool },
     Say(String),
-    Step { call: String, kind: ToolKind, label: String },
+    /// `batch` names the model response the call came from; `input` is what the model sent with it.
+    Step { call: String, kind: ToolKind, label: String, batch: String, input: String },
     /// A call the model has finished writing while it writes the next (`call_begin`); its `Step` follows later.
     CallBegin { call: String, kind: ToolKind, label: String },
-    Result { call: String, ok: bool, summary: String, diff: Option<(u32, u32)> },
+    Result { call: String, ok: bool, summary: String, diff: Option<(u32, u32)>, output: String },
     /// Whole new lines of a write's text while the model is still typing it
     /// (`call_stream`); `line` is where in `field` they begin.
     CallStream { call: String, tool: String, path: String, field: String, line: u32, text: String },
@@ -120,7 +121,9 @@ pub enum Item {
     User(String),
     /// The agent's words; `stream` is the id of the core stream still writing them.
     Agent { text: String, stream: Option<String> },
-    Tool { call: String, kind: ToolKind, label: String, state: CallState },
+    /// `batch` is the model response the call came from (empty until its step arrives); `input` and `output` are
+    /// what was sent and what came back, for the call to show when opened.
+    Tool { call: String, kind: ToolKind, label: String, state: CallState, batch: String, input: String, output: String },
     /// The model's thinking, if the provider passes it on.
     Thought(Thought),
     Error(String),
@@ -182,6 +185,8 @@ pub struct Session {
     pub closed: Option<(String, Instant)>,
     /// Calls shown from `call_begin` that no `Step` has confirmed yet.
     early: Vec<String>,
+    /// Which groups of calls are folded or open, and which calls show their input and output.
+    pub folds: crate::calls::Folds,
 }
 
 impl Session {
@@ -215,6 +220,11 @@ impl Session {
     }
 
     pub fn apply(&mut self, event: CoreEvent, now: Instant) {
+        self.dispatch(event, now);
+        self.folds.settle(&self.items, self.busy, now);
+    }
+
+    fn dispatch(&mut self, event: CoreEvent, now: Instant) {
         match event {
             CoreEvent::TurnStarted => self.begin_turn(now),
             CoreEvent::User(text) => self.items.push(Item::User(text)),
@@ -230,27 +240,29 @@ impl Session {
                 let known = self.items.iter().any(|item| matches!(item, Item::Tool { call: c, .. } if *c == call));
                 if !known {
                     self.early.push(call.clone());
-                    self.items.push(Item::Tool { call, kind, label, state: CallState::Running });
+                    self.items.push(Item::Tool { call, kind, label, state: CallState::Running, batch: String::new(), input: String::new(), output: String::new() });
                 }
             }
-            CoreEvent::Step { call, kind, label } if self.early.contains(&call) => {
+            CoreEvent::Step { call, kind, label, batch, input } if self.early.contains(&call) => {
                 self.early.retain(|c| *c != call);
                 for item in self.items.iter_mut() {
-                    if let Item::Tool { call: c, kind: k, label: l, .. } = item
+                    if let Item::Tool { call: c, kind: k, label: l, batch: b, input: i, .. } = item
                         && *c == call
                     {
                         *k = kind;
                         *l = label;
+                        *b = batch;
+                        *i = input;
                         break;
                     }
                 }
                 self.thinking_since = None;
             }
-            CoreEvent::Step { call, kind, label } => {
-                self.items.push(Item::Tool { call, kind, label, state: CallState::Running });
+            CoreEvent::Step { call, kind, label, batch, input } => {
+                self.items.push(Item::Tool { call, kind, label, state: CallState::Running, batch, input, output: String::new() });
                 self.thinking_since = None;
             }
-            CoreEvent::Result { call, ok, summary, diff } => self.finish_call(&call, CallState::Done { ok, summary, diff }, now),
+            CoreEvent::Result { call, ok, summary, diff, output } => self.finish_call(&call, CallState::Done { ok, summary, diff }, output, now),
             CoreEvent::FileChanged { path, added, removed, patch } => self.change_file(path, added, removed, patch, now),
             // Only the side panel shows it (app.rs); the transcript waits for the result.
             CoreEvent::CallStream { .. } => {}
@@ -475,13 +487,14 @@ impl Session {
         }
     }
 
-    fn finish_call(&mut self, call: &str, done: CallState, now: Instant) {
+    fn finish_call(&mut self, call: &str, done: CallState, result: String, now: Instant) {
         let found = self.items.iter_mut().rev().find_map(|item| match item {
-            Item::Tool { call: c, state, .. } if c == call => Some(state),
+            Item::Tool { call: c, state, output, .. } if c == call => Some((state, output)),
             _ => None,
         });
-        if let Some(state) = found {
+        if let Some((state, output)) = found {
             *state = done;
+            *output = result;
         }
         // The model thinks again until its next call or words arrive.
         self.thinking_since = Some(now);
@@ -623,7 +636,7 @@ mod tests {
         let mut session = Session::default();
         thought_events(&mut session, now);
         session.apply(CoreEvent::ThinkingDone { seconds: 1.0 }, now);
-        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "read".into() }, now);
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "read".into(), batch: String::new(), input: String::new() }, now);
         session.apply(CoreEvent::Thinking, now);
         assert_eq!(session.items.iter().filter(|item| matches!(item, Item::Thought(_))).count(), 2);
     }
@@ -645,7 +658,7 @@ mod tests {
         session.apply(CoreEvent::CallBegin { call: "c2".into(), kind: ToolKind::Shell, label: "run".into() }, now);
         session.apply(CoreEvent::CallBegin { call: "c1".into(), kind: ToolKind::Read, label: "again".into() }, now);
         session.apply(CoreEvent::Say("Looking.".into()), now);
-        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "reads a.py".into() }, now);
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "reads a.py".into(), batch: String::new(), input: String::new() }, now);
         assert!(matches!(&session.items[..], [Item::Agent { .. }, Item::Tool { label, .. }, Item::Tool { .. }] if label == "reads a.py"));
     }
 
@@ -653,9 +666,9 @@ mod tests {
     fn a_result_finishes_its_own_call() {
         let now = Instant::now();
         let mut session = Session::default();
-        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "a".into() }, now);
-        session.apply(CoreEvent::Step { call: "c2".into(), kind: ToolKind::Read, label: "b".into() }, now);
-        session.apply(CoreEvent::Result { call: "c1".into(), ok: true, summary: "ok".into(), diff: None }, now);
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "a".into(), batch: String::new(), input: String::new() }, now);
+        session.apply(CoreEvent::Step { call: "c2".into(), kind: ToolKind::Read, label: "b".into(), batch: String::new(), input: String::new() }, now);
+        session.apply(CoreEvent::Result { call: "c1".into(), ok: true, summary: "ok".into(), diff: None, output: String::new() }, now);
         let done: Vec<bool> = session
             .items
             .iter()
@@ -737,7 +750,7 @@ mod tests {
     fn settling_ends_calls_and_helpers_a_cut_journal_left_running() {
         let now = Instant::now();
         let mut session = Session::default();
-        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "a".into() }, now);
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "a".into(), batch: String::new(), input: String::new() }, now);
         session.apply(CoreEvent::HelperStep { id: "h1".into(), call: "x".into(), kind: ToolKind::Shell, label: "t".into() }, now);
         session.settle();
         assert!(matches!(&session.items[0], Item::Tool { state: CallState::Done { ok: false, .. }, .. }));

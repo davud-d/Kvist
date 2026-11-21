@@ -23,7 +23,7 @@ and the cell size in pixels:
 | Terminal | Works |
 |---|---|
 | kitty 0.28 or newer | yes (checked on 0.49) |
-| Ghostty | expected (kitty protocol), not checked yet |
+| Ghostty | yes (checked) |
 | WezTerm, Konsole | not checked: their kitty-protocol support is partial |
 | Alacritty, GNOME Terminal, Windows Terminal, xterm | no |
 | anything inside tmux, GNU screen or Zellij | no: the multiplexer does not pass pictures through |
@@ -173,6 +173,19 @@ The text is not held back to look slow: a few characters are drawn the moment
 they arrive. A burst (some providers send the thought in big pieces) is caught up
 within about a second, however big, so it flows instead of jumping. The log of a
 helper or an executor leaves the thinking out.
+
+## The model's calls
+
+The calls of one model response (`batch_id` of the `step` event) are one group.
+While the model works the group is open: every call is a row with its icon and
+description. Once the model's next request begins (it starts thinking, answers or
+calls again) the group stays in view for two seconds and then folds, with an
+animation, into one row: "▸ 4 calls · 1 failed". A click on that row opens it
+again. A click on a call opens it to what the model sent (**Input**: the command
+of `run_shell`, otherwise the arguments) and what came back (**Output**, red on
+failure); long ones are cut to a few rows with "… N more". What the person opened
+or folded by hand stays as they left it. A response with one call has no group
+row, but its call opens the same way.
 
 ## best-of and council
 

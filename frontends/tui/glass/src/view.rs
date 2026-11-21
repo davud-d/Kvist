@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::anim::Ease;
+use crate::calls::{self, Fold};
 use crate::app::{App, Modal, Pane, Phase};
 use crate::dialog::{Answer, Ask, Body};
 use crate::diff;
@@ -94,6 +95,8 @@ pub struct Drawn {
     pub formulas: Vec<FormulaSpot>,
     /// Where each code block's rows are on screen, with its index.
     pub code: Vec<(Rect, usize)>,
+    /// Where the rows that fold or open a group or a call are on screen.
+    pub folds: Vec<(Rect, Fold)>,
 }
 
 /// A display formula's picture: where it goes and how much of it shows (the rest is scrolled off).
@@ -118,7 +121,7 @@ fn span(s: impl Into<String>, color: Color) -> (String, Style) {
 }
 
 pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
-    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new(), formulas: Vec::new(), code: Vec::new() };
+    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new(), formulas: Vec::new(), code: Vec::new(), folds: Vec::new() };
     let area = app.grid.full();
     let ms = now.saturating_duration_since(app.started).as_millis();
     let mut p = Painter { buf, clip: area };
@@ -495,24 +498,29 @@ fn helper_doing(helper: &Helper) -> &str {
 }
 
 /// Builds every line of the conversation for a column `width` wide.
-/// The lines, the display formulas in them, and the code blocks' (first line, line count, block index).
-type Transcript = (Vec<Line>, Vec<markdown::Formula>, Vec<(usize, usize, usize)>);
+/// The lines, the display formulas in them, the code blocks' (first line, line count, block index),
+/// and the rows that fold or open something.
+type Transcript = (Vec<Line>, Vec<markdown::Formula>, Vec<(usize, usize, usize)>, Vec<(usize, Fold)>);
 
 fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcript {
     let mut lines: Vec<Line> = Vec::new();
     // (first line, line count, block index) of every code block
     let mut blocks: Vec<(usize, usize, usize)> = Vec::new();
     let mut formulas: Vec<markdown::Formula> = Vec::new();
-    let mut previous_tool = false;
-    for item in &app.session.items {
+    let mut folds: Vec<(usize, Fold)> = Vec::new();
+    let runs = calls::runs(&app.session.items);
+    for (index, item) in app.session.items.iter().enumerate() {
         if matches!(item, Item::Thought(thought) if thought.hidden()) {
             continue;
         }
-        let is_tool = matches!(item, Item::Tool { .. });
-        if !lines.is_empty() && (!is_tool || !previous_tool) {
+        // A call is drawn with the rest of its response's calls, from the first of them.
+        let run = runs.iter().find(|run| run.start == index);
+        if matches!(item, Item::Tool { .. }) && run.is_none() {
+            continue;
+        }
+        if !lines.is_empty() {
             lines.push(Vec::new());
         }
-        previous_tool = is_tool;
         match item {
             Item::User(text) => {
                 for raw in text.split('\n') {
@@ -529,12 +537,13 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
                 formulas.extend(found.into_iter().map(|formula| markdown::Formula { line: formula.line + base, ..formula }));
                 lines.extend(rendered);
             }
-            Item::Tool { call, kind, label, state } => {
-                lines.push(tool_line(*kind, label, state, width, ms));
-                // The next item is then set apart by a blank line, as after any block.
-                if push_blocks(app, |block| block.call == *call, width, now, &mut lines, &mut blocks) {
-                    previous_tool = false;
-                }
+            Item::Tool { .. } => {
+                let Some(run) = run else { continue };
+                let group = calls::render(app, &app.session.items[run.clone()], width, now, ms);
+                let base = lines.len();
+                folds.extend(group.folds.into_iter().map(|(line, fold)| (line + base, fold)));
+                blocks.extend(group.blocks.into_iter().map(|(first, count, block)| (first + base, count, block)));
+                lines.extend(group.lines);
             }
             Item::Thought(thought) => lines.extend(thought.lines(width, now, ms)),
             Item::Error(message) => {
@@ -569,11 +578,11 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Transcri
         row.push(span(format!("  {secs} {}", s.seconds), DUSK));
         lines.push(row);
     }
-    (lines, formulas, blocks)
+    (lines, formulas, blocks, folds)
 }
 
 /// Appends the code blocks `wanted` picks; true when any was added.
-fn push_blocks(app: &App, wanted: impl Fn(&crate::code::CodeBlock) -> bool, width: usize, now: Instant, lines: &mut Vec<Line>, blocks: &mut Vec<(usize, usize, usize)>) -> bool {
+pub(crate) fn push_blocks(app: &App, wanted: impl Fn(&crate::code::CodeBlock) -> bool, width: usize, now: Instant, lines: &mut Vec<Line>, blocks: &mut Vec<(usize, usize, usize)>) -> bool {
     let before = blocks.len();
     for (index, block) in app.code.iter().enumerate().filter(|(_, block)| wanted(block)) {
         let rows = block.lines(width, now);
@@ -632,7 +641,7 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
         return None;
     }
     let width = area.width.saturating_sub(6) as usize;
-    let (lines, formulas, blocks) = transcript_lines(app, width, now, ms);
+    let (lines, formulas, blocks, folds) = transcript_lines(app, width, now, ms);
     drawn.widths = lines.iter().map(text::line_width).collect();
     drawn.plain = lines.iter().map(|line| line.iter().map(|(s, _)| s.as_str()).collect()).collect();
     let avail = (area.height - 2) as usize;
@@ -649,6 +658,11 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
         let (top, bottom) = (first.max(start), (first + count).min(end));
         if top < bottom {
             drawn.code.push((Rect::new(card.x + 3, card.y + 1 + (top - start) as u16, width as u16, (bottom - top) as u16), index));
+        }
+    }
+    for (line, fold) in folds {
+        if (start..end).contains(&line) {
+            drawn.folds.push((Rect::new(card.x + 3, card.y + 1 + (line - start) as u16, width as u16, 1), fold));
         }
     }
     drawn.formulas = formulas
@@ -1408,17 +1422,51 @@ mod tests {
             let words = format!("{} END{round}", "word ".repeat(2500));
             app.session.apply(CoreEvent::Say(words), now);
             let call = format!("c{round}");
-            app.session.apply(CoreEvent::Step { call: call.clone(), kind: ToolKind::Shell, label: "pytest".into() }, now);
-            app.session.apply(CoreEvent::Result { call, ok: true, summary: String::new(), diff: None }, now);
+            app.session.apply(CoreEvent::Step { call: call.clone(), kind: ToolKind::Shell, label: "pytest".into(), batch: String::new(), input: String::new() }, now);
+            app.session.apply(CoreEvent::Result { call, ok: true, summary: String::new(), diff: None, output: String::new() }, now);
         }
         (app, now)
+    }
+
+    #[test]
+    fn a_group_folds_to_a_line_after_its_hold_and_a_click_opens_a_call_to_its_input_and_output() {
+        use crate::calls::Fold;
+        use crate::model::CoreEvent;
+        let mut now = Instant::now();
+        let mut app = App::new(layout::Grid { cols: 120, rows: 36, cw: 10, ch: 20 }, now, std::path::Path::new("/tmp"));
+        app.session.submit("hi".into(), now);
+        for (call, command) in [("c1", "cargo --version"), ("c2", "python -V")] {
+            let step = CoreEvent::Step { call: call.into(), kind: ToolKind::Shell, label: command.into(), batch: "b1".into(), input: command.into() };
+            app.session.apply(step, now);
+            app.session.apply(CoreEvent::Result { call: call.into(), ok: true, summary: String::new(), diff: None, output: format!("out of {command}") }, now);
+        }
+        let plain = |app: &App, now| -> Vec<String> {
+            transcript_lines(app, 100, now, 0).0.iter().map(|line| line.iter().map(|(s, _)| s.as_str()).collect()).collect()
+        };
+        assert!(plain(&app, now).iter().any(|row| row.contains("cargo --version")), "the last group of a running turn stays open");
+
+        app.session.apply(CoreEvent::Thinking, now);
+        now += std::time::Duration::from_millis(1500);
+        assert!(plain(&app, now).iter().any(|row| row.contains("python -V")), "held for two seconds after the next request begins");
+        now += std::time::Duration::from_secs(1);
+        let rows = plain(&app, now);
+        assert!(rows.iter().any(|row| row.starts_with("▸ ") && row.contains('2')) && !rows.iter().any(|row| row.contains("python -V")), "{rows:?}");
+
+        app.session.folds.toggle(Fold::Group("c1".into()), now);
+        now += std::time::Duration::from_secs(1);
+        assert!(plain(&app, now).iter().any(|row| row.contains("python -V")), "a click opens the group again");
+        assert!(!plain(&app, now).iter().any(|row| row.contains("out of python")), "a call shows no details until it is clicked");
+        app.session.folds.toggle(Fold::Call("c2".into()), now);
+        now += std::time::Duration::from_secs(1);
+        let rows = plain(&app, now);
+        assert!(rows.iter().any(|row| row.ends_with("Input")) && rows.iter().any(|row| row.ends_with("out of python -V")), "{rows:?}");
     }
 
     #[test]
     fn at_fifty_thousand_tokens_a_second_every_message_is_whole_at_once() {
         let rounds = 40;
         let (app, now) = burst_of_rounds(rounds);
-        let (lines, _, _) = transcript_lines(&app, 100, now, 0);
+        let (lines, ..) = transcript_lines(&app, 100, now, 0);
         let drawn: String = lines.iter().flatten().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join(" ");
         for round in 0..rounds {
             assert!(drawn.contains(&format!("END{round}")), "message {round} is not drawn whole");

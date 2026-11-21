@@ -221,6 +221,7 @@ pub struct App {
     /// The writes being typed (or just typed), shown as code blocks in the conversation.
     pub code: Vec<CodeBlock>,
     code_rects: Vec<(Rect, usize)>,
+    fold_rects: Vec<(Rect, crate::calls::Fold)>,
     widths: Vec<usize>,
     plain: Vec<String>,
     /// The display formulas showing now, which the pictures draw over their reserved rows.
@@ -312,6 +313,7 @@ impl App {
             text_view: None,
             code: Vec::new(),
             code_rects: Vec::new(),
+            fold_rects: Vec::new(),
             widths: Vec::new(),
             plain: Vec::new(),
             formulas: Vec::new(),
@@ -1048,6 +1050,7 @@ impl App {
             || self.command.is_some()
             || tweens.iter().any(|t| t.running(now))
             || self.session.thinking_moves(now)
+            || self.session.folds.moving(now)
             || self.image_pending
             || self.log.as_ref().is_some_and(|log| matches!(log.state, LogState::Loading))
             || !self.code.is_empty()
@@ -1064,6 +1067,7 @@ impl App {
         self.reading = drawn.reading;
         self.text_view = drawn.text;
         self.code_rects = drawn.code;
+        self.fold_rects = drawn.folds;
         self.widths = drawn.widths;
         self.plain = drawn.plain;
         self.formulas = drawn.formulas;
@@ -1821,6 +1825,17 @@ impl App {
         }
     }
 
+    /// A press on a group's or a call's row opens or folds it. Returns false when the press was elsewhere.
+    fn toggle_fold_at(&mut self, column: u16, row: u16, now: Instant) -> bool {
+        if self.modal.is_some() {
+            return false;
+        }
+        let Some((_, fold)) = self.fold_rects.iter().find(|(rect, _)| contains(*rect, (column, row))) else { return false };
+        let fold = fold.clone();
+        self.session.folds.toggle(fold, now);
+        true
+    }
+
     fn code_under_pointer(&self) -> Option<usize> {
         self.code_rects.iter().find(|(rect, _)| contains(*rect, self.last_mouse)).map(|(_, index)| *index)
     }
@@ -1899,6 +1914,9 @@ impl App {
                 _ => {}
             },
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.toggle_fold_at(m.column, m.row, now) {
+                    return;
+                }
                 if !self.drop_water(hit, m.column, m.row, now) {
                     self.click(hit, now);
                 }
@@ -2631,7 +2649,7 @@ mod tests {
         assert!(screen_text(&mut app, now + Duration::from_secs(1)).contains("y = 2"));
 
         let done = now + Duration::from_secs(2);
-        app.on_session(CoreEvent::Result { call: "w1".into(), ok: true, summary: "ok".into(), diff: Some((3, 0)) }, done);
+        app.on_session(CoreEvent::Result { call: "w1".into(), ok: true, summary: "ok".into(), diff: Some((3, 0)), output: String::new() }, done);
         app.fold_code(done + Duration::from_millis(1900));
         assert_eq!(app.code[0].open.target(), 1.0, "still lingering");
         app.fold_code(done + Duration::from_millis(2100));

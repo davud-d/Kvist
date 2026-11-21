@@ -11,6 +11,7 @@ mod app;
 mod arena;
 mod attach;
 mod backdrop;
+mod calls;
 mod code;
 mod core;
 mod decision;

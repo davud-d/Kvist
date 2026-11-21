@@ -277,8 +277,27 @@ fn step(event: &Value) -> Vec<CoreEvent> {
     if ENDINGS.contains(&action) {
         return out;
     }
-    out.push(CoreEvent::Step { call: call_id(event), kind: kind(action), label: label(event, action) });
+    let batch = event.get("batch_id").and_then(Value::as_str).unwrap_or("").to_string();
+    let input = input_text(action, event.get("action_args"));
+    out.push(CoreEvent::Step { call: call_id(event), kind: kind(action), label: label(event, action), batch, input });
     out
+}
+
+/// What the model sent with a call, as text to read: a command as it is, other arguments as `name: value` lines.
+fn input_text(action: &str, args: Option<&Value>) -> String {
+    let Some(Value::Object(args)) = args else { return String::new() };
+    if action == "run_shell"
+        && let Some(command) = args.get("command").and_then(Value::as_str)
+    {
+        return command.to_string();
+    }
+    args.iter()
+        .map(|(name, value)| match value {
+            Value::String(text) => format!("{name}: {text}"),
+            other => format!("{name}: {other}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A call's result; a successful write also changes its file's counts.
@@ -286,7 +305,8 @@ fn result(event: &Value) -> Vec<CoreEvent> {
     let ok = event.get("ok").and_then(Value::as_bool).unwrap_or(false);
     let summary = event.get("summary").and_then(Value::as_str).unwrap_or("").to_string();
     let diff = line_counts(event).filter(|_| ok);
-    let mut out = vec![CoreEvent::Result { call: call_id(event), ok, summary, diff }];
+    let output = event.get("output").and_then(Value::as_str).unwrap_or("").to_string();
+    let mut out = vec![CoreEvent::Result { call: call_id(event), ok, summary, diff, output }];
     let path = event.get("path").and_then(Value::as_str).filter(|p| !p.is_empty());
     if let (Some((added, removed)), Some(path)) = (diff, path) {
         let patch = event.get("patch").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_string);
@@ -381,16 +401,30 @@ mod tests {
     }
 
     #[test]
+    fn a_call_carries_what_the_model_sent_and_what_came_back() {
+        let step = json!({"type": "step", "step": 1, "call_id": "c1", "batch_id": "b1", "action_type": "run_shell",
+            "action_args": {"command": "cargo --version"}, "action_description": "version", "user_message": ""});
+        assert_eq!(
+            translate(&step),
+            vec![CoreEvent::Step { call: "c1".into(), kind: ToolKind::Shell, label: "version".into(), batch: "b1".into(), input: "cargo --version".into() }]
+        );
+        let read = json!({"type": "step", "step": 2, "call_id": "c2", "action_type": "read_file", "action_args": {"path": "a.py"}});
+        assert!(matches!(&translate(&read)[0], CoreEvent::Step { input, .. } if input == "path: a.py"));
+        let result = json!({"type": "action_result", "call_id": "c1", "ok": true, "summary": "exit 0", "output": "cargo 1.80\n"});
+        assert!(matches!(&translate(&result)[0], CoreEvent::Result { output, .. } if output == "cargo 1.80\n"));
+    }
+
+    #[test]
     fn a_write_carries_the_cores_line_counts_to_its_file() {
         let step = json!({"type": "step", "step": 3, "call_id": "c3", "action_type": "replace_in_file",
             "action_description": "edits a.py", "user_message": ""});
-        assert_eq!(translate(&step), vec![CoreEvent::Step { call: "c3".into(), kind: ToolKind::Write, label: "edits a.py".into() }]);
+        assert_eq!(translate(&step), vec![CoreEvent::Step { call: "c3".into(), kind: ToolKind::Write, label: "edits a.py".into(), batch: String::new(), input: String::new() }]);
         let result = json!({"type": "action_result", "call_id": "c3", "ok": true, "summary": "Replaced",
             "path": "a.py", "lines_added": 3, "lines_removed": 2, "patch": "@@ -1 +1 @@\n-x\n+y"});
         assert_eq!(
             translate(&result),
             vec![
-                CoreEvent::Result { call: "c3".into(), ok: true, summary: "Replaced".into(), diff: Some((3, 2)) },
+                CoreEvent::Result { call: "c3".into(), ok: true, summary: "Replaced".into(), diff: Some((3, 2)), output: String::new() },
                 CoreEvent::FileChanged { path: "a.py".into(), added: 3, removed: 2, patch: Some("@@ -1 +1 @@\n-x\n+y".into()) },
             ]
         );
@@ -407,7 +441,7 @@ mod tests {
     fn a_failed_write_or_a_read_changes_no_file() {
         let failed = json!({"type": "action_result", "call_id": "c1", "ok": false, "summary": "denied", "path": "b",
             "lines_added": null, "lines_removed": null});
-        assert_eq!(translate(&failed), vec![CoreEvent::Result { call: "c1".into(), ok: false, summary: "denied".into(), diff: None }]);
+        assert_eq!(translate(&failed), vec![CoreEvent::Result { call: "c1".into(), ok: false, summary: "denied".into(), diff: None, output: String::new() }]);
         let read = json!({"type": "action_result", "call_id": "c2", "ok": true, "summary": "12 lines", "path": "b"});
         assert_eq!(translate(&read).len(), 1);
     }
@@ -417,7 +451,7 @@ mod tests {
         let out = translate(&json!({"type": "step", "call_id": "c", "action_type": "final_answer", "user_message": "Готово"}));
         assert_eq!(out, vec![CoreEvent::Say("Готово".into())]);
         let out = translate(&json!({"type": "step", "step": 2, "action_type": "run_shell", "user_message": "Запускаю", "action_description": ""}));
-        assert_eq!(out, vec![CoreEvent::Say("Запускаю".into()), CoreEvent::Step { call: "step-2".into(), kind: ToolKind::Shell, label: "run_shell".into() }]);
+        assert_eq!(out, vec![CoreEvent::Say("Запускаю".into()), CoreEvent::Step { call: "step-2".into(), kind: ToolKind::Shell, label: "run_shell".into(), batch: String::new(), input: String::new() }]);
     }
 
     #[test]
