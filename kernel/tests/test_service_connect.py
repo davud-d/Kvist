@@ -345,3 +345,64 @@ def test_telegram_code_can_be_resent_by_the_next_method(monkeypatch):
     assert calls == [('resend', '+123456789', 'first'),
                      {'phone': '+123456789', 'code': '54321', 'phone_code_hash': 'second'}]
     assert "'r'" in titles[1] and "'r'" not in titles[2]
+
+
+def test_telegram_browser_login_shows_errors_and_resends_on_the_page(monkeypatch):
+    import sys
+    import threading
+    from urllib.parse import urlencode
+
+    class RPCError(Exception):
+        pass
+
+    class CodeInvalid(RPCError):
+        pass
+
+    class PasswordNeeded(RPCError):
+        pass
+
+    resend_module = SimpleNamespace(ResendCodeRequest=lambda phone, code_hash: ('resend', phone, code_hash))
+    monkeypatch.setitem(sys.modules, 'telethon', SimpleNamespace(errors=SimpleNamespace(
+        RPCError=RPCError, SessionPasswordNeededError=PasswordNeeded)))
+    monkeypatch.setitem(sys.modules, 'telethon.tl', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'telethon.tl.functions', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'telethon.tl.functions.auth', resend_module)
+
+    class Client:
+        async def send_code_request(self, phone):
+            return SimpleNamespace(phone_code_hash='first', type=SimpleNamespace(), next_type=object())
+
+        async def __call__(self, request):
+            return SimpleNamespace(phone_code_hash='second', type=SimpleNamespace(), next_type=None)
+
+        async def sign_in(self, **kw):
+            if kw['code'] != '54321':
+                raise CodeInvalid('The code is invalid')
+
+    replies = []
+
+    def person(page):
+        def post(**fields):
+            request = Request(page.url, data=urlencode(fields).encode(), method='POST')
+            with urlopen(request, timeout=10) as response:
+                replies.append(response.read().decode())
+        wait_for_form(page)
+        post(action='code', code='00000')
+        post(action='resend')
+        post(action='code', code='54321')
+
+    def wait_for_form(page):
+        import time
+        while 'Login code' not in page.html:
+            time.sleep(0.01)
+
+    with browser.LoginPage() as page:
+        thread = threading.Thread(target=person, args=(page,))
+        thread.start()
+        asyncio.run(telegram.browser_code_login(Client(), page, '+123456789'))
+        page.show('connected')  # the real flow ends with this page; the last POST waits for it
+        thread.join(timeout=10)
+    assert 'CodeInvalid: The code is invalid' in replies[0]
+    assert 'Send the code another way' in replies[0]
+    assert 'Send the code another way' not in replies[1]
+    assert replies[2] == '<!doctype html><html><meta charset=\'utf-8\'><title>Kvist login</title><meta name=\'viewport\' content=\'width=device-width,initial-scale=1\'><body>connected</body></html>'

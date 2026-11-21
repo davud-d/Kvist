@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 import time
+from html import escape
 
 if __package__:
     from .service_browser import LoginPage, launch, private_json
@@ -54,12 +55,6 @@ def validate(name, arguments):
 
 
 def _login_prompt(title, secret=False):
-    if "login-ui" in sys.argv:
-        print(json.dumps({"type": "prompt", "title": title, "secret": secret}), flush=True)
-        line = sys.stdin.readline()
-        if not line:
-            raise RuntimeError("Login cancelled")
-        return json.loads(line)
     return getpass.getpass(title) if secret else input(title)
 
 
@@ -70,23 +65,31 @@ def _login_browser(url):
         launch(url)
 
 
-async def phone_login(client):
-    from telethon import errors
-
-    phone = _login_prompt("Telegram phone number with country code / Номер с кодом страны: ").strip()
+def _normalize_phone(phone):
+    phone = phone.strip()
     if phone.startswith("+"):
         # People type numbers the way they are printed: "+7 999 123-45-67".
         phone = "+" + "".join(filter(str.isdigit, phone))
     if not phone.startswith("+") or not phone[1:].isdigit():
         raise ValueError("Enter the phone number with + and country code")
+    return phone
+
+
+def _delivery(sent):
+    return type(getattr(sent, "type", None)).__name__.removeprefix("SentCodeType")
+
+
+async def phone_login(client):
+    from telethon import errors
+
+    phone = _normalize_phone(_login_prompt("Telegram phone number with country code / Номер с кодом страны: "))
     sent = await client.send_code_request(phone)
     while True:
         # Telegram picks the channel itself (service chat in another signed-in app, SMS, call); naming it
         # tells the person where to look, and "r" asks Telegram for the next channel when nothing arrived.
-        delivery = type(getattr(sent, "type", None)).__name__.removeprefix("SentCodeType")
         resend = " 'r' = resend by next method / повторить другим способом;" if getattr(sent, "next_type", None) else ""
         code = _login_prompt(
-            f"Login code / Код входа (sent via {delivery}: the Telegram service chat in another signed-in app, "
+            f"Login code / Код входа (sent via {_delivery(sent)}: the Telegram service chat in another signed-in app, "
             f"or SMS;{resend}): ", secret=True).strip()
         if code.lower() != "r" or not resend:
             break
@@ -101,11 +104,157 @@ async def phone_login(client):
         await client.sign_in(password=password)
 
 
-async def login(path: Path):
-    from telethon import TelegramClient, errors
-    from telethon.sessions import StringSession
+async def terminal_password(client):
+    await client.sign_in(password=_login_prompt("Telegram two-step verification password: ", secret=True))
+
+
+async def qr_login(client, page, on_password):
+    from telethon import errors
     import qrcode
     from qrcode.image.svg import SvgPathImage
+
+    deadline = time.monotonic() + 300
+    while time.monotonic() < deadline:
+        qr = await client.qr_login()
+        svg = io.BytesIO()
+        qrcode.make(qr.url, image_factory=SvgPathImage).save(svg)
+        page.show("<meta http-equiv='refresh' content='5'><h1>Connect Telegram to Kvist</h1>"
+                  "<p>On your phone: Telegram → Settings → Devices → Link Desktop Device.</p>"
+                  "<p>Scan this QR code. / На телефоне: Настройки → Устройства → Подключить устройство.</p>"
+                  + svg.getvalue().decode().split("?>")[-1])
+        try:
+            await qr.wait(timeout=min(30, max(1, deadline - time.monotonic())))
+            return
+        except asyncio.TimeoutError:
+            continue
+        except errors.SessionPasswordNeededError:
+            page.show("<h1>Two-step verification</h1><p>Enter your Telegram password in Kvist.</p>")
+            await on_password(client)
+            return
+
+
+_STYLE = ("<style>body{font:16px system-ui,sans-serif;max-width:26em;margin:4em auto;padding:0 1em}"
+          "input{width:100%;box-sizing:border-box;font-size:1.1em;padding:.5em;margin:.3em 0 1em}"
+          "button{font-size:1em;padding:.6em 1.2em;margin-right:.5em;cursor:pointer}"
+          ".err{color:#b00020}.hint{color:#555}</style>")
+
+
+def _form(title, hint, fields, buttons, error=""):
+    """fields: (name, label, input type, value); buttons: (action, label)."""
+    rows = "".join(f"<label>{escape(label)}<input name='{name}' type='{kind}' value='{escape(value)}' "
+                   f"autocomplete='off' {'autofocus' if index == 0 else ''}></label>"
+                   for index, (name, label, kind, value) in enumerate(fields))
+    actions = "".join(f"<button name='action' value='{action}'>{escape(label)}</button>" for action, label in buttons)
+    problem = f"<p class='err'>{escape(error)}</p>" if error else ""
+    return f"{_STYLE}<h1>{escape(title)}</h1><p class='hint'>{hint}</p>{problem}<form method='post'>{rows}{actions}</form>"
+
+
+async def _ask(page, html):
+    return await asyncio.to_thread(page.ask, html)
+
+
+async def browser_password(client, page):
+    from telethon import errors
+
+    error = ""
+    while True:
+        form = await _ask(page, _form("Two-step verification / Пароль 2FA", "Your Telegram cloud password.",
+                                      [("password", "Password", "password", "")], [("ok", "Sign in")], error))
+        try:
+            await client.sign_in(password=form["password"])
+            return
+        except errors.PasswordHashInvalidError as exc:
+            error = str(exc)
+
+
+async def browser_code_login(client, page, phone):
+    from telethon import errors
+    from telethon.tl.functions.auth import ResendCodeRequest
+
+    sent = await client.send_code_request(phone)
+    error = ""
+    while True:
+        hint = (f"The code was sent via <b>{escape(_delivery(sent))}</b>: look in the “Telegram” service chat "
+                "in another app where you are signed in, or wait for the SMS.")
+        buttons = [("code", "Sign in / Войти")]
+        if getattr(sent, "next_type", None):
+            buttons.append(("resend", "Send the code another way / Отправить другим способом"))
+        form = await _ask(page, _form("Login code / Код входа", hint, [("code", "Code", "text", "")], buttons, error))
+        error = ""
+        try:
+            if form.get("action") == "resend":
+                sent = await client(ResendCodeRequest(phone, sent.phone_code_hash))
+                continue
+            await client.sign_in(phone=phone, code=form.get("code", "").strip(), phone_code_hash=sent.phone_code_hash)
+            return
+        except errors.SessionPasswordNeededError:
+            await browser_password(client, page)
+            return
+        except errors.RPCError as exc:
+            error = f"{type(exc).__name__}: {exc}"
+
+
+async def _save_account(client, api_id, api_hash, path):
+    if not await client.is_user_authorized():
+        raise RuntimeError("Telegram login expired; enter /telegram again.")
+    me = await client.get_me()
+    if me.bot:
+        raise RuntimeError("A personal Telegram account is required.")
+    private_json(path, {"api_id": api_id, "api_hash": api_hash,
+                        "session": client.session.save(), "user_id": me.id})
+    print("Telegram connected. Every send requires confirmation in Kvist.", file=sys.stderr)
+
+
+async def login_in_browser(path: Path):
+    """The whole login (keys, number, code, 2FA, QR) on one local page; Telegram's errors show on it."""
+    from telethon import TelegramClient, errors
+    from telethon.sessions import StringSession
+
+    client = None
+    form, error = {}, ""
+    with LoginPage() as page:
+        _login_browser(page.url)
+        try:
+            while True:
+                form = await _ask(page, _form(
+                    "Connect Telegram to Kvist / Подключить Telegram",
+                    "API ID and hash come from <a href='https://my.telegram.org/apps' rel='noreferrer' "
+                    "target='_blank'>my.telegram.org/apps</a>.",
+                    [("api_id", "API ID", "text", form.get("api_id", "")),
+                     ("api_hash", "API hash", "password", form.get("api_hash", "")),
+                     ("phone", "Phone with country code / Номер с кодом страны", "text", form.get("phone", ""))],
+                    [("code", "Get a code / Получить код"), ("qr", "Sign in with QR / Войти по QR")], error))
+                error = ""
+                try:
+                    api_id, api_hash = int(form["api_id"]), form["api_hash"].strip()
+                    if api_id <= 0 or not api_hash:
+                        raise ValueError("API ID and hash are required")
+                    phone = _normalize_phone(form["phone"]) if form["action"] == "code" else ""
+                    if client:
+                        await client.disconnect()
+                    # A fresh session starts on a default data center; Telegram answers the first login request
+                    # with PHONE_MIGRATE and Telethon needs a second attempt, so retries must stay enabled here.
+                    client = TelegramClient(StringSession(), api_id, api_hash, flood_sleep_threshold=0)
+                    await client.connect()
+                    if form["action"] == "qr":
+                        await qr_login(client, page, lambda c: browser_password(c, page))
+                    else:
+                        await browser_code_login(client, page, phone)
+                    break
+                except (ValueError, errors.RPCError) as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+            await _save_account(client, api_id, api_hash, path)
+            page.show(f"{_STYLE}<h1>Telegram connected ✓</h1><p>You can close this tab and return to Kvist. "
+                      "/ Можно закрыть вкладку и вернуться в Kvist.</p>")
+            await asyncio.sleep(1)
+        finally:
+            if client:
+                await client.disconnect()
+
+
+async def login(path: Path):
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
 
     api_id = int(_login_prompt("Telegram API ID (my.telegram.org/apps): "))
     api_hash = _login_prompt("Telegram API hash: ", secret=True).strip()
@@ -121,39 +270,11 @@ async def login(path: Path):
             await phone_login(client)
         elif method == "2":
             with LoginPage() as page:
-                deadline = time.monotonic() + 300
-                opened = False
-                while time.monotonic() < deadline:
-                    qr = await client.qr_login()
-                    svg = io.BytesIO()
-                    qrcode.make(qr.url, image_factory=SvgPathImage).save(svg)
-                    page.html = ("<meta http-equiv='refresh' content='5'><h1>Connect Telegram to Kvist</h1>"
-                                 "<p>On your phone: Telegram → Settings → Devices → Link Desktop Device.</p>"
-                                 "<p>Scan this QR code. / На телефоне: Настройки → Устройства → Подключить устройство.</p>"
-                                 + svg.getvalue().decode().split("?>")[-1])
-                    if not opened:
-                        _login_browser(page.url)
-                        opened = True
-                    try:
-                        await qr.wait(timeout=min(30, max(1, deadline - time.monotonic())))
-                        break
-                    except asyncio.TimeoutError:
-                        continue
-                    except errors.SessionPasswordNeededError:
-                        page.html = "<h1>Two-step verification</h1><p>Enter your Telegram password in Kvist.</p>"
-                        password = _login_prompt("Telegram two-step verification password: ", secret=True)
-                        await client.sign_in(password=password)
-                        break
+                _login_browser(page.url)
+                await qr_login(client, page, terminal_password)
         else:
             raise ValueError("Choose 1 for code login or 2 for QR login")
-        if not await client.is_user_authorized():
-            raise RuntimeError("Telegram login expired; enter /telegram again.")
-        me = await client.get_me()
-        if me.bot:
-            raise RuntimeError("A personal Telegram account is required.")
-        private_json(path, {"api_id": api_id, "api_hash": api_hash,
-                            "session": client.session.save(), "user_id": me.id})
-        print("Telegram connected. Every send requires confirmation in Kvist.", file=sys.stderr)
+        await _save_account(client, api_id, api_hash, path)
     finally:
         await client.disconnect()
 
@@ -249,7 +370,7 @@ if __name__ == "__main__":
         mode, filename = sys.argv[1:]
         if mode not in ("login", "login-ui", "serve"):
             raise ValueError("Expected login or serve")
-        asyncio.run(login(Path(filename)) if mode in ("login", "login-ui") else serve(Path(filename)))
+        asyncio.run({"login": login, "login-ui": login_in_browser, "serve": serve}[mode](Path(filename)))
     except KeyboardInterrupt:
         sys.exit(130)
     except Exception as error:
