@@ -28,6 +28,19 @@ ${rows}
 </tbody></table></div>`;
 }
 
+function paidCards(t, plans) {
+  const p = t.pricing;
+  const cards = plans.filter((plan) => plan.id !== "trial").map((plan) => `<div class="card">
+<p class="spread"><span class="h3">${esc(p.planNames[plan.id])}</span><span class="price">${esc(p.perMonth.replace("{p}", plan.price_usd))}</span></p>
+<ul class="facts"><li>${esc(p.paidHours.replace("{h}", plan.hours))}</li><li>${plan.vcpu} vCPU (shared) · ${plan.memory_gb} GB RAM · ${plan.disk_gb} GB</li></ul>
+<p><a class="btn ghost wide" href="/auth/github/login?next=/start">${esc(p.pay)}</a></p>
+</div>`).join("\n");
+  return `<h2 class="section-title" id="paid-title">${esc(p.paidTitle)}</h2>
+<div class="stack">
+${cards}
+</div>`;
+}
+
 export function renderPricing(t, catalog, styles) {
   const p = t.pricing;
   const other = t.lang === "ru" ? "en" : "ru";
@@ -61,6 +74,7 @@ export function renderPricing(t, catalog, styles) {
 <p class="small">${esc(p.github)}</p>
 </section>
 <section class="stack" style="margin-top:32px">
+${paidCards(t, catalog.plans)}
 <details class="compare"><summary>${esc(p.compare)}</summary>
 ${table(t, catalog.plans)}
 </details>

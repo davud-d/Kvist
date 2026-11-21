@@ -173,6 +173,9 @@
     "cta": "Try for 7 days",
     "terms": "No card for the trial. One trial per GitHub account older than one month. After 7 days you pick a plan if you want one: nothing is charged automatically.",
     "github": "You sign in with GitHub. No password, no forms, no email to confirm.",
+    "paidTitle": "Paid plans",
+    "pay": "Pay",
+    "paidHours": "{h} agent hours",
     "compare": "Compare plans",
     "colPlan": "Plan",
     "colPrice": "Price",
@@ -196,8 +199,8 @@
     "signedIn": "Open your dashboard"
   },
   "manual": {
-    "title": "Access is issued by hand for now",
-    "body": "Online payments are switched off for the moment. The administrator grants a plan or extra hours manually: message them on Telegram, say your GitHub login, and they will switch it on.",
+    "title": "Online payment is temporarily unavailable",
+    "body": "Card and SBP payments will work soon. Until then the administrator grants a plan or extra hours manually: message them on Telegram, say your GitHub login, and they will switch it on.",
     "button": "Write on Telegram: @brmalov",
     "after": "Once it is granted, reload this page and carry on."
   },
