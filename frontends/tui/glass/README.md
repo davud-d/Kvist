@@ -213,12 +213,16 @@ card are the risks from `council_objection`, with whom each is aimed at. After
 disagree, with their arguments below. Esc takes the screen away.
 
 **The status row**, on the right: how calls travel (`native` / `text`, from
-`tool_mode`) and the money: the sum of `cost_usd` of the main stream and of the
-executors' latest snapshots; "≈" when a price is approximate or some call has
-none. With no price at all (a subscription) it reads "total N tok · M uncached"
-(uncached = `input_tokens − cache_read_tokens`). If some call did not say what
-the cache served, the uncached number is an upper bound and carries "≈"; if none
-did, the uncached part is left out. The numbers come only from events.
+`tool_mode`), how full the context window is ("context 27.3k / 400.0k · 85% cached":
+`context_tokens` and `context_limit` of the last `usage`, and `cache_read_tokens` as a share of
+its `input_tokens`; the share is left out when the provider did not report the cache), and the
+money: the sum of `cost_usd` of the main stream and of the executors' latest snapshots; "≈"
+when a price is approximate or some call has none. The summed spend is not shown as tokens:
+it reads as a conversation that does not exist. Hovering the context window tells how long
+the cache is expected to live. No provider reports that, so it counts five minutes from the end
+of the last call (the usual lifetime) and says "most likely"; a provider that keeps the cache
+longer (OpenAI's 24 h) makes it too short. Without `context_tokens` in `usage` (an older core)
+the row falls back to "total N tok · M uncached". The numbers come only from events.
 
 ## How it is drawn
 

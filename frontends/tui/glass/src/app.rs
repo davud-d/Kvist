@@ -1043,6 +1043,8 @@ impl App {
         let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.diff_in, &self.modal_p, &self.menu_in, &self.strip_in];
         matches!(self.phase, Phase::Splash)
             || self.session.busy
+            // The cache countdown in the hover tip.
+            || self.hover == Some(Hit::Context)
             || self.command.is_some()
             || tweens.iter().any(|t| t.running(now))
             || self.session.thinking_moves(now)
@@ -3363,6 +3365,24 @@ mod tests {
         assert_eq!(silent.session.total_spend().label(false).as_deref(), Some("total 16.0k tok"));
         // Nothing reported: nothing shown.
         assert!(view::status_info(&main_app()).is_empty());
+    }
+
+    #[test]
+    fn the_status_line_shows_the_context_window_and_the_cached_share_instead_of_the_summed_spend() {
+        let mut app = main_app();
+        feed(&mut app, &[json!({"type": "usage", "input_tokens": 20000, "output_tokens": 500, "cache_read_tokens": 17000,
+            "context_tokens": 27300, "context_limit": 400000})]);
+        let line: String = view::status_info(&app).iter().map(|(text, _)| text.as_str()).collect();
+        assert!(line.contains("27.3k / 400.0k · 85%"), "{line}");
+        assert!(!line.contains("total"), "{line}");
+        // The cache's lifetime counts from the end of the call.
+        let window = app.session.window.clone().expect("a window");
+        assert_eq!(window.cache_left(window.at).as_secs(), 300);
+        assert!(window.cache_left(window.at + Duration::from_secs(400)).is_zero());
+        // A provider that does not report the cache gets no share and no tip.
+        let mut silent = main_app();
+        feed(&mut silent, &[json!({"type": "usage", "input_tokens": 100, "output_tokens": 5, "context_tokens": 100, "context_limit": 1000})]);
+        assert_eq!(silent.session.window.map(|w| w.cached), Some(None));
     }
 
     #[test]

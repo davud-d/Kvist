@@ -1,7 +1,7 @@
 // What the interface knows about the session, built from the core's events
 // (docs/UI_API.md §7) after protocol.rs has turned them into `CoreEvent`s.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::arena::{Arena, ArenaDiff, Council, CouncilVerdict, Finished, Member, Risk, Spend, Started, Status, Usage, Verdict};
 use crate::thought::Thought;
@@ -21,6 +21,29 @@ pub enum HelperState {
     Running,
     Done,
     Failed,
+}
+
+/// A cached prompt prefix usually stays warm for about five minutes after its last use (the lifetime of
+/// the cache breakpoints the core sets); providers differ, so what is shown from it is an estimate.
+pub const CACHE_TTL: Duration = Duration::from_secs(300);
+
+/// The context window after the last model call.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Window {
+    pub tokens: u64,
+    /// The budget the core trims a prompt to; 0 when it did not say.
+    pub limit: u64,
+    /// Percent of that call's input served from the cache; `None` when the provider did not report it.
+    pub cached: Option<u8>,
+    /// When the call ended: the cache's lifetime counts from here.
+    pub at: Instant,
+}
+
+impl Window {
+    /// How long the cache is still expected to live; zero once it is gone.
+    pub fn cache_left(&self, now: Instant) -> Duration {
+        CACHE_TTL.saturating_sub(now.saturating_duration_since(self.at))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +89,8 @@ pub enum CoreEvent {
     TurnEnd,
     /// One model call's tokens and price (`usage`).
     Spent(Usage),
+    /// How full the context window is after a call, and how much of that call's input the cache served.
+    Window { tokens: u64, limit: u64, input: u64, cache_read: Option<u64> },
     /// How the model's calls travel: `native` or `text` (`tool_mode`).
     ToolMode(String),
     BestofStarted(Started),
@@ -148,6 +173,8 @@ pub struct Session {
     pub council: Option<Council>,
     /// Tokens and money of the main stream and of the runs already dismissed.
     pub spend: Spend,
+    /// The context window as the last call left it; `None` until a call says.
+    pub window: Option<Window>,
     pub tool_mode: Option<String>,
     pub busy: bool,
     pub thinking_since: Option<Instant>,
@@ -257,6 +284,10 @@ impl Session {
                 }
             }
             CoreEvent::Spent(usage) => self.spend.add(&usage),
+            CoreEvent::Window { tokens, limit, input, cache_read } => {
+                let cached = cache_read.filter(|_| input > 0).map(|read| (read * 100 / input).min(100) as u8);
+                self.window = Some(Window { tokens, limit, cached, at: now });
+            }
             CoreEvent::ToolMode(mode) => self.tool_mode = Some(mode),
             other => self.apply_run(other),
         }

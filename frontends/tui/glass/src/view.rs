@@ -59,6 +59,8 @@ pub enum Hit {
     TakeOver,
     Provider,
     Models,
+    /// The context window in the status line; hovering it tells how long the cache lives.
+    Context,
     /// A row of the model picker, by its index in `ModelPicker::rows()`.
     ModelRow(usize),
     /// The smart/fast switch of the model picker.
@@ -935,12 +937,20 @@ fn draw_status(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     p.text(provider_x, y, &provider, st(lit(Hit::Provider)));
     drawn.hits.push((Rect::new(provider_x.max(0) as u16, y as u16, text::width(&provider) as u16 - 2, 1), Hit::Provider));
 
-    let info = status_info(app);
+    let (info, window_at) = status_parts(app);
     let info_w = text::line_width(&info) as i32;
     let mut edge = provider_x;
     if info_w > 0 && provider_x - info_w - 3 > left_end + 3 {
         edge = provider_x - info_w - 3;
         p.line(edge, y, &info);
+        if let Some(index) = window_at {
+            let x = edge + text::line_width(&info[..index].to_vec()) as i32;
+            let w = text::width(&info[index].0) as u16;
+            drawn.hits.push((Rect::new(x.max(0) as u16, y as u16, w, 1), Hit::Context));
+            if app.hover == Some(Hit::Context) {
+                draw_cache_tip(p, app, now, x, y - 1);
+            }
+        }
     }
 
     let Some(toast) = &app.toast else { return };
@@ -954,11 +964,31 @@ fn draw_status(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     p.line(x, y, &line);
 }
 
-/// How the model's calls travel, and what the session has cost so far; what
-/// the core has not reported is left out.
+/// How long the cache is expected to live, above the status line; the time is the last call's end plus the cache's lifetime.
+fn draw_cache_tip(p: &mut Painter, app: &App, now: Instant, x: i32, y: i32) {
+    let Some(window) = app.session.window.as_ref().filter(|w| w.cached.is_some()) else { return };
+    let s = strings();
+    let left = window.cache_left(now);
+    let tip = if left.is_zero() {
+        format!(" {} ({}) ", s.cache_gone, s.cache_guess)
+    } else {
+        let secs = left.as_secs();
+        format!(" {} {}:{:02} ({}) ", s.cache_left, secs / 60, secs % 60, s.cache_guess)
+    };
+    p.text(x, y, &tip, Style::default().fg(MOON).bg(NIGHT));
+}
+
+/// How the model's calls travel, how full the context window is and what the session has cost;
+/// what the core has not reported is left out.
 pub(crate) fn status_info(app: &App) -> Line {
+    status_parts(app).0
+}
+
+/// `status_info`, and which of its spans is the context window (it answers hovering).
+fn status_parts(app: &App) -> (Line, Option<usize>) {
     let s = strings();
     let mut info: Line = Vec::new();
+    let mut window_at = None;
     if let Some(mode) = &app.session.tool_mode {
         let word = match mode.as_str() {
             "native" => s.tools_native,
@@ -967,13 +997,38 @@ pub(crate) fn status_info(app: &App) -> Line {
         };
         info.push(span(word, DUSK));
     }
-    if let Some(spend) = app.session.total_spend().label(s.ru) {
+    let spend = app.session.total_spend();
+    // Summed spend reads as a huge conversation that does not exist, so with a window to show only a price joins it.
+    let spend_label = match (&app.session.window, spend.priced > 0) {
+        (Some(_), false) => None,
+        _ => spend.label(s.ru),
+    };
+    if let Some(window) = &app.session.window {
+        if !info.is_empty() {
+            info.push(span("  ", DUSK));
+        }
+        window_at = Some(info.len());
+        info.push(span(window_label(window, s), MIST));
+    }
+    if let Some(spend) = spend_label {
         if !info.is_empty() {
             info.push(span("  ", DUSK));
         }
         info.push(span(spend, MIST));
     }
-    info
+    (info, window_at)
+}
+
+/// "context 27.3k / 400k · 85% cached"; the budget and the cached share are left out when unknown.
+fn window_label(window: &crate::model::Window, s: &crate::strings::Strings) -> String {
+    let mut label = format!("{} {}", s.context, crate::arena::count(window.tokens, s.ru));
+    if window.limit > 0 {
+        label.push_str(&format!(" / {}", crate::arena::count(window.limit, s.ru)));
+    }
+    if let Some(percent) = window.cached {
+        label.push_str(&format!(" · {percent}% {}", s.cached));
+    }
+    label
 }
 
 /// The path whole if it fits in `max` columns, else "…/" and as many of its

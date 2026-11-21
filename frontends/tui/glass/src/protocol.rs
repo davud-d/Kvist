@@ -88,7 +88,14 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         "session" if event.get("closed").and_then(Value::as_bool) == Some(true) => {
             vec![CoreEvent::SessionEnded { notice: text("closed_notice") }]
         }
-        "usage" => vec![CoreEvent::Spent(usage(event))],
+        "usage" => {
+            let mut events = vec![CoreEvent::Spent(usage(event))];
+            if let Some(tokens) = event.get("context_tokens").and_then(Value::as_u64) {
+                let call = usage(event);
+                events.push(CoreEvent::Window { tokens, limit: number64(event, "context_limit"), input: call.input, cache_read: call.cache_read });
+            }
+            events
+        }
         "tool_mode" if !text("mode").is_empty() => vec![CoreEvent::ToolMode(text("mode"))],
         "bestof_started" => vec![CoreEvent::BestofStarted(started(event))],
         "bestof_status" => vec![CoreEvent::BestofStatus(status(event))],
@@ -150,6 +157,10 @@ fn items<'a>(event: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
 
 fn strings_of(value: Option<&Value>) -> Vec<String> {
     value.and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)).collect()
+}
+
+fn number64(value: &Value, key: &str) -> u64 {
+    value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
 fn number(value: &Value, key: &str) -> u32 {
