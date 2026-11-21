@@ -134,7 +134,10 @@
       heading("Permissions"),
       card(settingRow("Ask before risky commands", "Kvist asks you before running a risky command or overwriting a file. Off: risky commands are refused without asking.", toggle(ctx.approvalMode() === "ask", (on) => ctx.setApprovalMode(on ? "ask" : "deny")))),
       heading("Appearance"),
-      card(settingRow("Theme", "", select([["system", "System"], ["light", "Light"], ["dark", "Dark"]], K.store.get("theme", "system"), (value) => { K.store.set("theme", value); K.applyTheme() }))),
+      card(
+        settingRow("Theme", "", select([["system", "System"], ["light", "Light"], ["dark", "Dark"]], K.store.get("theme", "system"), (value) => { K.store.set("theme", value); K.applyTheme() })),
+        settingRow("Text size", "The size of the interface and thread text.", select([["13", "Small"], ["14", "Default"], ["15", "Large"], ["16", "Larger"]], K.store.get("textSize", "14"), (value) => { K.store.set("textSize", value); K.applyTheme() })),
+      ),
       heading("Diagnostics"),
       card(settingRow("Show agent debug messages", "Adds the core's diagnostic notes to the thread.", toggle(K.store.get("debug") === "1", (on) => K.store.set("debug", on ? "1" : "0")))),
     )

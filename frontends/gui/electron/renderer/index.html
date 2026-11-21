@@ -25,6 +25,7 @@
         <button id="rail-settings" class="rail-btn" type="button" data-nav="settings" title="Settings (Ctrl+,)" aria-label="Settings" data-icon="gear"></button>
       </nav>
 
+      <div class="sheet">
       <!-- Side panel: threads, or the settings sections -->
       <aside id="panel" class="panel" aria-label="Navigation">
         <div id="panel-threads" class="panel-body">
@@ -61,6 +62,9 @@
           <div id="topbar-actions" class="topbar-actions">
             <button id="open-folder" class="icon-btn" type="button" title="Open the project folder" aria-label="Open the project folder" data-icon="folder"></button>
             <button id="commit-btn" class="icon-btn" type="button" title="Commit changes" aria-label="Commit changes" data-icon="branch" disabled></button>
+            <button id="summary-btn" class="icon-btn" type="button" title="Thread summary" aria-label="Thread summary" data-icon="list"></button>
+            <span class="topbar-sep"></span>
+            <button id="review-btn" class="icon-btn" type="button" title="Review changes (Ctrl+Shift+D)" aria-label="Review changes" data-icon="review"></button>
           </div>
         </header>
 
@@ -133,6 +137,7 @@
           </aside>
         </div>
       </main>
+      </div>
     </div>
 
     <div id="modals"></div>

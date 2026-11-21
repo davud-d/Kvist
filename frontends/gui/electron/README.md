@@ -38,7 +38,7 @@ OpenAI- or Anthropic-compatible endpoint.
 | Permissions: default / full access | **Ask before risky commands** or **Deny risky commands**. There is deliberately no allow-all. A request can offer *Always allow* for its pattern. |
 | Approvals | A panel above the box: the command, the overwrite diff, skill and network permissions; *Deny* is focused. A closed window denies. |
 | Local / worktree / cloud | **Local** only. A core on a server (`docs/remote.md`) is not wired into this app. |
-| Review panel, diff, commit | **Agent changes** (from each write's patch in the thread) and **Working tree** (git, `.kvist/` excluded). *Revert* restores the agent's changes from the change journal. *Commit* writes the message with `--commit-message` and commits only the files you tick. |
+| Review panel, diff, commit | **Agent changes** (from each write's patch in the thread) and **Working tree** (git, `.kvist/` excluded). *Revert* restores the agent's changes from the change journal. *Commit* writes the message with `--commit-message` and commits only the files you tick. A finished turn that edited files ends with a *Changed N files* card: the files with their counts, *Undo* (the same revert) and *Review changes*. |
 | Integrated terminal | A **Commands** drawer (`Ctrl+J`): every command the agent ran or started in the background, with live output. It is not an interactive shell. |
 | Plugins, connectors, MCP | **Skills**, **MCP servers** and **service connections** (read-only lists here; manage them with `--skill-op`, `--mcp-op`, `--connection-op`). |
 | Memories | **Memory**: what Kvist remembers about you and the project, with *Forget*. |
@@ -51,7 +51,7 @@ Not covered: several tasks running at once (one task per app; other threads open
 ended), automations, queued follow-ups while a task runs (`Enter` never stops a task;
 use *Pause* or *Stop*), inline comments on a diff.
 
-The interface is English only, light and dark. Providers and models carry the maker's logo (the core names the brand in `--config-info`; `renderer/providers/` holds the artwork, a monogram stands in where there is none); a provider row opens onto its models.
+The interface is English only, light and dark. Colours, type sizes and spacing follow Codex Desktop's measured design values, rewritten here (none of its code or assets are used); *Settings → General → Text size* sets the interface text from 13 to 16 px (14 by default). A turn's work folds under *Worked for …*; actions with no words between them share one line (*Read 2 files, ran 3 commands*) that opens onto each call and its output. Threads with nothing written in them stay out of the lists. Providers and models carry the maker's logo (the core names the brand in `--config-info`; `renderer/providers/` holds the artwork, a monogram stands in where there is none); a provider row opens onto its models.
 
 ## Layout
 

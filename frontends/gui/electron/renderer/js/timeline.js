@@ -52,23 +52,38 @@
   const isEdit = (call) => K.EDIT_ACTIONS.has(call.type)
   const isQuiet = (call) => call.state === "ok" && !isEdit(call)
 
+  // "Read 3 files, ran 2 commands": what a run of actions did, in one line.
   function groupSummary(group) {
-    let explored = 0
-    let commands = 0
-    let web = 0
-    let other = 0
+    const count = { read: 0, listed: 0, searched: 0, ran: 0, edited: new Set(), web: 0, other: 0 }
     for (const call of group.calls) {
-      if (READ_TYPES.has(call.type)) explored += 1
-      else if (call.type === "run_shell") commands += 1
-      else if (call.type === "web_search" || call.type === "fetch_url") web += 1
-      else if (!isEdit(call)) other += 1
+      if (call.type === "read_file") count.read += 1
+      else if (call.type === "read_multiple_files") count.read += (call.args?.paths || []).length || 1
+      else if (call.type === "list_dir" || call.type === "list_tree") count.listed += 1
+      else if (["find_files", "search_code", "git_status", "git_diff"].includes(call.type)) count.searched += 1
+      else if (call.type === "run_shell") count.ran += 1
+      else if (isEdit(call)) count.edited.add(call.path || call.args?.path || "")
+      else if (call.type === "web_search" || call.type === "fetch_url") count.web += 1
+      else count.other += 1
     }
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
     const parts = []
-    if (explored) parts.push(`Explored ${explored}`)
-    if (commands) parts.push(`Ran ${commands} command${commands > 1 ? "s" : ""}`)
-    if (web) parts.push(`Browsed ${web}`)
-    if (other) parts.push(`${other} more`)
-    return parts.join(" · ") || "Worked"
+    if (count.read) parts.push(`read ${plural(count.read, "file", "files")}`)
+    if (count.listed) parts.push(`listed ${plural(count.listed, "folder", "folders")}`)
+    if (count.searched) parts.push(`searched ${count.searched === 1 ? "once" : `${count.searched} times`}`)
+    if (count.ran) parts.push(`ran ${plural(count.ran, "command", "commands")}`)
+    if (count.edited.size) parts.push(`edited ${plural(count.edited.size, "file", "files")}`)
+    if (count.web) parts.push(`browsed ${plural(count.web, "page", "pages")}`)
+    if (count.other) parts.push(plural(count.other, "other action", "other actions"))
+    const text = parts.join(", ") || "worked"
+    return text[0].toUpperCase() + text.slice(1)
+  }
+
+  function groupIcon(group) {
+    const types = new Set(group.calls.map((call) => call.type))
+    if (types.has("run_shell")) return "terminal"
+    if (group.calls.some(isEdit)) return "pencil"
+    if ([...types].every((type) => READ_TYPES.has(type))) return "search"
+    return "bolt"
   }
 
   function isOpen(call) {
@@ -84,10 +99,10 @@
 
   // The icon at the start of a row: the call's kind, or its state when it is not simply done.
   function leadingMark(call, kindIcon) {
-    if (call.state === "failed") return K.icon("x", 15)
-    if (call.state === "stopped") return K.icon("pause", 15)
+    if (call.state === "failed") return K.icon("x", 14)
+    if (call.state === "stopped") return K.icon("pause", 14)
     if (call.state === "running" || call.state === "writing") return h("span", { class: "spinner small", "aria-label": "Running" })
-    return K.icon(kindIcon, 15)
+    return K.icon(kindIcon, 14)
   }
 
   function callBody(call) {
@@ -95,7 +110,7 @@
     const a = call.args || {}
     if (call.type === "run_shell") {
       const out = call.state === "running" ? call.live : call.output
-      body.append(h("pre", { class: "term" }, h("span", { class: "prompt" }, "$ "), commandText(a), out ? `\n${lastLines(out, 60)}` : ""))
+      body.append(h("div", { class: "shell" }, h("div", { class: "shell-label" }, "Shell"), h("pre", { class: "term" }, h("span", { class: "prompt" }, "$ "), h("span", { class: "cmd" }, commandText(a)), out ? `\n${lastLines(out, 60)}` : "")))
       if (a.justification) body.append(h("div", { class: "call-note" }, a.justification))
       if (call.exitCode !== null && call.exitCode !== 0) body.append(h("div", { class: "call-note is-error" }, `Exit code ${call.exitCode}`))
       return body
@@ -113,7 +128,7 @@
       return body
     }
     if (call.summary) body.append(h("div", { class: "call-note" }, call.summary))
-    if (call.output) body.append(h("pre", { class: `term${call.state === "failed" ? " is-error" : ""}` }, lastLines(call.output, 40)))
+    if (call.output) body.append(h("div", { class: "shell" }, h("pre", { class: `term${call.state === "failed" ? " is-error" : ""}` }, lastLines(call.output, 40))))
     if (!call.summary && !call.output) body.append(h("div", { class: "call-note" }, call.description || ""))
     return body
   }
@@ -131,7 +146,9 @@
       h("span", { class: "call-verb" }, info.verb),
       h("span", { class: "call-subject" }, info.subject),
       counts,
+      K.icon("chevronRight", 12),
     )
+    head.lastElementChild.classList.add("call-chev")
     head.addEventListener("click", () => {
       call.open = !isOpen(call)
       rerender()
@@ -142,16 +159,22 @@
   }
 
   // --- item renderers ------------------------------------------------------------------
+  const SHELL_LANGS = new Set(["bash", "sh", "shell", "zsh", "fish", "console", "powershell", "ps1"])
+
+  // Code blocks get a sticky head: the language, line wrapping and copy.
   function enhanceMarkdown(container) {
     for (const pre of container.querySelectorAll("pre")) {
       const code = pre.querySelector("code")
       const lang = /language-([\w+-]+)/.exec(code?.className || "")?.[1] || ""
       const wrapper = h("div", { class: "codeblock" })
+      const label = SHELL_LANGS.has(lang.toLowerCase()) ? "Shell" : lang || "Code"
       const head = h(
         "div",
         { class: "codeblock-head" },
-        h("span", {}, lang),
-        h("button", { class: "icon-btn small", type: "button", title: "Copy", onclick: () => K.copyText(pre.textContent || "") }, K.icon("copy", 13)),
+        K.icon(SHELL_LANGS.has(lang.toLowerCase()) ? "terminal" : "file", 16),
+        h("span", { class: "codeblock-lang" }, label),
+        h("button", { class: "icon-btn", type: "button", title: "Wrap lines", "aria-label": "Wrap lines", onclick: () => wrapper.classList.toggle("is-wrapped") }, K.icon("list", 15)),
+        h("button", { class: "icon-btn", type: "button", title: "Copy code", "aria-label": "Copy code", onclick: () => K.copyText(pre.textContent || "") }, K.icon("copy", 15)),
       )
       pre.replaceWith(wrapper)
       wrapper.append(head, pre)
@@ -165,17 +188,84 @@
     return node
   }
 
+  // "Tuesday 17:30" for this week, a date before that.
+  function stamp(seconds) {
+    if (!seconds) return ""
+    const date = new Date(seconds * 1000)
+    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    const days = (Date.now() - date.getTime()) / 86400000
+    if (days < 1 && date.getDate() === new Date().getDate()) return time
+    if (days < 6) return `${date.toLocaleDateString("en-GB", { weekday: "long" })} ${time}`
+    return `${date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ${time}`
+  }
+
+  // What the turn changed: "Changed 3 files +12 −4", Undo and Review, then the files.
+  function changesCard(files, ctx) {
+    const SHOWN = 3
+    const sum = files.reduce((acc, file) => ({ added: acc.added + file.added, removed: acc.removed + file.removed }), { added: 0, removed: 0 })
+    const fileRow = (file) => {
+      const cut = file.path.lastIndexOf("/") + 1
+      return h(
+        "button",
+        { class: "changes-file", type: "button", title: file.path, onclick: () => ctx.openReview() },
+        h("span", { class: "changes-path" }, cut ? h("span", { class: "changes-dir" }, file.path.slice(0, cut)) : null, h("span", { class: "changes-name" }, file.path.slice(cut))),
+        K.diff.counts(file),
+      )
+    }
+    const list = h("div", { class: "changes-files" }, files.slice(0, SHOWN).map(fileRow))
+    if (files.length > SHOWN) {
+      const more = h("button", { class: "changes-more", type: "button" }, `Show ${files.length - SHOWN} more file${files.length - SHOWN > 1 ? "s" : ""}`, K.icon("chevronDown", 14))
+      more.addEventListener("click", () => { more.remove(); list.append(...files.slice(SHOWN).map(fileRow)) })
+      list.append(more)
+    }
+    return h(
+      "div",
+      { class: "changes" },
+      h(
+        "div",
+        { class: "changes-head" },
+        h("button", { class: "changes-head-hit", type: "button", "aria-label": "Review the changed files", onclick: () => ctx.openReview() }),
+        h("span", { class: "changes-icon" }, K.icon("diff", 22)),
+        h("span", { class: "changes-texts" }, h("span", { class: "changes-title" }, `Changed ${files.length} file${files.length > 1 ? "s" : ""}`), h("span", { class: "changes-sub" }, K.diff.counts(sum))),
+        h(
+          "div",
+          { class: "changes-actions" },
+          h("button", { class: "btn small ghost", type: "button", title: "Restore every file the agent changed in this thread", onclick: () => ctx.revert() }, "Undo", K.icon("undo", 13)),
+          h("button", { class: "btn small outline", type: "button", onclick: () => ctx.openReview() }, "Review changes"),
+        ),
+      ),
+      list,
+    )
+  }
+
   const RENDERERS = {
     user(item) {
-      return h("div", { class: "msg user" }, h("div", { class: "bubble" }, item.text, item.images ? h("div", { class: "bubble-note" }, `${item.images} image(s) attached`) : null))
+      return h(
+        "div",
+        { class: "msg user" },
+        h("div", { class: "bubble" }, item.text, item.images ? h("div", { class: "bubble-note" }, `${item.images} image(s) attached`) : null),
+        h(
+          "div",
+          { class: "msg-actions" },
+          h("button", { class: "icon-btn", type: "button", title: "Copy message", "aria-label": "Copy message", onclick: () => K.copyText(item.text) }, K.icon("copy", 15)),
+          h("span", { class: "msg-time" }, stamp(item.at)),
+        ),
+      )
     },
 
-    assistant(item) {
-      const node = h("div", { class: `msg assistant${item.streaming ? " is-streaming" : ""}${item.skill ? " is-skill" : ""}` })
+    assistant(item, ctx) {
+      const commentary = !item.streaming && ctx.thread.isCommentary(item)
+      const node = h("div", { class: `msg assistant${item.streaming ? " is-streaming" : ""}${item.skill ? " is-skill" : ""}${commentary ? " is-commentary" : ""}` })
       node.append(renderMarkdown(item.text))
-      if (!item.streaming) {
-        node.append(h("div", { class: "msg-actions" }, h("button", { class: "icon-btn small", type: "button", title: "Copy answer", onclick: () => K.copyText(item.text) }, K.icon("copy", 14))))
-      }
+      if (!ctx.thread.isFinal(item)) return node
+      const files = ctx.thread.turnChanges(item.turn)
+      if (files.length) node.append(changesCard(files, ctx))
+      node.append(h(
+        "div",
+        { class: "msg-actions" },
+        h("button", { class: "icon-btn", type: "button", title: "Copy", "aria-label": "Copy", onclick: () => K.copyText(item.text) }, K.icon("copy", 15)),
+        h("span", { class: "msg-time" }, stamp(item.at)),
+      ))
       return node
     },
 
@@ -190,18 +280,20 @@
       return node
     },
 
+    // A finished run of two or more actions folds into one line; a live one shows its calls.
     work(item, ctx) {
-      const quiet = item.calls.filter(isQuiet).length
-      const collapsible = item.closed && quiet >= 3
-      if (collapsible && item.collapsed === undefined) item.collapsed = true
-      const node = h("div", { class: `work${collapsible && item.collapsed ? " is-collapsed" : ""}` })
-      if (collapsible) {
+      const grouped = item.closed && item.calls.length >= 2
+      if (grouped && item.collapsed === undefined) item.collapsed = !item.calls.some((call) => call.state === "failed")
+      const node = h("div", { class: `work${grouped ? " has-head" : ""}${grouped && item.collapsed ? " is-collapsed" : ""}` })
+      if (grouped) {
         const toggle = h(
           "button",
           { class: "work-head", type: "button", "aria-expanded": String(!item.collapsed) },
-          K.icon("chevronRight", 14),
-          h("span", {}, groupSummary(item)),
+          K.icon(groupIcon(item), 14),
+          h("span", { class: "work-text" }, groupSummary(item)),
+          K.icon("chevronRight", 12),
         )
+        toggle.lastElementChild.classList.add("work-chev")
         toggle.addEventListener("click", () => {
           item.collapsed = !item.collapsed
           ctx.rerender(item)
@@ -230,10 +322,10 @@
     summary(item, ctx) {
       if (item.live) {
         const seconds = item.start ? (Date.now() - item.start) / 1000 : 0
-        return h("div", { class: "worked is-live" }, `Working for ${K.duration(seconds)}`)
+        return h("div", { class: "worked is-live" }, h("span", { class: "worked-label" }, `Working for ${K.duration(seconds)}`))
       }
       const open = !ctx.thread.folded.has(item.turn)
-      const node = h("button", { class: `worked${open ? " is-open" : ""}`, type: "button", "aria-expanded": String(open) }, `Worked for ${K.duration(item.seconds)} `, K.icon("chevronRight", 15))
+      const node = h("button", { class: `worked${open ? " is-open" : ""}`, type: "button", "aria-expanded": String(open) }, h("span", { class: "worked-label" }, `Worked for ${K.duration(item.seconds)}`, K.icon("chevronRight", 14)))
       node.addEventListener("click", () => ctx.toggleFold(item.turn))
       return node
     },
@@ -303,7 +395,8 @@
 
   // --- the Timeline ---------------------------------------------------------------------
   class Timeline {
-    constructor({ scroller, inner, jump }) {
+    constructor({ scroller, inner, jump, actions = {} }) {
+      this.actions = actions
       this.scroller = scroller
       this.inner = inner
       this.jump = jump
@@ -355,6 +448,8 @@
         rerender: (target) => this.schedule(target),
         thread: this.thread,
         toggleFold: (turn) => { this.thread.toggleFold(turn); this.renderAll(false) },
+        openReview: () => this.actions.openReview?.(),
+        revert: () => this.actions.revert?.(),
       })
       node.dataset.itemId = String(item.id)
       node.classList.toggle("is-folded", this.thread.isFolded(item))

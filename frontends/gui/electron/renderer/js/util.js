@@ -90,6 +90,7 @@
     copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/>',
     pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
     eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    diff: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 7.5v5M9.5 10h5M9.5 16h5"/>',
     list: '<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="M21 16l-5-5-9 9"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 8l3 3"/>',
@@ -169,7 +170,7 @@
     }
 
     const buttons = actions.map((action) => {
-      const button = K.h("button", { class: `btn ${action.kind ? `is-${action.kind}` : ""}`, type: "button" }, action.label)
+      const button = K.h("button", { class: `btn ${action.kind || "ghost"}`, type: "button" }, action.label)
       button.addEventListener("click", async () => {
         if (button.disabled) return
         button.disabled = true
@@ -186,8 +187,8 @@
     dialog.append(
       K.h("div", { class: "modal-head" }, K.h("h2", {}, title), K.h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: close }, K.icon("x"))),
       K.h("div", { class: "modal-body" }, body),
-      buttons.length ? K.h("div", { class: "modal-actions" }, buttons) : null,
     )
+    if (buttons.length) dialog.append(K.h("div", { class: "modal-actions" }, buttons))
     backdrop.append(dialog)
     backdrop.addEventListener("mousedown", (event) => { if (event.target === backdrop) close() })
     document.addEventListener("keydown", onKey, true)

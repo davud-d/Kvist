@@ -32,6 +32,7 @@
       this.stats = this.freshStats()
       this.silent = false
       this.folded = new Set()
+      this.eventTs = null
     }
 
     freshStats() {
@@ -45,6 +46,7 @@
 
     push(item) {
       item.turn = this.turnCount
+      item.at = this.clock()
       item.id = this.nextId
       this.nextId += 1
       this.items.push(item)
@@ -56,6 +58,7 @@
       const index = before ? this.items.indexOf(before) : -1
       if (index === -1) return this.push(item)
       item.turn = this.turnCount
+      item.at = this.clock()
       item.id = this.nextId
       this.nextId += 1
       this.items.splice(index, 0, item)
@@ -93,7 +96,9 @@
     }
 
     addUser(text, { ts = null, resumed = false, woken = false, images = 0 } = {}) {
+      this.eventTs = ts
       this.beginTurn(ts)
+      if (!this.silent) this.turn.liveStart = Date.now()
       this.turn.firstIndex = this.items.length
       return this.push({ kind: "user", text: String(text || ""), resumed, woken, images })
     }
@@ -134,11 +139,45 @@
     }
 
     // "Working for 12s" / "Worked for 1m 3s": one line at the head of a turn's work.
+    // The header goes right under the person's message even when words streamed
+    // before the first action, so the whole turn's work sits beneath it.
     ensureHeader(ts) {
       const turn = this.ensureTurn(ts)
       if (turn.header) return turn.header
-      turn.header = this.push({ kind: "summary", live: true, start: this.silent ? null : Date.now(), seconds: 0 })
+      const header = { kind: "summary", live: true, start: this.silent ? null : turn.liveStart || Date.now(), seconds: 0 }
+      const anchor = this.items.find((item, index) => index >= turn.firstIndex && item.turn === turn.number && item.kind !== "user")
+      turn.header = anchor ? this.insertBefore(header, anchor) : this.push(header)
       return turn.header
+    }
+
+    // Words the agent said on the way, before more work in the same turn: Codex shows them dimmer than the answer.
+    isCommentary(item) {
+      if (item.kind !== "assistant") return false
+      const index = this.items.indexOf(item)
+      return this.items.some((entry, at) => at > index && entry.turn === item.turn && (entry.kind === "assistant" || entry.kind === "work"))
+    }
+
+    // The answer that closes a finished turn: it gets the action bar and the changes card.
+    isFinal(item) {
+      if (item.kind !== "assistant" || item.streaming) return false
+      if (this.turn && this.turn.number === item.turn && !this.turn.ended) return false
+      return !this.isCommentary(item)
+    }
+
+    turnChanges(turn) {
+      const files = new Map()
+      for (const item of this.items) {
+        if (item.kind !== "work" || item.turn !== turn) continue
+        for (const call of item.calls) {
+          if (!EDIT_ACTIONS.has(call.type) || call.state !== "ok" || !call.patch) continue
+          const entry = files.get(call.path) || { path: call.path, patches: [], added: 0, removed: 0 }
+          entry.patches.push(call.patch)
+          entry.added += call.added || 0
+          entry.removed += call.removed || 0
+          files.set(call.path, entry)
+        }
+      }
+      return [...files.values()]
     }
 
     // Once a turn is over its work folds away; the last answer stays.
@@ -174,7 +213,8 @@
     groupFor(batchId, ts) {
       const turn = this.ensureTurn(ts)
       const last = this.last()
-      if (last && last.kind === "work" && !last.closed && (!batchId || !last.batchId || last.batchId === batchId)) {
+      // Consecutive actions share one group until the agent says something, as in Codex.
+      if (last && last.kind === "work" && !last.closed) {
         if (batchId) last.batchId = batchId
         return last
       }
@@ -203,13 +243,20 @@
     // --- events ---------------------------------------------------------------------
     apply(event, ts = null) {
       const handler = HANDLERS[event.type]
+      this.eventTs = ts
       if (handler) handler.call(this, event, ts)
+    }
+
+    // Seconds since the epoch: the journal's time on replay, now when live.
+    clock() {
+      return typeof this.eventTs === "number" ? this.eventTs : Date.now() / 1000
     }
 
     applyAll(events) {
       const wasSilent = this.silent
       this.silent = true
       for (const record of events) this.apply(record.event, record.ts ?? null)
+      this.eventTs = null
       this.silent = wasSilent
     }
 

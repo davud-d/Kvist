@@ -350,13 +350,14 @@
       this.suggestions = entries
       this.suggestIndex = Math.min(this.suggestIndex, entries.length - 1)
       K.clear(this.suggest)
+      this.suggest.append(h("div", { class: "suggest-head" }, kind === "file" ? "Files" : "Commands"))
       entries.forEach((entry, index) => {
         const row = h(
           "button",
           { class: `suggest-row${index === this.suggestIndex ? " is-active" : ""}`, type: "button", role: "option" },
-          K.icon(entry.icon || "file", 14),
+          K.icon(entry.icon || "file", 16),
           h("span", { class: "suggest-label" }, entry.label),
-          entry.hint ? h("span", { class: "suggest-hint" }, entry.hint) : null,
+          entry.hint ? h("span", { class: `suggest-hint${kind === "file" ? " is-path" : ""}` }, entry.hint) : null,
         )
         row.addEventListener("mousedown", (event) => {
           event.preventDefault()

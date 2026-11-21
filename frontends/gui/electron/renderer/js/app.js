@@ -50,7 +50,12 @@
     settingsSearch: $("settings-search"),
   }
 
-  const timeline = new K.Timeline({ scroller: $("timeline"), inner: $("timeline-inner"), jump: $("jump") })
+  const timeline = new K.Timeline({
+    scroller: $("timeline"),
+    inner: $("timeline-inner"),
+    jump: $("jump"),
+    actions: { openReview: () => { review.tab = "agent"; review.setOpen(true) }, revert: () => void confirmRevert() },
+  })
   timeline.attach(thread)
 
   const composer = new K.Composer({
@@ -88,6 +93,8 @@
     const theme = K.store.get("theme", "system")
     if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme
     else delete document.documentElement.dataset.theme
+    const size = Number(K.store.get("textSize", "14"))
+    document.documentElement.style.setProperty("--ui", `${size >= 12 && size <= 18 ? size : 14}px`)
     void root.kvist.setTheme(theme)
   }
 
@@ -239,25 +246,21 @@
     renderSummaryCard(sum, changes.length)
   }
 
-  // Codex's floating card at the top right of a thread: what this thread changed and ran.
+  // The thread summary (what it changed and ran) opens from the top bar, as in Codex.
   function renderSummaryCard(sum, files) {
-    let node = $("summary-card")
     const commands = thread.shellCalls().length
-    const show = state.view === "thread" && (files > 0 || commands > 0)
-    els.threadView.classList.toggle("has-card", show)
-    if (!show) { node?.remove(); return }
-    if (!node) {
-      node = h("aside", { id: "summary-card", class: "summary-card", "aria-label": "Thread summary" })
-      els.threadView.append(node)
+    const button = $("summary-btn")
+    button.disabled = !(files > 0 || commands > 0)
+    button.onclick = () => {
+      const rows = [h("div", { class: "sc-title" }, K.baseName(state.workspace))]
+      if (files > 0) {
+        rows.push(h("button", { class: "sc-row", type: "button", onclick: () => { K.closePopover(); review.tab = "agent"; review.setOpen(true) } }, K.icon("review", 16), h("span", { class: "sc-label" }, "Changes"), K.diff.counts(sum)))
+      }
+      if (commands > 0) {
+        rows.push(h("button", { class: "sc-row", type: "button", onclick: () => { K.closePopover(); drawer.setOpen(true) } }, K.icon("terminal", 16), h("span", { class: "sc-label" }, "Commands"), h("span", { class: "card-meta" }, String(commands))))
+      }
+      K.popover(button, h("div", { id: "summary-card", class: "summary-card", "aria-label": "Thread summary" }, rows), { align: "end" })
     }
-    const rows = [h("div", { class: "sc-title" }, K.baseName(state.workspace))]
-    if (files > 0) {
-      rows.push(h("button", { class: "sc-row", type: "button", onclick: () => { review.tab = "agent"; review.setOpen(true) } }, K.icon("review", 16), h("span", { class: "sc-label" }, "Changes"), K.diff.counts(sum)))
-    }
-    if (commands > 0) {
-      rows.push(h("button", { class: "sc-row", type: "button", onclick: () => drawer.setOpen(true) }, K.icon("terminal", 16), h("span", { class: "sc-label" }, "Commands"), h("span", { class: "card-meta" }, String(commands))))
-    }
-    node.replaceChildren(...rows)
   }
 
   async function refreshGit() {
@@ -291,6 +294,7 @@
     els.page.classList.toggle("is-hidden", view === "thread")
     for (const button of document.querySelectorAll("[data-nav]")) button.classList.toggle("is-active", button.dataset.nav === view)
     $("topbar-actions").classList.toggle("is-hidden", view !== "thread")
+    $("topbar").classList.toggle("is-page", view !== "thread")
     const settings = view === "settings"
     els.panelThreads.classList.toggle("is-hidden", settings)
     els.panelSettings.classList.toggle("is-hidden", !settings)
@@ -761,7 +765,7 @@
     let modal
 
     const recentThreads = () => state.projects
-      .flatMap((project) => (project.status?.session_items || []).map((item) => ({ project, item })))
+      .flatMap((project) => (project.status?.session_items || []).filter((item) => item.journal_bytes !== 0).map((item) => ({ project, item })))
       .sort((a, b) => Number(b.item.updated_at) - Number(a.item.updated_at))
 
     const collect = (query) => {
@@ -827,7 +831,7 @@
 
   function openNthThread(n) {
     const items = state.projects
-      .flatMap((project) => (project.status?.session_items || []).map((item) => ({ project, item })))
+      .flatMap((project) => (project.status?.session_items || []).filter((item) => item.journal_bytes !== 0).map((item) => ({ project, item })))
       .sort((a, b) => Number(b.item.updated_at) - Number(a.item.updated_at))
     const entry = items[n - 1]
     if (entry) void openThread(entry.project.path, entry.item.name)
@@ -846,6 +850,7 @@
     $("workspace-switch").addEventListener("click", () => openProjectMenu($("workspace-switch")))
     $("panel-toggle").addEventListener("click", togglePanel)
     els.reviewButton.addEventListener("click", () => review.toggle())
+    $("review-btn").addEventListener("click", () => review.toggle())
     els.drawerButton.addEventListener("click", () => drawer.toggle())
     els.commitButton.addEventListener("click", () => void commit())
     $("open-folder").addEventListener("click", () => void root.kvist.openProjectFolder().catch((error) => K.toast(error.message, { kind: "error" })))

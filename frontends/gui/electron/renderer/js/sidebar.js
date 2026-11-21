@@ -36,13 +36,19 @@
       for (const project of projects) this.projectsEl.append(this.renderProject(project))
 
       const recent = projects
-        .flatMap((project) => (project.status?.session_items || []).map((item) => ({ project, item })))
+        .flatMap((project) => this.listed(project).map((item) => ({ project, item })))
         .sort((a, b) => Number(b.item.updated_at) - Number(a.item.updated_at))
         .slice(0, RECENT_COUNT)
       for (const { project, item } of recent) this.recentEl.append(this.renderThread(project, item, false))
     }
 
-    toggleCollapsed(path) {
+    // A thread nobody wrote in yet stays out of the lists, as in Codex, unless it is the one working now.
+    listed(project) {
+      const { workspace, activeSession, running } = this.state
+      return (project.status?.session_items || []).filter((item) => item.journal_bytes !== 0 || (running && project.path === workspace && item.name === activeSession))
+    }
+
+        toggleCollapsed(path) {
       if (this.collapsed.has(path)) this.collapsed.delete(path)
       else this.collapsed.add(path)
       K.store.set("collapsed", JSON.stringify([...this.collapsed]))
@@ -89,7 +95,7 @@
         group.append(h("div", { class: "side-empty" }, "Folder not found"))
         return group
       }
-      const items = [...(project.status?.session_items || [])].sort((a, b) => Number(b.updated_at) - Number(a.updated_at))
+      const items = this.listed(project).sort((a, b) => Number(b.updated_at) - Number(a.updated_at))
       const expanded = this.showAll.has(project.path)
       for (const item of expanded ? items : items.slice(0, THREADS_PER_PROJECT)) group.append(this.renderThread(project, item, true))
       if (items.length > THREADS_PER_PROJECT) {

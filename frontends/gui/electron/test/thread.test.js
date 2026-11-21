@@ -177,6 +177,35 @@ test("a turn's work gets a header; ending the turn stops running calls and folds
   assert.equal(thread.isFolded(work), false, "the header opens the work again")
 })
 
+test("words streamed before the first action still sit under the header", () => {
+  const thread = new Thread()
+  thread.addUser("go")
+  thread.apply(ev("stream_commit", { stream_id: "s1", text: "Looking first." }))
+  thread.apply(ev("step", { call_id: "a", step: 1, action_type: "read_file", action_args: { path: "x" }, batch_id: "b1" }))
+  thread.apply(ev("step", { call_id: "b", step: 2, action_type: "run_shell", action_args: { command: ["ls"] }, batch_id: "b2" }))
+  thread.apply(ev("stream_commit", { stream_id: "s2", text: "Done." }))
+  thread.apply(ev("final", { message: "Done.", outcome: "done" }))
+  assert.deepEqual(kinds(thread), ["user", "summary", "assistant", "work", "assistant"])
+  const [, , interim, work, last] = thread.items
+  assert.equal(work.calls.length, 2, "actions with no words between them share one group, whatever their batch")
+  assert.equal(thread.isCommentary(interim), true)
+  assert.equal(thread.isFinal(interim), false)
+  assert.equal(thread.isFinal(last), true)
+})
+
+test("a turn's changes are its own edits, summed per file", () => {
+  const patch = "--- /dev/null\n+++ b/a\n@@ -0,0 +1 @@\n+x\n"
+  const thread = new Thread()
+  thread.addUser("one")
+  thread.apply(ev("step", { call_id: "w1", step: 1, action_type: "write_file", action_args: { path: "a" } }))
+  thread.apply(ev("action_result", { call_id: "w1", step: 1, ok: true, path: "a", lines_added: 1, lines_removed: 0, patch }))
+  thread.apply(ev("final", { message: "ok", outcome: "done" }))
+  thread.addUser("two")
+  thread.apply(ev("final", { message: "nothing to do", outcome: "done" }))
+  assert.deepEqual(thread.turnChanges(1).map((file) => [file.path, file.added]), [["a", 1]])
+  assert.deepEqual(thread.turnChanges(2), [])
+})
+
 test("a chat answer with no work has no header", () => {
   const thread = new Thread()
   thread.addUser("hi")
