@@ -160,4 +160,7 @@ def test_vision_request_carries_the_gateways_session_header(agent_factory):
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Red square"))])
     agent.client.chat.completions.create = create
     assert describe_images(agent, [attachment()]) == "Red square"
-    assert seen["extra_headers"] == {"x-opencode-session": agent.llm_session_id}
+    sent = seen["extra_headers"]["x-opencode-session"]
+    assert sent != agent.llm_session_id  # its own cache key, not the main conversation's
+    describe_images(agent, [attachment()])
+    assert seen["extra_headers"]["x-opencode-session"] == sent  # stable, so repeated vision calls share a cache

@@ -12,6 +12,7 @@ import io
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 
 from kernel.sandbox.redaction import defang_prompt_boundary_tags
@@ -137,8 +138,10 @@ def describe_images(agent, images: list[dict], question: str = "") -> str:
         raise InterruptedError("Image analysis cancelled")
     started = time.monotonic()
     limit_key = "max_completion_tokens" if model.lower().split("/")[-1].startswith(("gpt-5", "gpt-6", "o1", "o3", "o4")) else "max_tokens"
-    # Gateways such as OpenCode Go refuse a request without its session header (400 MissingSessionID).
-    session_headers = request_session_headers(agent.config.provider, agent.llm_session_id)
+    # Gateways such as OpenCode Go refuse a request without its session header (400 MissingSessionID) and cache by it.
+    # Vision has its own id, stable per agent: sharing the main one would mix another model's prompt into that cache.
+    vision_session = str(uuid.uuid5(uuid.UUID(agent.llm_session_id), "vision"))
+    session_headers = request_session_headers(agent.config.provider, vision_session)
     extra = {"extra_headers": session_headers} if session_headers else {}
     try:
         reply = agent.client.chat.completions.create(
