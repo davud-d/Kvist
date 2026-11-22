@@ -141,7 +141,7 @@ kvist
 Дальше напишите задачу, например «найди, почему падают тесты в
 `tests/test_parser.py`, и исправь».
 
-![Терминальный UI Kvist готов к задаче](docs/media/terminal-start.png)
+<!-- SCREENSHOT first run -->
 
 ![Kvist в терминале работает над задачей](docs/media/terminal-working.png)
 

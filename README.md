@@ -141,7 +141,7 @@ On a clean machine Kvist asks for a provider and a key (see [Providers](#provide
 Then type a task, for example "find why the tests in `tests/test_parser.py`
 fail and fix it".
 
-![Kvist terminal ready in Kitty](docs/media/terminal-start.png)
+<!-- SCREENSHOT first run -->
 
 ![Kvist terminal agent working in Kitty](docs/media/terminal-working.png)
 
