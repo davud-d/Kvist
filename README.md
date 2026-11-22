@@ -137,12 +137,7 @@ kvist
 Without `--workspace`, Kvist works in the current directory. In your home
 directory or a filesystem root it uses `Documents/Kvist Workspace` instead.
 
-On a clean machine Kvist offers [AnyModel](https://anymodel.org) as the default
-provider: press Enter to register in the browser and paste the key. Press Esc to
-pick another provider and enter its key at the masked `API key:` prompt. The
-choice is saved in `~/.kvist/config.json`. If `ANYMODEL_API_KEY` is already set,
-Kvist starts without asking.
-
+On a clean machine Kvist asks for a provider and a key (see [Providers](#providers)).
 Then type a task, for example "find why the tests in `tests/test_parser.py`
 fail and fix it".
 
@@ -151,6 +146,18 @@ fail and fix it".
 ![Kvist terminal agent working in Kitty](docs/media/terminal-working.png)
 
 ![Kvist terminal completed task in Kitty](docs/media/terminal-end.png)
+
+## Providers
+
+On a clean machine Kvist offers [AnyModel](https://anymodel.org) as the default
+provider: press Enter to register in the browser and paste the key. Press Esc to
+pick another provider and enter its key at the masked `API key:` prompt. The
+choice is saved in `~/.kvist/config.json`. If `ANYMODEL_API_KEY` is already set,
+Kvist starts without asking.
+
+Switch later with `/provider`, change a key with `/change-api`, pick the fast and
+smart models with `/models`. The full list of providers and the settings for each
+are in [`docs/configuration.md`](docs/configuration.md).
 
 ## How a task goes
 
