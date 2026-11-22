@@ -192,6 +192,19 @@ interrupted task stays in the session, so `/resume` or a new message picks it up
   [`frontends/tui/opencode`](frontends/tui/opencode/README.md)), Classic (over a
   photograph, kitty or Ghostty) and the Classic Legacy prompt_toolkit one;
   `/tui` switches between them.
+- **VS Code.** A chat panel that starts Kvist for the open project, plus commit
+  message generation in the source control view
+  ([details](frontends/ide/vscode/README.md)).
+- **Your own client.** A versioned NDJSON protocol over stdio:
+  [`docs/UI_API.md`](docs/UI_API.md).
+
+<details>
+<summary>Other interfaces (experimental)</summary>
+
+These run on the same core but are marked experimental.
+
+- **JetBrains.** The same chat panel and commit message generation as in VS Code
+  ([details](frontends/ide/jetbrains/README.md)).
 - **Voice.** An orb you talk to: say "Kvist" and it listens, short spoken
   answers (`/tui voice`, kitty or Ghostty;
   [`frontends/voice`](frontends/voice/README.md)).
@@ -201,17 +214,13 @@ interrupted task stays in the session, so `/resume` or a new message picks it up
   [`frontends/gui/electron-legacy`](frontends/gui/electron-legacy/README.md).
 - **Browser.** `kvist-web` opens `http://127.0.0.1:9671` and guides you through
   connecting a model ([details](frontends/web-local/README.md)).
-- **VS Code and JetBrains.** A chat panel that starts Kvist for the open
-  project, plus commit message generation in the source control view
-  ([VS Code](frontends/ide/vscode/README.md),
-  [JetBrains](frontends/ide/jetbrains/README.md)).
 - **Zed.** Registered as an external ACP agent with
   `scripts/installer/install_zed.py`; see [`frontends/zed`](frontends/zed/README.md)
   for what Zed cannot offer.
-- **Your own client.** A versioned NDJSON protocol over stdio:
-  [`docs/UI_API.md`](docs/UI_API.md).
 
 ![Kvist GUI agent working on Hyprland](docs/media/gui-working.png)
+
+</details>
 
 ## Terminal commands
 

@@ -195,6 +195,19 @@ Kvist заканчивает, когда модель считает работ�
   [`frontends/tui/opencode`](frontends/tui/opencode/README.ru.md)), Classic (поверх
   фотографии, kitty или Ghostty) и Classic Legacy на prompt_toolkit;
   переключение — `/tui`.
+- **VS Code.** Чат-панель, которая запускает Kvist для открытого проекта, и
+  генерация сообщений коммитов в окне source control
+  ([подробности](frontends/ide/vscode/README.md)).
+- **Свой клиент.** Версионируемый NDJSON-протокол по stdio:
+  [`docs/UI_API.ru.md`](docs/UI_API.ru.md).
+
+<details>
+<summary>Остальные интерфейсы (experimental)</summary>
+
+Они работают на том же ядре, но помечены как experimental.
+
+- **JetBrains.** Та же чат-панель и генерация сообщений коммитов, что и в VS Code
+  ([подробности](frontends/ide/jetbrains/README.md)).
 - **Голос.** Шар, с которым разговариваешь: скажи «Kvist», и она слушает,
   отвечает коротко вслух (`/tui voice`, kitty или Ghostty;
   [`frontends/voice`](frontends/voice/README.ru.md)).
@@ -204,17 +217,13 @@ Kvist заканчивает, когда модель считает работ�
   [`frontends/gui/electron-legacy`](frontends/gui/electron-legacy/README.md).
 - **Браузер.** `kvist-web` открывает `http://127.0.0.1:9671` и помогает подключить
   модель ([подробности](frontends/web-local/README.md)).
-- **VS Code и JetBrains.** Чат-панель, которая запускает Kvist для открытого
-  проекта, и генерация сообщений коммитов в окне source control
-  ([VS Code](frontends/ide/vscode/README.md),
-  [JetBrains](frontends/ide/jetbrains/README.md)).
 - **Zed.** Регистрируется как внешний ACP-агент через
   `scripts/installer/install_zed.py`; чего Zed дать не может, написано в
   [`frontends/zed`](frontends/zed/README.ru.md).
-- **Свой клиент.** Версионируемый NDJSON-протокол по stdio:
-  [`docs/UI_API.ru.md`](docs/UI_API.ru.md).
 
 ![Kvist в GUI работает над задачей в Hyprland](docs/media/gui-working.png)
+
+</details>
 
 ## Команды терминала
 
