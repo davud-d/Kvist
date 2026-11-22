@@ -384,6 +384,31 @@ function lastAnswerText(state: State): string | null {
   return last?.kind === "answer" ? last.text.trim() : null
 }
 
+// The words last shown for the person, looked for past the cards of a response that is still
+// running. A step carries the response's words again; showing them a second time pushes an item,
+// and a push settles the calls still in flight, so their cards (and the thought lines between
+// them) would be lost. Anything else on top ends the search: those words belong to an older turn.
+function lastSaidText(state: State): string | null {
+  for (let index = state.items.length - 1; index >= 0; index -= 1) {
+    const item = state.items[index]
+    if (!item) continue
+    if (item.kind === "answer" || item.kind === "say") return item.text.trim() || null
+    if (
+      item.kind === "step" ||
+      item.kind === "tool" ||
+      item.kind === "explored" ||
+      item.kind === "thought" ||
+      item.kind === "job" ||
+      item.kind === "job_notice" ||
+      item.kind === "aside"
+    ) {
+      continue
+    }
+    return null
+  }
+  return null
+}
+
 // The `fromEnd`-th answer counting back from the most recent one (1 = last).
 // Plain text as the model produced it: no ANSI, no UI chrome, safe to copy.
 export function answerFromEnd(items: readonly Item[], fromEnd: number): string | null {
@@ -568,9 +593,12 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       const shown = batchIndex === 0 && (kind ? seconds > 0 : !alreadyNarrated && (Boolean(text) || seconds > 0))
       const settled = state.inflight.length && !sameBatch ? settle(state) : state
       const withThought = shown ? push(settled, (id) => ({ id, kind: "thought", seconds, text })) : settled
-      // The response's words precede the calls they introduce, reads included.
-      const say = event.user_message.trim()
-      const next = say ? push(withThought, (id) => ({ id, kind: "say", text: say })) : withThought
+      // The response's words precede the calls they introduce, reads included. Words the stream
+      // already showed are not said again: the second item would settle the calls still in
+      // flight and take their cards with it.
+      const said = event.user_message.trim()
+      const words = said && said !== lastSaidText(withThought) ? said : ""
+      const next = words ? push(withThought, (id) => ({ id, kind: "say", text: words })) : withThought
       if (kind) {
         const weight = exploreWeight(kind, args)
         const label = `${event.action_type}  ${actionTarget(args)}`.trim()
