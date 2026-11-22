@@ -115,6 +115,10 @@ class AgentUI(Protocol):
         """Render a success/result message."""
         ...
 
+    def print_notice(self, message: str, level: str = "info") -> None:
+        """Tell the person something outside the conversation (a toast or status line, not a reply)."""
+        ...
+
     def print_error(self, message: str) -> None:
         """Render an error message."""
         ...

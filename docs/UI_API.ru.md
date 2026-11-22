@@ -133,7 +133,7 @@ kvist --workspace /path/to/project --frontend stdio \
 
 **Ответы:**
 `print_final(final_message, user_messages=None)`, `print_user_markdown(message)`,
-`print_result(message)`, `print_error(message)`, `print_sandbox_notice(note)`,
+`print_result(message)`, `print_notice(message, level="info")` (вне диалога: тост, а не ответ; им пользуется уведомление об обновлении), `print_error(message)`, `print_sandbox_notice(note)`,
 `render_user_markdown(message, fallback_style="") -> str`,
 и стриминг через `live_markdown()` — контекст-менеджер, отдающий callback
 `update(message)` (каждый вызов заменяет весь отрендеренный ответ новым кумулятивным

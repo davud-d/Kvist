@@ -131,7 +131,7 @@ A structural `typing.Protocol` (no subclassing needed). Methods, grouped:
 
 **Responses:**
 `print_final(final_message, user_messages=None)`, `print_user_markdown(message)`,
-`print_result(message)`, `print_error(message)`, `print_sandbox_notice(note)`,
+`print_result(message)`, `print_notice(message, level="info")` (outside the conversation: a toast, not a reply; the update notice uses it), `print_error(message)`, `print_sandbox_notice(note)`,
 `render_user_markdown(message, fallback_style="") -> str`,
 and streaming via `live_markdown()` — a context manager yielding an
 `update(message)` callback (each call replaces the whole rendered response with

@@ -733,6 +733,11 @@ class TerminalBannerUI:
             return
         self.console.print(Text(sanitize_display_text(message), style="bright_green"))
 
+    def print_notice(self, message: str, level: str = "info") -> None:
+        """A note outside the conversation; this terminal has no toast row, so it prints a plain line."""
+        _ = level
+        self.print_result(message)
+
     def print_error(self, message: str) -> None:
         """Print an error message (backward-compatible)."""
         if self._plain:

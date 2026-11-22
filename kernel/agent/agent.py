@@ -322,7 +322,7 @@ class LocalAgent:
         )
         # Only interactive frontends can show "restart"; headless runs must not swap the binary.
         if self.config.end_session_enabled and not self.is_helper:
-            self_update.start(self._ui.print_result, self._ui.debug_print)
+            self_update.start(self._ui.print_notice, self._ui.debug_print)
         self.resources = ResourceManager(executor.workspace)
         self.executor.service_dir_factory = self._service_dir
         self.skills = SkillManager(self)

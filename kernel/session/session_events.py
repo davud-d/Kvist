@@ -916,6 +916,10 @@ class JournalingUI:
         self._events.print_result(message)
         self._ui.print_result(message)
 
+    def print_notice(self, message: str, level: str = "info") -> None:
+        self._events.print_notice(message, level)
+        self._ui.print_notice(message, level)
+
     def print_error(self, message: str) -> None:
         self._events.print_error(message)
         self._ui.print_error(message)
