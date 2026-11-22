@@ -68,6 +68,7 @@ from kernel.agent.native_tools import (
     request_messages,
 )
 from kernel.llm.pricing import call_cost
+from kernel.providers.chatgpt_client import UsageLimitReached
 from kernel.llm.reasoning_effort import (
     THINKING_STYLE_KEY,
     is_reasoning_error,
@@ -778,6 +779,8 @@ def call_native_action_model(
             raise
         except Exception as error:
             _note_rate_limit(self, error)
+            if wait_out_usage_limit(self, error):
+                continue
             if is_tools_rejection(error):
                 raise NativeToolsRejected(redact_text(str(error))) from error
             if "temperature" in str(error).casefold() and _sends_temperature(self, model):
@@ -1534,6 +1537,8 @@ def call_model(
                     error=str(error),
                 )
                 last_error = error
+                if wait_out_usage_limit(self, error):
+                    continue
                 if is_context_overflow_error(error):
                     shrunk = _shrink_prompt_after_overflow(
                         self,
@@ -2412,6 +2417,32 @@ def _shrink_prompt_after_overflow(
         f"Retrying within {budget}; set AGENT_MAX_CONTEXT_TOKENS to pin a budget."
     )
     return self._trim_prompt_to_token_limit(system_prompt, user_prompt)
+
+
+# A five-hour window is worth waiting out in place; a weekly one would leave the run
+# asleep for days, so that error is reported and the person decides.
+_USAGE_WAIT_CAP_SECONDS = 6 * 3600
+# The server's clock and ours differ a little: asking at the exact second gets refused again.
+_USAGE_WAIT_MARGIN_SECONDS = 30
+
+
+def wait_out_usage_limit(self, error: Exception) -> bool:
+    """Sleep until a spent plan allowance returns; False when the error is not a wait worth taking."""
+    if not isinstance(error, UsageLimitReached) or error.resets_in is None:
+        return False
+    if error.resets_in > _USAGE_WAIT_CAP_SECONDS:
+        return False
+    seconds = error.resets_in + _USAGE_WAIT_MARGIN_SECONDS
+    resume_at = time.strftime("%H:%M", time.localtime(time.time() + seconds))
+    self._ui.print_notice(
+        f"Лимит подписки ChatGPT исчерпан. Продолжу сама в {resume_at}, когда он сбросится; Esc отменяет ожидание."
+        if self._state.response_language == "ru"
+        else f"The ChatGPT plan limit is spent. Resuming on my own at {resume_at}, when it resets; Esc cancels the wait.",
+        "warning",
+    )
+    if self._cancel_event.wait(seconds):
+        raise RunCancelled
+    return True
 
 
 def _should_retry_model_error(error: Exception) -> bool:

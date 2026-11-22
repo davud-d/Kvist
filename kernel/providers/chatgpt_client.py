@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
 from types import SimpleNamespace as NS
 from typing import Any
@@ -123,14 +124,32 @@ _USAGE_LIMIT_CODES = frozenset({
 })
 
 
-def _usage_limit_error() -> RuntimeError:
-    return RuntimeError("ChatGPT plan usage is unavailable or its limit was reached. "
-                        "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
+class UsageLimitReached(RuntimeError):
+    """The plan's allowance is spent; `resets_in` is seconds until it returns, None when the server did not say."""
+
+    def __init__(self, resets_in: float | None = None):
+        super().__init__("ChatGPT plan usage is unavailable or its limit was reached. "
+                         "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
+        self.resets_in = resets_in
+
+
+def _resets_in(detail: dict) -> float | None:
+    seconds = detail.get("resets_in_seconds")
+    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds >= 0:
+        return float(seconds)
+    at = detail.get("resets_at")
+    if isinstance(at, (int, float)) and not isinstance(at, bool):
+        return max(0.0, at - time.time())
+    return None
+
+
+def _http_error_detail(error: openai.APIStatusError) -> dict:
+    body = error.body if isinstance(error.body, dict) else {}
+    return body.get("error") if isinstance(body.get("error"), dict) else body
 
 
 def _http_error_code(error: openai.APIStatusError) -> str:
-    body = error.body if isinstance(error.body, dict) else {}
-    detail = body.get("error") if isinstance(body.get("error"), dict) else body
+    detail = _http_error_detail(error)
     return str(detail.get("code") or detail.get("type") or "")
 
 
@@ -139,7 +158,7 @@ def _response_error(event: Any) -> RuntimeError:
     error = getattr(response, "error", None) or getattr(event, "error", None)
     code = getattr(error, "code", None) or getattr(event, "code", None) or event.type
     if code in _USAGE_LIMIT_CODES:
-        return _usage_limit_error()
+        return UsageLimitReached(_resets_in({k: getattr(error, k, None) for k in ("resets_in_seconds", "resets_at")}))
     # Server error text can echo inputs; expose only the structured code.
     return RuntimeError(f"ChatGPT response failed ({code}) / Ответ ChatGPT не завершён.")
 
@@ -179,7 +198,7 @@ class ChatGPTClient:
                     raise auth.ChatGPTAuthError("ChatGPT access was revoked. Sign in again / Войдите в ChatGPT снова.") from None
             except openai.APIStatusError as error:
                 if _http_error_code(error) in _USAGE_LIMIT_CODES:
-                    raise _usage_limit_error() from None
+                    raise UsageLimitReached(_resets_in(_http_error_detail(error))) from None
                 raise
 
     def _stream_request(self, request: dict, token: str):

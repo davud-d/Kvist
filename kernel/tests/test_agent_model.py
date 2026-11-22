@@ -872,3 +872,43 @@ def test_invalid_table_returns_unpriced_and_fallback(tmp_path, monkeypatch, cont
         assert pricing.lookup_max_output_tokens("openai", "gpt-5") == 8192
     finally:
         pricing._table.cache_clear()
+
+
+class _WaitingAgent:
+    def __init__(self, cancelled=False):
+        import threading
+        from types import SimpleNamespace
+        self._cancel_event = threading.Event()
+        if cancelled:
+            self._cancel_event.set()
+        self.notices = []
+        self._ui = SimpleNamespace(print_notice=lambda message, level="info": self.notices.append(message))
+        self._state = SimpleNamespace(response_language="en")
+
+
+def test_a_spent_plan_window_is_waited_out_then_the_request_is_repeated(monkeypatch):
+    from kernel.agent import agent_model
+    from kernel.providers.chatgpt_client import UsageLimitReached
+    agent = _WaitingAgent()
+    waits = []
+    monkeypatch.setattr(agent._cancel_event, "wait", lambda seconds: waits.append(seconds) or False)
+    assert agent_model.wait_out_usage_limit(agent, UsageLimitReached(100)) is True
+    assert waits == [100 + agent_model._USAGE_WAIT_MARGIN_SECONDS]
+    assert len(agent.notices) == 1
+
+
+@pytest.mark.parametrize("resets_in", [None, 7 * 24 * 3600])
+def test_an_unknown_or_week_long_reset_is_not_waited_for(resets_in):
+    from kernel.agent import agent_model
+    from kernel.providers.chatgpt_client import UsageLimitReached
+    agent = _WaitingAgent()
+    assert agent_model.wait_out_usage_limit(agent, UsageLimitReached(resets_in)) is False
+    assert agent.notices == []
+
+
+def test_cancelling_during_the_usage_wait_stops_the_run():
+    from kernel.agent import agent_model
+    from kernel.agent.agent_state import RunCancelled
+    from kernel.providers.chatgpt_client import UsageLimitReached
+    with pytest.raises(RunCancelled):
+        agent_model.wait_out_usage_limit(_WaitingAgent(cancelled=True), UsageLimitReached(100))

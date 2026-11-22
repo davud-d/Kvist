@@ -428,3 +428,28 @@ def test_sdk_wire_uses_oauth_responses_and_refreshes_once_on_401(monkeypatch):
     assert body['instructions'] == 'instructions'
     assert body['prompt_cache_key'].startswith('kvist-')
     assert body['prompt_cache_key'] == json.loads(requests[0].content)['prompt_cache_key']
+
+
+@pytest.mark.parametrize("detail, expected", [
+    ({"code": "usage_limit_reached", "resets_in_seconds": 120}, 120.0),
+    ({"code": "usage_limit_reached"}, None),
+    ({"code": "usage_limit_reached", "resets_in_seconds": True}, None),
+])
+def test_usage_limit_carries_the_seconds_until_reset(monkeypatch, detail, expected):
+    saved_account()
+    response = httpx.Response(429, request=httpx.Request("POST", "https://example.test/responses"))
+    class Client:
+        def __init__(self, **kwargs): self.responses = self
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def create(self, **kwargs): raise openai.APIStatusError("limit", response=response, body={"error": detail})
+    monkeypatch.setattr(transport, "OpenAI", Client)
+    with pytest.raises(transport.UsageLimitReached) as caught:
+        transport.ChatGPTClient().create(model="test", messages=[{"role": "user", "content": "hi"}])
+    assert caught.value.resets_in == expected
+
+
+def test_resets_at_is_turned_into_seconds_from_now(monkeypatch):
+    monkeypatch.setattr(transport.time, "time", lambda: 1000.0)
+    assert transport._resets_in({"resets_at": 1600}) == 600.0
+    assert transport._resets_in({"resets_at": 500}) == 0.0
