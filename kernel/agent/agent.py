@@ -476,8 +476,6 @@ class LocalAgent:
         stopped_by_user: bool = False,
     ) -> None:
         """Record a finished or user-stopped turn in session history for context."""
-        outputs = self._harvest_run_outputs()
-
         entry = {
             "goal": user_goal,
             "role": role,
@@ -487,8 +485,9 @@ class LocalAgent:
         }
         if self._state.message_id:
             entry["msg_id"] = self._state.message_id
-        if outputs:
-            entry["outputs"] = outputs
+        actions = [log for log in self._state.step_logs if "command" in log]
+        if actions:
+            entry["actions"] = actions
         if self._state.plan_outcome:
             entry["plan_outcome"] = self._state.plan_outcome
         if stopped_by_user:
@@ -500,9 +499,6 @@ class LocalAgent:
         safe_entry = redact_value(entry)
         assert isinstance(safe_entry, dict)
         self._session_history.append(safe_entry)
-        # Keep last 10 entries
-        if len(self._session_history) > 10:
-            self._session_history = self._session_history[-10:]
         self.save_session()
         # Fallback for a turn that ended before its first action batch ran
         # (a chat reply, an immediate answer): name the brand-new session now.
@@ -1392,7 +1388,6 @@ class LocalAgent:
     def _run_chat(self, user_goal: str) -> str:
         """Lightweight chat mode: direct markdown streaming, no JSON protocol."""
         from kernel.agent.agent_model import build_role_system_prompt
-        from kernel.context.context_utils import trim_history
         from kernel.llm.llm_clients import fallback_candidates_for_model
 
         system_prompt = build_role_system_prompt(self, "chat")
@@ -1415,12 +1410,6 @@ class LocalAgent:
         # the user said, and must not show up as their message in the GUI or
         # get baked permanently into every future turn's context.
         self._chat_history.append({"role": "user", "content": user_goal})
-
-        # Coarse turn cap so a session document cannot grow without bound; the
-        # real limit is the token budget applied right after, which is what
-        # decides how much of a long conversation actually survives.
-        self._chat_history = trim_history(self._chat_history, max_recent=40)
-        self._chat_history = self._trim_chat_messages_to_token_limit(self._chat_history)
 
         # Wire history sent to the model decorates only the current turn with
         # the runtime directives; earlier turns are sent as the clean text
@@ -1547,6 +1536,8 @@ class LocalAgent:
             # A chat reply is already in _chat_history as an assistant message.
             if entry["role"] != "chat" and entry.get("result"):
                 history_lines.append(f"    Answered: {entry['result']}")
+            for action in entry.get("actions", []):
+                history_lines.append(f"    Action and result: {json.dumps(action, ensure_ascii=False, default=str)}")
             for output in entry.get("outputs", []):
                 history_lines.append(f"    Output: {output}")
         return "\n".join(history_lines) + "\n\n---\n\n"

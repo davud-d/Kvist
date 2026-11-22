@@ -108,7 +108,9 @@ def test_add_to_session_history_stores_read_content_for_next_role(agent_factory)
     agent._add_to_session_history("прочитай hypr.conf", "coder", "done")
 
     entry = agent._session_history[-1]
-    assert "gaps_in = 5" in "\n".join(entry.get("outputs", []))
+    assert "gaps_in = 5" in str(entry["actions"])
+    assert '"path": "hypr.conf"' in agent._build_runtime_prompt("продолжай", 1)
+    assert '"path": "hypr.conf"' in agent._chat_session_context()
 
 
 # ── The previous answer reaches the next turn whole ─────────────────────────
@@ -132,6 +134,26 @@ def test_previous_answer_reaches_the_next_role_whole(agent_factory):
     assert agent._session_history[-1]["result"] == _LONG_READER_ANSWER
     assert _FINDING in agent._build_runtime_prompt("да, удаляй", 1)
     assert _FINDING in render_session_history(agent._session_history, include_outputs=False)
+
+
+def test_action_arguments_and_results_survive_followup(agent_factory):
+    agent = agent_factory()
+    actions = [
+        ("run_shell", {"command": "printf hello"}, {"stdout": "hello"}),
+        ("write_file", {"path": "a.txt", "content": "written text"}, {"path": "a.txt"}),
+        ("read_file", {"path": "a.txt"}, {"content": "read text"}),
+        ("skill_call", {"skill": "example", "tool": "lookup", "arguments": {"query": "needle"}}, {"result": "found"}),
+    ]
+    for number, (kind, args, data) in enumerate(actions):
+        agent._state.step_logs.append({"step": number, "status": "ok", "command": {"action": {"type": kind, "args": args}}, "feedback": {"ok": True, "data": data}})
+    agent._add_to_session_history("do work", "coder", "done")
+    for text in ("printf hello", "written text", "read text", "needle", "found"):
+        assert text in agent._build_runtime_prompt("continue", 1)
+        assert text in agent._chat_session_context()
+    for number in range(11):
+        agent._state.step_logs = []
+        agent._add_to_session_history(f"turn {number}", "chat", "ok")
+    assert "needle" in agent._build_runtime_prompt("continue", 1)
 
 
 def test_chat_turn_sees_the_previous_agent_answer(agent_factory, monkeypatch):

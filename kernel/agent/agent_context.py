@@ -238,6 +238,9 @@ def render_session_history(history: Any, *, include_outputs: bool, with_ids: boo
             lines.append(f"  agent answered{_message_tag(entry, 'reply_id', with_ids)}:")
             lines.append(_indent_turn_text(result))
         if include_outputs:
+            for action in entry.get("actions", []):
+                lines.append("  action and result:")
+                lines.append(_indent_turn_text(json.dumps(action, ensure_ascii=False, default=str)))
             for output in entry.get("outputs", []):
                 lines.append("  tool output:")
                 lines.append(_indent_turn_text(str(output)))
