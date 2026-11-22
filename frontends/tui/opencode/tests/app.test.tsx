@@ -63,6 +63,37 @@ describe("a turn", () => {
     show("chat", app)
   })
 
+  test("a final event does not repeat the streamed answer after a debug event", async () => {
+    const reply = "The endpoint is ready."
+    const core = `
+      const readline = require("node:readline")
+      const emit = (event) => console.log(JSON.stringify(event))
+      if (process.argv.includes("--session-op")) {
+        emit({ ok: true })
+        process.exit(0)
+      }
+      emit({ type: "hello", protocol_version: 1, provider: "fake", models: { fast: "fake-fast" }, role: "auto" })
+      readline.createInterface({ input: process.stdin }).on("line", () => {
+        const text = ${JSON.stringify(reply)}
+        emit({ type: "stream_start", stream_id: "answer" })
+        emit({ type: "stream_chunk", stream_id: "answer", text, append: true })
+        emit({ type: "stream_commit", stream_id: "answer", text })
+        emit({ type: "step", step: 1, plan_step: "done", thought: "", user_message: "", action_type: "final_answer", action_args: { message: text }, reasoning_seconds: 0 })
+        emit({ type: "debug", message: "Result: final answer at step 1" })
+        emit({ type: "final", message: text, user_messages: [], outcome: "done" })
+        emit({ type: "turn_end" })
+        emit({ type: "notice", text: "Turn complete", level: "info" })
+      })
+    `
+    app = await mount({ env: { KVIST_CORE_CMD: JSON.stringify(["node", "-e", core, "--"]) } })
+    await app.waitFor("fake-fast")
+    await app.type("check endpoint")
+    app.enter()
+    await app.waitFor("Turn complete")
+    await app.waitFor(reply)
+    expect(app.frame().split(reply)).toHaveLength(2)
+  })
+
   test("reads and a write appear as OpenCode's inline rows and block", async () => {
     app = await mount({ height: 40 })
     await app.waitFor("fake-fast")

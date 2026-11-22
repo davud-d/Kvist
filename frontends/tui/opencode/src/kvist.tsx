@@ -95,7 +95,14 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
   const [historyRead, setHistoryRead] = createSignal(false)
   let waiting: { name: string; resolve: (result: CommandResult) => void } | null = null
 
-  const dispatch = (action: Action) => setState((previous) => reduce(previous, action))
+  const dispatch = (action: Action) => setState((previous) => {
+    if (action.type === "event" && action.event.type === "final") {
+      // The core can log completion between stream_commit and final.
+      const last = previous.items.findLast((item) => item.kind !== "note")
+      if (last?.kind === "answer" && last.text.trim() === action.event.message.trim()) return previous
+    }
+    return reduce(previous, action)
+  })
   const note = (text: string, tone: Tone = "info") => dispatch({ type: "note", tone, text })
 
   // Events that arrive together (one stdout chunk holds many lines) become one update.
