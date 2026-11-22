@@ -124,23 +124,36 @@ _USAGE_LIMIT_CODES = frozenset({
 })
 
 
-class UsageLimitReached(RuntimeError):
-    """The plan's allowance is spent; `resets_in` is seconds until it returns, None when the server did not say."""
+# The shortest window the plan has is five hours (300 minutes), the longest is a week (10080).
+_WEEKLY_WINDOW_MINUTES = 24 * 60
 
-    def __init__(self, resets_in: float | None = None):
+
+class UsageLimitReached(RuntimeError):
+    """The plan's allowance is spent. `resets_at` (epoch seconds) and `window_minutes` are None when the server did not say."""
+
+    def __init__(self, resets_at: int | None = None, window_minutes: int | None = None):
         super().__init__("ChatGPT plan usage is unavailable or its limit was reached. "
                          "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
-        self.resets_in = resets_in
+        self.resets_at = resets_at
+        self.window_minutes = window_minutes
+
+    @property
+    def resets_in(self) -> float | None:
+        return None if self.resets_at is None else max(0.0, self.resets_at - time.time())
+
+    @property
+    def is_weekly(self) -> bool:
+        return self.window_minutes is not None and self.window_minutes >= _WEEKLY_WINDOW_MINUTES
 
 
-def _resets_in(detail: dict) -> float | None:
-    seconds = detail.get("resets_in_seconds")
-    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and seconds >= 0:
-        return float(seconds)
-    at = detail.get("resets_at")
-    if isinstance(at, (int, float)) and not isinstance(at, bool):
-        return max(0.0, at - time.time())
-    return None
+def _whole_number(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _usage_limit(detail: Any) -> UsageLimitReached:
+    """The error with what the backend says about its window; `detail` is a dict or an object with the same fields."""
+    read = detail.get if isinstance(detail, dict) else lambda name: getattr(detail, name, None)
+    return UsageLimitReached(_whole_number(read("resets_at")), _whole_number(read("limit_window_minutes")))
 
 
 def _http_error_detail(error: openai.APIStatusError) -> dict:
@@ -158,7 +171,7 @@ def _response_error(event: Any) -> RuntimeError:
     error = getattr(response, "error", None) or getattr(event, "error", None)
     code = getattr(error, "code", None) or getattr(event, "code", None) or event.type
     if code in _USAGE_LIMIT_CODES:
-        return UsageLimitReached(_resets_in({k: getattr(error, k, None) for k in ("resets_in_seconds", "resets_at")}))
+        return _usage_limit(error)
     # Server error text can echo inputs; expose only the structured code.
     return RuntimeError(f"ChatGPT response failed ({code}) / Ответ ChatGPT не завершён.")
 
@@ -198,7 +211,7 @@ class ChatGPTClient:
                     raise auth.ChatGPTAuthError("ChatGPT access was revoked. Sign in again / Войдите в ChatGPT снова.") from None
             except openai.APIStatusError as error:
                 if _http_error_code(error) in _USAGE_LIMIT_CODES:
-                    raise UsageLimitReached(_resets_in(_http_error_detail(error))) from None
+                    raise _usage_limit(_http_error_detail(error)) from None
                 raise
 
     def _stream_request(self, request: dict, token: str):

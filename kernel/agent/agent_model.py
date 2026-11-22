@@ -2419,11 +2419,34 @@ def _shrink_prompt_after_overflow(
     return self._trim_prompt_to_token_limit(system_prompt, user_prompt)
 
 
-# A five-hour window is worth waiting out in place; a weekly one would leave the run
-# asleep for days, so that error is reported and the person decides.
-_USAGE_WAIT_CAP_SECONDS = 6 * 3600
+# Anything further off than a day is reported, not slept through: the person decides what to do with that.
+_USAGE_WAIT_CAP_SECONDS = 24 * 3600
 # The server's clock and ours differ a little: asking at the exact second gets refused again.
 _USAGE_WAIT_MARGIN_SECONDS = 30
+
+
+def _duration_text(seconds: float, ru: bool) -> str:
+    minutes = max(1, round(seconds / 60))
+    hours, minutes = divmod(minutes, 60)
+    h, m = ("ч", "мин") if ru else ("h", "min")
+    return f"{hours} {h} {minutes} {m}" if hours and minutes else f"{hours} {h}" if hours else f"{minutes} {m}"
+
+
+def _usage_wait_agreed(self, error: UsageLimitReached, seconds: float, ru: bool) -> bool:
+    """A spent weekly allowance is a long stop, so it is the person's call; the five-hour one is not."""
+    if not error.is_weekly:
+        return True
+    ask = getattr(self._ui, "ask_choice", None)
+    if ask is None:
+        return False
+    wait = _duration_text(seconds, ru)
+    if ru:
+        title = f"Недельный лимит подписки ChatGPT потрачен целиком. Он сбросится через {wait}. Подождать и продолжить автоматически?"
+        options = [("wait", f"подождать {wait}"), ("stop", "остановиться, продолжу с другим провайдером")]
+    else:
+        title = f"The weekly ChatGPT plan limit is fully spent. It resets in {wait}. Wait and carry on automatically?"
+        options = [("wait", f"wait {wait}"), ("stop", "stop, I will carry on with another provider")]
+    return ask(title, options) == "wait"
 
 
 def wait_out_usage_limit(self, error: Exception) -> bool:
@@ -2433,13 +2456,20 @@ def wait_out_usage_limit(self, error: Exception) -> bool:
     if error.resets_in > _USAGE_WAIT_CAP_SECONDS:
         return False
     seconds = error.resets_in + _USAGE_WAIT_MARGIN_SECONDS
+    ru = self._state.response_language == "ru"
+    if not _usage_wait_agreed(self, error, seconds, ru):
+        return False
     resume_at = time.strftime("%H:%M", time.localtime(time.time() + seconds))
-    self._ui.print_notice(
-        f"Лимит подписки ChatGPT исчерпан. Продолжу сама в {resume_at}, когда он сбросится; Esc отменяет ожидание."
-        if self._state.response_language == "ru"
-        else f"The ChatGPT plan limit is spent. Resuming on my own at {resume_at}, when it resets; Esc cancels the wait.",
-        "warning",
+    wait = _duration_text(seconds, ru)
+    message = (
+        f"Закончились лимиты подписки ChatGPT. Автопродление в {resume_at} (через {wait}), когда лимит сбросится. "
+        "Чтобы продолжить с другим провайдером, нажмите Escape и введите команду /provider."
+        if ru
+        else f"The ChatGPT plan limit is spent. Automatic resume at {resume_at} (in {wait}), when it resets. "
+        "To carry on with another provider instead, press Escape and enter the /provider command."
     )
+    # print_notice is a toast and only some screens have it; this one has to stay up for hours.
+    self._ui.print_result(message)
     if self._cancel_event.wait(seconds):
         raise RunCancelled
     return True

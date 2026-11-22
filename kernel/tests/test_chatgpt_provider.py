@@ -430,12 +430,13 @@ def test_sdk_wire_uses_oauth_responses_and_refreshes_once_on_401(monkeypatch):
     assert body['prompt_cache_key'] == json.loads(requests[0].content)['prompt_cache_key']
 
 
-@pytest.mark.parametrize("detail, expected", [
-    ({"code": "usage_limit_reached", "resets_in_seconds": 120}, 120.0),
-    ({"code": "usage_limit_reached"}, None),
-    ({"code": "usage_limit_reached", "resets_in_seconds": True}, None),
+@pytest.mark.parametrize("detail, resets_at, window", [
+    ({"code": "usage_limit_reached", "resets_at": 1600, "limit_window_minutes": 300, "plan_type": "plus"}, 1600, 300),
+    ({"code": "usage_limit_reached", "resets_at": 1600, "limit_window_minutes": 10080}, 1600, 10080),
+    ({"code": "usage_limit_reached"}, None, None),
+    ({"code": "usage_limit_reached", "resets_at": True, "limit_window_minutes": "300"}, None, None),
 ])
-def test_usage_limit_carries_the_seconds_until_reset(monkeypatch, detail, expected):
+def test_usage_limit_carries_the_reset_time_and_window(monkeypatch, detail, resets_at, window):
     saved_account()
     response = httpx.Response(429, request=httpx.Request("POST", "https://example.test/responses"))
     class Client:
@@ -446,10 +447,18 @@ def test_usage_limit_carries_the_seconds_until_reset(monkeypatch, detail, expect
     monkeypatch.setattr(transport, "OpenAI", Client)
     with pytest.raises(transport.UsageLimitReached) as caught:
         transport.ChatGPTClient().create(model="test", messages=[{"role": "user", "content": "hi"}])
-    assert caught.value.resets_in == expected
+    assert (caught.value.resets_at, caught.value.window_minutes) == (resets_at, window)
 
 
-def test_resets_at_is_turned_into_seconds_from_now(monkeypatch):
+def test_the_streamed_limit_error_carries_the_same_fields():
+    event = NS(type="response.failed", response=NS(error=NS(
+        code="usage_limit_reached", resets_at=1600, limit_window_minutes=10080)))
+    error = transport._response_error(event)
+    assert (error.resets_at, error.is_weekly) == (1600, True)
+
+
+def test_reset_time_becomes_seconds_from_now(monkeypatch):
     monkeypatch.setattr(transport.time, "time", lambda: 1000.0)
-    assert transport._resets_in({"resets_at": 1600}) == 600.0
-    assert transport._resets_in({"resets_at": 500}) == 0.0
+    assert transport.UsageLimitReached(1600).resets_in == 600.0
+    assert transport.UsageLimitReached(500).resets_in == 0.0
+    assert transport.UsageLimitReached().resets_in is None

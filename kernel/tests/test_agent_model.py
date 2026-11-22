@@ -875,40 +875,68 @@ def test_invalid_table_returns_unpriced_and_fallback(tmp_path, monkeypatch, cont
 
 
 class _WaitingAgent:
-    def __init__(self, cancelled=False):
+    def __init__(self, cancelled=False, answer=None, language="en"):
         import threading
         from types import SimpleNamespace
         self._cancel_event = threading.Event()
         if cancelled:
             self._cancel_event.set()
-        self.notices = []
-        self._ui = SimpleNamespace(print_notice=lambda message, level="info": self.notices.append(message))
-        self._state = SimpleNamespace(response_language="en")
+        self.shown, self.asked = [], []
+        ui = SimpleNamespace(print_result=self.shown.append)
+        if answer is not None:
+            ui.ask_choice = lambda title, options: self.asked.append((title, options)) or answer
+        self._ui = ui
+        self._state = SimpleNamespace(response_language=language)
 
 
-def test_a_spent_plan_window_is_waited_out_then_the_request_is_repeated(monkeypatch):
-    from kernel.agent import agent_model
+def _limit(seconds_from_now, window):
+    import time
     from kernel.providers.chatgpt_client import UsageLimitReached
-    agent = _WaitingAgent()
+    return UsageLimitReached(int(time.time()) + seconds_from_now, window)
+
+
+def test_a_spent_five_hour_window_is_waited_out_with_a_message_about_escape(monkeypatch):
+    from kernel.agent import agent_model
+    agent = _WaitingAgent(language="ru")
     waits = []
     monkeypatch.setattr(agent._cancel_event, "wait", lambda seconds: waits.append(seconds) or False)
-    assert agent_model.wait_out_usage_limit(agent, UsageLimitReached(100)) is True
-    assert waits == [100 + agent_model._USAGE_WAIT_MARGIN_SECONDS]
-    assert len(agent.notices) == 1
+    assert agent_model.wait_out_usage_limit(agent, _limit(3600, 300)) is True
+    assert 3600 < waits[0] <= 3600 + agent_model._USAGE_WAIT_MARGIN_SECONDS
+    assert agent.asked == []
+    assert "Автопродление" in agent.shown[0] and "Escape" in agent.shown[0] and "/provider" in agent.shown[0]
 
 
-@pytest.mark.parametrize("resets_in", [None, 7 * 24 * 3600])
-def test_an_unknown_or_week_long_reset_is_not_waited_for(resets_in):
+def test_a_weekly_limit_close_to_its_reset_asks_before_waiting(monkeypatch):
+    from kernel.agent import agent_model
+    agent = _WaitingAgent(answer="wait")
+    monkeypatch.setattr(agent._cancel_event, "wait", lambda seconds: False)
+    assert agent_model.wait_out_usage_limit(agent, _limit(5 * 3600, 10080)) is True
+    assert "weekly" in agent.asked[0][0] and "5 h" in agent.asked[0][0]
+
+
+def test_declining_the_weekly_wait_leaves_the_error_to_stop_the_run():
+    from kernel.agent import agent_model
+    assert agent_model.wait_out_usage_limit(_WaitingAgent(answer="stop"), _limit(5 * 3600, 10080)) is False
+
+
+def test_a_weekly_limit_with_nobody_to_ask_is_not_waited_for():
+    from kernel.agent import agent_model
+    assert agent_model.wait_out_usage_limit(_WaitingAgent(), _limit(5 * 3600, 10080)) is False
+
+
+@pytest.mark.parametrize("limit_args", [(None, None), (2 * 24 * 3600, 10080)])
+def test_an_unknown_or_distant_reset_is_not_waited_for(limit_args):
     from kernel.agent import agent_model
     from kernel.providers.chatgpt_client import UsageLimitReached
-    agent = _WaitingAgent()
-    assert agent_model.wait_out_usage_limit(agent, UsageLimitReached(resets_in)) is False
-    assert agent.notices == []
+    seconds, window = limit_args
+    error = UsageLimitReached() if seconds is None else _limit(seconds, window)
+    agent = _WaitingAgent(answer="wait")
+    assert agent_model.wait_out_usage_limit(agent, error) is False
+    assert agent.shown == [] and agent.asked == []
 
 
 def test_cancelling_during_the_usage_wait_stops_the_run():
     from kernel.agent import agent_model
     from kernel.agent.agent_state import RunCancelled
-    from kernel.providers.chatgpt_client import UsageLimitReached
     with pytest.raises(RunCancelled):
-        agent_model.wait_out_usage_limit(_WaitingAgent(cancelled=True), UsageLimitReached(100))
+        agent_model.wait_out_usage_limit(_WaitingAgent(cancelled=True), _limit(3600, 300))
