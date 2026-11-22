@@ -4,6 +4,8 @@
 
 [Русская версия](README.ru.md)
 
+**What sets it apart:** undo any edit with `/revert`, a Bubblewrap sandbox with no network by default, and it works on cheap models without tool calling.
+
 <p align="center">
   <a href="https://github.com/davud-d/Kvist"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-Kvist-181717?style=for-the-badge&logo=github"></a>
   <a href="https://github.com/davud-d/Kvist/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/davud-d/Kvist?style=for-the-badge&logo=github&color=yellow"></a>
