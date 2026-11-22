@@ -389,6 +389,18 @@ Kvist никогда не запрашивает.
 - [`docs/vision.md`](docs/vision.md): ввод изображений;
 - [`scripts/installer/README.ru.md`](scripts/installer/README.ru.md): установщики ([EN](scripts/installer/README.md)).
 
+## Как это сделано
+
+Kvist разрабатывается с помощью Claude Code. В Python-наборе 6326 тестов (`pytest --collect-only -q`);
+230 медленных тестов с PTY и реальными процессами по умолчанию отключены, так что обычный `pytest`
+запускает 6096; в CI медленные идут отдельным шагом. Каждый push проверяется на Linux, Windows и macOS:
+[`platforms.yml`](.github/workflows/platforms.yml) запускает ruff, тесты Python, проверки сборки и
+установки на Ubuntu 22.04 (с Bubblewrap и без), macOS и Windows, а
+[`ci.yml`](.github/workflows/ci.yml) проверяет скрипты установки релиза на Ubuntu и Windows. Релизы собирают [`release-binary.yml`](.github/workflows/release-binary.yml),
+[`plugin-release.yml`](.github/workflows/plugin-release.yml) и
+[`mobile-release.yml`](.github/workflows/mobile-release.yml). Как участвовать — в
+[`CONTRIBUTING.ru.md`](CONTRIBUTING.ru.md).
+
 ## Разработка
 
 ```bash

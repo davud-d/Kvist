@@ -386,6 +386,18 @@ Regional alternatives, tried for the same provider:
 - [`docs/vision.md`](docs/vision.md): image input;
 - [`scripts/installer/README.md`](scripts/installer/README.md): installers ([RU](scripts/installer/README.ru.md)).
 
+## How it's built
+
+Kvist is developed with Claude Code. The Python suite has 6326 tests (`pytest --collect-only -q`);
+230 slow PTY and real-process tests are deselected by default, so a plain `pytest` runs 6096; CI runs
+the slow ones in a separate step. Every push is checked on Linux, Windows and macOS:
+[`platforms.yml`](.github/workflows/platforms.yml) runs ruff, the Python tests and the packaging and
+install smoke tests on Ubuntu 22.04 (with and without Bubblewrap), macOS and Windows, and
+[`ci.yml`](.github/workflows/ci.yml) smoke-tests the release install scripts on Ubuntu and Windows. Releases are built by [`release-binary.yml`](.github/workflows/release-binary.yml),
+[`plugin-release.yml`](.github/workflows/plugin-release.yml) and
+[`mobile-release.yml`](.github/workflows/mobile-release.yml). To contribute, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Development
 
 ```bash
