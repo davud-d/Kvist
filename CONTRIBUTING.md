@@ -36,7 +36,9 @@ example `cd frontends/tui/ink && npm install && npm test`.
 ## Branches
 
 Every change goes to the `experimental` branch first, never straight to `main`.
-Base your pull request on `experimental`. `main` is moved only by a
+Open your pull request into the `experimental` branch (base: `experimental`).
+A pull request into `main` is accepted too; the maintainer will move it over
+to `experimental`. `main` is moved only by a
 fast-forward merge from `experimental`, after the maintainer has checked the
 change.
 

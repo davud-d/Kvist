@@ -36,7 +36,8 @@ python3 -m venv .venv
 ## Ветки
 
 Любое изменение сначала попадает в ветку `experimental`, никогда прямо в `main`.
-Основывайте pull request на `experimental`. `main` двигается только
+Открывай pull request в ветку `experimental` (base: `experimental`).
+Pull request в `main` тоже примут и перенесут сами. `main` двигается только
 fast-forward-слиянием из `experimental` после того, как мейнтейнер проверил
 изменение.
 
