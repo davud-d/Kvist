@@ -295,86 +295,86 @@ Kvist может обращаться, перечислены ниже; все �
 
 | Что | Где | Адрес | Когда |
 | --- | --- | --- | --- |
-| Запросы к модели (ваши промпты, куски файлов, вывод команд) | `llm/llm_clients.py:59`, `:62`, `:65`, `:824`, `:825`, `:2032` | `openrouter.ai`, `api.anthropic.com`, `api.deepseek.com`, `generativelanguage.googleapis.com`, `api.groq.com` | Только выбранный вами провайдер |
-| OpenAI | значение по умолчанию в SDK `openai`, адреса в `kernel/` нет (`llm/llm_clients.py:1074`) | `api.openai.com/v1` | Только если OpenAI — ваш провайдер |
-| Остальные провайдеры | `llm/provider_registry.py`, `llm/llm_clients.py:99-121` | полный список ниже | Только выбранный вами провайдер |
-| Ваш собственный endpoint | `llm/custom_provider.py:44` | адрес, который вы ввели | Только если вы его добавили |
-| AnyModel | `llm/provider_registry.py:296`, `providers/anymodel_pricing.py:28` | `anymodel.org/v1`, `anymodel.org/v1/models` (список моделей и цены) | Когда AnyModel — ваш провайдер |
-| Страница регистрации AnyModel | `llm/anymodel_onboarding.py:32` | `anymodel.org/app/register` | Открывается в вашем браузере при первом запуске, сам Kvist ничего не отправляет |
-| Вход по подписке ChatGPT | `providers/chatgpt_endpoints.py:9`, `:12` | `auth.openai.com`, `api.openai.com/v1` | Только если вы входите по подписке ChatGPT |
-| Проверка обновлений | `config/self_update.py:40` | `api.github.com` (простой GET списка релиза, в запросе ничего о вас) | Вскоре после запуска, затем раз в 6 часов, пока не найдена новая версия; `auto_update: false` или `KVIST_AUTO_UPDATE=0` отключают |
-| Загрузка обновления | `config/self_update.py:41` | `github.com/davud-d/Kvist/releases` | Только когда вы набрали `/update` |
-| Поиск в сети | `sandbox/executor.py:2871`, `:2910`, `:2957`, `:2995` | `api.tavily.com`, `api.search.brave.com`, `api.exa.ai`, `generativelanguage.googleapis.com` (SearXNG: ваш собственный адрес) | Только выбранный вами движок, когда Kvist ищет в сети |
-| Чтение веб-страниц | `sandbox/executor.py:370-404` (список разрешённых), `:1173` (дополнительные домены) | страницы, которые просит Kvist, только с этих доменов | Когда Kvist загружает страницу |
-| Зависимости скиллов | `plugins/deps.py:31` | `pypi.org`, `files.pythonhosted.org` | Когда вы ставите зависимости скилла |
-| Скилл Gmail | `plugins/service_connect.py:26`, `:59`, `:98`, `:129` | `oauth2.googleapis.com`, `accounts.google.com`, `gmail.googleapis.com` | Только если вы подключили Gmail |
-| Отзыв | `agent/feedback.py:34`, `:113` (форма в браузере), `:123` (`gh issue create`) | `github.com/davud-d/Kvist/issues` | Только после того, как вы прочли черновик и ответили на «Отправить отзыв?» |
+| Запросы к модели (ваши промпты, куски файлов, вывод команд) | `llm/llm_clients.py`: `OPENROUTER_DEFAULT_BASE_URL`, `ANTHROPIC_DEFAULT_BASE_URL`, `DEEPSEEK_DEFAULT_BASE_URL`, `_GEMINI_OPENAI_BASE_URL`, `_GROQ_OPENAI_BASE_URL`; `AnthropicCompatibleClient.__init__` (запасной адрес) | `openrouter.ai`, `api.anthropic.com`, `api.deepseek.com`, `generativelanguage.googleapis.com`, `api.groq.com` | Только выбранный вами провайдер |
+| OpenAI | значение по умолчанию в SDK `openai`, адреса в `kernel/` нет (`llm/llm_clients.py`: `resolve_openai_accessible_models`) | `api.openai.com/v1` | Только если OpenAI — ваш провайдер |
+| Остальные провайдеры | `llm/provider_registry.py`: `MANUAL_OPENAI_PROVIDERS`; `llm/llm_clients.py`: `REGIONAL_BASE_URL_CANDIDATES` | полный список ниже | Только выбранный вами провайдер |
+| Ваш собственный endpoint | `llm/custom_provider.py`: `normalize_base_url` | адрес, который вы ввели | Только если вы его добавили |
+| AnyModel | `llm/provider_registry.py`: `MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]`; `providers/anymodel_pricing.py`: `ANYMODEL_MODELS_URL` | `anymodel.org/v1`, `anymodel.org/v1/models` (список моделей и цены) | Когда AnyModel — ваш провайдер |
+| Страница регистрации AnyModel | `llm/anymodel_onboarding.py`: `ANYMODEL_REGISTER_URL` | `anymodel.org/app/register` | Открывается в вашем браузере при первом запуске, сам Kvist ничего не отправляет |
+| Вход по подписке ChatGPT | `providers/chatgpt_endpoints.py`: `ISSUER`, `RESOURCE` | `auth.openai.com`, `api.openai.com/v1` | Только если вы входите по подписке ChatGPT |
+| Проверка обновлений | `config/self_update.py`: `RELEASE_API` | `api.github.com` (простой GET списка релиза, в запросе ничего о вас) | Вскоре после запуска, затем раз в 6 часов, пока не найдена новая версия; `auto_update: false` или `KVIST_AUTO_UPDATE=0` отключают |
+| Загрузка обновления | `config/self_update.py`: `DOWNLOAD_BASE` | `github.com/davud-d/Kvist/releases` | Только когда вы набрали `/update` |
+| Поиск в сети | `sandbox/executor.py`: `SafeExecutor._search_tavily`, `_search_brave`, `_search_exa`, `_search_gemini` | `api.tavily.com`, `api.search.brave.com`, `api.exa.ai`, `generativelanguage.googleapis.com` (SearXNG: ваш собственный адрес) | Только выбранный вами движок, когда Kvist ищет в сети |
+| Чтение веб-страниц | `sandbox/executor.py`: `SafeExecutor.__init__` (`allowed_web_domains`), `_extra_fetch_domains` | страницы, которые просит Kvist, только с этих доменов | Когда Kvist загружает страницу |
+| Зависимости скиллов | `plugins/deps.py`: `PACKAGE_INDEX` | `pypi.org`, `files.pythonhosted.org` | Когда вы ставите зависимости скилла |
+| Скилл Gmail | `plugins/service_connect.py`: `_google_token`, `google_login`, `_gmail` | `oauth2.googleapis.com`, `accounts.google.com`, `gmail.googleapis.com` | Только если вы подключили Gmail |
+| Отзыв | `agent/feedback.py`: `ISSUES_URL`; `submit` (форма в браузере), `_create_with_gh` (`gh issue create`) | `github.com/davud-d/Kvist/issues` | Только после того, как вы прочли черновик и ответили на «Отправить отзыв?» |
 | Подключения к сервисам, которые вы настроили | `plugins/connections.py` | адрес `https://`, который вы указали | Только для скилла, которому вы выдали это подключение |
 
 Остальные строки `http(s)://` в `kernel/` — ссылки в сообщениях (`openrouter.ai/keys`
 и подобные в `agent/agent_model.py` и `main.py`, `github.com/davud-d/Kvist` в
-`main.py:6459`, ссылка на документацию темы opencode в `config/theme.py:4`), их
+`main.py` (печатает `main`), ссылка на документацию темы opencode в докстринге `config/theme.py`), их
 Kvist никогда не запрашивает.
 
 <details>
 <summary>Все адреса провайдеров (40 в реестре, 13 региональных альтернатив)</summary>
 
-- `provider_registry.py:38` https://opencode.ai/inference/go/openai/v1
-- `provider_registry.py:44` https://opencode.ai/zen/v1
-- `provider_registry.py:50` https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-- `provider_registry.py:56` https://api.moonshot.ai/v1
-- `provider_registry.py:62` https://api.kimi.ai/coding/v1
-- `provider_registry.py:68` https://open.bigmodel.cn/api/paas/v4
-- `provider_registry.py:74` https://api.z.ai/api/paas/v4
-- `provider_registry.py:80` https://api.xiaomimimo.com/v1
-- `provider_registry.py:86` https://token-plan-cn.xiaomimimo.com/v1
-- `provider_registry.py:92` https://api.minimax.io/v1
-- `provider_registry.py:98` https://api.lingyiwanwu.com/v1
-- `provider_registry.py:104` https://api.stepfun.com/v1
-- `provider_registry.py:110` https://api.siliconflow.com/v1
-- `provider_registry.py:116` https://api.baichuan-ai.com/v1
-- `provider_registry.py:122` https://qianfan.baidubce.com/v2
-- `provider_registry.py:128` https://api.hunyuan.cloud.tencent.com/v1
-- `provider_registry.py:134` https://api-inference.modelscope.cn/v1
-- `provider_registry.py:140` https://api.mistral.ai/v1
-- `provider_registry.py:150` https://api.groq.com/openai/v1
-- `provider_registry.py:156` https://api.together.xyz/v1
-- `provider_registry.py:162` https://api.fireworks.ai/inference/v1
-- `provider_registry.py:168` https://api.x.ai/v1
-- `provider_registry.py:174` https://api.perplexity.ai
-- `provider_registry.py:180` https://api.cerebras.ai/v1
-- `provider_registry.py:186` https://api.deepinfra.com/v1/openai
-- `provider_registry.py:192` https://api.novita.ai/v3/openai
-- `provider_registry.py:198` https://ai-gateway.vercel.sh/v1
-- `provider_registry.py:204` https://inference.baseten.co/v1
-- `provider_registry.py:210` https://api.sambanova.ai/v1
-- `provider_registry.py:216` https://api.studio.nebius.com/v1
-- `provider_registry.py:222` https://api.friendli.ai/serverless/v1
-- `provider_registry.py:245` https://generativelanguage.googleapis.com/v1beta/openai/
-- `provider_registry.py:251` https://api.cohere.com/compatibility/v1
-- `provider_registry.py:257` https://api.ai21.com/studio/v1
-- `provider_registry.py:263` https://ark.cn-beijing.volces.com/api/v3
-- `provider_registry.py:272` https://models.github.ai/inference
-- `provider_registry.py:278` https://spark-api-open.xf-yun.com/v1
-- `provider_registry.py:284` https://api.scaleway.ai/v1
-- `provider_registry.py:290` https://api.inceptionlabs.ai/v1
-- `provider_registry.py:296` https://anymodel.org/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["opencode-go"]`: https://opencode.ai/inference/go/openai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["opencode-zen"]`: https://opencode.ai/zen/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["qwen"]`: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["moonshot"]`: https://api.moonshot.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS[KIMI_PROVIDER]`: https://api.kimi.ai/coding/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["zhipu"]`: https://open.bigmodel.cn/api/paas/v4
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["zai"]`: https://api.z.ai/api/paas/v4
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["xiaomi"]`: https://api.xiaomimimo.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["xiaomi-tokenplan"]`: https://token-plan-cn.xiaomimimo.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["minimax"]`: https://api.minimax.io/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["lingyiwanwu"]`: https://api.lingyiwanwu.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["stepfun"]`: https://api.stepfun.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["siliconflow"]`: https://api.siliconflow.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["baichuan"]`: https://api.baichuan-ai.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["qianfan"]`: https://qianfan.baidubce.com/v2
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["hunyuan"]`: https://api.hunyuan.cloud.tencent.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["modelscope"]`: https://api-inference.modelscope.cn/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["mistral"]`: https://api.mistral.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["groq"]`: https://api.groq.com/openai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["together"]`: https://api.together.xyz/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["fireworks"]`: https://api.fireworks.ai/inference/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["xai"]`: https://api.x.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["perplexity"]`: https://api.perplexity.ai
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["cerebras"]`: https://api.cerebras.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["deepinfra"]`: https://api.deepinfra.com/v1/openai
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["novita"]`: https://api.novita.ai/v3/openai
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["vercel"]`: https://ai-gateway.vercel.sh/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["baseten"]`: https://inference.baseten.co/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["sambanova"]`: https://api.sambanova.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["nebius"]`: https://api.studio.nebius.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["friendli"]`: https://api.friendli.ai/serverless/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["gemini"]`: https://generativelanguage.googleapis.com/v1beta/openai/
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["cohere"]`: https://api.cohere.com/compatibility/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["ai21"]`: https://api.ai21.com/studio/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["doubao"]`: https://ark.cn-beijing.volces.com/api/v3
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["github-models"]`: https://models.github.ai/inference
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["iflytek-spark"]`: https://spark-api-open.xf-yun.com/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["scaleway"]`: https://api.scaleway.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["inception"]`: https://api.inceptionlabs.ai/v1
+- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]`: https://anymodel.org/v1
 
 Региональные альтернативы, которые пробуются для того же провайдера:
 
-- `llm_clients.py:99` https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-- `llm_clients.py:100` https://dashscope.aliyuncs.com/compatible-mode/v1
-- `llm_clients.py:103` https://api.moonshot.ai/v1
-- `llm_clients.py:104` https://api.moonshot.cn/v1
-- `llm_clients.py:107` https://api.kimi.ai/coding/v1
-- `llm_clients.py:108` https://api.kimi.com/coding/v1
-- `llm_clients.py:111` https://api.minimax.io/v1
-- `llm_clients.py:112` https://api.minimaxi.com/v1
-- `llm_clients.py:115` https://api.siliconflow.com/v1
-- `llm_clients.py:116` https://api.siliconflow.cn/v1
-- `llm_clients.py:119` https://token-plan-cn.xiaomimimo.com/v1
-- `llm_clients.py:120` https://token-plan-sgp.xiaomimimo.com/v1
-- `llm_clients.py:121` https://token-plan-ams.xiaomimimo.com/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["qwen"]`: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["qwen"]`: https://dashscope.aliyuncs.com/compatible-mode/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["moonshot"]`: https://api.moonshot.ai/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["moonshot"]`: https://api.moonshot.cn/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["moonshot"]`: https://api.kimi.ai/coding/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["moonshot"]`: https://api.kimi.com/coding/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["minimax"]`: https://api.minimax.io/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["minimax"]`: https://api.minimaxi.com/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["siliconflow"]`: https://api.siliconflow.com/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["siliconflow"]`: https://api.siliconflow.cn/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["xiaomi-tokenplan"]`: https://token-plan-cn.xiaomimimo.com/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["xiaomi-tokenplan"]`: https://token-plan-sgp.xiaomimimo.com/v1
+- `llm_clients.py`, `REGIONAL_BASE_URL_CANDIDATES["xiaomi-tokenplan"]`: https://token-plan-ams.xiaomimimo.com/v1
 
 </details>
 
