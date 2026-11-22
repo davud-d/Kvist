@@ -50,8 +50,8 @@ Kvist is for the case where you want to choose the model yourself.
   or a stop, `/resume` continues from the last checkpoint.
 - **Your editor.** The same agent runs in the terminal, an Electron app, a
   browser (`kvist-web`), VS Code, JetBrains IDEs and Zed.
-- **Local and MIT-licensed.** Nothing goes anywhere except the requests to the
-  provider you chose.
+- **Local and MIT-licensed.** No telemetry. What can leave your machine is
+  listed in [What leaves your machine](#what-leaves-your-machine).
 
 Kvist is in beta (version 0.1.0b1). It is a supervised tool, not a security
 boundary: read the diff and the command output before you accept them.
@@ -273,6 +273,98 @@ notebook: she records the project's history there (when she started, milestones,
 decisions, finished campaigns), corrects it and prunes it herself, without asking.
 Because the files live in the project, Kvist treats their content as data that
 cannot change its safety rules.
+
+## What leaves your machine
+
+Kvist has no telemetry. A search of `kernel/` (outside the tests) for telemetry,
+analytics, Sentry, PostHog, Mixpanel, Segment, Statsig and Amplitude finds only advice
+text in a bundled skill's reference notes, no code. The addresses Kvist can
+contact are below; all paths are under `kernel/`.
+
+| What | Where | Address | When |
+| --- | --- | --- | --- |
+| Model requests (your prompts, file excerpts, command output) | `llm/llm_clients.py:59`, `:62`, `:65`, `:824`, `:825`, `:2032` | `openrouter.ai`, `api.anthropic.com`, `api.deepseek.com`, `generativelanguage.googleapis.com`, `api.groq.com` | Only the provider you selected |
+| OpenAI | the `openai` SDK default, no address in `kernel/` (`llm/llm_clients.py:1074`) | `api.openai.com/v1` | Only if OpenAI is your provider |
+| Other providers | `llm/provider_registry.py`, `llm/llm_clients.py:99-121` | full list below | Only the provider you selected |
+| Your own endpoint | `llm/custom_provider.py:44` | the address you typed | Only if you added one |
+| AnyModel | `llm/provider_registry.py:296`, `providers/anymodel_pricing.py:28` | `anymodel.org/v1`, `anymodel.org/v1/models` (model list and prices) | When AnyModel is your provider |
+| AnyModel sign-up page | `llm/anymodel_onboarding.py:32` | `anymodel.org/app/register` | Opened in your browser at first run, Kvist itself sends nothing |
+| ChatGPT plan sign-in | `providers/chatgpt_endpoints.py:9`, `:12` | `auth.openai.com`, `api.openai.com/v1` | Only if you sign in with a ChatGPT plan |
+| Update check | `config/self_update.py:40` | `api.github.com` (a plain GET of the release list, nothing about you in the body) | Shortly after start, then every 6 hours until a new version is found; `auto_update: false` or `KVIST_AUTO_UPDATE=0` turns it off |
+| Update download | `config/self_update.py:41` | `github.com/davud-d/Kvist/releases` | Only when you type `/update` |
+| Web search | `sandbox/executor.py:2871`, `:2910`, `:2957`, `:2995` | `api.tavily.com`, `api.search.brave.com`, `api.exa.ai`, `generativelanguage.googleapis.com` (SearXNG: your own address) | Only the engine you chose, when the agent searches the web |
+| Reading web pages | `sandbox/executor.py:370-404` (allowlist), `:1173` (extra domains) | the pages the agent asks for, limited to those domains | When the agent fetches a page |
+| Skill dependencies | `plugins/deps.py:31` | `pypi.org`, `files.pythonhosted.org` | When you install a skill's dependencies |
+| Gmail skill | `plugins/service_connect.py:26`, `:59`, `:98`, `:129` | `oauth2.googleapis.com`, `accounts.google.com`, `gmail.googleapis.com` | Only if you connect Gmail |
+| Feedback | `agent/feedback.py:34`, `:113` (browser form), `:123` (`gh issue create`) | `github.com/davud-d/Kvist/issues` | Only after you read the draft and answer "Send this feedback?" |
+| Service connections you configured | `plugins/connections.py` | the `https://` address you gave | Only for a skill you granted that connection |
+
+The rest of the `http(s)://` strings in `kernel/` are links printed in messages
+(`openrouter.ai/keys` and similar in `agent/agent_model.py` and `main.py`,
+`github.com/davud-d/Kvist` at `main.py:6459`, the opencode theme docs link in
+`config/theme.py:4`) and are never requested.
+
+<details>
+<summary>Every provider address (40 in the registry, 13 regional alternatives)</summary>
+
+- `provider_registry.py:38` https://opencode.ai/inference/go/openai/v1
+- `provider_registry.py:44` https://opencode.ai/zen/v1
+- `provider_registry.py:50` https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+- `provider_registry.py:56` https://api.moonshot.ai/v1
+- `provider_registry.py:62` https://api.kimi.ai/coding/v1
+- `provider_registry.py:68` https://open.bigmodel.cn/api/paas/v4
+- `provider_registry.py:74` https://api.z.ai/api/paas/v4
+- `provider_registry.py:80` https://api.xiaomimimo.com/v1
+- `provider_registry.py:86` https://token-plan-cn.xiaomimimo.com/v1
+- `provider_registry.py:92` https://api.minimax.io/v1
+- `provider_registry.py:98` https://api.lingyiwanwu.com/v1
+- `provider_registry.py:104` https://api.stepfun.com/v1
+- `provider_registry.py:110` https://api.siliconflow.com/v1
+- `provider_registry.py:116` https://api.baichuan-ai.com/v1
+- `provider_registry.py:122` https://qianfan.baidubce.com/v2
+- `provider_registry.py:128` https://api.hunyuan.cloud.tencent.com/v1
+- `provider_registry.py:134` https://api-inference.modelscope.cn/v1
+- `provider_registry.py:140` https://api.mistral.ai/v1
+- `provider_registry.py:150` https://api.groq.com/openai/v1
+- `provider_registry.py:156` https://api.together.xyz/v1
+- `provider_registry.py:162` https://api.fireworks.ai/inference/v1
+- `provider_registry.py:168` https://api.x.ai/v1
+- `provider_registry.py:174` https://api.perplexity.ai
+- `provider_registry.py:180` https://api.cerebras.ai/v1
+- `provider_registry.py:186` https://api.deepinfra.com/v1/openai
+- `provider_registry.py:192` https://api.novita.ai/v3/openai
+- `provider_registry.py:198` https://ai-gateway.vercel.sh/v1
+- `provider_registry.py:204` https://inference.baseten.co/v1
+- `provider_registry.py:210` https://api.sambanova.ai/v1
+- `provider_registry.py:216` https://api.studio.nebius.com/v1
+- `provider_registry.py:222` https://api.friendli.ai/serverless/v1
+- `provider_registry.py:245` https://generativelanguage.googleapis.com/v1beta/openai/
+- `provider_registry.py:251` https://api.cohere.com/compatibility/v1
+- `provider_registry.py:257` https://api.ai21.com/studio/v1
+- `provider_registry.py:263` https://ark.cn-beijing.volces.com/api/v3
+- `provider_registry.py:272` https://models.github.ai/inference
+- `provider_registry.py:278` https://spark-api-open.xf-yun.com/v1
+- `provider_registry.py:284` https://api.scaleway.ai/v1
+- `provider_registry.py:290` https://api.inceptionlabs.ai/v1
+- `provider_registry.py:296` https://anymodel.org/v1
+
+Regional alternatives, tried for the same provider:
+
+- `llm_clients.py:99` https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+- `llm_clients.py:100` https://dashscope.aliyuncs.com/compatible-mode/v1
+- `llm_clients.py:103` https://api.moonshot.ai/v1
+- `llm_clients.py:104` https://api.moonshot.cn/v1
+- `llm_clients.py:107` https://api.kimi.ai/coding/v1
+- `llm_clients.py:108` https://api.kimi.com/coding/v1
+- `llm_clients.py:111` https://api.minimax.io/v1
+- `llm_clients.py:112` https://api.minimaxi.com/v1
+- `llm_clients.py:115` https://api.siliconflow.com/v1
+- `llm_clients.py:116` https://api.siliconflow.cn/v1
+- `llm_clients.py:119` https://token-plan-cn.xiaomimimo.com/v1
+- `llm_clients.py:120` https://token-plan-sgp.xiaomimimo.com/v1
+- `llm_clients.py:121` https://token-plan-ams.xiaomimimo.com/v1
+
+</details>
 
 ## Platforms
 
