@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="docs/media/kvist_x_anymodel.webp" width="480" alt="Kvist x AnyModel preview video">
-</p>
+<!-- DEMO GIF -->
 
 # Kvist
 
