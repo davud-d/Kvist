@@ -3,13 +3,13 @@
 // redraw what changed; nothing here touches the DOM.
 
 import { reduce } from "./reducer.js";
+import { workspaceTheme } from "./theme.js";
 
 export const DEFAULT_PREFS = {
-  theme: "dusk",
-  glass: 0.85,
+  theme: "system",
   speed: 1, // 1 = animations on, 0 = off
   scale: 1,
-  inspector: true,
+  inspector: false,
   inspectorTab: "hours",
   expanded: [], // projects opened on the rail (by id; "" is the older tasks)
 };
@@ -100,6 +100,7 @@ function write(key, value) {
 
 export function loadPrefs() {
   store.prefs = { ...DEFAULT_PREFS, ...(read(PREFS_KEY) ?? {}) };
+  store.prefs.theme = workspaceTheme(store.prefs.theme);
 }
 
 export function savePrefs() {

@@ -11,7 +11,7 @@ export function toast(text, tone = "ok") {
   if (!host) return;
   const el = h("div", { class: `toast ${tone}`, role: "status" }, text);
   host.append(el);
-  enter(el, { from: "translateY(14px) scale(0.96)" });
+  enter(el);
   setTimeout(async () => {
     await finished(animate(el, [{ opacity: 1 }, { opacity: 0, transform: "translateY(6px)" }], { curve: "in", ms: 200, fill: "forwards" }));
     el.remove();

@@ -1,4 +1,4 @@
-// Kvist Cloud, pixel edition: wires the modules together, loads the account and opens the first task.
+// Kvist Cloud workspace: wires the modules together, loads the account and opens the first task.
 
 import { activate, newAgent, onNeedKey, onNeedProject, openSession, refreshSessions, startListening, syncAddress } from "./actions.js";
 import { openExternal } from "./bridge.js";
@@ -6,6 +6,7 @@ import { account, keepFresh, loadAccount, parseLocation, resolveSession, workspa
 import { $ } from "./dom.js";
 import { detectLanguage, setLanguage, t } from "./i18n.js";
 import { setMathRenderer } from "./markdown.js";
+import { setSpeed } from "./motion.js";
 import { applyPrefs } from "./theme.js";
 import { active, loadPrefs, setMode, setPref, store, subscribe } from "./store.js";
 import { mountChat } from "./views/chat.js";
@@ -84,15 +85,22 @@ async function showTask(task) {
 async function boot() {
   loadPrefs();
   setLanguage(detectLanguage());
-  applyPrefs(store.prefs);
   mountMath();
   const app = $("#app");
   const pane = $("#pane");
+  const inspector = $("#inspector");
+  const syncPrefs = () => {
+    applyPrefs(store.prefs);
+    setSpeed(store.prefs.speed);
+    app.classList.toggle("no-inspector", !store.prefs.inspector);
+    inspector.hidden = !store.prefs.inspector;
+  };
+  syncPrefs();
   mountTitlebar($("#titlebar"));
   mountNotices($("#notices"));
   mountDock($("#dock"));
   mountChat(pane);
-  mountInspector($("#inspector"));
+  mountInspector(inspector);
   mountOverview($("#overview"), pane);
   wireGlobalKeys();
   startListening();
@@ -110,10 +118,8 @@ async function boot() {
   window.addEventListener("popstate", () => openByAddress().catch((error) => console.error(error)));
   subscribe((change) => {
     if (change.kind !== "prefs") return;
-    applyPrefs(store.prefs);
-    app.classList.toggle("no-inspector", !store.prefs.inspector);
+    syncPrefs();
   });
-  app.classList.toggle("no-inspector", !store.prefs.inspector);
   // A signed-out visitor is sent to sign in from inside loadAccount.
   await loadAccount();
   sayHowSignInWent();
