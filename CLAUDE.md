@@ -1,7 +1,7 @@
-# CLAUDE.md
+# Kvist repository instructions
 
-Quick reference only. For details, read the code, the module docstrings, `docs/` and each frontend's README;
-the long architecture notes that used to live here are in git history (`git log -p -- CLAUDE.md`).
+Shared reference for coding agents. For details, read the code, the module docstrings, `docs/` and each
+frontend's README. The earlier architecture notes are in git history (`git log -p -- CLAUDE.md`).
 
 ## What this is
 
