@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
+from typing import Annotated
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -34,8 +35,12 @@ PERSISTED = frozenset(
         "message", "final", "error", "input_request", "input_closed", "stream_start", "stream_commit",
         "reasoning_start", "reasoning_commit", "usage", "session_title", "artifact", "helper", "skill",
         "turn_end", "wake", "command_result", "session", "notice", "sandbox_notice", "task_state", "user",
+        "manifest",
     }
 )
+# What the page needs of Kvist's manifest: the commands it offers after "/". The rest (providers, themes,
+# models) is the desktop app's and is large, so it is not kept.
+MANIFEST_KEPT = ("slash_commands", "plugin_commands")
 # Reasons the runner gives for stopping a task that can be continued later.
 PAUSE_REASONS = frozenset(
     {"hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted",
@@ -215,6 +220,9 @@ def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
     if kind == "hello" or (kind == "task_state" and event.get("state") == "running"):
         # Kvist on the machine is up and working, so it has the message that started this turn.
         task.pending_text = ""
+        task.pending_command = False
+    if kind == "manifest":
+        event = {"type": "manifest", **{name: event.get(name) or [] for name in MANIFEST_KEPT}}
     seq = None
     if kind in PERSISTED:
         seq = task.next_seq
@@ -255,6 +263,12 @@ class TaskIn(InputModel):
 
 class MessageIn(InputModel):
     text: str = Field(min_length=1, max_length=GOAL_LIMIT)
+
+
+class CommandIn(InputModel):
+    # A name as Kvist's manifest gives it ("memory", "best-of"); the arguments as typed after it.
+    name: str = Field(min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9-]*$")
+    args: list[Annotated[str, Field(max_length=500)]] = Field(default_factory=list, max_length=20)
 
 
 class TitleIn(InputModel):
@@ -521,11 +535,13 @@ async def resume_task(
     return task_payload(db, task)
 
 
-def restart_with(db: Session, task: Task, text: str) -> None:
-    """The session goes on in a new run of Kvist: it switches back into the conversation and takes `text`."""
+def restart_with(db: Session, task: Task, text: str, command: bool = False) -> None:
+    """The session goes on in a new run of Kvist: it switches back into the conversation and takes `text`
+    (a slash command for Kvist when `command`)."""
     from .limits import admit
 
     task.pending_text = text
+    task.pending_command = command
     task.resume_requested = False
     task.status_reason = ""
     task.outcome = ""
@@ -544,12 +560,40 @@ async def post_message(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     """Another message in the conversation. A task is a session: it takes as many as the hours allow."""
-    app = request.app
     lock_account(db, user.id)
     task = owned_task(db, user, task_id)
     text = payload.text.strip()
     if not text:
         raise ApiError(400, "empty", "Write something first. / Сначала напиши что-нибудь.")
+    return await deliver(request.app, db, user, task, text)
+
+
+@router.post("/api/tasks/{task_id}/commands")
+async def post_command(
+    task_id: int,
+    payload: CommandIn,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """A slash command of Kvist's (`/memory forget …`) run in the task's session, as the desktop app runs it:
+    its dialogs come as the task's questions. What the cloud takes away (commands.py) is refused here too."""
+    from . import commands
+
+    lock_account(db, user.id)
+    task = owned_task(db, user, task_id)
+    if not commands.allowed(commands.plan_of(db, user), payload.name):
+        raise ApiError(
+            403, "command_unavailable", "This command is not available here. / Эта команда здесь недоступна."
+        )
+    line = " ".join(["/" + payload.name, *payload.args])
+    return await deliver(request.app, db, user, task, line, command=True)
+
+
+async def deliver(
+    app: FastAPI, db: Session, user: User, task: Task, text: str, command: bool = False
+) -> dict[str, object]:
+    """Gives the running Kvist the message (or command), or starts it again in the conversation to take it."""
     can_run(db, user)
     if task.status in (TaskStatus.QUEUED, TaskStatus.STARTING):
         raise ApiError(
@@ -560,13 +604,14 @@ async def post_message(
     if task.status in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
         # Kvist queues a goal that arrives during a turn and takes it when the turn ends.
         db.commit()
-        delivered = await app.state.gateway.send(task.machine_id, {"type": "message", "task_id": task.id, "text": text})
+        message = {"type": "message", "task_id": task.id, "text": text, **({"command": True} if command else {})}
+        delivered = await app.state.gateway.send(task.machine_id, message)
         if not delivered:
             raise ApiError(503, "machine_offline", "The machine is not reachable. / Машина недоступна.")
         record_user(app, db, task, text)
         db.commit()
         return task_payload(db, task)
-    restart_with(db, task, text)
+    restart_with(db, task, text, command)
     record_user(app, db, task, text)
     db.commit()
     await _dispatch(app, task.machine_id)

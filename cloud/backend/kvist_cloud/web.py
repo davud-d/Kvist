@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
@@ -47,16 +48,19 @@ def install(app: FastAPI) -> None:
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
+    # The workspace page is built from cloud/pixel (where it came from) and served at /workspace.
     pixel = dist / "pixel"
     if pixel.is_dir():
-        async def pixel_page() -> FileResponse:
+        async def workspace_page() -> FileResponse:
             # The same page at every address of a session or a project; what it shows, it asks the API for,
             # and the API answers only the owner.
             return FileResponse(pixel / "index.html", media_type="text/html; charset=utf-8")
 
-        for path in ("/pixel/s/{public_id}", "/pixel/p/{project_id}"):
-            app.add_api_route(path, pixel_page, methods=["GET"], include_in_schema=False)
-        app.mount("/pixel", StaticFiles(directory=pixel, html=True), name="pixel")
+        for path in ("/workspace/s/{public_id}", "/workspace/p/{project_id}"):
+            app.add_api_route(path, workspace_page, methods=["GET"], include_in_schema=False)
+        app.add_api_route("/pixel", old_workspace_address, methods=["GET"], include_in_schema=False)
+        app.add_api_route("/pixel/{rest:path}", old_workspace_address, methods=["GET"], include_in_schema=False)
+        app.mount("/workspace", StaticFiles(directory=pixel, html=True), name="workspace")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
@@ -153,10 +157,18 @@ def _legal_route(name: str):
     return serve
 
 
+def old_workspace_address(request: Request, rest: str = "") -> RedirectResponse:
+    """The workspace lived at /pixel/; a bookmark or a link from then opens the same place at /workspace/."""
+    target = "/workspace/" + quote(rest, safe="/")
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=308)
+
+
 @router.get("/new", include_in_schema=False)
 def new_task() -> Response:
     """Tasks are written in the workspace now; an old bookmark or link lands there."""
-    return RedirectResponse("/pixel/", status_code=307)
+    return RedirectResponse("/workspace/", status_code=307)
 
 
 for _path in APP_PATHS:

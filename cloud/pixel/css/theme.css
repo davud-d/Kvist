@@ -1,111 +1,130 @@
-/* Design tokens. The look is modern pixel art, not a retro desktop: flat surfaces, a limited
-   palette, a 3px ink outline whose corners are notched (never a bevel or a gradient), a darker
-   band inside buttons, and a readable monospace for everything the person reads. The pixel
-   typeface is kept for the wordmark only, because its Cyrillic does not survive small sizes. */
+/* Design tokens. Kvist Cloud is a place where people who bill for their time (accountants, doctors,
+   founders, developers) hand work to an agent, so the page behaves like a good instrument: quiet surfaces,
+   one spruce-green accent (kvist is a twig), soft rounded shapes and a humanist sans with a real Cyrillic.
+   Colour carries state only: green = yours / done, amber = needs you, red = failed. */
 
-@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono.ttf") format("truetype"); font-weight: 100 800; font-display: block; }
-@font-face { font-family: "Pixelify Sans"; src: url("../fonts/PixelifySans.ttf") format("truetype"); font-weight: 400 700; font-display: block; }
+@font-face { font-family: "Golos Text"; src: url("../fonts/GolosText.woff2") format("woff2"); font-weight: 400 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("../fonts/JetBrainsMono.ttf") format("truetype"); font-weight: 100 800; font-display: swap; }
 
 :root {
-  --font-text: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --font-pixel: "Pixelify Sans", var(--font-text);
-  --font-size: 14px;
+  color-scheme: light dark;
+  --font-text: "Golos Text", "Segoe UI", system-ui, sans-serif;
+  --font-code: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --zoom: 1;
-  --glass: 1;
-  --o: 3px; /* one pixel step of the outline */
 
-  --ink: #0d0b16;
-  --bg: #17142a;
-  --surface: #211d38;
-  --surface-2: #2c2748;
-  --raise: #38325b;
-  --shade: #1a1730;      /* the darker band inside a button */
-  --line: #4a4272;
-  --text: #f4ecdb;
-  --dim: #aaa2c9;
-  --accent: #ffb347;
-  --accent-shade: #d4851f;
-  --accent-ink: #1d1206;
-  --mint: #6fe3c1;
-  --pink: #ff86ab;
-  --warn: #ffd166;
-  --ok: #7ee08a;
-  --err: #ff6b7a;
-  --add: rgba(126, 224, 138, 0.16);
-  --del: rgba(255, 107, 122, 0.17);
-}
+  /* Type by role. Secondary text never goes below 13px: it is read, not decoration. */
+  --t-display: 30px;   /* the home screen's question */
+  --t-title: 20px;     /* the task in focus, a sheet */
+  --t-md: 15px;        /* reading: messages, answers */
+  --t-ui: 14px;        /* rows, buttons, menus */
+  --t-sm: 13px;        /* secondary lines under a row, meta */
+  --t-xs: 12.5px;      /* times and counts only */
+  --t-lg: 17px;        /* headings inside an answer */
+  --t-xl: 22px;
+  --t-2xl: 32px;
 
-:root[data-theme="moss"] {
-  --ink: #07100b; --bg: #0f1d15; --surface: #16291d; --surface-2: #1f3a29; --raise: #2a4d37; --shade: #0f1f16; --line: #3d6a4d;
-  --text: #e9f5e6; --dim: #9bbca3; --accent: #b6e35a; --accent-shade: #86ad2f; --accent-ink: #0d1904; --mint: #6fe3c1; --pink: #f3c969;
+  /* Space on a 4px step. */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  /* Shape by role, not one radius for everything: the field to write in is the one big rounded object;
+     rows are square until hovered or chosen; floating things (sheet, menu, palette) are medium; a circle
+     is always a signal. */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-row: 10px;
+  --r-md: 12px;
+  --r-float: 14px;
+  --r-lg: 16px;
+  --r-field: 22px;
+  --r-pill: 999px;
+
+  /* Motion (see js/motion.js): ease-out for anything that answers the person, never a bounce. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --d-press: 120ms;
+  --d-hover: 150ms;
+  --d-pop: 200ms;
+  --d-panel: 280ms;
+
+  /* Surface levels: the rail is a step below the stage, floating things a step above. */
+  --rail: light-dark(#eef1ee, #0d100f);
+  --canvas: light-dark(#fafbfa, #141917);
+  --surface: light-dark(#ffffff, #1b211e);
+  --surface-2: light-dark(#f2f4f2, #212825);
+  --select: light-dark(#e6eae7, #29312d);  /* the chosen row, everywhere */
+  --raise: light-dark(#e8ece9, #2a322e);
+  --shade: light-dark(#f4f6f4, #101413);   /* wells: code, inputs */
+  --line: light-dark(#e1e6e2, #262e2a);
+  --line-strong: light-dark(#c3ccc6, #3a4540);
+  --text: light-dark(#16211c, #e3e9e5);
+  --dim: light-dark(#56635c, #9aa59f);
+  --faint: light-dark(#5f6b65, #838f89);
+  --accent: light-dark(#1c6b4f, #7cc6a2);
+  --accent-hover: light-dark(#175a42, #94d3b4);
+  --accent-ink: light-dark(#ffffff, #0b1a12);
+  --accent-soft: light-dark(#e2efe8, #1d3229);
+  --ok: light-dark(#1f7a47, #7fd19c);
+  /* The two signals the person learns: blue = something new to look at, yellow = waiting for you. */
+  --news: light-dark(#2f6fdc, #6ea4f5);
+  --asks: light-dark(#d99a06, #f1bf3c);
+  --warn: light-dark(#8a5a00, #e5b864);
+  --warn-soft: light-dark(#fbf1dc, #33291a);
+  --err: light-dark(#b3261e, #ff9d92);
+  --err-soft: light-dark(#fbe9e7, #3a2220);
+  --info: light-dark(#2d5f8a, #9cc3e6);
+  --add: light-dark(#e3f3e8, #1b3326);
+  --del: light-dark(#fbe9e7, #3a2220);
+  --focus: light-dark(#1c6b4f, #7cc6a2);
+
+  --shadow-1: 0 1px 2px light-dark(rgb(22 33 28 / 0.06), rgb(0 0 0 / 0.3));
+  --shadow-2: 0 1px 2px light-dark(rgb(22 33 28 / 0.05), rgb(0 0 0 / 0.3)), 0 8px 24px -6px light-dark(rgb(22 33 28 / 0.12), rgb(0 0 0 / 0.5));
+  --shadow-3: 0 2px 6px light-dark(rgb(22 33 28 / 0.06), rgb(0 0 0 / 0.35)), 0 24px 56px -12px light-dark(rgb(22 33 28 / 0.22), rgb(0 0 0 / 0.6));
+
+  /* Older rules name these; they are the hairline border now. */
+  --outline: 0 0 0 1px var(--line);
+  --paint: var(--surface);
 }
-:root[data-theme="ember"] {
-  --ink: #120706; --bg: #231110; --surface: #321a17; --surface-2: #44241f; --raise: #5a312a; --shade: #251210; --line: #7a4639;
-  --text: #fbece4; --dim: #c9a496; --accent: #ff8a4c; --accent-shade: #d1612a; --accent-ink: #220b02; --mint: #ffd166; --pink: #ff86ab;
-}
-:root[data-theme="paper"] {
-  --ink: #2a2437; --bg: #f1ead9; --surface: #fbf6ea; --surface-2: #efe6d0; --raise: #e5d9bd; --shade: #d9ccaa; --line: #bfae86;
-  --text: #2a2437; --dim: #6b6483; --accent: #e0561d; --accent-shade: #a83c0d; --accent-ink: #fff5ea; --mint: #1f8f77; --pink: #c63a68;
-  --warn: #9a6a00; --ok: #23803c; --err: #c4352f; --add: rgba(35, 128, 60, 0.16); --del: rgba(196, 53, 47, 0.14);
-}
-:root[data-theme="mono"] {
-  --ink: #0b0b0b; --bg: #161616; --surface: #1f1f1f; --surface-2: #2b2b2b; --raise: #383838; --shade: #181818; --line: #4d4d4d;
-  --text: #f0f0f0; --dim: #a5a5a5; --accent: #c4c4c4; --accent-shade: #8e8e8e; --accent-ink: #0b0b0b; --mint: #b9b9b9; --pink: #a9a9a9;
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
 html, body {
   margin: 0;
   height: 100%;
-  background: transparent; /* the window itself may be see-through */
+  background: var(--canvas);
   color: var(--text);
   font-family: var(--font-text);
-  font-size: var(--font-size);
-  line-height: 1.55;
+  font-size: var(--t-md);
+  line-height: 1.5;
   overflow: hidden;
-  zoom: var(--zoom);
+  -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "tnum" 0;
 }
+#app { zoom: var(--zoom); }
 
 button, input, textarea, select { font: inherit; color: inherit; }
-img { image-rendering: pixelated; }
-::selection { background: var(--accent); color: var(--accent-ink); }
+button, select, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+code, pre, kbd, .diff, .code-body, .call-output, .call-tail { font-family: var(--font-code); }
+::selection { background: var(--accent-soft); color: var(--text); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 [hidden] { display: none !important; }
+.num { font-variant-numeric: tabular-nums; }
 
-/* Surfaces. `--outline` is a one-pixel-step ink border with the four corner pixels left out. */
-:root {
-  --outline: calc(var(--o) * -1) 0 0 0 var(--ink), var(--o) 0 0 0 var(--ink), 0 calc(var(--o) * -1) 0 0 var(--ink), 0 var(--o) 0 0 var(--ink);
-  --paint: color-mix(in srgb, var(--surface) calc(var(--glass) * 100%), transparent);
-  --paint-2: color-mix(in srgb, var(--surface-2) calc(var(--glass) * 100%), transparent);
-}
-.px { background: var(--paint); box-shadow: var(--outline); }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border: 4px solid transparent; border-radius: var(--r-pill); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--faint); }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; border: 2px solid transparent; }
-::-webkit-scrollbar-track { background: transparent; }
+/* The theme change: the new colours open as a circle from the button that asked for them (js/theme.js). */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-new(root) { z-index: 2; }
 
-/* The squirrel: three frames of the mascot, stepped (never tweened). */
-.squirrel {
-  display: inline-block;
-  width: 32px;
-  height: 32px;
-  background: url("../sprites/squirrel-1.png") 0 0 / 100% 100% no-repeat;
-  image-rendering: pixelated;
-  flex: none;
-}
-.squirrel.small { width: 28px; height: 28px; }
-#app[data-busy="1"] .brand .squirrel, .squirrel.working { animation: squirrel 0.8s steps(1) infinite; }
-@keyframes squirrel {
-  0% { background-image: url("../sprites/squirrel-1.png"); }
-  34% { background-image: url("../sprites/squirrel-2.png"); }
-  67% { background-image: url("../sprites/squirrel-3.png"); }
-}
-
+/* Reduced motion keeps fades and colour changes but nothing travels. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; transition-duration: 0.001s !important; }
+  :root { --d-panel: 0ms; }
+  *, *::before, *::after { animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
-
-/* Every boxed region wears the same outline on the same paint. */
-.chat-header, .composer, .tabs, .inspector-body, .dialog, .settings, #dock, .tile { background: var(--paint); box-shadow: var(--outline); }
+:root[data-motion="off"] *, :root[data-motion="off"] *::before, :root[data-motion="off"] *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }

@@ -18,6 +18,7 @@ from . import (
     auth,
     billing,
     chatgpt,
+    commands,
     exports,
     funnel,
     gateway,
@@ -135,6 +136,7 @@ def create_app(
     app.include_router(gateway.router)
     app.include_router(projects.router)
     app.include_router(tasks.router)
+    app.include_router(commands.router)
     app.include_router(screens.router)
     app.include_router(billing.router)
     app.include_router(ledger.router)

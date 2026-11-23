@@ -53,7 +53,7 @@ function card(agent, view) {
   const picture = h("img", { class: "screen-view", alt: view.title || view.skill, hidden: true });
   const waiting = h("p", { class: "dim pad" }, t("waiting picture"));
   const bar = h("div", { class: "screen-bar" });
-  const el = h("div", { class: "screen-card px" }, bar, picture, waiting);
+  const el = h("div", { class: "screen-card" }, bar, picture, waiting);
   const paint = (next) => {
     bar.replaceChildren(h("span", { class: `state-dot ${next.state}` }), h("span", { class: "screen-title" }, next.title || next.skill), h("span", { class: "chip" }, next.state));
     return el;

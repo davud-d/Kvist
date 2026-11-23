@@ -82,13 +82,13 @@ test("a message is held back, with the reason, until the account can run it", ()
 });
 
 test("a session is addressed by its own id, and an address says exactly what it asks for", () => {
-  assert.equal(sessionUrl("aB3_xY-9kQ"), "/pixel/s/aB3_xY-9kQ");
-  assert.equal(projectUrl(7), "/pixel/p/7");
-  assert.deepEqual(parseLocation("/pixel/s/aB3_xY-9kQ2"), { kind: "session", id: "aB3_xY-9kQ2" });
-  assert.deepEqual(parseLocation("/pixel/s/aB3_xY-9kQ2/"), { kind: "session", id: "aB3_xY-9kQ2" });
-  assert.deepEqual(parseLocation("/pixel/p/12"), { kind: "project", id: "12" });
-  assert.deepEqual(parseLocation("/pixel/", "#/tasks/5"), { kind: "task", id: "5" });
-  for (const bad of ["/pixel/", "/pixel/s/", "/pixel/s/abc", "/pixel/s/../x", "/pixel/s/a b c d e f", "/pixel/p/x", "/other/s/aB3_xY-9kQ2"]) assert.equal(parseLocation(bad), null, bad);
+  assert.equal(sessionUrl("aB3_xY-9kQ"), "/workspace/s/aB3_xY-9kQ");
+  assert.equal(projectUrl(7), "/workspace/p/7");
+  assert.deepEqual(parseLocation("/workspace/s/aB3_xY-9kQ2"), { kind: "session", id: "aB3_xY-9kQ2" });
+  assert.deepEqual(parseLocation("/workspace/s/aB3_xY-9kQ2/"), { kind: "session", id: "aB3_xY-9kQ2" });
+  assert.deepEqual(parseLocation("/workspace/p/12"), { kind: "project", id: "12" });
+  assert.deepEqual(parseLocation("/workspace/", "#/tasks/5"), { kind: "task", id: "5" });
+  for (const bad of ["/workspace/", "/workspace/s/", "/workspace/s/abc", "/workspace/s/../x", "/workspace/s/a b c d e f", "/workspace/p/x", "/other/s/aB3_xY-9kQ2"]) assert.equal(parseLocation(bad), null, bad);
 });
 
 test("what Kvist says about opening or switching a session never reaches the feed, or it would wipe it", () => {

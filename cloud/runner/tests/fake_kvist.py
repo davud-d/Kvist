@@ -240,6 +240,21 @@ def session_file(workspace: Path, name: str) -> Path:
     return folder / f"{name}.txt"
 
 
+FAKE_COMMANDS = (
+    ("memory", "Inspect, explain, forget or pause what Kvist remembers between sessions"),
+    ("context", "Show the model's context size and how much of it is used"),
+    ("changes", "Show agent file changes across all sessions"),
+    ("provider", "Switch or configure the LLM provider"),
+    ("models", "Select fast and smart models"),
+    ("change-api", "Update the API key for the current provider"),
+    ("effort", "Set the model's reasoning effort level"),
+    ("rename", "Rename the current session"),
+    ("full-reset", "Wipe all saved provider settings and API keys"),
+    ("permissions", "Allow, ask, deny or run-outside-the-sandbox rules for commands"),
+    ("session", "Create, switch or delete saved sessions"),
+)
+
+
 def main() -> int:
     args = sys.argv[1:]
     workspace = Path(args[args.index("--workspace") + 1]) if "--workspace" in args else Path.cwd()
@@ -248,6 +263,11 @@ def main() -> int:
     session = f"fake-{os.getpid()}"
     emit({"type": "hello", "protocol_version": 1, "provider": os.environ.get("AGENT_LLM_PROVIDER", ""),
           "session": session, "has_checkpoint": False})
+    # Like Kvist, the commands it carries out, less what the host turned off (--commands-off).
+    off = args[args.index("--commands-off") + 1].split(",") if "--commands-off" in args else []
+    commands = [{"name": name, "description": about, **({} if name in off else {"via": "core"})}
+                for name, about in FAKE_COMMANDS]
+    emit({"type": "manifest", "plugin_commands": [], "slash_commands": commands})
     while True:
         message = next_message()
         if message is None or message.get("type") == "eof":
@@ -289,6 +309,14 @@ def main() -> int:
             emit({"type": "command_result", "name": "session", "ok": session == wanted, "message": "", "effects": {}})
         elif message.get("type") == "command" and message.get("name") == "resume":
             run_turn("quick", workspace)
+        elif message.get("type") == "command":
+            # Any other command: carried out unless the host turned it off (--commands-off), as Kvist does.
+            name = str(message.get("name", ""))
+            off = args[args.index("--commands-off") + 1].split(",") if "--commands-off" in args else []
+            ok = name not in off
+            emit({"type": "command_result", "name": name, "ok": ok,
+                  "message": f"ran {name} {' '.join(message.get('args') or [])}" if ok else f"Unknown command: {name}",
+                  "effects": {}})
 
 
 if __name__ == "__main__":

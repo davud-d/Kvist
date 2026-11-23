@@ -1,111 +1,297 @@
-/* The conversation: header, feed items, composer, closed banner. Content is set in the readable
-   monospace; the pixel look comes from outlines, colour and the sprite, not from the typeface. */
+/* Home and the task in focus. Both use the same reading column; neither puts the work in a frame. */
 
-.chat-header { display: flex; align-items: center; gap: 16px; padding: 14px 18px; }
-.chat-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.chat-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.title-text { font-weight: 700; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.title-sub { color: var(--dim); font-size: 12px; white-space: nowrap; }
-.chips { display: flex; flex-wrap: wrap; margin: -3px; }
-.chat-controls { display: flex; gap: 10px; }
+/* -- home ------------------------------------------------------------------------------------------------------- */
+.home-inner { width: 100%; max-width: 760px; margin: 0 auto; padding: 12vh var(--s6) var(--s8); display: flex; flex-direction: column; gap: var(--s5); }
+/* With nothing to show under it, the field sits where the eye rests, a little above the middle. */
+.home-inner.quiet { margin-block: auto; padding-top: 0; padding-bottom: 8vh; }
+.home-line { margin: calc(-1 * var(--s3)) 0 var(--s1); color: var(--dim); font-size: var(--t-md); line-height: 1.45; text-align: center; text-wrap: balance; }
+.home-title { margin: 0 0 var(--s1); font-size: var(--t-display); font-weight: 600; line-height: 1.2; letter-spacing: -0.02em; text-align: center; text-wrap: balance; }
+.home-lists { display: flex; flex-direction: column; gap: var(--s6); margin-top: var(--s3); }
+.home-section { display: flex; flex-direction: column; gap: 2px; }
+.home-section-title { margin: 0 0 var(--s1); padding: 0 12px; font-size: var(--t-sm); font-weight: 600; color: var(--dim); }
+.home-rows { display: flex; flex-direction: column; gap: 1px; margin: 0 -12px; }
+.home-rows .task-row { padding-inline: 24px 12px; }
 
-.feed-wrap { position: relative; flex: 1; min-height: 0; background: color-mix(in srgb, var(--bg) calc(var(--glass) * 100%), transparent); box-shadow: var(--outline); }
-.feed { position: absolute; inset: 0; overflow-y: auto; padding: 24px 9% 28px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
-.empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 40px; color: var(--dim); pointer-events: none; }
+/* -- the composer: the one big rounded object on screen --------------------------------------------------------- */
+.composer { position: relative; display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s2); padding: 10px 10px 10px 20px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-field); box-shadow: var(--shadow-2); transition: border-color var(--d-hover) ease, box-shadow var(--d-pop) ease; }
+.composer:focus-within { border-color: var(--faint); box-shadow: var(--shadow-3); }
+.composer-input { flex: 1; min-width: 0; min-height: 40px; max-height: 280px; resize: none; border: 0; outline: none; background: transparent; padding: 9px 0; font-size: var(--t-md); line-height: 1.5; }
+.composer-input:focus-visible { outline: none; }
+.composer-input::placeholder { color: var(--faint); }
+.composer .send { width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: 50%; }
+.composer .send:disabled { background: var(--raise); border-color: var(--raise); color: var(--faint); opacity: 1; }
+.home-composer { flex-direction: column; align-items: stretch; padding: 14px 12px 10px 20px; }
+.home-composer .composer-input { min-height: 56px; font-size: 16px; padding: 4px 0; }
+.composer-foot { display: flex; align-items: center; gap: var(--s1); margin-left: -8px; }
+.composer-foot .spacer { flex: 1; }
+.model-pick .provider-mark { width: 20px; height: 20px; }
 
-.item { min-width: 0; }
-/* What the person said: a bubble on the right, pictures above it. */
-.item-user { align-self: flex-end; max-width: 78%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.user-text { padding: 9px 16px 12px; background: var(--accent); color: var(--accent-ink); box-shadow: inset 0 -4px 0 0 var(--accent-shade), var(--outline); white-space: pre-wrap; overflow-wrap: anywhere; }
-.user-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
-.user-image { max-width: 240px; max-height: 160px; object-fit: cover; image-rendering: auto; box-shadow: var(--outline); }
+/* The model menu: a search, then providers as parents with their models hanging under them. */
+.provider-mark { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 6px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); font-size: 11px; font-weight: 700; line-height: 1; }
+.effort-menu { top: calc(100% - 8px); width: 300px; max-height: none; padding: 6px; overflow: visible; }
+.effort-menu .effort-dial { background: transparent; }
+.model-menu { top: calc(100% - 8px); left: 12px; width: 380px; max-height: min(460px, 60vh); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.model-search-row { display: flex; align-items: center; gap: var(--s2); padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--faint); }
+.model-search { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font-size: var(--t-ui); }
+.model-search::placeholder { color: var(--faint); }
+.model-search::-webkit-search-cancel-button { display: none; }
+.model-tree { overflow-y: auto; padding: 6px; }
+.provider-row { display: flex; align-items: center; gap: var(--s3); width: 100%; padding: 7px 8px; border: 0; border-radius: var(--r-sm); cursor: pointer; background: transparent; color: var(--text); font-size: var(--t-ui); text-align: left; }
+.provider-row > .icon:last-child { color: var(--faint); transition: transform var(--d-pop) var(--ease-out); }
+.provider.open > .provider-row > .icon:last-child { transform: rotate(90deg); }
+.provider.open > .provider-row { font-weight: 600; }
+.provider-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-state { font-size: var(--t-xs); color: var(--ok); }
+/* The children hang from the parent's mark: a thread from under it, the rows indented past it. */
+.provider-children:empty { display: none; }
+.provider-children { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 8px 19px; padding-left: 13px; border-left: 1px solid var(--line-strong); }
+.model-row { display: flex; align-items: center; gap: var(--s2); width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-sm); cursor: pointer; background: transparent; color: var(--text); font-size: var(--t-ui); text-align: left; }
+/* The name to read, and under it the exact id the provider knows it by. */
+.model-names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.model-names > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-id { color: var(--faint); font-family: var(--font-code); font-size: 12px; }
+.model-row.on { background: var(--select); }
+.model-row .icon { color: var(--ok); }
+.model-note { margin: 4px 8px 6px; font-size: var(--t-sm); line-height: 1.45; color: var(--dim); }
+.provider-children .btn { align-self: flex-start; margin: 0 0 4px 8px; }
+.model-manual { margin: 4px 0 2px; font-family: var(--font-code); font-size: var(--t-sm); padding: 6px 10px; }
+@media (hover: hover) and (pointer: fine) {
+  .provider-row:hover, .model-row:hover { background: var(--surface-2); }
+  .model-row.on:hover { background: var(--select); }
+}
+.project-pick { display: inline-flex; align-items: center; gap: 6px; max-width: 60%; padding: 6px 8px; border: 0; border-radius: var(--r-sm); cursor: pointer; background: transparent; color: var(--dim); font-size: var(--t-ui); font-weight: 500; }
+.project-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-pick .icon:last-child { transform: rotate(90deg); }
+.home-composer .menu { top: calc(100% - 8px); left: 12px; }
+/* A task's field: the same two rows as the home one, smaller; it sits at the bottom, so its menus open upwards. */
+.task-composer { flex-direction: column; align-items: stretch; padding: 8px 10px 8px 20px; }
+/* In the column the field's height is its own (set as it grows), not a flex share of nothing. */
+.task-composer .composer-input { flex: none; padding: 6px 0 2px; min-height: 32px; }
+.task-composer .menu:not(.command-hint) { top: auto; bottom: calc(100% + 6px); left: 12px; }
+@media (hover: hover) and (pointer: fine) { .project-pick:hover { background: var(--surface-2); color: var(--text); } }
 
-.item-reply, .item-final { max-width: 820px; }
+/* -- the task in focus ----------------------------------------------------------------------------------------- */
+.session-head { display: flex; align-items: center; gap: var(--s4); padding: var(--s4) var(--s6) var(--s3); }
+.session-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.session-title { margin: 0; font-size: var(--t-title); font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-meta { margin: 0; font-size: var(--t-sm); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.meta-warn { color: var(--warn); }
+.session-tools, .session-controls { display: flex; align-items: center; gap: var(--s1); }
+.session-tools .count { margin-left: 2px; }
+.session-body { position: relative; flex: 1; min-height: 0; }
+.feed { position: absolute; inset: 0; overflow-y: auto; scroll-behavior: smooth; }
+.feed:focus { outline: none; }
+.feed { padding: var(--s3) max(var(--s6), calc((100% - 760px) / 2)) var(--s6); display: flex; flex-direction: column; gap: var(--s5); }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+
+.item { min-width: 0; flex-shrink: 0; }
+/* The feed's gap parts one turn from the next; inside a turn the thinking, the calls and the words between them read
+   as one story, so they stand close. Thought and work heads carry their own padding, hence the smaller step. */
+.feed > .item:not(.item-user) + .item:not(.item-user) { margin-top: calc(var(--s3) - var(--s5)); }
+.feed > .item.item-thought + .item:not(.item-user),
+.feed > .item.item-work + .item.item-work { margin-top: calc(var(--s1) - var(--s5)); }
+.feed > .item:not(.item-user) + .item.item-thought { margin-top: calc(var(--s2) - var(--s5)); }
+.item-user { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.user-text { padding: 10px 16px; background: var(--surface-2); border-radius: 18px 18px 6px 18px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.user-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.user-image { max-width: 240px; max-height: 160px; object-fit: cover; border-radius: var(--r-md); }
 .item-reply.aside { color: var(--dim); }
-.chip + .md, .md + .chip { margin-top: 8px; }
-.item-final .chip { display: inline-block; margin-top: 10px; }
+.item-final .chip { display: inline-block; margin-top: 10px; font-size: var(--t-sm); color: var(--dim); }
+.item-plan { padding: var(--s4) var(--s5); background: var(--surface-2); border-radius: var(--r-md); }
+.item-plan .card-title { margin-bottom: 6px; }
+.item-note { font-size: var(--t-sm); color: var(--faint); }
+.item-error { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; color: var(--err); background: var(--err-soft); border-radius: var(--r-md); }
+.item-artifact img, .artifact-image { max-width: 420px; display: block; border-radius: var(--r-md); }
+.artifact-caption { margin-top: 6px; font-size: var(--t-sm); color: var(--dim); }
 
-.md { font-size: 14px; line-height: 1.7; }
-.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
-.md p { margin: 0 0 0.8em; overflow-wrap: anywhere; }
-.md-h { margin: 1.1em 0 0.5em; font-size: 15px; font-weight: 800; color: var(--accent); }
-.md-list { margin: 0 0 0.8em; padding-left: 1.5em; }
-.md-list li { margin: 0.15em 0; }
-.md blockquote { margin: 0 0 0.8em; padding: 2px 14px; border-left: 4px solid var(--line); color: var(--dim); }
-.md a { color: var(--mint); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-.md-code { font-size: 13px; padding: 1px 6px; background: var(--surface-2); color: var(--pink); }
-.md-pre { position: relative; margin: 0 0 1em; padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.55; background: var(--shade); box-shadow: var(--outline); }
-.md-pre[data-lang]::before { content: attr(data-lang); position: absolute; top: 0; right: 0; padding: 1px 8px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); background: var(--surface-2); }
-.md-pre code { font: inherit; white-space: pre; }
-.caret { display: inline-block; width: 8px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom; background: var(--accent); animation: blink 0.8s steps(2) infinite; }
+/* A block of work: one quiet line when it is over, the calls under it while it runs or when opened. */
+.item-work { display: flex; flex-direction: column; }
+.work-head { display: inline-flex; align-self: flex-start; align-items: center; gap: var(--s2); max-width: 100%; padding: 5px 10px 5px 6px; margin-left: -6px; border: 0; border-radius: var(--r-sm); cursor: pointer; background: transparent; color: var(--dim); font-size: var(--t-ui); text-align: left; }
+.work-title { font-weight: 600; color: var(--text); }
+.work-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-body { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 0 9px; padding-left: var(--s4); border-left: 1px solid var(--line-strong); }
+.work-body[hidden], .work-head[hidden], .work-head .spin[hidden] { display: none; }
+/* A lone call stands on its own, with no head and no rule, as in Glass. */
+.item-work.single .work-body { margin: 0; padding-left: 0; border-left: 0; }
+@media (hover: hover) and (pointer: fine) { .work-head:hover { background: var(--surface-2); } }
 
-/* Formulas: KaTeX, in the text colour. */
-.math-block { margin: 0.6em 0 1em; padding: 12px 16px; overflow-x: auto; text-align: center; background: var(--surface); box-shadow: var(--outline); }
-.math.raw, .math-block.raw { color: var(--pink); }
-.katex { font-size: 1.12em; color: var(--text); }
-.katex-display { margin: 0; }
-
+/* A thought, as Kvist Glass shows it: while it runs, a window of its latest lines (the top ones fading) under a
+   shimmering "Thinking" and a clock; once it ends, one quiet line that opens the whole text on a click. */
 .item-thought { color: var(--dim); }
-.thought-head { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; }
-.thought-head .icon { transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.thought-head { display: inline-flex; align-items: center; gap: var(--s2); padding: 4px 6px; margin-left: -6px; border-radius: var(--r-sm); cursor: pointer; font-size: var(--t-sm); }
+.item-thought.live .thought-head { cursor: default; }
+.thought-label { font-weight: 500; }
+.thought-clock { color: var(--faint); font-variant-numeric: tabular-nums; }
+.thought-head .icon { color: var(--faint); transition: transform var(--d-pop) var(--ease-out); }
+.item-thought.live .thought-head .icon { display: none; }
 .item-thought.open .thought-head .icon { transform: rotate(90deg); }
-.thought-body { display: none; margin-top: 8px; padding: 8px 14px; max-height: 200px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; border-left: 4px solid var(--line); }
-.item-thought.open .thought-body, .item-thought.live .thought-body { display: block; }
+.thought-window { display: none; margin: 2px 0 6px 3px; padding-left: var(--s3); border-left: 1px solid var(--line-strong); font-size: var(--t-sm); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden; }
+.item-thought.live .thought-window, .item-thought.folding .thought-window { display: flex; flex-direction: column; justify-content: flex-end; max-height: calc(5 * 1.6em); -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.25), #000 85%); mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.25), #000 85%); }
+.item-thought.open:not(.live) .thought-window, .item-thought.closing .thought-window { display: block; max-height: 360px; overflow-y: auto; }
 .dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
 @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 
-.item-call { background: var(--surface); box-shadow: inset 4px 0 0 0 var(--line), var(--outline); max-width: 820px; margin: 3px 0; }
-.item-call[data-phase="run"] { box-shadow: inset 4px 0 0 0 var(--accent), var(--outline); }
-.item-call[data-phase="fail"] { box-shadow: inset 4px 0 0 0 var(--err), var(--outline); }
-.call-head { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
+/* One call: a row, not a card. */
+.item-call { border-radius: var(--r-sm); }
+.call-head { display: flex; align-items: center; gap: 10px; padding: 6px 8px; margin-left: -8px; cursor: pointer; font-size: var(--t-ui); border-radius: var(--r-sm); }
+.call-head > .icon:first-child { color: var(--faint); }
 .call-label { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.call-summary { flex: 1; text-align: right; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.counts { font-size: 12px; }
-.call-detail { display: none; padding: 0 16px 12px; }
-.item-call.open .call-detail { display: block; }
-.call-output, .call-tail { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; font-size: 12px; line-height: 1.5; background: var(--shade); white-space: pre-wrap; overflow-wrap: anywhere; }
-.call-tail { margin: 0 16px 10px; max-height: 70px; color: var(--dim); }
+.item-call[data-phase="fail"] .call-label { color: var(--err); }
+.call-summary { flex: 1; text-align: right; color: var(--faint); font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.counts { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.counts b { font-weight: 600; }
+.call-detail { display: none; padding: 4px 0 10px; }
+.item-call.open .call-detail, .item-call.closing .call-detail { display: block; }
+.call-output, .call-tail { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; font-size: 12.5px; line-height: 1.55; background: var(--shade); border-radius: var(--r-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.call-tail { margin: 2px 0 8px; max-height: 72px; color: var(--dim); }
 .call-output.dim { color: var(--dim); }
+@media (hover: hover) and (pointer: fine) { .call-head:hover, .item-thought:not(.live) .thought-head:hover { background: var(--surface-2); } }
 
-.diff { font-size: 12px; line-height: 1.5; background: var(--shade); max-height: 320px; overflow: auto; }
-.diff-line { padding: 0 12px; white-space: pre; }
-.diff-line.add { background: var(--add); color: var(--ok); }
-.diff-line.del { background: var(--del); color: var(--err); }
-.diff-line.hunk { color: var(--mint); opacity: 0.8; }
-
-.item-plan { padding: 14px 18px; max-width: 820px; background: var(--surface-2); box-shadow: var(--outline), inset 0 0 0 3px var(--pink); }
-.item-note { font-size: 12px; color: var(--dim); }
-.item-note.error { color: var(--err); }
-.item-error { display: flex; gap: 10px; padding: 10px 16px; color: var(--err); background: var(--del); max-width: 820px; box-shadow: var(--outline); }
-.artifact-image { max-width: 420px; display: block; image-rendering: auto; box-shadow: var(--outline); }
-.artifact-caption { margin-top: 6px; font-size: 12px; color: var(--dim); }
-
-/* Bottom: status line, composer or the closed banner. */
-.chat-bottom { display: flex; flex-direction: column; gap: 10px; position: relative; }
-.status { display: none; align-items: center; gap: 12px; height: 34px; padding: 0 6px; font-size: 14px; }
-.status.on { display: flex; }
-.shimmer { font-weight: 700; white-space: nowrap; }
-.status-detail { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.composer { position: relative; display: flex; align-items: flex-end; gap: 10px; padding: 12px 14px; flex-wrap: wrap; }
-.composer-input { flex: 1; min-width: 0; min-height: 34px; max-height: 180px; resize: none; border: 0; outline: none; background: transparent; padding: 6px 4px; font-size: 14px; line-height: 1.55; }
-.composer-input::placeholder { color: var(--dim); }
-.composer .attach-tray { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 12px; padding-bottom: 4px; }
-.thumb { position: relative; width: 68px; height: 68px; box-shadow: var(--outline); animation: pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.thumb img { width: 100%; height: 100%; object-fit: cover; image-rendering: auto; display: block; }
-.thumb-remove { position: absolute; top: -9px; right: -9px; width: 22px; height: 22px; border: 0; cursor: pointer; background: var(--err); color: #fff; line-height: 1; font-size: 15px; box-shadow: var(--outline); }
-@keyframes pop { from { transform: scale(0.4); opacity: 0; } }
-
-/* A closed conversation has no input at all: a bar of the same height. */
-.closed-bar { min-height: 60px; width: 100%; border: 0; cursor: pointer; color: var(--dim); text-align: center; background: var(--surface); box-shadow: var(--outline); }
-.closed-bar:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; color: var(--text); }
-
-/* The block a write is typed into */
-.codebox { position: relative; margin: 0 16px 10px; background: var(--shade); box-shadow: var(--outline); }
-.code-mark { position: absolute; top: 6px; right: 10px; z-index: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; opacity: 0.9; pointer-events: none; }
-.code-body { max-height: 280px; overflow: auto; padding: 8px 0; font-size: 12px; line-height: 1.5; }
+/* The file the agent is writing, line by line. */
+.codebox { position: relative; margin: 2px 0 10px; background: var(--shade); border-radius: var(--r-sm); overflow: hidden; }
+.code-body { max-height: 300px; overflow: auto; padding: 10px 0; font-size: 12.5px; line-height: 1.6; }
 .code-body.has-above { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px); mask-image: linear-gradient(to bottom, transparent 0, #000 34px); }
-.code-line { padding: 0 12px; white-space: pre; }
+.code-line { padding: 0 14px; white-space: pre; }
 .code-line.add { background: var(--add); }
 .code-line.del { background: var(--del); }
-.code-line .sign { display: inline-block; width: 1.4em; color: var(--dim); }
+
+.diff { font-size: 12.5px; line-height: 1.6; background: var(--shade); border-radius: var(--r-sm); max-height: 360px; overflow: auto; padding: 8px 0; }
+.sheet-body .diff { max-height: none; }
+.diff-line { padding: 0 14px; white-space: pre; }
+.diff-line.add { background: var(--add); }
+.diff-line.del { background: var(--del); }
+.diff-line.hunk { color: var(--info); }
+.diff-line .sign, .code-line .sign { display: inline-block; width: 1.4em; color: var(--faint); user-select: none; }
+.diff-line.add .sign, .code-line.add .sign { color: var(--ok); }
+.diff-line.del .sign, .code-line.del .sign { color: var(--err); }
+
+/* Syntax colours (js/highlight.js): muted enough to read beside prose, distinct enough to scan. */
+.tk-kw { color: light-dark(#8a3ffc, #c9a7ff); }
+.tk-str { color: light-dark(#1d7a4c, #94d6a8); }
+.tk-num { color: light-dark(#b45309, #f0b37a); }
+.tk-com { color: var(--faint); font-style: italic; }
+.tk-fn { color: light-dark(#1f5fa8, #8ec1f2); }
+.tk-type { color: light-dark(#a1366b, #f2a3c5); }
+
+/* -- the result ----------------------------------------------------------------------------------------------- */
+
+/* -- markdown --------------------------------------------------------------------------------------------------- */
+.md { font-size: var(--t-md); line-height: 1.65; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 0.75em; overflow-wrap: anywhere; }
+.md strong { font-weight: 600; }
+.md-h { margin: 1.3em 0 0.45em; font-size: var(--t-lg); font-weight: 600; line-height: 1.3; }
+.md-list { margin: 0 0 0.8em; padding-left: 1.4em; }
+.md-list li { margin: 0.2em 0; }
+.md-list li::marker { color: var(--faint); }
+.md blockquote { margin: 0 0 0.8em; padding: 2px 14px; border-left: 3px solid var(--line-strong); color: var(--dim); }
+.md a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.md table { border-collapse: collapse; margin: 0 0 1em; font-size: var(--t-ui); font-variant-numeric: tabular-nums; }
+.md th, .md td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.md th { font-weight: 600; color: var(--dim); }
+.md-code { font-family: var(--font-code); font-size: 0.86em; padding: 1px 6px; border-radius: var(--r-xs); background: var(--surface-2); }
+.md-pre { position: relative; margin: 0 0 1em; padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.6; background: var(--shade); border-radius: var(--r-md); }
+.md-pre[data-lang]::before { content: attr(data-lang); position: absolute; top: 8px; right: 12px; font-family: var(--font-text); font-size: var(--t-xs); color: var(--faint); }
+.md-pre code { font: inherit; white-space: pre; }
+.math-block { margin: 0.6em 0 1em; padding: 12px 16px; overflow-x: auto; text-align: center; background: var(--shade); border-radius: var(--r-md); }
+.math.raw, .math-block.raw { color: var(--dim); font-family: var(--font-code); }
+.katex { font-size: 1.1em; color: var(--text); }
+.katex-display { margin: 0; }
+
+/* -- the bottom of a task: status, the agent's question or the composer ----------------------------------------- */
+.chat-bottom { display: flex; flex-direction: column; gap: var(--s2); width: 100%; max-width: 824px; margin: 0 auto; padding: 0 var(--s6) var(--s4); }
+.status { display: none; align-items: center; gap: 10px; height: 26px; padding: 0 6px; font-size: var(--t-ui); }
+.status.on { display: flex; }
+.status .spin { width: 12px; height: 12px; }
+.shimmer {
+  font-weight: 500; white-space: nowrap;
+  background: linear-gradient(90deg, var(--dim) 0%, var(--dim) 40%, var(--text) 50%, var(--dim) 60%, var(--dim) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+.shimmer.slow { background-image: linear-gradient(90deg, var(--warn) 0%, var(--warn) 40%, var(--text) 50%, var(--warn) 60%, var(--warn) 100%); }
+.shimmer.stuck { background-image: linear-gradient(90deg, var(--err) 0%, var(--err) 40%, var(--text) 50%, var(--err) 60%, var(--err) 100%); }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+.status-detail { color: var(--faint); font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.composer-hint { display: flex; justify-content: space-between; gap: 12px; padding: 0 12px; font-size: var(--t-xs); color: var(--faint); }
+
+/* The agent's question stands where the composer was: answering it is the next thing to do. */
+.question:empty { display: none; }
+.question .scrim { position: static; display: block; padding: 0; background: none; }
+.question .dialog { width: 100%; max-height: 60vh; border-color: color-mix(in srgb, var(--asks) 60%, var(--line)); border-left: 4px solid var(--asks); box-shadow: var(--shadow-2); }
+
+.closed-bar { min-height: 56px; width: 100%; cursor: pointer; color: var(--dim); text-align: center; background: transparent; border: 1px dashed var(--line-strong); border-radius: var(--r-field); font-size: var(--t-ui); }
+@media (hover: hover) and (pointer: fine) { .closed-bar:hover { color: var(--text); border-color: var(--faint); } }
+
+/* -- the orb: where the agent is now (js/views/orb.js). Every loop runs on --orb-period from --orb-phase. ---------- */
+.orb { --loop: var(--orb-period, 2s) ease-in-out var(--orb-phase, 0s) infinite; display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--dim); vertical-align: -5px; }
+.orb svg { width: 22px; height: 22px; overflow: visible; opacity: 0.7; }
+.orb svg * { transform-box: view-box; }
+.orb-row { display: flex; align-items: center; height: 28px; flex-shrink: 0; }
+/* At the end of the words the dot stands in the line like the caret did. */
+.md .orb { width: 16px; height: 16px; margin-left: 4px; vertical-align: -2px; }
+
+/* Speaking: the blue dot grows and shrinks. */
+.orb-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--news); animation: orb-breathe var(--loop); }
+@keyframes orb-breathe { 0%, 100% { transform: scale(0.62); opacity: 0.75; } 50% { transform: scale(1); opacity: 1; } }
+
+/* Thinking: a faint brain that breathes; a spark of thought crosses it. */
+.orb[data-state="think"] svg { opacity: 0.45; animation: orb-think var(--loop); }
+@keyframes orb-think { 0%, 100% { transform: scale(0.9); opacity: 0.38; } 50% { transform: scale(1.03); opacity: 0.75; } }
+.orb[data-state="think"] .spark { animation: orb-blink var(--loop); }
+
+/* A terminal: the prompt nudges forward, the cursor blinks. */
+.orb[data-state="shell"] .prompt { animation: orb-nudge var(--loop); }
+.orb[data-state="shell"] .cursor { animation: orb-cursor var(--orb-period) steps(1) var(--orb-phase) infinite; }
+@keyframes orb-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1px); } }
+@keyframes orb-cursor { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+/* Reading: the right page turns over the spine. */
+.orb[data-state="read"] .leaf { fill: var(--canvas); transform-origin: 12px 12px; animation: orb-turn var(--orb-period) cubic-bezier(0.45, 0, 0.55, 1) var(--orb-phase) infinite; }
+@keyframes orb-turn { 0%, 15% { transform: scaleX(1); } 70%, 100% { transform: scaleX(-1); } }
+
+/* Adding: the last line is written out, the pen riding along it. */
+.orb[data-state="write"] .ink { stroke-dasharray: 1; animation: orb-write var(--loop); }
+.orb[data-state="write"] .pen { animation: orb-pen-write var(--loop); }
+@keyframes orb-write { 0%, 10% { stroke-dashoffset: 1; } 80%, 100% { stroke-dashoffset: 0; } }
+@keyframes orb-pen-write { 0%, 10% { transform: translate(-3.5px, 1.8px); } 80% { transform: translate(0, 1.8px); } 100% { transform: translate(0, 1.8px); opacity: 0.4; } }
+
+/* Changing: the eraser rubs the line out, then the pen writes it again. */
+.orb[data-state="edit"] .ink { stroke-dasharray: 1; animation: orb-redo var(--orb-period) linear var(--orb-phase) infinite; }
+.orb[data-state="edit"] .eraser { animation: orb-erase var(--orb-period) linear var(--orb-phase) infinite; }
+.orb[data-state="edit"] .pen { animation: orb-pen-edit var(--orb-period) linear var(--orb-phase) infinite; }
+@keyframes orb-redo { 0%, 5% { stroke-dashoffset: 0; } 40% { stroke-dashoffset: -1; } 55% { stroke-dashoffset: 1; } 92%, 100% { stroke-dashoffset: 0; } }
+@keyframes orb-erase { 0%, 5% { transform: translateX(0); opacity: 1; } 40% { transform: translateX(4.2px); opacity: 1; } 50%, 100% { transform: translateX(4.2px); opacity: 0; } }
+@keyframes orb-pen-edit { 0%, 50% { transform: translate(-3.5px, 1.8px); opacity: 0; } 55% { transform: translate(-3.5px, 1.8px); opacity: 1; } 92% { transform: translate(0, 1.8px); opacity: 1; } 100% { transform: translate(0, 1.8px); opacity: 0; } }
+
+/* Folders: the lid lifts. */
+.orb[data-state="folder"] .lid { transform-origin: 3.5px 10.5px; animation: orb-lid var(--loop); }
+@keyframes orb-lid { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-12deg); } }
+
+/* Searching: the lens looks around. */
+.orb[data-state="search"] .lens { animation: orb-look var(--loop); }
+@keyframes orb-look { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(1.5px, -1px); } 50% { transform: translate(0, -1.5px); } 75% { transform: translate(-1.5px, -0.5px); } }
+
+/* The web: the globe turns. */
+.orb[data-state="web"] .meridian { animation: orb-spin-globe var(--orb-period) linear var(--orb-phase) infinite; }
+@keyframes orb-spin-globe { 0% { rx: 8.5px; } 50% { rx: 0.5px; } 100% { rx: 8.5px; } }
+
+/* A skill: one book is drawn up out of a full shelf, then put back. */
+.orb[data-state="skill"] .drawn { fill: currentColor; stroke: none; animation: orb-draw-book var(--loop); }
+@keyframes orb-draw-book { 0%, 20% { transform: translateY(0); } 55%, 70% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+
+/* Helpers: two dots circle the agent. */
+.orb[data-state="helper"] .hub { fill: currentColor; }
+.orb[data-state="helper"] .ring { transform-origin: 12px 12px; animation: orb-orbit var(--orb-period) linear var(--orb-phase) infinite; }
+@keyframes orb-orbit { to { transform: rotate(360deg); } }
+
+@keyframes orb-blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .orb *, .orb-dot { animation: none !important; } }
+
+/* The command hint: over the field, as wide as a short menu. */
+/* Over the field in both places; the home field's menus open under it, so this one says so with more weight. */
+.composer .command-hint { top: auto; bottom: calc(100% + 6px); left: 12px; min-width: 300px; max-height: 320px; }
+.command-row { display: flex; align-items: baseline; gap: var(--s3); width: 100%; padding: 7px 10px; border: 0; border-radius: var(--r-sm); cursor: pointer; background: transparent; color: var(--text); text-align: left; font-size: var(--t-ui); }
+.command-row.on { background: var(--select); }
+.command-name { font-family: var(--font-code); font-size: 13px; }
+.command-about { color: var(--dim); font-size: var(--t-sm); }

@@ -32,7 +32,7 @@ async function signOut() {
 function header(active, funnel) {
   // Inside the funnel there is one way forward; the app's navigation would only be a way out.
   const items = state.me && !funnel
-    ? [["/dashboard", "nav.dashboard"], ["/pixel/", "nav.pixel"], ["/settings", "nav.settings"],
+    ? [["/dashboard", "nav.dashboard"], ["/workspace/", "nav.pixel"], ["/settings", "nav.settings"],
        ...(state.me.is_admin ? [["/admin", "nav.admin"]] : [])]
     : [];
   return h("header.top", {},
@@ -41,7 +41,7 @@ function header(active, funnel) {
         h("span.dot", { "aria-hidden": "true" }), t("common.brand"), h("span.sub", { text: t("common.cloud") })),
       h("nav.nav", { "aria-label": "main" },
         // The pixel window is its own page, not a screen of this app: a plain link, a full load.
-        items.map(([href, key]) => h("a", { href, "data-link": href.startsWith("/pixel") ? null : "", "aria-current": active === href ? "page" : null,
+        items.map(([href, key]) => h("a", { href, "data-link": href.startsWith("/workspace") ? null : "", "aria-current": active === href ? "page" : null,
           text: t(key) })),
         state.me && !state.me.ban && !funnel ? bellButton() : null,
         h("button.chip", { type: "button", lang: locale() === "ru" ? "en" : "ru", "aria-label": t("common.otherLangName"),

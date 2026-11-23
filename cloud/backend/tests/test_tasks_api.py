@@ -301,3 +301,52 @@ def test_messages_are_for_the_owner_and_need_hours_and_words(client_factory, eng
     assert client.post(f"/api/tasks/{task_id + 50}/messages", json={"text": "hi"}).status_code == 404
     assert client.post(f"/api/tasks/{task_id}/messages", json={"text": ""}).status_code == 422
     assert client.post(f"/api/tasks/{task_id}/messages", json={"text": "   "}).status_code == 400
+
+
+def test_a_command_runs_in_the_conversation_and_what_the_cloud_owns_is_refused(client_factory, engine, fake_provider):
+    """`/memory` is Kvist's own command, run in the task's session; the cloud's own (`/provider`) never reach it."""
+    client = signed_in(client_factory, engine)
+    with runner(client, fake_provider) as ws:
+        ws.send_json({"type": "hello", "tasks": []})
+        task_id = client.post("/api/tasks", json={"goal": "go"}).json()["id"]
+        first = ws.receive_json()
+        # Kvist starts without what the cloud runs itself; the runner's own session commands stay.
+        assert {"provider", "full-reset", "permissions", "update"} <= set(first["commands_off"])
+        assert not {"new", "session", "resume", "memory"} & set(first["commands_off"])
+        assert first["command"] is False
+
+        for name in ("provider", "full-reset", "session", "new", "resume"):
+            refused = client.post(f"/api/tasks/{task_id}/commands", json={"name": name})
+            assert refused.status_code == 403 and refused.json()["error"]["code"] == "command_unavailable"
+        assert client.post(f"/api/tasks/{task_id}/commands", json={"name": "../x"}).status_code == 422
+
+        relay(ws, task_id, {"type": "hello", "protocol_version": 1, "session": "chat-1"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.RUNNING)
+        sent = client.post(f"/api/tasks/{task_id}/commands", json={"name": "memory", "args": ["list"]})
+        assert sent.status_code == 200
+        assert ws.receive_json() == {"type": "message", "task_id": task_id, "text": "/memory list", "command": True}
+
+        # Between runs the command starts the next one, in the same session, as a command.
+        relay(ws, task_id, {"type": "final", "message": "ok", "user_messages": [], "outcome": "done"})
+        eventually(lambda: status(engine, task_id) == TaskStatus.DONE)
+        client.post(f"/api/tasks/{task_id}/commands", json={"name": "context"})
+        start = ws.receive_json()
+        assert (start["goal"], start["command"], start["session"]) == ("/context", True, "chat-1")
+
+
+def test_the_page_learns_the_commands_from_kvist_less_what_the_cloud_takes_away(client_factory, engine, fake_provider):
+    client = signed_in(client_factory, engine)
+    policy = client.get("/api/commands").json()
+    assert policy["manifest"] is None
+    assert {"provider", "session", "remote"} <= set(policy["hidden"]) and "memory" not in policy["hidden"]
+    with runner(client, fake_provider) as ws:
+        ws.send_json({"type": "hello", "tasks": []})
+        task_id = client.post("/api/tasks", json={"goal": "go"}).json()["id"]
+        ws.receive_json()
+        commands = [{"name": "memory", "description": "Inspect memory", "via": "core"}]
+        relay(ws, task_id, {"type": "manifest", "slash_commands": commands, "plugin_commands": [],
+                            "providers": [{"id": "x"}], "themes": {"big": True}})
+        eventually(lambda: client.get("/api/commands").json()["manifest"] is not None)
+    # Only the commands are kept of the manifest, not its providers and themes.
+    assert client.get("/api/commands").json()["manifest"] == {
+        "type": "manifest", "slash_commands": commands, "plugin_commands": []}

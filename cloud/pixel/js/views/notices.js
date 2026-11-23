@@ -2,7 +2,7 @@
 // stopped and why). Each says what to do about it where there is something to do.
 
 import { account, onAccount, retryMachine, warnings } from "../cloud.js";
-import { fill, frameThrottle, h } from "../dom.js";
+import { fill, frameThrottle, h, icon } from "../dom.js";
 import { t } from "../i18n.js";
 import { toast } from "./toast.js";
 import { active, subscribe } from "../store.js";
@@ -35,14 +35,22 @@ function bar(item) {
     { class: `notice ${item.level}`, role: item.level === "error" ? "alert" : "status" },
     h("span", { class: "notice-text" }, text),
     run ? h("button", { class: "btn", type: "button", onclick: run }, t(label)) : null,
-    h("button", { class: "btn flat", type: "button", title: t("dismiss"), onclick: () => { dismissed.add(item.id); redraw(); } }, "×"),
+    h("button", { class: "btn flat", type: "button", title: t("dismiss"), "aria-label": t("dismiss"), onclick: () => { dismissed.add(item.id); redraw(); } }, icon("close", 16)),
   );
 }
 
+// The home screen and the open task each have a place for them; both show the same list.
+const roots = new Set();
+
 export function mountNotices(root) {
+  roots.add(root);
+  if (roots.size > 1) {
+    redraw();
+    return;
+  }
   redraw = frameThrottle(() => {
     const shown = warnings(account, active(), found).filter((item) => !dismissed.has(item.id));
-    fill(root, shown.map(bar));
+    for (const each of roots) fill(each, shown.map(bar));
   });
   subscribe(redraw);
   onAccount(redraw);

@@ -112,12 +112,13 @@ function build(agent, request) {
   return textDialog(agent, request);
 }
 
-/** The modal for the agent's oldest open request, or null. */
+/** The agent's oldest open request as a card, or null. */
 export function makeDialog(agent) {
   const request = agent.dialogs[0];
   if (!request) return null;
   const spec = build(agent, request);
-  const card = h("div", { class: `dialog px ${spec.tone ?? ""}`, role: "dialog", "aria-modal": "true", tabindex: "-1" }, h("div", { class: "dialog-title" }, spec.title), ...spec.content);
+  // It stands where the composer was, not over the page: the conversation above stays readable while answering.
+  const card = h("div", { class: `dialog ${spec.tone ?? ""}`, role: "dialog", "aria-modal": "false", tabindex: "-1" }, h("div", { class: "dialog-title" }, spec.title), ...spec.content);
   card.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.stopPropagation();

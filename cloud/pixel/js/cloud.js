@@ -52,18 +52,18 @@ export function listItem(task) {
 }
 
 // -- addresses -------------------------------------------------------------------------------------------------
-// A session is /pixel/s/<its own id>, a draft in a project /pixel/p/<project id>. The id in the address is an
+// A session is /workspace/s/<its own id>, a draft in a project /workspace/p/<project id>. The id in the address is an
 // opaque one (not the row number) and opens nothing for anyone but the owner: the page asks the API, which
 // answers "not found" to everyone else.
 
-export const sessionUrl = (publicId) => `/pixel/s/${publicId}`;
-export const projectUrl = (projectId) => `/pixel/p/${projectId}`;
+export const sessionUrl = (publicId) => `/workspace/s/${publicId}`;
+export const projectUrl = (projectId) => `/workspace/p/${projectId}`;
 
 /** What an address asks for: {kind: "session", id} | {kind: "project", id} | {kind: "task", id} (an old #/tasks/N link) | null. */
 export function parseLocation(pathname, hash = "") {
-  const session = pathname.match(/^\/pixel\/s\/([A-Za-z0-9_-]{6,40})\/?$/);
+  const session = pathname.match(/^\/workspace\/s\/([A-Za-z0-9_-]{6,40})\/?$/);
   if (session) return { kind: "session", id: session[1] };
-  const project = pathname.match(/^\/pixel\/p\/(\d+)\/?$/);
+  const project = pathname.match(/^\/workspace\/p\/(\d+)\/?$/);
   if (project) return { kind: "project", id: project[1] };
   const old = hash.match(/^#\/tasks\/(\d+)$/);
   return old ? { kind: "task", id: old[1] } : null;
@@ -160,7 +160,9 @@ export function warnings(state, agent = null, extra = []) {
 
 // -- the account ----------------------------------------------------------------------------
 
-export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], projects: [], ready: false };
+export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], projects: [], ready: false,
+  // What "/" offers: Kvist's own list (its last manifest the cloud kept) and what the cloud takes away from it.
+  commands: { hidden: [], manifest: null } };
 
 const listeners = new Set();
 export const onAccount = (fn) => (listeners.add(fn), () => listeners.delete(fn));
@@ -269,6 +271,11 @@ export async function resolveSession(publicId) {
   }
 }
 
+export async function refreshCommands() {
+  const commands = await quietly("/api/commands");
+  if (commands) account.commands = { hidden: commands.hidden ?? [], manifest: commands.manifest ?? null };
+}
+
 export async function refreshKey() {
   const key = await quietly("/api/model-key");
   if (key) account.key = key;
@@ -279,18 +286,19 @@ export async function loadAccount() {
   account.me = await api("/api/me");
   const providers = await quietly("/api/model-providers");
   if (providers) account.providers = providers;
-  await Promise.all([refreshMachine(), refreshHours(), refreshTasks(), refreshKey(), refreshProjects()]);
+  await Promise.all([refreshMachine(), refreshHours(), refreshTasks(), refreshKey(), refreshProjects(), refreshCommands()]);
   account.ready = true;
   changed();
 }
 
 const SETTLED = new Set(["ready", "working", "waiting_for_you", "error", "asleep"]);
 
-/** Keeps the server and the hours fresh: quickly while the machine is being prepared or a task runs, calmly otherwise. */
+/** Keeps the server, the hours and the tasks fresh: quickly while the machine is being prepared or a task runs, calmly otherwise. */
 export function keepFresh() {
   let timer = null;
   const tick = async () => {
-    await Promise.all([refreshMachine(), refreshHours()]);
+    // The task list too: tasks run on the server while this page shows something else, and the home screen says so.
+    await Promise.all([refreshMachine(), refreshHours(), refreshTasks()]);
     const working = account.tasks.some((task) => WORKING.has(task.status) || task.status === "waiting_for_user");
     timer = setTimeout(tick, SETTLED.has(account.machine?.display_status) && !working ? 15000 : 3000);
   };

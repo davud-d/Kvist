@@ -62,7 +62,7 @@ backend/kvist_cloud/   сервер управления (FastAPI, SQLAlchemy 2,
 backend/migrations/    Alembic; здесь же триггеры журнала против UPDATE/DELETE
 runner/kvist_runner/   процесс на машине: WebSocket, heartbeat, свой Kvist на задачу
 frontend/              ванильный JS + esbuild; build.mjs проверяет локали, контраст и бюджеты
-pixel/                 пиксельное окно (копия Kvist Pixel) на облаке: отдаётся по /pixel/, см. pixel/README.ru.md
+pixel/                 пиксельное окно (копия Kvist Pixel) на облаке: отдаётся по /workspace/ (старые ссылки /pixel/ ведут туда), см. pixel/README.ru.md
 scripts/dev.sh         локальный запуск одной командой   scripts/fake_model.py  фейковая модель
 scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   выкладка, см. docs/DEPLOY.ru.md
 scripts/backup*.sh, restore.sh, setup_backup_host.sh   бэкапы, см. docs/BACKUP.ru.md

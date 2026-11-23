@@ -6,7 +6,8 @@ import { account, api, displayState, machineAction } from "../cloud.js";
 import { fill, h, icon } from "../dom.js";
 import { t } from "../i18n.js";
 import { announce } from "../store.js";
-import { machineDot } from "../views/titlebar.js";
+
+const machineDot = (status) => ({ ready: "idle", asleep: "hollow", working: "running", waiting_for_you: "asks", creating: "starting", waking: "starting", error: "gone", none: "hollow" })[status] ?? "hollow";
 import { toast } from "../views/toast.js";
 
 const POLL_MS = 1500;
@@ -34,7 +35,7 @@ async function packFiles(machine) {
 }
 
 function row(label, value) {
-  return h("div", { class: "kv" }, h("span", { class: "kv-key" }, label), h("span", { class: "kv-value" }, value));
+  return h("div", { class: "kv" }, h("dt", { class: "kv-key" }, label), h("dd", { class: "kv-value" }, value));
 }
 
 function run(action) {
@@ -58,22 +59,21 @@ export const server = {
     const files = archive.phase === "ready"
       ? h("a", { class: "btn primary", href: archive.url, download: "" }, t("archive ready"))
       : h("button", { class: "btn", type: "button", disabled: archive.phase === "packing" || undefined, onclick: () => packFiles(machine) }, archive.phase === "packing" ? t("archive packing") : t("export archive"));
+    // One action at a time, the one that makes sense now: an asleep server is woken (the main thing to do),
+    // an idle one may be put to sleep, a busy one has nothing to press.
+    const action = status === "asleep"
+      ? h("button", { class: "btn primary", type: "button", onclick: () => run("wake") }, icon("bolt", 16), h("span", {}, t("wake")))
+      : busy ? null : h("button", { class: "btn", type: "button", onclick: () => run("sleep") }, icon("pause", 16), h("span", {}, t("sleep")));
     fill(
       el,
-      h("div", { class: "ctx-card px" },
-        h("div", { class: "card-title" }, t("machine").toUpperCase()),
-        h("div", { class: "server-status" }, h("span", { class: `state-dot ${machineDot(status)}` }), h("b", {}, t(`status ${status}`))),
-        row("vCPU", String(machine.vcpu)),
-        row("RAM", `${machine.memory_gb} GB`),
-        row(t("files"), `${machine.disk_gb} GB`),
-        machine.detail ? h("div", { class: "dim" }, machine.detail) : null,
-      ),
-      h("div", { class: "action-grid pad" },
-        h("button", { class: "btn", type: "button", disabled: status !== "asleep" || undefined, onclick: () => run("wake"), title: t("wake") }, icon("bolt", 14), h("span", {}, t("wake"))),
-        h("button", { class: "btn", type: "button", disabled: busy || status === "asleep" || undefined, onclick: () => run("sleep"), title: t("sleep") }, icon("pause", 14), h("span", {}, t("sleep"))),
-      ),
-      h("div", { class: "pad" }, files, archive.phase === "failed" ? h("p", { class: "dim" }, t("archive failed")) : null),
-      h("p", { class: "dim pad" }, t("server sleeps note")),
+      h("div", { class: "server-status" }, h("span", { class: `state-dot ${machineDot(status)}` }), h("b", {}, t(`status ${status}`)), action),
+      machine.detail ? h("p", { class: "dim" }, machine.detail) : null,
+      h("dl", { class: "spec" },
+        row(t("processor"), `${machine.vcpu} vCPU`),
+        row(t("memory"), `${machine.memory_gb} ${t("gb")}`),
+        row(t("disk"), `${machine.disk_gb} ${t("gb")}`)),
+      h("p", { class: "dim" }, t("server sleeps note")),
+      h("div", {}, files, archive.phase === "failed" ? h("p", { class: "dim" }, t("archive failed")) : null),
     );
   },
 };

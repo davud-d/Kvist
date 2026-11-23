@@ -29,6 +29,8 @@ STOPPED_STATES = {"awaiting_input", "paused", "cancelled", "completed", "failed"
 LINE_LIMIT = 16 * 1024 * 1024
 EXIT_WAIT_SECONDS = 30.0
 WATCH_SECONDS = 0.25
+# Kvist commands that are whole turns: their events, turn_end, then command_result (docs/UI_API.md, §8c).
+TURN_COMMANDS = frozenset({"best-of", "council"})
 # Variables a Kvist process may inherit from the runner; the rest is built here.
 PASSED_ENV = ("PATH", "TZ", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
 
@@ -72,6 +74,8 @@ class TaskProcess:
         session: str = "",
         folder: str = "",
         follow_up: bool = False,
+        command: bool = False,
+        commands_off: list[str] | None = None,
         github_token: str = "",
         secrets: list[str] | None = None,
     ) -> None:
@@ -110,6 +114,15 @@ class TaskProcess:
         # finishing is one of them: the stdin stays open until its turn has been taken too.
         self._goals_waiting = 0
         self._woken = False
+        # The words of each thought so far, by stream: they arrive in live-only pieces.
+        self._thoughts: dict[str, str] = {}
+        # The goal is a slash command for Kvist (`/memory …`), not a message; and what the cloud turned off.
+        self.command = command
+        self.commands_off = list(commands_off or [])
+        # The person's commands written to Kvist whose `command_result` has not come yet: each ends like a turn.
+        self._commands_waiting: list[str] = []
+        # Commands that came during a turn: Kvist takes a command only between turns, so they wait here.
+        self._held: list[str] = []
 
     def hide(self, secret: str) -> None:
         self._secrets.append(secret)
@@ -157,6 +170,8 @@ class TaskProcess:
         ]
         if self.limits.background_seconds > 0:
             argv.append("--wake")
+        if self.commands_off:
+            argv += ["--commands-off", ",".join(self.commands_off)]
         argv = with_machine_limits(argv, self.limits.vcpu, self.limits.memory_gb)
         env = self._child_env()
         log_path = self.config.root / "logs" / f"task-{self.task_id}.log"
@@ -187,7 +202,7 @@ class TaskProcess:
             first = self._session_command()
             self._after_switch = self.goal
         else:
-            first = {"type": "goal", "text": self.goal}
+            first = self._what_to_write(self.goal, self.command)
         await self._write(first)
         self._goals_waiting = 1
         self.turn_open = True
@@ -244,8 +259,20 @@ class TaskProcess:
             return
         if event.get("type") == "screen":
             event = self.screens.sanitize(event)
+        event = self._with_thought(event)
         self._emit({"type": "event", "task_id": self.task_id, "event": event})
         await self._track(event)
+
+    def _with_thought(self, event: dict) -> dict:
+        """A thought's pieces are live only; its end carries all its words, so the history keeps the thought."""
+        kind = event.get("type")
+        stream = str(event.get("stream_id", ""))
+        if kind == "reasoning_chunk":
+            piece = str(event.get("text") or "")
+            self._thoughts[stream] = self._thoughts.get(stream, "") + piece if event.get("append") is True else piece
+        elif kind == "reasoning_commit" and stream in self._thoughts:
+            return {**event, "text": self._thoughts.pop(stream)}
+        return event
 
     async def _track(self, event: dict) -> None:
         kind = event.get("type")
@@ -267,6 +294,10 @@ class TaskProcess:
             await self._turn_ended()
         elif kind == "command_result" and event.get("name") in ("session", "new") and self._after_switch is not None:
             await self._take_message(event)
+        elif kind == "command_result" and event.get("name") in self._commands_waiting:
+            # The person's command is done: it ends like a turn (Kvist sends no turn_end for it).
+            self._commands_waiting.remove(str(event.get("name")))
+            await self._turn_ended()
         elif kind == "command_result" and event.get("name") == "resume" and not event.get("ok"):
             self.stop_reason = self.stop_reason or "resume_failed"
             await self._turn_ended()
@@ -304,7 +335,17 @@ class TaskProcess:
                 "type": "message", "source": "notice",
                 "markdown": "Could not reopen the earlier conversation, so this message starts a new one. / "
                             "Не удалось открыть прежний разговор: это сообщение начнёт новый."}})
-        await self._write({"type": "goal", "text": text})
+        await self._write(self._what_to_write(text, self.command))
+
+    def _what_to_write(self, text: str, command: bool) -> dict:
+        """A message is a goal; a command (`/name arg …`) is Kvist's `command`, answered by `command_result`."""
+        if not command:
+            return {"type": "goal", "text": text}
+        name, *args = text.strip().lstrip("/").split()
+        # Turn commands (best-of, council) end with turn_end before their command_result: counted as goals.
+        if name not in TURN_COMMANDS:
+            self._commands_waiting.append(name)
+        return {"type": "command", "name": name, "args": args}
 
     def _session_command(self) -> dict:
         if self._session_mode == "new":
@@ -319,15 +360,19 @@ class TaskProcess:
             return False
         return process.returncode is None
 
-    async def follow_up(self, text: str) -> bool:
-        """Another message for the agent that is already running; False when it is already on its way out."""
+    async def follow_up(self, text: str, command: bool = False) -> bool:
+        """Another message (or command) for the agent that is already running; False when it is on its way out."""
         if not self.accepts_goals:
             return False
+        busy = self.turn_open
         self.turn_open = True
         self.background_deadline = None
         self._goals_waiting += 1
         self._set_running(True)
-        await self._write({"type": "goal", "text": text})
+        if command and busy:
+            self._held.append(text)
+            return True
+        await self._write(self._what_to_write(text, command))
         return True
 
     async def _turn_ended(self) -> None:
@@ -336,6 +381,11 @@ class TaskProcess:
             self._woken = False
         elif self._goals_waiting > 0:
             self._goals_waiting -= 1
+        if self._held and not self.stop_reason and self._goals_waiting == len(self._held):
+            # Nothing else is queued in Kvist: the turn is over, so the command that waited for it goes now.
+            self.turn_open = True
+            await self._write(self._what_to_write(self._held.pop(0), True))
+            return
         if self._goals_waiting > 0 and not self.stop_reason:
             # Another message is already queued behind this turn: its turn comes next, so Kvist stays up.
             self.turn_open = True

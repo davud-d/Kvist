@@ -90,6 +90,26 @@ browser POST /api/tasks/{id}/messages {text}
 * Every message needs hours, a key and a subscription, like a first goal (`can_run`); one that arrives while the task
   is `queued`/`starting` is refused with `not_ready` (409).
 
+#### Kvist's slash commands
+
+The page offers what Kvist itself announces (its `manifest`; the server keeps only its `slash_commands` and
+`plugin_commands` as a `manifest` event, and `GET /api/commands` returns the latest one with `hidden`, what the
+cloud takes away). The cloud's part is one list, `backend/kvist_cloud/commands.py`:
+
+* `CLOUD_OWNS`: commands the cloud runs itself or that would undo what it set up (the model key and provider,
+  effort, the task's name, updates, the sandbox's rules, the machine, local reports and resets). `start_task`
+  carries them as `commands_off`, and the runner starts Kvist with `--commands-off`, so Kvist neither offers nor
+  carries them out. The page runs a few of them itself (`/provider` and `/models` open the model picker,
+  `/change-api` the key dialog, `/effort`, `/rename`, `/new`).
+* `RUNNER_ONLY` (`new`, `session`, `resume`): Kvist keeps them for the runner, a person cannot send them.
+* `PLAN_ONLY`: `remote` only on the Remote plan.
+
+`POST /api/tasks/{id}/commands {name, args}` refuses anything hidden (403 `command_unavailable`) and otherwise goes
+the way of a message, flagged as a command (`{"type":"message", "command": true}`, or `pending_text` with
+`pending_command` and `start_task {command: true}`). The runner writes Kvist's `command` instead of a goal; a command
+that arrives during a turn waits for `turn_end` (Kvist takes commands only between turns), and its
+`command_result` ends it like a turn. The page shows the result's message under the command.
+
 ### Heartbeat
 
 Every 15 s, and immediately whenever the set changes, the runner sends
@@ -133,7 +153,7 @@ nothing listens on the customer's computer:
 ### Session addresses and who may open them
 
 Every task has a **public id** (`tasks.public_id`: 72 random bits, url-safe; not the row number, never reused) and
-the workspace shows each session at its own address, **`/pixel/s/<id>`** (a draft in a project at `/pixel/p/<project>`).
+the workspace shows each session at its own address, **`/workspace/s/<id>`** (a draft in a project at `/workspace/p/<project>`).
 Typing the address, following a link or reloading opens that session without any button; the address bar follows
 what is in front, so back and forward move between sessions.
 

@@ -1,22 +1,26 @@
-// Kvist Cloud, pixel edition: wires the modules together, loads the account and opens the first task.
+// Kvist Cloud's workspace: wires the modules together, loads the account and opens what the address asks for.
+// Two screens share the stage: home (start work, see what changed) and one task in focus; the rail is the only
+// thing always there, and details open in the side sheet on request.
 
-import { activate, newAgent, onNeedKey, onNeedProject, openSession, refreshSessions, startListening, syncAddress } from "./actions.js";
+import { activate, goHome, onNeedKey, onNeedProject, openTask, startListening, syncAddress } from "./actions.js";
+import { markSeen } from "./attention.js";
 import { openExternal } from "./bridge.js";
-import { account, keepFresh, loadAccount, parseLocation, resolveSession, workspaceOf } from "./cloud.js";
+import { account, keepFresh, loadAccount, onAccount, parseLocation, resolveSession } from "./cloud.js";
 import { $ } from "./dom.js";
 import { detectLanguage, setLanguage, t } from "./i18n.js";
 import { setMathRenderer } from "./markdown.js";
+import { watchTasks } from "./notify.js";
 import { applyPrefs } from "./theme.js";
-import { active, loadPrefs, setMode, setPref, store, subscribe } from "./store.js";
+import { active, announce, loadPrefs, setMode, setPref, store, subscribe } from "./store.js";
 import { mountChat } from "./views/chat.js";
-import { mountDock } from "./views/dock.js";
-import { mountInspector } from "./views/inspector.js";
-import { mountNotices, setNotices } from "./views/notices.js";
-import { mountOverview } from "./views/overview.js";
+import { mountHome } from "./views/home.js";
+import { setNotices } from "./views/notices.js";
+import { openPalette } from "./views/palette.js";
 import { openProjectDialog } from "./views/project-dialog.js";
+import { mountRail } from "./views/rail.js";
 import { openKeyDialog } from "./views/settings-dialogs.js";
+import { mountSheet } from "./views/sheet.js";
 import { toast } from "./views/toast.js";
-import { mountTitlebar } from "./views/titlebar.js";
 
 function mountMath() {
   const katex = globalThis.katex;
@@ -24,15 +28,22 @@ function mountMath() {
   setMathRenderer((tex, display) => katex.renderToString(tex, { displayMode: display, throwOnError: false, output: "html", trust: false }));
 }
 
-function wireGlobalKeys() {
+function wireGlobalKeys(home, chat) {
   document.addEventListener("keydown", (event) => {
-    if (event.ctrlKey && event.key === "\\") setMode(store.mode === "overview" ? "chat" : "overview");
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key.toLowerCase() === "k") openPalette();
+    else if (mod && event.key === "\\") (store.mode === "home" && active() ? activate(active().id) : goHome());
     else if (event.ctrlKey && event.key === "Tab") {
       const at = store.order.indexOf(store.activeId);
       const next = store.order[(at + (event.shiftKey ? -1 : 1) + store.order.length) % store.order.length];
       if (next) activate(next);
     } else if (event.altKey && event.key === "n") {
-      newAgent(active()?.workspace || String(account.projects[0]?.id ?? ""));
+      goHome();
+      home.focus();
+    } else if (event.shiftKey && event.key === "Escape" && !document.querySelector("#modals > *")) {
+      // Back to typing without the mouse, from anywhere on the page: the home field or the task's own.
+      if (store.mode === "chat") chat.focusInput();
+      else home.focus();
     } else return;
     event.preventDefault();
   });
@@ -44,9 +55,9 @@ function wireGlobalKeys() {
   });
 }
 
-// What the address asks for is what opens: /pixel/s/<id> is that session, /pixel/p/<id> a draft in that project, and a
-// bare /pixel/ the project used last. A session that is not the person's (or does not exist) is said so, and the page
-// falls back to a draft; the cloud answers a stranger exactly as it answers a missing one.
+// What the address asks for is what opens: /workspace/s/<id> is that session, /workspace/p/<id> the home screen with that
+// project chosen for the next task, and a bare /workspace/ the home screen. A session that is not the person's (or does
+// not exist) is said so; the cloud answers a stranger exactly as it answers a missing one.
 async function openByAddress() {
   const wanted = parseLocation(location.pathname, location.hash);
   setNotices([]);
@@ -54,31 +65,23 @@ async function openByAddress() {
     const task = wanted.kind === "session"
       ? account.tasks.find((item) => item.public_id === wanted.id) ?? await resolveSession(wanted.id)
       : account.tasks.find((item) => String(item.id) === wanted.id);
-    if (task) return showTask(task);
+    if (task) return openTask(task);
     setNotices([{ id: "session-missing", level: "error", text: "warn session missing" }]);
   }
-  const project = wanted?.kind === "project" && account.projects.some((item) => String(item.id) === wanted.id) ? wanted.id : null;
-  if (wanted?.kind === "project" && !project) setNotices([{ id: "project-missing", level: "error", text: "warn project missing" }]);
-  const workspace = project ?? lastWorkspace();
-  if (!workspace) return syncAddress(null);
-  expand(workspace);
-  const draft = [...store.agents.values()].find((agent) => agent.workspace === workspace && !agent.session);
-  if (draft) return activate(draft.id);
-  newAgent(workspace);
+  if (wanted?.kind === "project") {
+    if (account.projects.some((item) => String(item.id) === wanted.id)) setPref("project", wanted.id);
+    else setNotices([{ id: "project-missing", level: "error", text: "warn project missing" }]);
+  }
+  setMode("home");
   return undefined;
 }
 
-const lastWorkspace = () => String(workspaceOf(account.tasks[0] ?? {}) || account.projects[0]?.id || "");
-
-function expand(workspace) {
-  if (!store.prefs.expanded.includes(workspace)) setPref("expanded", [...store.prefs.expanded, workspace]);
-}
-
-async function showTask(task) {
-  const workspace = workspaceOf(task);
-  expand(workspace);
-  refreshSessions(workspace);
-  await openSession(workspace, String(task.id), task.goal.trim().split("\n")[0], task.public_id);
+// Looking at a task makes what it finished with no longer news (the blue dot goes out).
+function noteSeen() {
+  const agent = active();
+  if (store.mode !== "chat" || !agent?.session) return;
+  const task = account.tasks.find((item) => String(item.id) === agent.session);
+  if (task && markSeen(store.seen, task)) announce({ kind: "seen" });
 }
 
 async function boot() {
@@ -86,38 +89,32 @@ async function boot() {
   setLanguage(detectLanguage());
   applyPrefs(store.prefs);
   mountMath();
-  const app = $("#app");
-  const pane = $("#pane");
-  mountTitlebar($("#titlebar"));
-  mountNotices($("#notices"));
-  mountDock($("#dock"));
-  mountChat(pane);
-  mountInspector($("#inspector"));
-  mountOverview($("#overview"), pane);
-  wireGlobalKeys();
+  mountRail($("#rail"));
+  const home = mountHome($("#home"));
+  const chat = mountChat($("#pane"));
+  mountSheet($("#sheet"));
+  wireGlobalKeys(home, chat);
   startListening();
   onNeedKey(openKeyDialog);
   onNeedProject(openProjectDialog);
-  // The address bar follows what is in front, and back/forward move between sessions.
+  // The address bar follows the task in focus, and back/forward move between tasks and home.
   let settled = false;
   subscribe((change) => {
-    // The first open replaces the address the page was loaded with; after that, each change is a step in history.
-    if (change.kind !== "active") return;
-    syncAddress(active(), { push: settled });
-    // A warning about the address that was asked for is about that moment: moving on to something else ends it.
-    if (settled) setNotices([]);
+    if (change.kind === "prefs") applyPrefs(store.prefs);
+    if (change.kind === "active" || change.kind === "mode") {
+      if (store.mode === "chat") syncAddress(active(), { push: settled });
+      // A warning about the address that was asked for is about that moment: moving on ends it.
+      if (settled) setNotices([]);
+    }
+    if (change.kind !== "seen") noteSeen();
   });
+  onAccount(noteSeen);
   window.addEventListener("popstate", () => openByAddress().catch((error) => console.error(error)));
-  subscribe((change) => {
-    if (change.kind !== "prefs") return;
-    applyPrefs(store.prefs);
-    app.classList.toggle("no-inspector", !store.prefs.inspector);
-  });
-  app.classList.toggle("no-inspector", !store.prefs.inspector);
   // A signed-out visitor is sent to sign in from inside loadAccount.
   await loadAccount();
   sayHowSignInWent();
   keepFresh();
+  watchTasks(openTask);
   await openByAddress();
   settled = true;
 }

@@ -2,16 +2,15 @@
 // laid out, and the person's interface preferences. Views subscribe and
 // redraw what changed; nothing here touches the DOM.
 
+import { loadSeen } from "./attention.js";
 import { reduce } from "./reducer.js";
 
 export const DEFAULT_PREFS = {
-  theme: "dusk",
+  theme: "system",
   glass: 0.85,
   speed: 1, // 1 = animations on, 0 = off
   scale: 1,
-  inspector: true,
-  inspectorTab: "hours",
-  expanded: [], // projects opened on the rail (by id; "" is the older tasks)
+  project: "", // the project a new task from the home screen goes to (its id)
 };
 
 export const store = {
@@ -19,7 +18,9 @@ export const store = {
   listings: new Map(), // workspace -> the sessions the core lists for it
   order: [],
   activeId: null,
-  mode: "chat", // chat | overview
+  mode: "home", // home (start work, see what changed) | chat (one task in focus)
+  sheet: null, // the contextual side sheet: null | {kind, title}
+  seen: null, // attention.js: which finished tasks the person has looked at
   prefs: { ...DEFAULT_PREFS },
 };
 
@@ -100,6 +101,13 @@ function write(key, value) {
 
 export function loadPrefs() {
   store.prefs = { ...DEFAULT_PREFS, ...(read(PREFS_KEY) ?? {}) };
+  store.seen = loadSeen();
+}
+
+/** The side sheet shows one thing at a time; the same kind again closes it. */
+export function setSheet(sheet) {
+  store.sheet = sheet && store.sheet?.kind === sheet.kind ? null : sheet;
+  announce({ kind: "sheet" });
 }
 
 export function savePrefs() {

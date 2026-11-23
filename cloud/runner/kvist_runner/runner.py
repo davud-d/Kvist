@@ -167,7 +167,8 @@ class Runner:
         elif kind == "prepare_project":
             self._spawn(self._prepare_project(message))
         elif kind == "message":
-            await self._message(int(message.get("task_id") or 0), str(message.get("text") or ""))
+            task_id = int(message.get("task_id") or 0)
+            await self._message(task_id, str(message.get("text") or ""), bool(message.get("command")))
         elif kind == "screen_watch" and task is not None:
             task.screens.watch(str(message.get("screen_id", "")), float(message.get("lease_seconds") or 0))
         elif kind == "export" and self.exporter is not None:
@@ -203,12 +204,12 @@ class Runner:
             # The first task tries again and tells the person; nothing waits on this.
             log.warning("project folder not ready: %s %s", error.reason, error.detail)
 
-    async def _message(self, task_id: int, text: str) -> None:
+    async def _message(self, task_id: int, text: str, command: bool = False) -> None:
         task = self.tasks.get(task_id)
-        if task is not None and await task.follow_up(text):
+        if task is not None and await task.follow_up(text, command):
             return
         # Nobody to take it: the run ended a moment ago. The server starts the next run with this message.
-        self.emit({"type": "message_undelivered", "task_id": task_id, "text": text})
+        self.emit({"type": "message_undelivered", "task_id": task_id, "text": text, "command": command})
 
     def _start(self, message: dict) -> None:
         task_id = int(message["task_id"])
@@ -228,6 +229,8 @@ class Runner:
             session=str(message.get("session") or ""),
             folder=str(message.get("folder") or ""),
             follow_up=bool(message.get("follow_up")),
+            command=bool(message.get("command")),
+            commands_off=[str(name) for name in message.get("commands_off") or []],
             config=self.config,
             emit=self.emit,
             on_change=self.heartbeat_now,
@@ -252,7 +255,8 @@ class Runner:
             message.pop("env", None)  # not needed: the running process already holds the key
             if message.get("follow_up"):
                 # Still up (its turn is finishing, or background work keeps it): it takes the message itself.
-                self._spawn(self._message(existing.task_id, str(message.get("goal") or "")))
+                text = str(message.get("goal") or "")
+                self._spawn(self._message(existing.task_id, text, bool(message.get("command"))))
             return
         run = self._runs.get(existing.task_id)
         if run is not None and not run.done():

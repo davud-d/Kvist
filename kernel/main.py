@@ -117,6 +117,16 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--commands-off",
+        metavar="NAMES",
+        default="",
+        help=(
+            "stdio-multi only: comma-separated slash commands this core neither offers nor carries out "
+            "(a host that manages them itself, such as Kvist Cloud, turns them off). The manifest then "
+            "lists them without `via: core`, and a `command` for one answers \"Unknown command\"."
+        ),
+    )
+    parser.add_argument(
         "--remote",
         metavar="HOST",
         help=(
@@ -4909,6 +4919,12 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
 }
 
 
+def served_commands(off: str) -> dict[str, CommandHandler]:
+    """The command table without the names in ``--commands-off`` (comma-separated)."""
+    names = {name.strip().lstrip("/") for name in off.split(",") if name.strip()}
+    return {name: handler for name, handler in STDIO_COMMANDS.items() if name not in names}
+
+
 def _choose_machine(args: argparse.Namespace) -> None:
     """``--machines`` opens the dialog; then ``--machine``, ``--local`` and the main machine decide where this launch works."""
     from kernel.ssh.entry import apply_choice, resolve_machine
@@ -5199,7 +5215,7 @@ def main() -> None:
                 models_override=models_override,
                 routed_role=None if args.role == "auto" else args.role,
                 approval_mode=args.approval_mode,
-                commands=STDIO_COMMANDS,
+                commands=served_commands(args.commands_off),
                 wake=args.wake,
                 **({"resume": args.resume} if args.resume else {}),
             )

@@ -175,6 +175,7 @@ export async function sendToAgent(id, message) {
   if (message.type === "pause") return api(`/api/tasks/${entry.taskId}/pause`, { method: "POST" });
   if (message.type === "cancel") return api(`/api/tasks/${entry.taskId}/cancel`, { method: "POST" });
   if (message.type === "command" && message.name === "resume") return api(`/api/tasks/${entry.taskId}/resume`, { method: "POST" });
+  if (message.type === "command") return api(`/api/tasks/${entry.taskId}/commands`, { method: "POST", body: { name: message.name, args: message.args ?? [] } });
   return undefined;
 }
 

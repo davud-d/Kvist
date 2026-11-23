@@ -10,6 +10,9 @@ import { parseImageGoal } from "./views/attachments.js";
 
 const MAX_ACTIVITY = 30;
 
+// Commands the cloud's runner sends to keep a task in its conversation (runner/kvist_runner/task.py).
+const RUNNER_COMMANDS = new Set(["new", "session", "resume"]);
+
 export function createAgent(id, workspace, session = "") {
   return {
     id,
@@ -41,7 +44,7 @@ export function createAgent(id, workspace, session = "") {
     screens: new Map(),
     // The cloud task behind this agent ({id, goal, status, reason, used_seconds}); null while it is a draft.
     cloud: null,
-    // The id in the session's address (/pixel/s/<publicId>), known once the cloud has told about the task.
+    // The id in the session's address (/workspace/s/<publicId>), known once the cloud has told about the task.
     publicId: "",
     context: { tokens: 0, limit: 0 },
     spend: { input: 0, output: 0 },
@@ -147,10 +150,12 @@ const WRITES = new Set(["write_file", "append_file", "replace_in_file"]);
 
 const lineCount = (text) => (text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0);
 
-// call_stream carries whole new lines of a call's text while the model is still writing it; `line` is where they
-// begin, so a piece that does not follow on is dropped and line 0 starts the field over (a retried request).
+// call_stream carries the new words of a call's text while the model is still writing it; `line` is the line
+// they begin on, so a piece that does not follow on is dropped. Every piece of the first line says line 0, so
+// line 0 starts the field over (a retried request) only once the text has gone past the first line.
 function feedStream(call, ev) {
-  const have = ev.line === 0 ? "" : (call.stream[ev.field] ?? "");
+  const current = call.stream[ev.field] ?? "";
+  const have = ev.line === 0 && current.includes("\n") ? "" : current;
   if (ev.line !== have.split("\n").length - 1) return;
   call.stream[ev.field] = have + ev.text;
   const replacing = call.actionType === "replace_in_file";
@@ -355,6 +360,8 @@ export function reduce(agent, ev, { replay = false } = {}) {
     }
     case "reasoning_commit": {
       const item = thought(agent, ev.stream_id);
+      // The history has no pieces: there the end of a thought carries its words (the runner keeps them).
+      if (typeof ev.text === "string" && ev.text) item.text = ev.text;
       item.seconds = ev.duration_seconds ?? 0;
       item.live = false;
       agent.streams.delete(`t:${ev.stream_id}`);
@@ -467,6 +474,12 @@ export function reduce(agent, ev, { replay = false } = {}) {
     case "command_result":
       agent.command = { name: ev.name, ok: ev.ok, message: ev.message, effects: ev.effects ?? {} };
       applyEffects(agent, ev.name, ev.effects);
+      // What a person's command answered stands under it in the conversation; the cloud's own session switching
+      // (new, session, resume) is not something the person asked for.
+      if (ev.message && !RUNNER_COMMANDS.has(ev.name)) {
+        if (ev.ok) push(agent, { kind: "reply", text: ev.message, live: false, aside: true });
+        else addNote(agent, ev.message, "error");
+      }
       return;
     case "gone":
       agent.state = "gone";

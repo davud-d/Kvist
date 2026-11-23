@@ -1,19 +1,23 @@
 // Motion: named curves, springs baked into CSS linear() easings, and thin
 // wrappers over the Web Animations API. Everything goes through `animate`, so
 // the person's speed setting (and prefers-reduced-motion) reach every effect.
+//
+// This is a work tool used all day, so motion is short and never bounces: things that answer the person
+// ease out (they start fast, so the page feels quick), things that move on screen ease in and out, exits
+// are faster than entrances, and nothing scales up from nothing (0.96 at most). Springs are critically damped.
 
 export const curves = {
-  out: "cubic-bezier(0.16, 1, 0.3, 1)",
-  in: "cubic-bezier(0.7, 0, 0.84, 0)",
-  inOut: "cubic-bezier(0.65, 0, 0.35, 1)",
-  emphasized: "cubic-bezier(0.2, 0, 0, 1)",
-  snap: "cubic-bezier(0.34, 1.56, 0.64, 1)",
+  out: "cubic-bezier(0.23, 1, 0.32, 1)",
+  inOut: "cubic-bezier(0.77, 0, 0.175, 1)",
+  drawer: "cubic-bezier(0.32, 0.72, 0, 1)",
+  // Older names, kept so every call reads the same curve family.
+  in: "cubic-bezier(0.23, 1, 0.32, 1)",
+  emphasized: "cubic-bezier(0.32, 0.72, 0, 1)",
 };
 
 export const springs = {
-  soft: { stiffness: 170, damping: 22, mass: 1 },
-  snappy: { stiffness: 320, damping: 26, mass: 1 },
-  bouncy: { stiffness: 260, damping: 14, mass: 1 },
+  soft: { stiffness: 300, damping: 34, mass: 1 },
+  snappy: { stiffness: 520, damping: 46, mass: 1 },
 };
 
 const STEP = 1 / 240;
@@ -62,7 +66,7 @@ export function setSpeed(value) {
   motion.speed = Number.isFinite(value) && value >= 0 ? value : 1;
 }
 
-function playing() {
+export function playing() {
   return motion.speed > 0 && !reduced();
 }
 
@@ -72,7 +76,7 @@ function playing() {
  * Returns the Animation, or null when motion is off (the end state is simply
  * the element's own style, so callers never wait on it).
  */
-export function animate(el, keyframes, { curve = "out", spring = null, ms = 320, delay = 0, fill = "backwards" } = {}) {
+export function animate(el, keyframes, { curve = "out", spring = null, ms = 220, delay = 0, fill = "backwards" } = {}) {
   if (!playing() || !el.animate) return null;
   let easing = curves[curve] ?? curve;
   let duration = ms;
@@ -88,16 +92,26 @@ export function finished(animation) {
   return animation ? animation.finished.catch(() => {}) : Promise.resolve();
 }
 
-/** A new element arrives: it rises into place on a soft spring. */
-export function enter(el, { from = "translateY(10px) scale(0.98)", delay = 0 } = {}) {
-  return animate(el, [{ opacity: 0, transform: from }, { opacity: 1, transform: "none" }], { spring: "soft", delay });
+/** A new element arrives: it settles a few pixels into place. */
+export function enter(el, { from = "translateY(6px)", delay = 0, ms = 240 } = {}) {
+  return animate(el, [{ opacity: 0, transform: from }, { opacity: 1, transform: "none" }], { ms, delay });
 }
 
 /** An element goes away, then is removed. */
-export async function leave(el, { to = "scale(0.96)" } = {}) {
-  const run = animate(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: to }], { curve: "in", ms: 160, fill: "forwards" });
+export async function leave(el, { to = "scale(0.98)" } = {}) {
+  const run = animate(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: to }], { ms: 150, fill: "forwards" });
   await finished(run);
   el.remove();
+}
+
+/** A sheet (dialog, popover) opens from `origin`; its exit is the same movement, shorter. */
+export function popIn(el, origin = "50% 50%") {
+  el.style.transformOrigin = origin;
+  return animate(el, [{ opacity: 0, transform: "scale(0.96) translateY(4px)" }, { opacity: 1, transform: "none" }], { ms: 200 });
+}
+
+export function popOut(el) {
+  return animate(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.98)" }], { ms: 140, fill: "forwards" });
 }
 
 /**
@@ -132,11 +146,11 @@ export function boxTransform(from, to) {
 /** Zooms `el` from the box `from` into its own place (the lens moves in). */
 export function zoomIn(el, from) {
   const to = el.getBoundingClientRect();
-  return animate(el, [{ transform: boxTransform(from, to), opacity: 0.2, transformOrigin: "0 0" }, { transform: "none", opacity: 1, transformOrigin: "0 0" }], { spring: { stiffness: 210, damping: 27, mass: 1 } });
+  return animate(el, [{ transform: boxTransform(from, to), opacity: 0.2, transformOrigin: "0 0" }, { transform: "none", opacity: 1, transformOrigin: "0 0" }], { curve: "drawer", ms: 380 });
 }
 
 /** Zooms `el` away from its place into the box `to` (the lens moves out). */
 export function zoomOut(el, to) {
   const from = el.getBoundingClientRect();
-  return animate(el, [{ transform: "none", opacity: 1, transformOrigin: "0 0" }, { transform: boxTransform(to, from), opacity: 0, transformOrigin: "0 0" }], { curve: "emphasized", ms: 360, fill: "forwards" });
+  return animate(el, [{ transform: "none", opacity: 1, transformOrigin: "0 0" }, { transform: boxTransform(to, from), opacity: 0, transformOrigin: "0 0" }], { curve: "drawer", ms: 320, fill: "forwards" });
 }

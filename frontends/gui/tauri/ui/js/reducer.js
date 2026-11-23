@@ -145,10 +145,12 @@ const WRITES = new Set(["write_file", "append_file", "replace_in_file"]);
 
 const lineCount = (text) => (text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0);
 
-// call_stream carries whole new lines of a call's text while the model is still writing it; `line` is where they
-// begin, so a piece that does not follow on is dropped and line 0 starts the field over (a retried request).
+// call_stream carries the new words of a call's text while the model is still writing it; `line` is the line
+// they begin on, so a piece that does not follow on is dropped. Every piece of the first line says line 0, so
+// line 0 starts the field over (a retried request) only once the text has gone past the first line.
 function feedStream(call, ev) {
-  const have = ev.line === 0 ? "" : (call.stream[ev.field] ?? "");
+  const current = call.stream[ev.field] ?? "";
+  const have = ev.line === 0 && current.includes("\n") ? "" : current;
   if (ev.line !== have.split("\n").length - 1) return;
   call.stream[ev.field] = have + ev.text;
   const replacing = call.actionType === "replace_in_file";

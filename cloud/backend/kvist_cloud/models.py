@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     event,
+    false,
 )
 from sqlalchemy.orm import Mapped, ORMExecuteState, Session, mapped_column, relationship
 
@@ -196,7 +197,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # What the address of the session carries (/pixel/s/<public_id>). Knowing it opens nothing for anyone but the owner.
+    # What the session's address carries (/workspace/s/<public_id>). Knowing it opens nothing for anyone but the owner.
     public_id: Mapped[str] = mapped_column(String(24), unique=True, index=True, default=new_public_id)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     machine_id: Mapped[int] = mapped_column(ForeignKey("machines.id"), index=True)
@@ -215,6 +216,8 @@ class Task(Base):
     # A task is a session: what the person wrote after the first goal waits here until the machine has it
     # (it may be asleep, or the plan may have no free slot yet). Cleared when the machine's Kvist says hello.
     pending_text: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # The pending text is a slash command for Kvist (`/memory`), run in the task's session, not a message.
+    pending_command: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     next_seq: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

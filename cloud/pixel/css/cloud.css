@@ -1,61 +1,45 @@
-/* What Kvist Cloud adds to the pixel window: the hours and the server in the title strip, the server and
-   hours panels, the private screen card. Everything else is the desktop app's own styling, unchanged. */
+/* What only the cloud has: the server and hours in the sheet, the warnings, the model key dialog. */
 
-.brand { width: auto; min-width: 0; }
-.brand-sub { font-family: var(--font-pixel); font-size: 14px; letter-spacing: 0.2em; color: var(--dim); align-self: flex-end; padding-bottom: 3px; }
+/* Numbers as a table: label left, value right, aligned digits. */
+.spec { display: flex; flex-direction: column; margin: 0; }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: var(--t-ui); }
+.kv:last-child { border-bottom: 0; }
+.kv-key { margin: 0; color: var(--dim); }
+.kv-value { margin: 0; font-weight: 500; font-variant-numeric: tabular-nums; }
+.server-status { display: flex; align-items: center; gap: 10px; font-size: var(--t-md); }
+.server-status b { flex: 1; font-weight: 600; }
+.server-status .btn { margin-left: auto; }
 
-#titlebar .crumb { display: flex; align-items: center; gap: 18px; overflow: visible; }
-.session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hours-meter { display: flex; align-items: center; gap: 10px; }
-.hours-meter .meter-label { font-size: 12px; color: var(--text); letter-spacing: 0.04em; }
-.hours-meter .meter-bar i { height: 12px; }
-.server-chip { display: inline-flex; align-items: center; gap: 8px; margin: 0; text-transform: none; letter-spacing: 0.02em; font-weight: 500; }
-.btn.lang { min-width: 44px; font-family: var(--font-pixel); }
-
-.chip.repo { text-transform: none; letter-spacing: 0.02em; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
-.chip.hours { color: var(--ok); }
-
-/* The inspector holds six tabs; they share the row evenly. */
-.inspector-inner .tabs { display: flex; }
-.inspector-inner .tabs .tab { flex: 1; min-width: 0; padding-inline: 4px; }
-
-.kv { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
-.kv-key { color: var(--dim); }
-.server-status { display: flex; align-items: center; gap: 10px; font-size: 15px; }
-.server-status b { font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 13px; }
-
-.hours-big { font-family: var(--font-pixel); font-size: 28px; line-height: 1.1; color: var(--accent); }
-.feed-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 6px; border-top: 2px solid var(--shade); font-size: 13px; }
+.hours-big { font-size: var(--t-2xl); font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.feed-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: var(--t-ui); }
 .feed-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.feed-row b { font-weight: 600; }
+.feed-row b { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Spending hours is the normal case and reads as plain text; only hours coming in are marked. */
+.feed-row.minus { color: inherit; }
 .feed-row.plus b { color: var(--ok); }
-.feed-when { grid-column: 1 / -1; font-size: 11px; color: var(--dim); }
+.feed-when { grid-column: 1 / -1; font-size: var(--t-xs); color: var(--faint); }
 
-.screen-view { display: block; width: 100%; height: auto; background: var(--ink); image-rendering: auto; }
+.screen-view { display: block; width: 100%; height: auto; background: #000; border-radius: var(--r-sm); }
 .screen-card[hidden], .screen-view[hidden] { display: none; }
-.privacy { font-size: 12px; }
-
+.privacy { font-size: var(--t-sm); }
 .dialog .bad { color: var(--err); }
 
-/* The model key is the settings' first row; it gets the whole width so its text does not wrap. */
 .settings-group .action-grid .setting:first-child { grid-column: 1 / -1; }
-
-/* A narrow window has no room for three columns: the inspector gives way (the title strip button brings it back). */
-@media (max-width: 1100px) {
-  #app { grid-template-columns: 250px minmax(0, 1fr) 0px; }
-  #app #inspector { opacity: 0; pointer-events: none; }
-  .brand-sub, .server-chip span:last-child { display: none; }
-}
-
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .repo-list { max-height: 220px; overflow-y: auto; }
 
-/* Warnings: above the chat, one bar each, said before the thing bites. */
-#notices:empty { display: none; }
-#notices { display: flex; flex-direction: column; gap: 8px; flex: none; }
-.notice { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--surface-2); box-shadow: var(--outline); font-size: 13px; }
-.notice::before { content: ""; flex: none; width: 10px; height: 10px; background: var(--warn); }
+/* The key dialog: the partner on top, the three usual providers, the rest behind a picker. */
+.provider-more { display: flex; flex-direction: column; gap: 8px; }
+.provider-row { display: flex; width: 100%; }
+.provider-row .seg { flex: 1; }
+
+/* Warnings: one line each, said before the thing bites, with the way to fix it. */
+.notices:empty { display: none; }
+.notices { display: flex; flex-direction: column; gap: var(--s2); }
+#pane > .notices { width: 100%; max-width: 824px; margin: 0 auto; padding: 0 var(--s6) var(--s2); }
+.notice { display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; background: var(--warn-soft); border-radius: var(--r-md); font-size: var(--t-ui); }
+.notice::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--asks); }
+.notice.error { background: var(--err-soft); }
 .notice.error::before { background: var(--err); }
 .notice-text { flex: 1; min-width: 0; }
-.notice .btn { min-height: 28px; font-size: 12px; }
-a.sess { text-decoration: none; }
+.notice .btn { min-height: 30px; padding-block: 4px; background: var(--surface); }
+.notice .btn.flat { background: transparent; padding: 4px 6px; }

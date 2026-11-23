@@ -20,6 +20,13 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL = "fake-model"
+# A streamed answer goes out in pieces of this many characters, this far apart.
+STREAM_PIECE_CHARS = 24
+STREAM_PAUSE_SECONDS = 0.04
+
+
+def pieces(text: str) -> list[str]:
+    return [text[at:at + STREAM_PIECE_CHARS] for at in range(0, len(text), STREAM_PIECE_CHARS)]
 
 
 def first_user_line(messages: list[dict]) -> str:
@@ -49,8 +56,11 @@ def reply(request: dict) -> dict:
         return {"role": "assistant", "content": "Kvist Cloud task"}
     done = tool_results(messages)
     if done == 0 and "write_file" in tools:
+        # Long enough that a page streaming the write shows it grow line by line.
         content = f"# Cloud notes\n\nFirst line of the request: {first_user_line(messages)[:200]}\n\n" \
-                  "Written by the fake model.\n"
+                  "| Step | What happens |\n| --- | --- |\n" \
+                  + "".join(f"| {n} | The fake model writes line {n} of this table. |\n" for n in range(1, 13)) \
+                  + "\nWritten by the fake model.\n"
         return call("write_file", {"path": "CLOUD_NOTES.md", "content": content})
     if done == 1 and "read_file" in tools:
         return call("read_file", {"path": "CLOUD_NOTES.md"})
@@ -109,15 +119,18 @@ def make_handler(delay: float):
                         "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage})
 
         def _stream(self, message: dict, finish: str, usage: dict) -> None:
-            delta: dict = {"role": "assistant"}
-            if message.get("tool_calls"):
-                delta["tool_calls"] = [{**item, "index": index} for index, item in enumerate(message["tool_calls"])]
-            else:
-                delta["content"] = message.get("content") or ""
-            chunks = [
-                {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
-                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": usage},
-            ]
+            # Small pieces with a pause between them, as a real provider sends them: the page shows a file
+            # being written line by line only when the text really arrives that way.
+            chunks = [{"choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}]
+            for index, item in enumerate(message.get("tool_calls") or []):
+                head = {**item, "index": index, "function": {**item["function"], "arguments": ""}}
+                chunks.append({"choices": [{"index": 0, "delta": {"tool_calls": [head]}, "finish_reason": None}]})
+                for piece in pieces(item["function"].get("arguments") or ""):
+                    part = {"index": index, "function": {"arguments": piece}}
+                    chunks.append({"choices": [{"index": 0, "delta": {"tool_calls": [part]}, "finish_reason": None}]})
+            for piece in pieces(message.get("content") or ""):
+                chunks.append({"choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]})
+            chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}], "usage": usage})
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -127,6 +140,8 @@ def make_handler(delay: float):
                 payload = {"id": "chatcmpl-fake", "object": "chat.completion.chunk", "created": int(time.time()),
                            "model": MODEL, **chunk}
                 self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(STREAM_PAUSE_SECONDS)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
             self.close_connection = True

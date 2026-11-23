@@ -2,11 +2,10 @@
 // Hours run only while the agent works (cloud/docs/ARCHITECTURE.md, "Hours ledger rules").
 
 import { account, duration, share } from "../cloud.js";
-import { fill, h, icon } from "../dom.js";
+import { fill, h, meterTrack } from "../dom.js";
 import { lang, t } from "../i18n.js";
 
-const BLOCKS = 24;
-const SHOWN = 14;
+const SHOWN = 8;
 
 function when(iso) {
   return iso ? new Date(iso).toLocaleString(lang.current === "ru" ? "ru-RU" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
@@ -34,20 +33,21 @@ export const hours = {
       fill(el, h("p", { class: "dim pad" }, t("no plan")), h("a", { class: "btn primary", href: "/start" }, t("start trial")));
       return;
     }
-    const filled = Math.round(share(sub.balance_seconds, sub.plan_seconds) * BLOCKS);
+    // What the number is, said next to it: the agent's working hours left in this period of the plan.
     fill(
       el,
-      h("div", { class: "ctx-card px" },
-        h("div", { class: "card-title" }, t("hours left").toUpperCase()),
-        h("div", { class: "hours-big" }, duration(sub.balance_seconds)),
-        h("div", { class: "meter-bar big" }, ...Array.from({ length: BLOCKS }, (_, i) => h("i", { class: i < filled ? "on" : "" }))),
-        h("div", { class: "dim" }, `${t("of")} ${duration(sub.plan_seconds)} · ${t("period ends")} ${when(sub.period_end).split(",")[0]}`),
-        sub.purchased_seconds > 0 ? h("div", { class: "dim" }, `${t("purchased")}: ${duration(sub.purchased_seconds)}`) : null,
-        agent?.cloud ? h("div", { class: "dim" }, `${t("this task")}: ${duration(agent.cloud.used_seconds)}`) : null,
-      ),
-      h("div", { class: "pad" }, h("a", { class: "btn", href: "/dashboard" }, icon("plus", 14), h("span", {}, t("manage plan")))),
-      h("div", { class: "card-title pad" }, t("history").toUpperCase()),
-      ...(account.feed.length ? account.feed.slice(0, SHOWN).map(feedRow) : [h("p", { class: "dim pad" }, t("no hours history"))]),
+      h("h3", { class: "sheet-heading" }, t("agent hours left")),
+      h("div", { class: "hours-big" }, duration(sub.balance_seconds)),
+      meterTrack(share(sub.balance_seconds, sub.plan_seconds), { big: true, warnBelow: 0.2 }),
+      h("dl", { class: "spec" },
+        h("div", { class: "kv" }, h("dt", { class: "kv-key" }, t("in the plan")), h("dd", { class: "kv-value" }, duration(sub.plan_seconds))),
+        h("div", { class: "kv" }, h("dt", { class: "kv-key" }, t("period ends")), h("dd", { class: "kv-value" }, when(sub.period_end).split(",")[0])),
+        sub.purchased_seconds > 0 ? h("div", { class: "kv" }, h("dt", { class: "kv-key" }, t("purchased")), h("dd", { class: "kv-value" }, duration(sub.purchased_seconds))) : null,
+        agent?.cloud ? h("div", { class: "kv" }, h("dt", { class: "kv-key" }, t("this task")), h("dd", { class: "kv-value" }, duration(agent.cloud.used_seconds))) : null),
+      h("p", { class: "dim" }, t("hours run note")),
+      h("a", { class: "btn", href: "/dashboard" }, h("span", {}, t("manage plan"))),
+      h("h3", { class: "sheet-heading" }, t("history")),
+      h("div", {}, account.feed.length ? account.feed.slice(0, SHOWN).map(feedRow) : h("p", { class: "dim" }, t("no hours history"))),
     );
   },
 };

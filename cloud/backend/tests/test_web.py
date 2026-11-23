@@ -65,9 +65,9 @@ def test_the_pixel_window_is_served_and_may_show_pictures_it_fetched(client_fact
     (dist / "pixel" / "index.html").write_text("<!doctype html><title>pixel</title>")
     (dist / "pixel" / "js" / "main.js").write_text("export {};")
     client = client_factory(FRONTEND_DIST=str(dist))
-    page = client.get("/pixel/")
+    page = client.get("/workspace/")
     assert "pixel" in page.text and page.headers["cache-control"] == "no-cache"
-    assert client.get("/pixel/js/main.js").status_code == 200
+    assert client.get("/workspace/js/main.js").status_code == 200
     # The agent's screen is drawn from a blob the page fetched itself; nothing else widens what pages may load.
     policy = page.headers["content-security-policy"]
     assert "img-src 'self' data: blob: https://avatars.githubusercontent.com" in policy
@@ -77,7 +77,22 @@ def test_the_pixel_window_is_served_and_may_show_pictures_it_fetched(client_fact
 def test_the_old_new_task_page_leads_to_the_workspace(client_factory, dist):
     client = client_factory(FRONTEND_DIST=str(dist))
     response = client.get("/new", follow_redirects=False)
-    assert response.status_code == 307 and response.headers["location"] == "/pixel/"
+    assert response.status_code == 307 and response.headers["location"] == "/workspace/"
+
+
+def test_an_old_pixel_address_opens_the_same_place_in_the_workspace(client_factory, dist):
+    (dist / "pixel").mkdir()
+    (dist / "pixel" / "index.html").write_text("<!doctype html><title>pixel</title>")
+    client = client_factory(FRONTEND_DIST=str(dist))
+    for old, new in (
+        ("/pixel", "/workspace/"),
+        ("/pixel/", "/workspace/"),
+        ("/pixel/s/aB3_xY-9kQ2", "/workspace/s/aB3_xY-9kQ2"),
+        ("/pixel/p/7?x=1", "/workspace/p/7?x=1"),
+    ):
+        response = client.get(old, follow_redirects=False)
+        assert response.status_code == 308 and response.headers["location"] == new, old
+    assert client.get("/pixel/s/aB3_xY-9kQ2").text.startswith("<!doctype html><title>pixel")
 
 
 def test_missing_build_is_a_clear_message(client_factory, tmp_path):

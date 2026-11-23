@@ -35,7 +35,32 @@ export function openRename(agent) {
   input.focus();
 }
 
-export function openKeyDialog() {
+// How many providers get a button of their own after the partner; the rest are one pick in a list.
+const SHOWN_PROVIDERS = 3;
+
+// The partner on a row of its own, the usual providers and "Other" as buttons, the long tail in a select.
+function providerPicker(list, current, choose) {
+  const seg = (item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === current ? " on" : ""}`, type: "button", onclick: () => choose(item.id) }, item.id === "other" ? t("other") : item.label);
+  const partners = list.filter((item) => item.partner);
+  const usual = list.filter((item) => !item.partner && item.id !== "other");
+  const other = list.find((item) => item.id === "other");
+  const shown = usual.slice(0, SHOWN_PROVIDERS);
+  const rest = usual.slice(SHOWN_PROVIDERS);
+  const picked = rest.some((item) => item.id === current);
+  const select = rest.length
+    ? h("select", { class: "field", "aria-label": t("other providers"), onchange: (event) => event.target.value && choose(event.target.value) },
+      h("option", { value: "", selected: !picked }, `${t("other providers")}…`),
+      rest.map((item) => h("option", { value: item.id, selected: item.id === current }, item.label)))
+    : null;
+  return [
+    partners.length ? h("div", { class: "segment provider-row" }, partners.map(seg)) : null,
+    h("div", { class: "segment provider-row" }, [...shown, ...(other ? [other] : [])].map(seg)),
+    select,
+  ];
+}
+
+/** `preferred`: the provider to start on (the model picker's "Connect key" under a provider). */
+export function openKeyDialog(preferred = "") {
   const saved = () => (account.key?.provider === "chatgpt" ? account.key : null);
   const draft = account.key?.set ? {} : readDraft();
   const remember = () => {
@@ -45,7 +70,7 @@ export function openKeyDialog() {
       // Storage blocked: the draft is only a convenience.
     }
   };
-  const choice = { provider: account.key?.set ? account.key.provider : draft.provider || "deepseek" };
+  const choice = { provider: preferred || (account.key?.set ? account.key.provider : draft.provider || "deepseek") };
   const key = h("input", { class: "field", type: "password", autocomplete: "off", spellcheck: "false", placeholder: "sk-…" });
   const base = h("input", { class: "field", type: "url", placeholder: "https://…", spellcheck: "false", value: account.key?.base_url ?? draft.base_url ?? "" });
   const model = h("input", { class: "field", type: "text", placeholder: t("model name"), spellcheck: "false", value: account.key?.model ?? draft.model ?? "" });
@@ -71,7 +96,7 @@ export function openKeyDialog() {
   base.addEventListener("input", () => remember());
   model.addEventListener("input", () => remember());
   const status = h("p", { class: "dim", "aria-live": "polite" });
-  const providers = h("div", { class: "segment" });
+  const providers = h("div", { class: "provider-more" });
   const extra = h("div", { class: "field-stack" });
   const link = h("p", { class: "dim" });
   const save = h("button", { class: "btn primary", type: "button" }, t("save"));
@@ -111,7 +136,7 @@ export function openKeyDialog() {
 
   const paint = () => {
     const list = account.providers.length ? account.providers : [{ id: "deepseek", label: "DeepSeek" }, { id: "openai", label: "OpenAI" }, { id: "anthropic", label: "Anthropic" }, { id: "other", label: "…", needs_base_url: true, needs_model: true }];
-    fill(providers, list.map((item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === choice.provider ? " on" : ""}`, type: "button", onclick: () => { choice.provider = item.id; remember(); paint(); } }, item.id === "other" ? t("other") : item.label)));
+    fill(providers, providerPicker(list, choice.provider, (id) => { choice.provider = id; remember(); paint(); }));
     const current = list.find((item) => item.id === choice.provider);
     fill(link, current?.keys_page ? h("a", { href: current.keys_page, target: "_blank", rel: "noopener" }, `${t("get a key")} ↗`) : null);
     // A sign-in has no key to paste and nothing to save: its own button does the work.

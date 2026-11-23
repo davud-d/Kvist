@@ -127,9 +127,11 @@ FIELDS = [
     *[("POST", "/api/model-key", {"provider": "deepseek", "key": "test-key-12345678"}, k)
       for k in ("provider", "key", "base_url", "model", "headers", "stream")],
     ("PUT", "/api/effort", {"level": "medium"}, "level"),
+    ("PUT", "/api/model", {"model": "m1"}, "model"),
     ("PATCH", "/api/tasks/1", {"title": "safe"}, "title"),
     *[("POST", "/api/tasks", {"goal": "safe"}, k) for k in ("goal", "repo_url", "project_id")],
     ("POST", "/api/tasks/1/messages", {"text": "safe"}, "text"),
+    *[("POST", "/api/tasks/1/commands", {"name": "memory"}, k) for k in ("name", "args")],
     *[("POST", "/api/tasks/1/input", {"request_id": "r1"}, k) for k in ("request_id", "value", "approved")],
     *[("POST", "/api/projects", {"name": "safe"}, k) for k in ("name", "repo_url")],
     *[("POST", "/api/disputes", {"message": "please review"}, k) for k in ("task_id", "message")],

@@ -61,7 +61,7 @@ backend/kvist_cloud/   the control server (FastAPI, SQLAlchemy 2, Alembic)
 backend/migrations/    Alembic; the ledger's no-UPDATE/no-DELETE triggers live here
 runner/kvist_runner/   the process on a machine: WebSocket, heartbeat, one Kvist per task
 frontend/              vanilla JS + esbuild; build.mjs checks locales, contrast and budgets
-pixel/                 the pixel-game window (a copy of Kvist Pixel) on the cloud: served at /pixel/, see pixel/README.md
+pixel/                 the pixel-game window (a copy of Kvist Pixel) on the cloud: served at /workspace/ (old /pixel/ links redirect there), see pixel/README.md
 scripts/dev.sh         the one-command local run    scripts/fake_model.py  the fake model
 scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   shipping, see docs/DEPLOY.md
 scripts/backup*.sh, restore.sh, setup_backup_host.sh   backups, see docs/BACKUP.md

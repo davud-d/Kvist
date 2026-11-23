@@ -15,7 +15,7 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import chatgpt, exports, ledger, limits, plans, projects, screens, tasks
+from . import chatgpt, commands, exports, ledger, limits, plans, projects, screens, tasks
 from .chatgpt import ChatGPTError
 from .db import lock_account, session_scope, utcnow
 from .keys import has_model_access, kvist_environment
@@ -111,6 +111,10 @@ def start_message(app: FastAPI, db: Session, task: Task, chatgpt_access: dict | 
         "folder": project.folder if project is not None else "",
         "session": session,
         "follow_up": bool(task.pending_text),
+        # The pending text is a slash command for Kvist, not a message (tasks.post_command).
+        "command": bool(task.pending_text) and task.pending_command,
+        # Kvist starts without what the cloud runs itself or the plan does not include (commands.py).
+        "commands_off": commands.commands_off(plan.id),
         "repo_url": task.repo_url,
         "github_token": app.state.vault.decrypt(user.github_token_enc) if user.github_token_enc else "",
         "resume": task.resume_requested,
@@ -348,7 +352,7 @@ async def _undelivered(app: FastAPI, machine_id: int, message: dict) -> None:
         text = str(message.get("text") or "")
         if task is None or not text:
             return
-        tasks.restart_with(db, task, text)
+        tasks.restart_with(db, task, text, bool(message.get("command")))
         app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
     await dispatch(app, machine_id)
 

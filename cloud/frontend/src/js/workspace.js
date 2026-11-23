@@ -6,7 +6,7 @@ import { h } from "./dom.js";
 export const NEED_KEY_PATH = "/settings?need=key";
 
 export function workspaceLink(className, text, navigate) {
-  const link = h(`a.${className}`, { href: "/pixel/", text });
+  const link = h(`a.${className}`, { href: "/workspace/", text });
   link.addEventListener("click", async (event) => {
     // A modified click keeps its usual meaning (new tab).
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
@@ -14,7 +14,7 @@ export function workspaceLink(className, text, navigate) {
     const key = await api("/api/model-key").catch(() => null);
     // Unknown (the request failed) is let through: the workspace says the same thing itself.
     if (key && !key.set) navigate(NEED_KEY_PATH);
-    else location.assign("/pixel/");
+    else location.assign("/workspace/");
   });
   return link;
 }

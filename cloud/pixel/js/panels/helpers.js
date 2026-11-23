@@ -1,13 +1,13 @@
 // What the helpers are doing: one card each, its task, its last calls live.
 
-import { fill, h, icon } from "../dom.js";
+import { fill, h, icon, spinner } from "../dom.js";
 import { t } from "../i18n.js";
 
 const LIVE = new Set(["starting", "running", "paused"]);
 
 function activityRow(entry) {
   const state = entry.phase === "step" ? "run" : entry.ok === false ? "fail" : "ok";
-  return h("div", { class: `activity ${state}` }, state === "run" ? h("span", { class: "spin" }) : h("span", { class: `mark ${state}` }, state === "ok" ? "✓" : "✕"), h("span", { class: "activity-label" }, entry.label), entry.summary ? h("span", { class: "activity-summary" }, entry.summary) : null);
+  return h("div", { class: `activity ${state}` }, state === "run" ? spinner() : h("span", { class: `mark ${state}` }, state === "ok" ? "✓" : "✕"), h("span", { class: "activity-label" }, entry.label), entry.summary ? h("span", { class: "activity-summary" }, entry.summary) : null);
 }
 
 function card(helper) {

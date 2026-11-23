@@ -111,3 +111,18 @@ def test_the_real_core_serves_what_the_manifest_calls_its_own():
 
     assert claimed <= {*STDIO_COMMANDS, "resume"}
     assert {"models", "session", "provider", "memory", "permissions", "doctor", "machines", "remote"} <= claimed
+
+
+def test_commands_turned_off_are_neither_offered_nor_served():
+    """A host that manages some commands itself (Kvist Cloud) turns them off with --commands-off."""
+    from kernel.main import served_commands
+
+    table = served_commands(" provider, /full-reset ,update")
+    assert not {"provider", "full-reset", "update"} & set(table)
+    assert {"memory", "context"} <= set(table)
+
+    manifest = build_manifest(commands=sorted({*table, "resume"}))
+    offered = {entry["name"] for entry in manifest["slash_commands"] if entry.get("via") == "core"}
+    assert "provider" not in offered and "full-reset" not in offered
+    assert "memory" in offered
+    assert served_commands("") == served_commands(",")

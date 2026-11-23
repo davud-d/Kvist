@@ -56,15 +56,17 @@ impl CodeBlock {
         }
     }
 
-    /// Adds the lines that begin at `line` of `field`; line 0 starts it over
-    /// (the request was retried), and lines that do not follow on are dropped.
+    /// Adds the words that begin on `line` of `field`; pieces that do not follow
+    /// on are dropped. Every piece of the first line says line 0, so line 0
+    /// starts the field over (the request was retried) only once the text has
+    /// gone past the first line.
     pub fn feed(&mut self, field: &str, line: u32, text: &str) {
         let index = self.fields.iter().position(|(name, _)| name == field).unwrap_or_else(|| {
             self.fields.push((field.into(), String::new()));
             self.fields.len() - 1
         });
         let have = &mut self.fields[index].1;
-        if line == 0 {
+        if line == 0 && have.contains('\n') {
             have.clear();
         }
         if line as usize != have.matches('\n').count() {
@@ -259,6 +261,19 @@ mod tests {
         block.feed("content", 0, "z\n");
         block.rebuild(60);
         assert_eq!(block.rows_total(), 1);
+    }
+
+    #[test]
+    fn words_of_the_first_line_add_up_instead_of_starting_over() {
+        let now = Instant::now();
+        let mut block = CodeBlock::new("c1", "write_file", "notes.md");
+        block.feed("content", 0, "# Cloud ");
+        block.feed("content", 0, "notes\n\nFirst ");
+        block.feed("content", 2, "line\n");
+        open(&mut block, now);
+        let lines = block.lines(60, now);
+        assert!(plain(&lines[1]).contains("# Cloud notes"), "{}", plain(&lines[1]));
+        assert!(plain(&lines[3]).contains("First line"));
     }
 
     #[test]

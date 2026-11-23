@@ -2,10 +2,11 @@
 // bridge and feed what comes back into the store.
 
 import * as bridge from "./bridge.js";
-import { account, api, cannotRun, projectUrl, refreshKey, refreshTasks, sessionUrl, titleOf } from "./cloud.js";
+import { account, api, cannotRun, projectUrl, refreshKey, refreshTasks, sessionUrl, titleOf, workspaceOf } from "./cloud.js";
 import { t } from "./i18n.js";
 import { addNote, beginTurn, clearFeed, createAgent, replayHistory } from "./reducer.js";
-import { addAgent, announce, dispatch, removeAgent, setActive, setPref, store } from "./store.js";
+import { askToNotify } from "./notify.js";
+import { addAgent, announce, dispatch, removeAgent, setActive, setMode, setPref, store } from "./store.js";
 import { toast } from "./views/toast.js";
 
 const ready = new Map();
@@ -25,14 +26,29 @@ function newId() {
   return `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+const TASK_CHANGES = new Set(["cloud_task", "session", "final", "turn_end", "input_request", "task_state"]);
+// A burst of events (a turn ending) asks the server once.
+const REFRESH_DELAY_MS = 800;
+let refreshTimer = null;
+
+function refreshTasksSoon() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refreshTasks();
+  }, REFRESH_DELAY_MS);
+}
+
 export function startListening() {
   bridge.onCore(({ agent: id, event }) => {
     dispatch(id, event);
     if (event.type === "hello") ready.get(id)?.();
     const agent = store.agents.get(id);
-    if (agent && ["session", "cloud_task"].includes(event.type) && store.prefs.expanded.includes(agent.workspace)) refreshSessions(agent.workspace);
+    // The task list is what the home screen and the dots read; these events change a task's status there.
+    if (TASK_CHANGES.has(event.type)) refreshTasksSoon();
     // The first message gives the draft its session id: the address becomes the session's own.
-    if (agent && event.type === "cloud_task" && id === store.activeId) syncAddress(agent);
+    // Only while the task is on screen: the person may already be back home, and that address must stay.
+    if (agent && event.type === "cloud_task" && id === store.activeId && store.mode === "chat") syncAddress(agent);
   });
 }
 
@@ -54,16 +70,10 @@ export async function refreshSessions(workspace) {
   announce({ kind: "structure" });
 }
 
-export function toggleProject(workspace) {
-  const open = store.prefs.expanded.includes(workspace);
-  setPref("expanded", open ? store.prefs.expanded.filter((w) => w !== workspace) : [...store.prefs.expanded, workspace]);
-  if (!open) refreshSessions(workspace);
-}
-
-/** A project (by id) opens on the rail and gets a draft task to write in. */
+/** A new project becomes where the next task goes, and the home screen is where it is written. */
 export function addProject(workspace) {
-  if (!store.prefs.expanded.includes(workspace)) setPref("expanded", [...store.prefs.expanded, workspace]);
-  return newAgent(workspace);
+  setPref("project", workspace);
+  goHome();
 }
 
 /** A stored task: the agent that already shows it, or one made for it (its stream opens on first use). */
@@ -121,7 +131,7 @@ export async function loadHistory(agent) {
 }
 
 /** The address that shows this agent: its session's own, or the project it is a draft in. */
-export const addressOf = (agent) => (agent.publicId ? sessionUrl(agent.publicId) : agent.workspace ? projectUrl(agent.workspace) : "/pixel/");
+export const addressOf = (agent) => (agent.publicId ? sessionUrl(agent.publicId) : agent.workspace ? projectUrl(agent.workspace) : "/workspace/");
 
 /** The address bar follows what is in front, so a link to it works anywhere; back and forward move between them. */
 export function syncAddress(agent, { push = false } = {}) {
@@ -131,8 +141,47 @@ export function syncAddress(agent, { push = false } = {}) {
   history[push ? "pushState" : "replaceState"](null, "", address);
 }
 
+/** A task comes into focus: the whole stage is its. */
 export async function activate(id) {
   setActive(id);
+  setMode("chat");
+}
+
+/** A task from the cloud's list (home screen, task search): its agent, made on first use. */
+export async function openTask(task) {
+  const workspace = workspaceOf(task);
+  refreshSessions(workspace);
+  await openSession(workspace, String(task.id), titleOf(task), task.public_id);
+  announce({ kind: "agent", id: store.activeId });
+}
+
+/** Back to the home screen; the open tasks keep running and keep their place. */
+export function goHome() {
+  setMode("home");
+  history.pushState(null, "", store.prefs.project ? projectUrl(store.prefs.project) : "/workspace/");
+}
+
+/**
+ * A new task from the home screen: a draft in the chosen project gets the words and comes into focus. False
+ * (and the words stay where they were typed) when the account cannot run it yet or there is no project.
+ */
+export async function startTask(workspace, text) {
+  if (!workspace) {
+    explain("no_project");
+    return false;
+  }
+  askToNotify();
+  const problem = cannotRun(account);
+  if (problem) {
+    explain(problem);
+    return false;
+  }
+  const draft = [...store.agents.values()].find((agent) => agent.workspace === workspace && !agent.session && !agent.items.length);
+  const agent = draft ?? newAgent(workspace);
+  await activate(agent.id);
+  const sent = await sendGoal(agent, text);
+  if (sent) refreshTasks();
+  return sent;
 }
 
 export async function closeTab(id) {
@@ -150,6 +199,50 @@ function explain(problem) {
   else location.assign(problem === "no_subscription" ? "/start" : "/dashboard");
 }
 
+// Commands of Kvist's that the page runs itself: the cloud owns what they change (the model key and the model, the
+// effort it starts Kvist with, the task's name), so its Kvist is started without them (backend commands.py).
+// `task`: needs a task to act on, so the home field does not offer it.
+const PAGE_RUNS = {
+  provider: { task: false, run: () => openModelPicker() },
+  models: { task: false, run: () => openModelPicker() },
+  "change-api": { task: false, run: () => openKeyDialog() },
+  effort: { task: false, run: (_agent, args) => effortCommand(args[0]?.toLowerCase()) },
+  rename: { task: true, run: (agent, args) => (args.length ? renameTask(agent, args.join(" ")) : toast(t("rename usage"), "error")) },
+  new: { task: true, run: () => goHome() },
+};
+export const PAGE_COMMANDS = new Set(Object.keys(PAGE_RUNS));
+/** The page's own commands that make sense with no task (the home field). */
+export const pageCommandWithoutTask = (name) => PAGE_RUNS[name]?.task === false;
+
+// The model picker is in the field the command was typed into, the home one or a task's.
+function openModelPicker() {
+  document.dispatchEvent(new CustomEvent("kvist:model-picker"));
+}
+
+const parseCommand = (text) => {
+  const found = text.trim().match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
+  return found ? { name: found[1].toLowerCase(), args: (found[2] ?? "").split(/\s+/).filter(Boolean) } : null;
+};
+
+/**
+ * A command the page runs itself (`/effort high`, `/provider`), where it is typed. True when `text` was one;
+ * `agent` is the task it was typed in, or null in the home field.
+ */
+export async function pageCommand(text, agent = null) {
+  const command = parseCommand(text);
+  const page = command && PAGE_RUNS[command.name];
+  if (!page || (page.task && !agent)) return false;
+  await page.run(agent, command.args);
+  return true;
+}
+
+/** True when `name` is a command Kvist carries out for this task (its manifest, less what the cloud takes away). */
+function kvistCommand(agent, name) {
+  const manifest = agent.manifest ?? account.commands.manifest;
+  const entry = manifest?.slash_commands?.find((command) => command.name === name);
+  return Boolean(entry && entry.via === "core" && !account.commands.hidden.includes(name));
+}
+
 /**
  * The first message starts the task; every later one goes into the same conversation (the cloud starts the agent
  * again if it had stopped, or queues the message if it is busy). The person's words reach the feed from the
@@ -158,18 +251,11 @@ function explain(problem) {
 export async function sendGoal(agent, text) {
   const line = text.trim();
   if (!line || agent.state === "gone") return false;
-  // The one slash command with a meaning here; anything else is words for the agent, as in the desktop app.
-  const effort = line.match(/^\/effort(?:\s+(\S+))?$/i);
-  if (effort) {
-    await effortCommand(effort[1]?.toLowerCase());
-    return true;
-  }
-  const rename = line.match(/^\/rename(?:\s+(.+))?$/i);
-  if (rename) {
-    if (!rename[1]) toast(t("rename usage"), "error");
-    else await renameTask(agent, rename[1]);
-    return true;
-  }
+  // Still inside the person's click or key: the only moment a browser lets a page ask.
+  if (!line.startsWith("/")) askToNotify();
+  if (await pageCommand(line, agent)) return true;
+  const command = parseCommand(line);
+  if (command && kvistCommand(agent, command.name)) return runKvistCommand(agent, command);
   // A task lives in a project (a folder on the server); a draft with none cannot start.
   const problem = !agent.session && !agent.workspace ? "no_project" : cannotRun(account);
   if (problem) {
@@ -185,7 +271,8 @@ export async function sendGoal(agent, text) {
     else if (error.code === "no_subscription") location.assign("/start");
     return false;
   }
-  if (agent.state !== "running") beginTurn(agent);
+  // The cloud's own "task started" news can mark the task running first; the turn's clock starts here all the same.
+  if (!agent.turn.startedAt) beginTurn(agent);
   announce({ kind: "agent", id: agent.id });
   return true;
 }
@@ -194,14 +281,32 @@ export async function sendGoal(agent, text) {
 export const EFFORT_LEVELS = ["false", "low", "medium", "high", "xhigh", "max"];
 export const effortNow = () => account.key?.effort || "medium";
 
-export async function setEffort(level) {
+/** `quiet` is for the dial: it already shows the level, so only a failure is worth a toast. */
+export async function setEffort(level, { quiet = false } = {}) {
   try {
     await api("/api/effort", { method: "PUT", body: { level } });
     await refreshKey();
-    toast(`${t("effort")}: ${level} — ${t("effort from next message")}`);
+    if (!quiet) toast(`${t("effort")}: ${t(`effort ${level}`)} — ${t("effort from next message")}`);
   } catch (error) {
     toast(error.localized ?? String(error), "error");
   }
+}
+
+/** One of Kvist's commands, run in the task's conversation; its dialogs come as the task's questions. */
+async function runKvistCommand(agent, command) {
+  if (!agent.session && !agent.cloud) {
+    toast(t("command needs task"), "error");
+    return false;
+  }
+  try {
+    await bridge.sendToAgent(agent.id, { type: "command", name: command.name, args: command.args });
+  } catch (error) {
+    toast(error.localized ?? String(error), "error");
+    return false;
+  }
+  if (!agent.turn.startedAt) beginTurn(agent);
+  announce({ kind: "agent", id: agent.id });
+  return true;
 }
 
 /** `/effort` alone says where it stands; `/effort high` sets it. */
@@ -236,7 +341,10 @@ export async function renameTask(agent, title) {
 
 /** The only commands the cloud has: another task, and continuing a paused one. */
 export async function runCommand(agent, name) {
-  if (name === "new") return newAgent(agent.workspace || String(account.projects[0]?.id ?? ""));
+  if (name === "new") {
+    if (agent.workspace) setPref("project", agent.workspace);
+    return goHome();
+  }
   if (name === "resume" && agent.cloud?.status === "paused") {
     return bridge.sendToAgent(agent.id, { type: "command", name: "resume" }).catch((error) => toast(error.localized ?? String(error), "error"));
   }

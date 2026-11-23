@@ -2,6 +2,8 @@
 // headings, lists, quotes, fenced code, inline code, bold, italics and links.
 // Everything is escaped first; the only tags in the output are ours.
 
+import { familyOf, highlightLine } from "./highlight.js";
+
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
 export function escapeHtml(text) {
@@ -119,7 +121,9 @@ function renderBlocks(source) {
       const body = [];
       for (i += 1; i < lines.length && !/^\s*```\s*$/.test(lines[i]); i++) body.push(lines[i]);
       const lang = fence[1] ? ` data-lang="${escapeHtml(fence[1])}"` : "";
-      out.push(`<pre class="md-pre"${lang}><code>${escapeHtml(body.join("\n"))}</code></pre>`);
+      // highlightLine escapes every character itself and adds only its own spans.
+      const family = familyOf(fence[1]);
+      out.push(`<pre class="md-pre"${lang}><code>${body.map((line) => highlightLine(line, family)).join("\n")}</code></pre>`);
       continue;
     }
     if (!line.trim()) {

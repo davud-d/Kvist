@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -297,3 +298,75 @@ def test_project_folders_are_plain_names():
     for bad in ("", ".", "..", "a/b", "../x", "a\\b", "a\0b"):
         with pytest.raises(WorkspaceError):
             project_dir(tmp, bad)
+
+
+async def test_a_command_runs_in_the_conversation_and_ends_the_run(tmp_path):
+    """`/memory list` is Kvist's command, not words: it runs and its command_result ends the run like a turn."""
+    recorder = Recorder()
+    task = make(tmp_path, "/memory list", recorder)
+    task.command = True
+    await run(task)
+    results = recorder.events("command_result")
+    assert [(r["name"], r["ok"], r["message"]) for r in results] == [("memory", True, "ran memory list")]
+    assert recorder.exit()["reason"] == "finished"
+
+
+async def test_what_the_cloud_turned_off_is_turned_off_in_kvist(tmp_path):
+    recorder = Recorder()
+    task = make(tmp_path, "/provider", recorder)
+    task.command = True
+    task.commands_off = ["provider", "full-reset"]
+    await run(task)
+    assert [(r["name"], r["ok"]) for r in recorder.events("command_result")] == [("provider", False)]
+
+
+async def test_a_command_for_a_running_agent_is_written_to_it(tmp_path):
+    """While Kvist is up (a turn, or background work) the command goes to it, and the run waits for its result."""
+    recorder = Recorder()
+    task = make(tmp_path, "bg 1", recorder, background_seconds=30.0)
+    running = asyncio.create_task(run(task))
+    for _ in range(200):
+        if task.accepts_goals and recorder.events("job_started"):
+            break
+        await asyncio.sleep(0.02)
+    assert await task.follow_up("/context", command=True)
+    await running
+    assert ("context", True) in [(r["name"], r["ok"]) for r in recorder.events("command_result")]
+
+
+async def test_a_command_during_a_turn_waits_for_the_turn_to_end(tmp_path):
+    """Kvist takes a command only between turns, so one sent mid-turn is held and written after turn_end."""
+    recorder = Recorder()
+    task = make(tmp_path, "slow 1", recorder)
+    running = asyncio.create_task(run(task))
+    for _ in range(200):
+        if task.accepts_goals:
+            break
+        await asyncio.sleep(0.02)
+    assert await task.follow_up("/context", command=True)
+    assert task._held == ["/context"]
+    await running
+    kinds = [m["event"]["type"] for m in recorder.messages if m["type"] == "event"]
+    assert kinds.index("command_result") > kinds.index("turn_end")
+    assert [(r["name"], r["ok"]) for r in recorder.events("command_result")] == [("context", True)]
+
+
+async def test_the_end_of_a_thought_carries_its_words_for_the_history(tmp_path):
+    recorder = Recorder()
+    task = make(tmp_path, "quick", recorder)
+    for line in (
+        {"type": "reasoning_start", "stream_id": "s1"},
+        {"type": "reasoning_chunk", "stream_id": "s1", "text": "Which ", "append": True},
+        {"type": "reasoning_chunk", "stream_id": "s1", "text": "file?", "append": True},
+        {"type": "reasoning_commit", "stream_id": "s1", "duration_seconds": 3},
+        # An older core sends the whole thought so far in each piece.
+        {"type": "reasoning_chunk", "stream_id": "s2", "text": "one"},
+        {"type": "reasoning_chunk", "stream_id": "s2", "text": "one two"},
+        {"type": "reasoning_commit", "stream_id": "s2", "duration_seconds": 1},
+        # A thought with no words (a model that hides them) ends as it was.
+        {"type": "reasoning_commit", "stream_id": "s3", "duration_seconds": 2},
+    ):
+        await task._handle_line(json.dumps(line).encode())
+    commits = recorder.events("reasoning_commit")
+    assert [commit.get("text") for commit in commits] == ["Which file?", "one two", None]
+    assert task._thoughts == {}

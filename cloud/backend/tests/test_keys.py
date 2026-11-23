@@ -358,3 +358,36 @@ def test_bad_headers_are_refused_before_anything_is_called(client_factory):
                                                  "headers": {"Authorization": "Bearer stolen"}})
     assert answer.status_code == 400 and answer.json()["error"]["code"] == "bad_headers"
     assert called == []
+
+
+# -- switching the model of the saved key -------------------------------------------------------------------
+
+def test_the_saved_key_lists_its_models_and_switches_between_them_with_a_check(client_factory):
+    from conftest import dev_login
+
+    seen: list = []
+
+    def gateway(request):
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(200, json={"data": [{"id": "m1"}, {"id": "models/m2"}]})
+
+    client = client_factory(gateway, AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    client.post("/api/model-key", json={"provider": "other", "key": KEY, "base_url": GATEWAY, "model": "m1"})
+    assert client.get("/api/model-catalog/saved").json() == {"models": ["m1", "m2"]}
+    switched = client.put("/api/model", json={"model": "m2"}).json()
+    assert switched["ok"] is True and switched["key"]["model"] == "m2"
+    assert client.put("/api/model", json={"model": "nope"}).json() == {"ok": False, "code": "model_not_found"}
+    assert client.get("/api/model-key").json()["model"] == "m2", "a refused model is not kept"
+    assert set(seen) == {f"Bearer {KEY}"}, "the saved key is the one used, and it never comes back to the page"
+
+
+def test_a_provider_that_picks_its_own_models_has_nothing_to_switch(client_factory):
+    from conftest import dev_login
+
+    client = client_factory(lambda request: httpx.Response(200, json={"is_available": True}), AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.get("/api/model-catalog/saved").json() == {"models": []}
+    client.post("/api/model-key", json={"provider": "deepseek", "key": KEY})
+    assert client.get("/api/model-catalog/saved").json() == {"models": []}
+    assert client.put("/api/model", json={"model": "deepseek-chat"}).json() == {"ok": False, "code": "model_fixed"}

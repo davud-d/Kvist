@@ -338,6 +338,13 @@ async def model_catalog(payload: CatalogIn, request: Request, user: User = Depen
         headers = clean_headers(payload.headers) if provider.needs_base_url else {}
     except ApiError:
         return {"models": []}
+    return {"models": await _list_models(request, provider, key, base_url, headers)}
+
+
+async def _list_models(
+    request: Request, provider: ModelProvider, key: str, base_url: str, headers: dict[str, str]
+) -> list[str]:
+    """The ids the provider's /models lists; empty when it lists none or does not answer."""
     try:
         async with await _provider_client(request, provider) as client:
             response = await client.get(
@@ -345,10 +352,61 @@ async def model_catalog(payload: CatalogIn, request: Request, user: User = Depen
                 headers={**with_session(headers), "Authorization": f"Bearer {key}"})
         data = response.json().get("data", []) if response.status_code == 200 else []
     except (httpx.HTTPError, ValueError, AttributeError):
-        return {"models": []}
+        return []
     # Some vendors list ids as "models/<id>".
     ids = {str(item.get("id")).removeprefix("models/") for item in data if isinstance(item, dict) and item.get("id")}
-    return {"models": sorted(ids)}
+    return sorted(ids)
+
+
+def _saved_access(request: Request, user: User) -> tuple[ModelProvider, str, str, dict[str, str]] | None:
+    """The saved provider, key, address and headers, when the saved provider lets the person pick a model."""
+    provider = PROVIDERS.get(user.model_provider)
+    if provider is None or provider.sign_in or not provider.needs_model or not user.model_key_enc:
+        return None
+    vault: Vault = request.app.state.vault
+    key = vault.decrypt(user.model_key_enc)
+    remember(key)
+    headers = json.loads(vault.decrypt(user.model_headers_enc)) if user.model_headers_enc else {}
+    return provider, key, user.model_base_url or provider.default_base_url, headers
+
+
+@router.get("/api/model-catalog/saved")
+async def saved_model_catalog(request: Request, user: User = Depends(current_user)) -> dict[str, object]:
+    """The models of the provider whose key is saved, so the model can be switched without pasting the key again."""
+    access = _saved_access(request, user)
+    if access is None:
+        return {"models": []}
+    provider, key, base_url, headers = access
+    if not base_url or endpoint_problem(base_url, request.app.state.settings.allow_local_endpoints):
+        return {"models": []}
+    return {"models": await _list_models(request, provider, key, base_url, headers)}
+
+
+class ModelIn(InputModel):
+    model: str = Field(min_length=1, max_length=200)
+
+
+@router.put("/api/model")
+async def set_model(
+    payload: ModelIn, request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    """Another model of the saved provider, checked with one cheap request the way a new key is."""
+    access = _saved_access(request, user)
+    if access is None:
+        return {"ok": False, "code": "model_fixed"}
+    provider, key, base_url, headers = access
+    allow_local = request.app.state.settings.allow_local_endpoints
+    problem = endpoint_problem(base_url, allow_local) if provider.needs_base_url else ""
+    if problem:
+        return {"ok": False, "code": problem}
+    model = payload.model.strip()
+    async with await _provider_client(request, provider) as client:
+        result = await check_key(client, user.model_provider, key, base_url, model, headers)
+    if not result.ok:
+        return {"ok": False, "code": result.code}
+    user.model_name = model
+    db.commit()
+    return {"ok": True, "code": "", "key": key_summary(user)}
 
 
 @router.get("/api/model-key")
