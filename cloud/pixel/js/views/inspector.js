@@ -10,7 +10,6 @@ import { active, setPref, store, subscribe } from "../store.js";
 export function mountInspector(root) {
   const tabs = h("div", { class: "tabs" });
   const body = h("div", { class: "inspector-body" });
-  root.setAttribute("aria-label", t("inspector"));
   root.append(h("div", { class: "inspector-inner" }, tabs, body));
   const seen = new Map();
 
@@ -34,7 +33,7 @@ export function mountInspector(root) {
     fill(tabs, 
       ...panels.map((panel) => {
         const count = agent ? panel.badge(agent) : "";
-        return h("button", { class: `tab${panel.id === current.id ? " on" : ""}`, type: "button", title: t(panel.title), "aria-label": t(panel.title), "aria-pressed": String(panel.id === current.id), onclick: () => setPref("inspectorTab", panel.id) }, icon(panel.icon, 14), count ? h("span", { class: "tab-badge" }, String(count)) : null);
+        return h("button", { class: `tab${panel.id === current.id ? " on" : ""}`, type: "button", title: t(panel.title), onclick: () => setPref("inspectorTab", panel.id) }, icon(panel.icon, 14), count ? h("span", { class: "tab-badge" }, String(count)) : null);
       }),
     );
     // Hours and the server belong to the account, not to a task, so they show with or without one.

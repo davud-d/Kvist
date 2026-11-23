@@ -59,7 +59,7 @@ function paintThought(el, item) {
   const label = item.live ? `${t("thinking")}` : item.seconds ? `${t("thought for")} ${Math.round(item.seconds)}s` : t("thought for");
   el.classList.toggle("live", item.live === true);
   const body = h("div", { class: "thought-body" }, item.text);
-  fill(el, h("div", { class: "thought-head" }, icon("chev", 10), h("span", {}, label)), body);
+  fill(el, h("div", { class: "thought-head" }, icon("chev", 10), h("span", {}, label), item.live ? h("span", { class: "dots" }) : null), body);
   if (item.live) body.scrollTop = body.scrollHeight;
 }
 
@@ -151,7 +151,7 @@ async function fold(el, item, box) {
   item.folded = true;
   if (box.isConnected) {
     box.style.overflow = "hidden";
-    await finished(animate(box, [{ height: `${box.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0, marginBottom: "0px" }], { ms: 180, fill: "forwards" }));
+    await finished(animate(box, [{ height: `${box.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0, marginBottom: "0px" }], { curve: "emphasized", ms: 360, fill: "forwards" }));
   }
   box.remove();
 }

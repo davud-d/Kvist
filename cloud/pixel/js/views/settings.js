@@ -1,9 +1,10 @@
-// The settings popover and the controls defined in settings-defs.js.
+// The settings popover: it grows out of the gear at the bottom left (a zoom
+// from that corner) and closes the same way. Rows come from settings-defs.js.
 
 import { onAccount } from "../cloud.js";
 import { fill, h } from "../dom.js";
 import { t } from "../i18n.js";
-import { animate, enter, finished } from "../motion.js";
+import { animate, finished } from "../motion.js";
 import { active, store, subscribe } from "../store.js";
 import { SETTINGS } from "./settings-defs.js";
 
@@ -15,7 +16,7 @@ const labelOf = (row) => (typeof row.label === "function" ? row.label() : t(row.
 function segment(row, agent) {
   const current = String(row.get(agent, store.prefs) ?? "");
   const options = row.options(agent);
-  return h("div", { class: `segment${row.compact ? " compact" : ""}` }, options.map((value) => h("button", { class: `seg${String(value) === current ? " on" : ""}`, type: "button", "aria-pressed": String(String(value) === current), onclick: () => row.set(agent, value) }, t(row.words?.[value] ?? String(value)))));
+  return h("div", { class: `segment${row.compact ? " compact" : ""}` }, options.map((value) => h("button", { class: `seg${String(value) === current ? " on" : ""}`, type: "button", onclick: () => row.set(agent, value) }, t(row.words?.[value] ?? String(value)))));
 }
 
 function slider(row, agent) {
@@ -29,7 +30,7 @@ function control(row, agent) {
   if (row.kind === "slider") return slider(row, agent);
   if (row.kind === "toggle") {
     const on = Boolean(row.get(agent, store.prefs));
-    return h("button", { class: `switch${on ? " on" : ""}`, type: "button", role: "switch", "aria-label": labelOf(row), "aria-checked": String(on), onclick: () => row.set(agent, !on) }, h("i"));
+    return h("button", { class: `switch${on ? " on" : ""}`, type: "button", role: "switch", "aria-checked": String(on), onclick: () => row.set(agent, !on) }, h("i"));
   }
   if (row.kind === "select") return h("select", { class: "field", onchange: (event) => row.set(agent, event.target.value) }, h("option", { value: "" }, "—"), row.options(agent).map((value) => h("option", { value }, value)));
   return h("button", { class: "btn", type: "button", onclick: () => { row.set(agent); closeSettings(); } }, labelOf(row));
@@ -68,7 +69,7 @@ export function closeSettings() {
   popover.off();
   document.removeEventListener("pointerdown", popover.outside, true);
   popover = null;
-  return finished(animate(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(4px)" }], { curve: "in", ms: 150, fill: "forwards" })).then(() => el.remove());
+  return finished(animate(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.9)" }], { curve: "in", ms: 150, fill: "forwards" })).then(() => el.remove());
 }
 
 export function toggleSettings(anchor) {
@@ -90,6 +91,7 @@ export function toggleSettings(anchor) {
   popover = { el, off, outside };
   document.addEventListener("pointerdown", outside, true);
   el.addEventListener("keydown", (event) => event.key === "Escape" && closeSettings());
-  enter(el);
+  // It unfolds from the gear's corner: origin bottom-left, a soft overshoot.
+  animate(el, [{ opacity: 0, transform: "scale(0.82) translateY(12px)" }, { opacity: 1, transform: "none" }], { spring: "bouncy" });
   return undefined;
 }

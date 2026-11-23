@@ -1,15 +1,16 @@
-# Kvist Cloud workspace
+# Kvist Pixel on the cloud
 
 *(Русская версия: [README.ru.md](README.ru.md))*
 
-`cloud/frontend/build.mjs` copies the workspace to `dist/pixel/`. The server serves it at **`/pixel/`**.
-Each session has its own address, `/pixel/s/<id>`, which only its owner can open.
+The pixel-game window of [Kvist Pixel (Tauri)](../../frontends/gui/tauri/README.md), copied here and changed
+only where the cloud has different data. It is plain files, no bundler: `cloud/frontend/build.mjs` copies it to
+`dist/pixel/` and the server serves it at **`/pixel/`** (the old pages stay as they are; the header has a "Workspace"
+link). Every session has its own address, `/pixel/s/<id>` (an opaque id), so a link opens it; only its owner can open it.
 
-Choose **System**, **Light**, or **Dark** in the top bar. Settings also let you turn animations off. The workspace
-honors the system's reduced-motion preference. On narrow screens, open projects or task details from the top bar.
-The examples on a new task put editable text into the composer. Send it when it is ready.
+## What is the same
 
-The workspace uses the same Kvist events as the desktop app for the conversation, dialogs and Markdown/KaTeX.
+The reducer, feed, dialogs, themes, squirrel, motion and markdown/KaTeX are the desktop app's own. They work
+unchanged because the cloud relays Kvist's events as they are (`cloud/docs/ARCHITECTURE.md`, "A task").
 
 ## What is cloud data now
 
@@ -45,6 +46,6 @@ admin and a signed-out visitor all get "not found"). Details and tests: `cloud/d
 
 `js/cloud.js` the account (hours, server, key, tasks) and the page's pure helpers · `js/bridge.js` the only place
 that talks to the cloud (HTTP and the task's WebSocket) · `js/panels/` the inspector's tabs · `css/cloud.css`
-cloud status, usage and responsive utilities · `tests/` the pure logic (`node --test "tests/*.test.mjs"`).
+what the cloud adds · `tests/` the pure logic (`node --test "tests/*.test.mjs"`).
 
 Fonts and KaTeX are the desktop app's: see [THIRD_PARTY.md](THIRD_PARTY.md).

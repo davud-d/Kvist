@@ -41,9 +41,7 @@ function bar(item) {
 
 export function mountNotices(root) {
   redraw = frameThrottle(() => {
-    const agent = active();
-    const shown = warnings(account, agent, found)
-      .filter((item) => !dismissed.has(item.id) && (agent || item.id !== "no-projects"));
+    const shown = warnings(account, active(), found).filter((item) => !dismissed.has(item.id));
     fill(root, shown.map(bar));
   });
   subscribe(redraw);

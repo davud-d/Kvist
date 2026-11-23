@@ -35,8 +35,6 @@ function sessionRow(project, session) {
 
 function paintProject(el, project) {
   el.classList.toggle("open", project.open);
-  el.querySelector(".proj-head").setAttribute("aria-expanded", String(project.open));
-  el.querySelector(".proj-body").inert = !project.open;
   const chev = icon("chev", 12);
   chev.classList.add("chev");
   fill(
@@ -69,10 +67,10 @@ function workspaces() {
 
 export function mountDock(root) {
   const list = h("div", { class: "tree" });
-  const add = h("button", { class: "btn primary wide", type: "button" }, icon("plus", 14), h("span", {}, t("add project")));
+  const add = h("button", { class: "btn wide", type: "button" }, icon("plus", 14), h("span", {}, t("add project")));
   const gear = h("button", { class: "btn wide", type: "button", title: t("settings"), "aria-haspopup": "dialog" }, icon("gear", 16), h("span", {}, t("settings")));
-  root.setAttribute("aria-label", t("projects"));
-  root.append(add, h("div", { class: "section-label" }, t("projects")), list, h("div", { class: "dock-foot" }, gear));
+  root.classList.add("px");
+  root.append(h("div", { class: "section-label" }, t("projects")), list, h("div", { class: "dock-foot" }, add, gear));
 
   add.addEventListener("click", openProjectDialog);
   gear.addEventListener("click", () => toggleSettings(gear));
@@ -81,7 +79,7 @@ export function mountDock(root) {
     key: (project) => project.workspace,
     make: makeProject,
     update: paintProject,
-    onEnter: (el) => enter(el, { from: "translateX(-4px)" }),
+    onEnter: (el) => enter(el, { from: "translateX(-12px)" }),
     // A cheap fingerprint: what the rows show, so an unchanged folder is not repainted.
     rev: (project) => JSON.stringify([project.name, project.open, project.running, project.draftActive, project.sessions.map((s) => [s.session, s.publicId, s.title, s.state, s.active, s.attention, s.closed])]),
   });
