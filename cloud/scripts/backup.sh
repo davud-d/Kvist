@@ -44,3 +44,5 @@ backup_data() {
 
 "backup_$KIND"
 echo "ok: $KIND-$STAMP"
+# A quiet tick for every backup that went through; a failure says what broke instead (alert).
+telegram "✅"

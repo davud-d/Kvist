@@ -85,6 +85,11 @@ systemctl enable --now kvist-backup-check.timer kvist-backup-verify.timer
 Для оповещений впиши `ALERT_URL=…` (адрес для POST, например тема ntfy) в оба файла `backup.env`. Без него сбои
 попадают только в журнал; в systemd их показывает и `systemctl --failed`.
 
+Telegram: впиши `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` и короткую метку `TELEGRAM_LABEL` («prod», «backup») в оба
+файла (`backup.env` на продакшене, `backup-host.env` на бэкап-сервере). Каждый прошедший бэкап присылает «✅»;
+сбой — «❌ <метка>: что сломалось», и так же бэкап-сервер, когда последний архив слишком старый. Токен живёт только
+в этих файлах, не в репозитории; curl получает его через stdin, поэтому в списке процессов его не видно.
+
 ## Восстановление
 
 `restore.sh` читает тот же файл `KVIST_BACKUP_ENV` (по умолчанию `/etc/kvist-cloud/backup.env`).

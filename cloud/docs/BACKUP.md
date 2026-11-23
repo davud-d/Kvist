@@ -86,6 +86,11 @@ systemctl enable --now kvist-backup-check.timer kvist-backup-verify.timer
 For alerts, put `ALERT_URL=…` (a POST endpoint, e.g. an ntfy topic) in both `backup.env` files. Without it,
 failures only reach the journal; with systemd, `systemctl --failed` shows them too.
 
+Telegram: set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and a short `TELEGRAM_LABEL` ("prod", "backup") in both
+files (production's `backup.env`, the backup host's `backup-host.env`). Every backup that went through sends "✅";
+a failure sends "❌ <label>: what broke", and so does the backup host when the newest archive is too old. The token
+stays in those files, never in the repository; it reaches curl on stdin, so the process list does not show it.
+
 ## Restore
 
 `restore.sh` reads the same `KVIST_BACKUP_ENV` file (default `/etc/kvist-cloud/backup.env`).

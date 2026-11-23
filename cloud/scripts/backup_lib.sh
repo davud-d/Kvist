@@ -4,9 +4,15 @@
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLOUD="$(dirname "$LIB_DIR")"
 
-die() { echo "error: $*" >&2; exit 1; }
+# Once alert_on_failure is on, a deliberate stop is a failure to report too: the ERR trap does not see `exit 1`.
+die() {
+    echo "error: $*" >&2
+    [[ -z "${ALERTING:-}" ]] || alert "$(basename "$0"): $*"
+    exit 1
+}
 
-# Loads the backup settings (BORG_REPO, BORG_PASSPHRASE, BORG_RSH, ALERT_URL). The file is ours, so it is sourced;
+# Loads the backup settings (BORG_REPO, BORG_PASSPHRASE, BORG_RSH, ALERT_URL, TELEGRAM_BOT_TOKEN,
+# TELEGRAM_CHAT_ID, TELEGRAM_LABEL). The file is ours, so it is sourced;
 # the passphrase in it is why it must not be readable by anyone else.
 load_backup_env() {
     local file="${KVIST_BACKUP_ENV:-/etc/kvist-cloud/backup.env}"
@@ -58,15 +64,28 @@ PY
 )"
 }
 
-# Writes to stderr (the journal) and, when ALERT_URL is set, POSTs the text there (an ntfy-style endpoint).
+# Sends one message to the Telegram chat when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set. The token goes to
+# curl on stdin, not on its command line, where any process on the host could read it. A message that cannot be
+# delivered is said in the journal and never fails the backup itself.
+telegram() {
+    [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]] || return 0
+    printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$TELEGRAM_BOT_TOKEN" |
+        curl -fsS -m 10 -K - --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" --data-urlencode "text=$1" >/dev/null ||
+        echo "warning: the Telegram message could not be delivered" >&2
+}
+
+# Writes to stderr (the journal) and, when set, to ALERT_URL (an ntfy-style endpoint) and to Telegram.
 alert() {
     echo "ALERT: $*" >&2
+    # The label says which side broke ("prod", "backup"); the machines' own names say little.
+    telegram "❌ ${TELEGRAM_LABEL:-$(hostname)}: $*"
     [[ -n "${ALERT_URL:-}" ]] || return 0
     curl -fsS -m 10 -d "$*" "$ALERT_URL" >/dev/null || echo "warning: the alert could not be delivered to ALERT_URL" >&2
 }
 
 # Needs `set -E` in the caller so the trap also covers functions.
 alert_on_failure() {
+    ALERTING=1
     # shellcheck disable=SC2064
     trap 'alert "kvist-cloud backup: $(basename "$0") failed at line $LINENO"' ERR
 }
