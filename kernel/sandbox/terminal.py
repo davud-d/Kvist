@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, Callable
 
@@ -875,8 +876,13 @@ class TerminalExecutor(
             secret_targets=secret_targets,
         )
         if context != expected_context:
+            changed = ", ".join(
+                field.name for field in fields(ExecutionContext)
+                if getattr(context, field.name) != getattr(expected_context, field.name)
+            )
             raise HardDenyError(
                 "Hard security denial: approved execution context changed before process creation"
+                f" (changed: {changed})"
             )
         missing = next(
             (binding.token for binding in bindings[: len(self._split_pipe_segments(command_snapshot))] if not binding.resolved_path),

@@ -32,6 +32,7 @@ from kernel.sandbox import terminal as terminal_module
 from kernel.sandbox.sandbox import resolve_bubblewrap_path, SandboxMode
 from kernel.sandbox.secret_paths import UnsafeSecretPathError, enumerate_secret_targets
 from kernel.sandbox.terminal import ApprovalRequiredError, HardDenyError, TerminalExecutor
+from kernel.sandbox.scratchpad import Scratchpad
 
 pytestmark = pytest.mark.slow
 
@@ -82,6 +83,27 @@ def _glob_reader(ws: Path, pattern_literal: str) -> None:
         "        pass\n",
         encoding="utf-8",
     )
+
+
+def test_changing_scratch_input_reports_the_changed_context(tmp_path, monkeypatch):
+    scratch = Scratchpad()
+    try:
+        log = scratch.ensure() / "service.log"
+        log.write_text("first\n", encoding="utf-8")
+        (tmp_path / "reader.py").write_text("import sys\nprint(open(sys.argv[1]).read())\n")
+        _write_policy_ask(tmp_path, ["python3 *"])
+        executor = TerminalExecutor(tmp_path, scratch=scratch)
+
+        def append_during_approval(command, reason):
+            with log.open("a", encoding="utf-8") as stream:
+                stream.write("second\n")
+            return True
+
+        executor._request_user_approval = append_during_approval
+        with pytest.raises(HardDenyError, match="changed: referenced_files"):
+            executor.run(["python3", "reader.py", str(log)])
+    finally:
+        scratch.clear()
 
 
 # ───────────────────────── CRITICAL-1: secret symlinks ───────────────────────
