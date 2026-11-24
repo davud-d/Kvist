@@ -53,6 +53,9 @@ class Server:
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
                 owner.seen.append((self.path, self.headers.get("Authorization")))
+                if self.headers.get("User-Agent", "").startswith("Python-urllib"):
+                    self.send_error(403)  # what Cloudflare does with urllib's own User-Agent
+                    return
                 target = directory / self.path.rsplit("/", 1)[-1]
                 if self.headers.get("Authorization") != f"Bearer {TOKEN}" or not target.is_file():
                     self.send_error(404)

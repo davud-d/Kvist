@@ -23,6 +23,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .config import RunnerConfig
 
+USER_AGENT = "kvist-runner/update"
 RELEASE_ID = re.compile(r"[0-9a-f]{16}")
 WHEEL_NAME = re.compile(r"[\w.+-]+\.whl")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -91,7 +92,8 @@ def _base_url(gateway_url: str) -> str:
 
 
 def _download(url: str, token: str, target: Path, sha256: str) -> None:
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    # Cloudflare in front of the server refuses urllib's own User-Agent (403), so the runner names itself.
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT})
     digest = hashlib.sha256()
     with urllib.request.urlopen(request, timeout=DOWNLOAD_SECONDS) as response, open(target, "wb") as out:  # noqa: S310
         while chunk := response.read(1 << 20):
