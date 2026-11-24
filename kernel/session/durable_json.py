@@ -330,7 +330,9 @@ def append_private_bytes(
     """
     target = validate_storage_path(path, boundary)
     with _exclusive_path_lock(target, boundary):
-        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND
+        # O_BINARY: in Windows' text mode every "\n" written becomes "\r\n", so bytes that already
+        # carry "\r\n" (a file moved into another) turn into "\r\r\n" and read back as a blank line.
+        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0)
         flags |= getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         try:

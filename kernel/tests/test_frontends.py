@@ -272,7 +272,8 @@ def test_find_node_prefers_the_installers_node_then_the_installed_one_then_path(
     monkeypatch.delenv("KVIST_NODE", raising=False)
     assert main.find_node() == on_path
 
-    installed = executable(tmp_path / "lib" / "node" / "bin" / "node")
+    # Node's Windows zip keeps node.exe at its root; the Unix tarballs keep it in bin/.
+    installed = executable(tmp_path / "lib" / "node" / ("node.exe" if os.name == "nt" else "bin/node"))
     monkeypatch.setattr(main.sys, "frozen", True, raising=False)
     monkeypatch.setattr(main.sys, "executable", str(tmp_path / "lib" / "kvist-core"))
     assert main.find_node() == installed
@@ -296,7 +297,7 @@ def test_find_node_prefers_the_node_packed_into_the_binary(monkeypatch, tmp_path
         return path
 
     on_path = node_at(tmp_path / "path" / "node", 0o755)
-    beside = node_at(tmp_path / "lib" / "node" / "bin" / "node", 0o755)
+    beside = node_at(tmp_path / "lib" / "node" / ("node.exe" if os.name == "nt" else "bin/node"), 0o755)
     # The archive did not keep the executable bit; find_node restores it.
     packed = node_at(tmp_path / "unpacked" / "node" / ("node.exe" if os.name == "nt" else "node"), 0o644)
     monkeypatch.setattr(shutil, "which", lambda name: str(on_path) if name == "node" else None)

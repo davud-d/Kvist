@@ -394,13 +394,10 @@ def _spawn_first_run(tmp_path: Path) -> _PtyChild:
     )
 
 
-def test_cli_pty_first_run_escape_goes_back_and_ctrl_c_in_the_picker_quits_with_130(tmp_path):
+def test_cli_pty_first_run_ctrl_c_in_the_picker_quits_with_130(tmp_path):
     child = _spawn_first_run(tmp_path)
     try:
-        child.wait_for("Open registration in browser", timeout=30)
-        child.settle()
-        child.send("\x1b")
-        child.wait_for("Select LLM Provider")
+        child.wait_for("Select LLM Provider", timeout=30)
         child.settle()
         child.send("\x03")
         assert child.wait() == 130
@@ -412,26 +409,10 @@ def test_cli_pty_first_run_escape_goes_back_and_ctrl_c_in_the_picker_quits_with_
         child.close()
 
 
-def test_cli_pty_first_run_ctrl_c_at_the_registration_dialog_quits(tmp_path):
-    child = _spawn_first_run(tmp_path)
-    try:
-        child.wait_for("Open registration in browser", timeout=30)
-        child.settle()
-        child.send("\x03")
-        assert child.wait() == 130
-        assert "Setup cancelled. Run kvist again to continue." in child.visible()
-        assert not (tmp_path / "home" / ".kvist" / "config.json").exists()
-    finally:
-        child.close()
-
-
 def test_cli_pty_first_run_ctrl_c_in_the_key_prompt_quits(tmp_path):
     child = _spawn_first_run(tmp_path)
     try:
-        child.wait_for("Open registration in browser", timeout=30)
-        child.settle()
-        child.send("\x1b")
-        child.wait_for("Select LLM Provider")
+        child.wait_for("Select LLM Provider", timeout=30)
         child.settle()
         child.send("\r")
         child.wait_for("OpenAI API key")

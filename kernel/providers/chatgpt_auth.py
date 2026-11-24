@@ -16,7 +16,9 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from kernel.lazy import lazy_import
 
 httpx = lazy_import("httpx")
-import jwt
+# Lazy: jwt pulls in cryptography, and agent_model imports this module at start-up, where the Intel
+# macOS binary's bundled libssl cannot load it.
+jwt = lazy_import("jwt")
 
 from kernel.config.user_config import _update_user_config, load_user_config
 from kernel.providers.chatgpt_endpoints import (  # noqa: F401 - re-exported for callers of this module

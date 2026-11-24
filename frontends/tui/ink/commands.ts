@@ -26,6 +26,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "role", route: "core", hint: "Agent role: auto, coder, reader, devops, chat, universal" },
   { name: "effort", route: "core", hint: "Reasoning effort: false … max" },
   { name: "models", route: "core", hint: "Pick the fast and smart models" },
+  { name: "mode", route: "core", hint: "File edits: manual asks first, accept_edits does not" },
   { name: "web-search-provider", route: "core", hint: "Web search provider and its API key" },
   { name: "style", route: "core", hint: "Working style of the agent and the chat" },
   { name: "verbose", route: "core", hint: "Toggle verbose mode (on | off)" },

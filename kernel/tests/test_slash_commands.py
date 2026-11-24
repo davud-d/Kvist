@@ -45,12 +45,12 @@ def test_empty_slash_lists_every_canonical_command_with_description():
 
 
 def test_completion_filters_case_insensitively():
-    assert _completion_rows("/mo") == [
-        ("/models", "Select fast and smart models")
+    expected = [
+        ("/models", "Select fast and smart models"),
+        ("/mode", "Choose manual mode or accept edits mode (file changes go through unasked)"),
     ]
-    assert _completion_rows("/MO") == [
-        ("/models", "Select fast and smart models")
-    ]
+    assert _completion_rows("/mo") == expected
+    assert _completion_rows("/MO") == expected
     assert _completion_rows("/ver") == [
         ("/verbose", "Enable or disable verbose runtime output")
     ]
