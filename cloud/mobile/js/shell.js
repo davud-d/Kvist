@@ -9,6 +9,11 @@ import { dialogFor } from "./dialogs.js";
 import { fill, h, icon } from "./dom.js";
 import { createDrawer } from "./drawer.js";
 import { createFeed, working } from "./feed.js";
+import { createStatus } from "./status.js";
+import { providerMark } from "./mark.js";
+import { effortSheet, effortOf } from "./sheets/effort.js";
+import { imageGoal } from "./attachments.js";
+import { openPopover } from "./popover.js";
 import { clock, titleOf } from "./format.js";
 import { homeView } from "./home.js";
 import { t } from "./i18n.js";
@@ -33,23 +38,25 @@ function fixFor(code) {
 export function startShell(root, { go, onAuth }) {
   const feedEl = h("main", { class: "feed", id: "feed" });
   const jump = h("button", { class: "jump hidden", type: "button", aria: { label: t("latest") } }, icon("arrow-down", 18));
-  const chat = createChat(feedEl, jump);
+  const status = createStatus();
+  const chat = createChat(feedEl, jump, status.node);
   const homeEl = h("div", { class: "home-wrap" });
   feedEl.prepend(homeEl);
 
-  const composer = createComposer({ onSend: (text) => send(text), onStop: () => pause() });
+  const chips = h("div", { class: "chips" });
+  const composer = createComposer({ onSend: (text, images) => send(text, images), onStop: () => pause(), chips, onPlus: (anchor) => plusMenu(anchor) });
   const bannerEl = h("div", { class: "banner-slot" });
-  const statusEl = h("div", { class: "status-line", role: "status" });
   const dialogEl = h("div", { class: "dialog-slot" });
-  const dock = h("footer", { class: "dock" }, bannerEl, statusEl, dialogEl, composer.node);
+  const dock = h("footer", { class: "dock" }, bannerEl, dialogEl, composer.node);
 
   const title = h("div", { class: "t1" });
-  const subtitle = h("div", { class: "t2" });
-  const more = h("button", { class: "icon-btn", type: "button", aria: { label: t("more") }, onclick: () => sessionMenu() }, icon("more", 22));
+  const menuDot = h("i", { class: "dot", hidden: true });
   const bar = h("header", { class: "bar" },
-    h("button", { class: "icon-btn", type: "button", aria: { label: t("sessions") }, onclick: () => drawer.open() }, icon("menu", 22)),
-    h("div", { class: "bar-title" }, title, subtitle),
-    more);
+    h("button", { class: "glass-btn", type: "button", aria: { label: t("sessions") }, onclick: () => drawer.open() }, icon("menu", 20), menuDot),
+    h("div", { class: "bar-title" }, title),
+    h("div", { class: "glass-pill" },
+      h("button", { type: "button", aria: { label: t("new session") }, onclick: () => go("/m/") }, icon("new-chat", 20)),
+      h("button", { type: "button", aria: { label: t("more") }, onclick: () => sessionMenu() }, icon("more", 20))));
 
   const drawer = createDrawer({
     onNew: () => go("/m/"),
@@ -60,6 +67,8 @@ export function startShell(root, { go, onAuth }) {
   });
 
   root.replaceChildren(bar, feedEl, jump, dock, drawer.node);
+  // The bars are glass over the conversation, so the conversation leaves room for the dock by its height.
+  new ResizeObserver(() => root.style.setProperty("--dock-h", `${dock.offsetHeight}px`)).observe(dock);
 
   /** {kind: "new", projectId} or {kind: "session", publicId, task, feed, stream, link}. */
   let view = { kind: "new", projectId: "" };
@@ -68,11 +77,31 @@ export function startShell(root, { go, onAuth }) {
 
   function paintBar() {
     const task = view.task;
-    const project = task?.project_id != null ? account.projects.find((p) => p.id === task.project_id)?.name : "";
-    title.textContent = view.kind === "session" ? (titleOf(task ?? {}) || t("session")) : t("new session");
-    const machine = machineState(account.machines);
-    subtitle.textContent = [project, view.kind === "session" ? t(`machine ${machine}`) : ""].filter(Boolean).join(" · ");
-    more.hidden = view.kind !== "session";
+    const projectId = view.kind === "session" ? task?.project_id : view.projectId;
+    title.textContent = account.projects.find((p) => String(p.id) === String(projectId))?.name || "Kvist Cloud";
+    // The dot on the menu: another session is waiting for an answer.
+    menuDot.hidden = !account.tasks.some((item) => item.status === "waiting_for_user" && item.public_id !== view.publicId);
+  }
+
+  /** The menu behind the plus: a photo from the camera or the library, and how hard the model thinks. */
+  function plusMenu(anchor) {
+    openPopover(anchor, [
+      { icon: icon("camera", 20), label: t("camera"), onSelect: () => composer.attachments.takePhoto() },
+      { icon: icon("image", 20), label: t("photo"), onSelect: () => composer.attachments.pickPhoto() },
+      ...(account.key?.set ? [{ icon: icon("gauge", 20), label: t("think"), detail: t(`effort ${effortOf()}`), onSelect: effortSheet }] : []),
+    ]);
+  }
+
+  /** The row under the field: the project (a new session only), the model with its mark, how hard it thinks. */
+  function paintChips() {
+    const key = account.key;
+    const model = key?.set ? (key.model || key.label || key.provider) : t("model key");
+    const project = view.kind === "new" ? [h("button", { class: "chip small", type: "button", onclick: () => chooseProject(view.projectId) },
+      icon("folder", 14), h("span", {}, account.projects.find((p) => String(p.id) === String(view.projectId))?.name || t("no project")))] : [];
+    fill(chips, project,
+      h("button", { class: "chip small", type: "button", onclick: () => keySheet() },
+        key?.set ? providerMark(key.provider, key.label, 14) : null, h("span", {}, model)),
+      null);
   }
 
   function paintBanner() {
@@ -92,13 +121,12 @@ export function startShell(root, { go, onAuth }) {
     const dialog = feed?.dialogs[0];
     composer.node.hidden = Boolean(dialog);
     fill(dialogEl, dialog ? dialogFor(dialog, (reply) => answer(dialog, reply)) : null);
-    if (!state) return fill(statusEl);
-    const words = state === "waiting" ? t("waiting for you") : [t("working"), feed.status.step ? t("step n", { n: feed.status.step }) : "", feed.status.text].filter(Boolean).join(" · ");
-    fill(statusEl, h("span", { class: "pulse" }), h("span", {}, words));
+    status.update(feed);
   }
 
   function paint() {
     paintBar();
+    paintChips();
     paintBanner();
     paintDock();
   }
@@ -117,12 +145,7 @@ export function startShell(root, { go, onAuth }) {
     drawer.setCurrent("");
     homeEl.hidden = false;
     chat.column.hidden = true;
-    homeEl.replaceChildren(homeView({
-      projectId,
-      onChooseProject: () => chooseProject(projectId),
-      onSuggest: (text) => composer.set(text),
-      onSetup: (id) => (id === "plan" ? plansSheet() : id === "key" ? keySheet() : projectSheet((project) => go(`/m/p/${project.id}`))),
-    }));
+    homeEl.replaceChildren(homeView());
     paint();
   }
 
@@ -185,7 +208,8 @@ export function startShell(root, { go, onAuth }) {
     return Boolean(fix);
   }
 
-  async function send(text) {
+  async function send(rawText, images = []) {
+    const text = imageGoal(rawText, images);
     const blocked = cannotRun(account);
     if (blocked && guide(blocked)) return;
     try {

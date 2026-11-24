@@ -129,6 +129,20 @@ Things that follow from Platega's model, not choices:
   change nothing; handle them by hand in the Platega cabinet and in the ledger.
 - Prices are charged in `PLATEGA_CURRENCY`; the dollar figures in the plan table are only the catalogue.
 
+### Photos in messages
+
+A message may carry photos (the `kvist-image-goal` envelope of `docs/vision.md`, the same one the other interfaces use). A crafted
+picture is an attack on a parser, and the control server holds every customer's secrets, so it never decodes pixels:
+[`images.py`](backend/kvist_cloud/images.py) reads the *structure* of a PNG or JPEG, checks every length and checksum, inflates a
+PNG's data in bounded pieces to the exact size its header promises (a bomb is refused, never held), drops text, EXIF, ICC profiles,
+animation and whatever follows the end of the file (a polyglot loses its second life), and writes the picture again. Only PNG and
+JPEG, decided by the bytes, never by the declared type; at most 8 photos, 5 MB each, 20 MB together, 25 megapixels. The envelope is
+recognised by the core's own rule (JSON, any spacing, any key order), so another spelling of it is no way around the check. The
+history keeps the photos' names, not pixels (the first message's photos wait in `tasks.start_envelope`). The page also shrinks every
+photo to a JPEG of at most 2048 px before sending, which bakes in the camera's turn and removes the metadata at the source; the
+server does not trust that. Kvist's core on the machine still decodes the rewritten file with its own library: that is the
+customer's own machine, and the file it meets is plainer than what came in.
+
 ### Freedom Pay (freedompay.kg)
 
 Freedom Pay's **hosted payment page**, the Merchant API of [docs.freedompay.kz](https://docs.freedompay.kz) (the `.kg` host serves

@@ -21,7 +21,7 @@
   --r-l: 20px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Roboto Mono", monospace;
-  --bar-h: 52px;
+  --bar-h: 56px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -43,7 +43,7 @@ html, body {
   height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
   overflow: hidden;
 }
 #screen { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
@@ -111,7 +111,7 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 
 /* -- the gate (sign in, terms, trouble) ---------------------------------------------------------------------------- */
 
-.gate { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); max-width: 460px; width: 100%; margin: 0 auto; }
+.gate { padding-top: env(safe-area-inset-top); flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); max-width: 460px; width: 100%; margin: 0 auto; }
 .gate h1 { font-size: 28px; line-height: 1.2; letter-spacing: -.02em; font-weight: 600; }
 .lead { color: var(--text2); font-size: 16px; line-height: 1.55; }
 .wordmark { font-weight: 600; letter-spacing: -.01em; }
@@ -120,14 +120,9 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 
 /* -- the bar --------------------------------------------------------------------------------------------------------- */
 
-.bar { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: 4px; padding: 0 6px; border-bottom: 1px solid var(--line); background: var(--bg); }
-.bar-title { flex: 1; min-width: 0; text-align: center; line-height: 1.2; }
-.t1 { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.t2 { font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 15px; }
 
 /* -- the feed ------------------------------------------------------------------------------------------------------------- */
 
-.feed { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scroll-padding-bottom: 24px; }
 .col { max-width: 720px; margin: 0 auto; padding: 16px 16px 28px; display: flex; flex-direction: column; gap: 18px; }
 .jump { position: absolute; right: 16px; bottom: calc(var(--dock-h, 96px) + 8px); width: 40px; height: 40px; border-radius: 50%; background: var(--s3); border: 1px solid var(--line); display: grid; place-items: center; z-index: 5; }
 
@@ -211,7 +206,6 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 
 /* -- the dock: banner, status, dialog, composer ----------------------------------------------------------------------- */
 
-.dock { flex: none; padding: 6px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid transparent; display: grid; gap: 8px; max-width: 760px; width: 100%; margin: 0 auto; }
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px 10px 14px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--s1); font-size: 14px; line-height: 1.35; }
 .banner.warn { border-color: #4b3d1f; }
 .banner-action { flex: none; padding: 6px 12px; border-radius: 999px; background: var(--s3); font-size: 13px; font-weight: 500; }
@@ -219,8 +213,6 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .status-line:empty { display: none; }
 .status-line span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.composer { display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 16px; background: var(--s2); border: 1px solid var(--line); border-radius: 26px; }
-.composer:focus-within { border-color: #44444a; }
 .composer-input { flex: 1; min-width: 0; max-height: 160px; padding: 7px 0; border: 0; outline: 0; background: none; resize: none; font-size: 16px; line-height: 1.4; color: var(--text); }
 .composer-input::placeholder { color: var(--text3); }
 
@@ -309,3 +301,75 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .google-pay-slot button { height: 48px !important; }
 .ways { display: grid; gap: 0; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; }
 .ways .ways-label { padding: 12px 16px 4px; }
+
+/* -- the glass layout: the conversation runs under the bar and the dock, which blur it ------------------------------------ */
+
+#screen { position: relative; }
+.feed { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding-top: calc(var(--bar-h) + env(safe-area-inset-top)); padding-bottom: var(--dock-h, 110px); scroll-padding-bottom: 24px; }
+
+.bar { position: absolute; z-index: 6; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
+  height: calc(var(--bar-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0; pointer-events: none; }
+.bar > * { pointer-events: auto; }
+/* The blurred strip fades out downwards, so there is no edge where the conversation passes under the bar. */
+.bar::before, .dock::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); }
+.bar::before { background: linear-gradient(rgba(10, 10, 11, .78), rgba(10, 10, 11, 0));
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+.dock::before { background: linear-gradient(rgba(10, 10, 11, 0), rgba(10, 10, 11, .82) 45%);
+  -webkit-mask-image: linear-gradient(transparent, #000 45%); mask-image: linear-gradient(transparent, #000 45%); }
+.bar-title { flex: 1; min-width: 0; text-align: center; font-size: 16px; font-weight: 600; line-height: 1.2; }
+.t1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glass-btn, .glass-pill { position: relative; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(44, 44, 48, .55); border: 1px solid rgba(255, 255, 255, .09); color: var(--text);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6); backdrop-filter: blur(16px) saturate(1.6); }
+.glass-btn { width: 40px; border-radius: 20px; }
+.glass-pill { border-radius: 20px; padding: 0 4px; }
+.glass-pill button { width: 42px; height: 38px; display: grid; place-items: center; border-radius: 19px; }
+.glass-btn:active, .glass-pill button:active { background: rgba(255, 255, 255, .1); }
+.glass-btn .dot { position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: #4f8cff; border: 2px solid #1b1b1e; box-sizing: content-box; }
+
+.dock { position: absolute; z-index: 6; bottom: 0; left: 0; right: 0; margin: 0 auto; max-width: 760px; width: 100%;
+  padding: 18px 12px calc(10px + env(safe-area-inset-bottom)); display: grid; gap: 8px; }
+.composer { display: grid; gap: 6px; padding: 12px 10px 8px 16px; border-radius: 26px; background: rgba(34, 34, 38, .62);
+  border: 1px solid rgba(255, 255, 255, .09); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); }
+.composer:focus-within { border-color: rgba(255, 255, 255, .2); }
+.composer-foot { display: flex; align-items: center; gap: 8px; }
+.chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip.small { flex: none; min-height: 32px; padding: 0 11px; gap: 6px; font-size: 13px; background: rgba(255, 255, 255, .07); border: 0; color: var(--text2); }
+.chip.small:active { background: rgba(255, 255, 255, .13); }
+.mark-tile { display: inline-grid; place-items: center; width: var(--size, 14px); height: var(--size, 14px); font-size: 11px; font-weight: 700; color: var(--text); }
+.home-wrap { min-height: 100%; display: flex; }
+.home { margin: auto; padding: 24px 20px 120px; text-align: center; }
+.home h1 { font-size: 26px; line-height: 1.2; letter-spacing: -.02em; font-weight: 600; }
+.status-line { display: none; }
+
+/* Motion that moves only transforms and opacity runs on the compositor, at whatever rate the screen has. */
+.drawer, .sheet, .drawer-scrim, #layer .scrim { will-change: transform, opacity; }
+
+/* -- the plus menu, the tray of photos ---------------------------------------------------------------------------------- */
+.plus { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 18px; color: var(--text); }
+.plus:active { background: rgba(255, 255, 255, .1); }
+.tray { display: flex; gap: 8px; overflow-x: auto; padding: 0 0 4px; scrollbar-width: none; }
+.thumb { position: relative; flex: none; width: 76px; height: 76px; border-radius: 14px; overflow: hidden; background: var(--s2); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb-x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 11px; background: rgba(0, 0, 0, .6); color: #fff; }
+.composer.drop { border-color: #4f8cff; background: rgba(79, 140, 255, .12); }
+.pop-scrim { position: fixed; inset: 0; z-index: 44; }
+.popover { position: fixed; z-index: 45; min-width: 250px; padding: 8px; border-radius: 26px; transform-origin: 20px 100%;
+  background: rgba(30, 30, 34, .72); border: 1px solid rgba(255, 255, 255, .1); box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7); backdrop-filter: blur(28px) saturate(1.7);
+  opacity: 0; transform: scale(.9) translateY(8px); transition: opacity .16s ease-out, transform .22s cubic-bezier(.32, .72, 0, 1); }
+.popover.in { opacity: 1; transform: none; }
+.pop-item { width: 100%; display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px 0 8px; border-radius: 22px; font-size: 17px; }
+.pop-item:active { background: rgba(255, 255, 255, .08); }
+.pop-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 19px; background: rgba(255, 255, 255, .08); flex: none; }
+.pop-label { flex: 1; text-align: left; }
+.pop-detail { color: var(--text2); font-size: 14px; }
+
+.pics { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
+.pic { width: 96px; height: 96px; border-radius: 12px; object-fit: cover; background: var(--s3); }
+.pic.gone { display: grid; place-items: center; color: var(--text3); }
+.bubble:has(.pics) { padding: 6px; }
+.bubble:has(.pics) > div:last-child:not(.pics) { padding: 2px 8px 4px; }

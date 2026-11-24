@@ -5,9 +5,12 @@
 // view redraws only what moved. Everything the agent does between two things the person reads (a reply, their own
 // message) is gathered into one "work" item, a collapsed ledger of steps, instead of a long run of cards.
 
+import { parseImageGoal } from "./envelope.js";
+
 const TERMINAL = new Set(["final_answer", "report_to_user", "refuse"]);
 const WRITES = new Set(["write_file", "append_file", "replace_in_file"]);
 // Commands the cloud's runner sends to keep a task in its conversation (runner/kvist_runner/task.py).
+const LIFE = new Set(["stream_chunk", "reasoning_chunk", "step", "action_result", "status"]);
 const RUNNER_COMMANDS = new Set(["new", "session", "resume"]);
 
 export function createFeed() {
@@ -105,11 +108,14 @@ const sameAsLast = (feed, text) => {
 
 /** Folds one core event into the feed. `replay` marks events loaded from history rather than live ones. */
 export function reduce(feed, ev, { replay = false } = {}) {
+  // The model showed life: the wait that warms the status line's colour starts over.
+  if (!replay && LIFE.has(ev.type)) feed.lastLife = Date.now();
   switch (ev.type) {
     case "user":
       if (!ev.text) return;
       closeWork(feed);
-      push(feed, { kind: "user", text: ev.text });
+      if (!replay) feed.turnStartedAt = feed.lastLife = Date.now();
+      push(feed, { kind: "user", ...parseImageGoal(ev.text) });
       return;
     case "status":
       feed.status = { text: ev.user_message ?? "", step: ev.step ?? 0 };
@@ -264,6 +270,27 @@ export function working(feed) {
   const status = feed.task?.status;
   if (status === "waiting_for_user" || feed.dialogs.length) return "waiting";
   return ["queued", "starting", "running"].includes(status) ? "working" : "";
+}
+
+/**
+ * What the agent is at, for the orb and the status line: null when it is not working. `running` is the call in progress,
+ * `speaking` that a reply is being written, `silentSince` since when the model has said nothing, `startedAt` the turn's
+ * start. The server's task status says whether it works; the events say what at.
+ */
+export function feedActivity(feed) {
+  if (!["running", "starting", "queued"].includes(feed.task?.status)) return null;
+  const turn = feed.items.findLastIndex((item) => item.kind === "user");
+  const mine = feed.items.slice(turn + 1);
+  const group = mine.findLast((item) => item.kind === "work");
+  const last = feed.items.at(-1);
+  const startedAt = (mine.find((item) => item.kind === "work")?.startedAt) ?? feed.turnStartedAt ?? (feed.turnStartedAt = Date.now());
+  return {
+    running: group?.calls.find((call) => call.phase === "run") ?? null,
+    speaking: last?.kind === "reply" && last.live,
+    silentSince: feed.lastLife ?? startedAt,
+    startedAt,
+    request: feed.items.findLast((item) => item.kind === "user")?.text ?? "",
+  };
 }
 
 /** The steps of a work item as the ledger counts them. */

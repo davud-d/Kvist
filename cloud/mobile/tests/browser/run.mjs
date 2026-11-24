@@ -127,13 +127,14 @@ async function signIn(page) {
 }
 
 async function startTrial(page) {
-  await page.locator(".setup .row", { hasText: "Pick a plan" }).click();
+  // What is missing is said once, above the field, with the button that fixes it.
+  await page.locator(".banner-action").click();
   await page.locator(".plan-card", { hasText: "Trial" }).click();
   await page.locator(".sheet").waitFor({ state: "detached" });
 }
 
 async function addKeyAndProject(page) {
-  await page.locator(".setup .row", { hasText: "Add a model key" }).click();
+  await page.locator(".banner-action").click();
   await page.locator(".picker").click();
   await page.locator("input[type=search]").fill("other");
   await page.locator(".sheet .choice", { hasText: "Other" }).click();
@@ -142,11 +143,13 @@ async function addKeyAndProject(page) {
   await page.locator("input[type=password]").fill("sk-test-12345678");
   await page.locator(".sheet .btn.primary").click();
   await page.locator(".sheet").waitFor({ state: "detached" });
-  await page.locator(".setup .row", { hasText: "Create a project" }).click();
+  // The project is a chip under the field.
+  await page.locator(".chips .chip", { hasText: "No project" }).click();
+  await page.locator(".sheet .row", { hasText: "New project" }).click();
   await page.locator("input[placeholder='Project name']").fill("demo");
   await page.locator(".sheet .btn.primary").click();
   await page.locator(".sheet").waitFor({ state: "detached" });
-  await visible(page, ".suggest");
+  await visible(page, ".chips .chip:has-text('demo')");
 }
 
 async function sendTask(page, text) {
@@ -176,11 +179,11 @@ scenario("first run: sign in, terms, trial, key, project, first task", async (pa
   await page.check("#t2");
   await page.locator(".gate .btn.primary").click();
   await visible(page, ".home");
-  assert.equal(await page.locator(".setup .row").count(), 3, "three things to set up");
+  assert.match(await page.locator(".banner").innerText(), /plan/i, "what is missing is said above the field");
   await shot(page, "home-setup");
   await startTrial(page);
   await addKeyAndProject(page);
-  assert.equal(await page.locator(".setup").count(), 0, "nothing left to set up");
+  assert.equal(await page.locator(".banner").count(), 0, "nothing left to say");
   await shot(page, "home-ready");
   await sendTask(page, "quick");
   await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 30000 });
@@ -189,7 +192,7 @@ scenario("first run: sign in, terms, trial, key, project, first task", async (pa
   await visible(page, ".call-label");
   assert.equal(await page.locator(".call-label").first().innerText(), "writes hello.txt");
   await shot(page, "chat");
-  assert.match(await page.locator(".bar-title .t1").innerText(), /quick/);
+  assert.equal(await page.locator(".bar-title .t1").innerText(), "demo", "the bar says only the project");
   // The address is the session: a reload comes back to it with its history.
   await page.reload();
   await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 15000 });
@@ -218,6 +221,39 @@ scenario("a host that cannot sign in falls back to the ordinary redirect", async
   await visible(page, "#t1");
 });
 
+scenario("a photo is shrunk in the browser, sent with the task, and shown in the message", async (page) => {
+  await signIn(page);
+  await startTrial(page);
+  await addKeyAndProject(page);
+  // A large picture: the page must send a small JPEG, not this.
+  const big = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 3000; canvas.height = 2000;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#c33"; context.fillRect(0, 0, 3000, 2000);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  const sentBodies = [];
+  page.on("request", (request) => request.url().endsWith("/api/tasks") && request.method() === "POST" && sentBodies.push(request.postData()));
+  await page.locator("input[type=file]").first().setInputFiles({ name: "IMG_0001.PNG", mimeType: "image/png", buffer: Buffer.from(big) });
+  await visible(page, ".thumb img");
+  await page.locator(".composer-input").fill("what is this");
+  await page.locator(".composer .round").click();
+  await page.waitForURL(/\/m\/s\//);
+  await visible(page, ".bubble .pic");
+  const goal = JSON.parse(JSON.parse(sentBodies[0]).goal);
+  assert.equal(goal.type, "kvist-image-goal");
+  assert.match(goal.images[0].data_url, /^data:image\/jpeg;base64,/);
+  assert.match(goal.images[0].name, /^photo-[a-z0-9]+-\d+\.jpg$/, "the file's own name is not sent");
+  const bytes = Buffer.from(goal.images[0].data_url.split(",")[1], "base64");
+  assert.ok(bytes.length < 300_000, `a small JPEG, not ${bytes.length} bytes`);
+  assert.equal(bytes[0], 0xff);
+  assert.match(await page.locator(".bubble").first().innerText(), /what is this/);
+  await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 30000 });
+  assert.deepEqual(page.problems, []);
+});
+
 scenario("the agent asks, the person answers", async (page) => {
   await signIn(page);
   await startTrial(page);
@@ -239,7 +275,7 @@ scenario("the round button is send, then pause while it works", async (page) => 
   await addKeyAndProject(page);
   await sendTask(page, "hang");
   await visible(page, ".round.stop");
-  assert.match(await page.locator(".status-line").innerText(), /Working/);
+  await visible(page, ".tail .orb");
   await shot(page, "working");
   await page.locator(".round.stop").click();
   await visible(page, ".banner");

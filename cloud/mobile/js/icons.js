@@ -31,5 +31,10 @@ export const ICONS = {
   external: ["M14 4h6v6", "M20 4l-9 9", "M18 14v5H5V6h5"],
   sliders: ["M5 7h9", "M18 7h1", "M5 17h1", "M10 17h9", "M16 5v4", "M8 15v4"],
   user: ["M12 12a4 4 0 100-8 4 4 0 000 8z", "M4 20a8 8 0 0116 0"],
+  // A page and the pen that writes on it: a new session, as in the apps this one is read beside.
+  "new-chat": ["M12 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6", "M18.4 2.6a1.9 1.9 0 0 1 2.7 2.7L12 14.4l-3.7 1 1-3.7z"],
+  camera: ["M4 8h3l1.5-2h7L17 8h3v11H4z", "M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"],
+  image: ["M4 5h16v14H4z", "M4 16l4.5-4.5 3.5 3.5 3-3L20 16", "M9 9.5h.01"],
+  gauge: ["M4.5 17a8 8 0 1 1 15 0", "M12 13l4-4"],
   lock: ["M6 11h12v9H6z", "M8.500 11V8a3.500 3.500 0 017 0v3"],
 };

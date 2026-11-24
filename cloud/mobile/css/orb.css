@@ -1,0 +1,86 @@
+/* The orb and the shimmering status line, ported from the web workspace (cloud/workspace/css/chat.css) onto this page's
+   tokens: --dim is --text2, --news the blue, --canvas the page, --warn and --err the state colours. */
+.orb-scope { --dim: var(--text2); --news: #6ea4f5; --canvas: var(--bg); --err: var(--bad); }
+/* -- the orb: where the agent is now (js/views/orb.js). Every loop runs on --orb-period from --orb-phase. ---------- */
+.orb { --loop: var(--orb-period, 2s) ease-in-out var(--orb-phase, 0s) infinite; display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--text2); vertical-align: -5px; }
+.orb svg { width: 22px; height: 22px; overflow: visible; opacity: 0.7; }
+.orb svg * { transform-box: view-box; }
+.orb-row { display: flex; align-items: center; height: 28px; flex-shrink: 0; }
+/* At the end of the words the dot stands in the line like the caret did. */
+.md .orb { width: 16px; height: 16px; margin-left: 4px; vertical-align: -2px; }
+
+/* Speaking: the blue dot grows and shrinks. */
+.orb-dot { width: 11px; height: 11px; border-radius: 50%; background: #6ea4f5; animation: orb-breathe var(--loop); }
+@keyframes orb-breathe { 0%, 100% { transform: scale(0.62); opacity: 0.75; } 50% { transform: scale(1); opacity: 1; } }
+
+/* Thinking: a faint brain that breathes; a spark of thought crosses it. */
+.orb[data-state="think"] svg { opacity: 0.45; animation: orb-think var(--loop); }
+@keyframes orb-think { 0%, 100% { transform: scale(0.9); opacity: 0.38; } 50% { transform: scale(1.03); opacity: 0.75; } }
+.orb[data-state="think"] .spark { animation: orb-blink var(--loop); }
+
+/* A terminal: the prompt nudges forward, the cursor blinks. */
+.orb[data-state="shell"] .prompt { animation: orb-nudge var(--loop); }
+.orb[data-state="shell"] .cursor { animation: orb-cursor var(--orb-period) steps(1) var(--orb-phase) infinite; }
+@keyframes orb-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(1px); } }
+@keyframes orb-cursor { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+/* Reading: the right page turns over the spine. */
+.orb[data-state="read"] .leaf { fill: var(--bg); transform-origin: 12px 12px; animation: orb-turn var(--orb-period) cubic-bezier(0.45, 0, 0.55, 1) var(--orb-phase) infinite; }
+@keyframes orb-turn { 0%, 15% { transform: scaleX(1); } 70%, 100% { transform: scaleX(-1); } }
+
+/* Adding: the last line is written out, the pen riding along it. */
+.orb[data-state="write"] .ink { stroke-dasharray: 1; animation: orb-write var(--loop); }
+.orb[data-state="write"] .pen { animation: orb-pen-write var(--loop); }
+@keyframes orb-write { 0%, 10% { stroke-dashoffset: 1; } 80%, 100% { stroke-dashoffset: 0; } }
+@keyframes orb-pen-write { 0%, 10% { transform: translate(-3.5px, 1.8px); } 80% { transform: translate(0, 1.8px); } 100% { transform: translate(0, 1.8px); opacity: 0.4; } }
+
+/* Changing: the eraser rubs the line out, then the pen writes it again. */
+.orb[data-state="edit"] .ink { stroke-dasharray: 1; animation: orb-redo var(--orb-period) linear var(--orb-phase) infinite; }
+.orb[data-state="edit"] .eraser { animation: orb-erase var(--orb-period) linear var(--orb-phase) infinite; }
+.orb[data-state="edit"] .pen { animation: orb-pen-edit var(--orb-period) linear var(--orb-phase) infinite; }
+@keyframes orb-redo { 0%, 5% { stroke-dashoffset: 0; } 40% { stroke-dashoffset: -1; } 55% { stroke-dashoffset: 1; } 92%, 100% { stroke-dashoffset: 0; } }
+@keyframes orb-erase { 0%, 5% { transform: translateX(0); opacity: 1; } 40% { transform: translateX(4.2px); opacity: 1; } 50%, 100% { transform: translateX(4.2px); opacity: 0; } }
+@keyframes orb-pen-edit { 0%, 50% { transform: translate(-3.5px, 1.8px); opacity: 0; } 55% { transform: translate(-3.5px, 1.8px); opacity: 1; } 92% { transform: translate(0, 1.8px); opacity: 1; } 100% { transform: translate(0, 1.8px); opacity: 0; } }
+
+/* Folders: the lid lifts. */
+.orb[data-state="folder"] .lid { transform-origin: 3.5px 10.5px; animation: orb-lid var(--loop); }
+@keyframes orb-lid { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(-12deg); } }
+
+/* Searching: the lens looks around. */
+.orb[data-state="search"] .lens { animation: orb-look var(--loop); }
+@keyframes orb-look { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(1.5px, -1px); } 50% { transform: translate(0, -1.5px); } 75% { transform: translate(-1.5px, -0.5px); } }
+
+/* The web: the globe turns. */
+.orb[data-state="web"] .meridian { animation: orb-spin-globe var(--orb-period) linear var(--orb-phase) infinite; }
+@keyframes orb-spin-globe { 0% { rx: 8.5px; } 50% { rx: 0.5px; } 100% { rx: 8.5px; } }
+
+/* A skill: one book is drawn up out of a full shelf, then put back. */
+.orb[data-state="skill"] .drawn { fill: currentColor; stroke: none; animation: orb-draw-book var(--loop); }
+@keyframes orb-draw-book { 0%, 20% { transform: translateY(0); } 55%, 70% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+
+/* Helpers: two dots circle the agent. */
+.orb[data-state="helper"] .hub { fill: currentColor; }
+.orb[data-state="helper"] .ring { transform-origin: 12px 12px; animation: orb-orbit var(--orb-period) linear var(--orb-phase) infinite; }
+@keyframes orb-orbit { to { transform: rotate(360deg); } }
+
+@keyframes orb-blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .orb *, .orb-dot { animation: none !important; } }
+
+
+.shimmer {
+  font-weight: 500; white-space: nowrap;
+  background: linear-gradient(90deg, var(--text2) 0%, var(--text2) 40%, var(--text) 50%, var(--text2) 60%, var(--text2) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: shimmer 2.4s linear infinite;
+}
+.shimmer.slow { background-image: linear-gradient(90deg, var(--warn) 0%, var(--warn) 40%, var(--text) 50%, var(--warn) 60%, var(--warn) 100%); }
+.shimmer.stuck { background-image: linear-gradient(90deg, var(--bad) 0%, var(--bad) 40%, var(--text) 50%, var(--bad) 60%, var(--bad) 100%); }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--s3); border-top-color: var(--text2); animation: spin .9s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.status-detail { color: var(--text3); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tail { display: grid; gap: 6px; min-height: 28px; }
+.tail:empty { display: none; }
+.tail-status { display: flex; align-items: center; gap: 10px; font-size: 14px; min-height: 22px; }
+.orb-row { display: flex; align-items: center; height: 28px; }

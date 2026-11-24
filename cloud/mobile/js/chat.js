@@ -14,8 +14,9 @@ import * as native from "./native.js";
 const PIN_DISTANCE = 100;
 const STREAM_PAINT_MS = 50;
 
-export function createChat(root, jump) {
+export function createChat(root, jump, tail) {
   const column = h("div", { class: "col" });
+  column.append(tail);
   root.append(column);
   /** id -> {node, rev} */
   const nodes = new Map();
@@ -109,7 +110,11 @@ export function createChat(root, jump) {
   }
 
   const builders = {
-    user: (item) => h("article", { class: "msg user" }, h("div", { class: "bubble" }, item.text)),
+    user: (item) => h("article", { class: "msg user" }, h("div", { class: "bubble" },
+      item.images?.length ? h("div", { class: "pics" }, item.images.map((pic) => pic.data_url
+        ? h("img", { class: "pic", src: pic.data_url, alt: "" })
+        : h("span", { class: "pic gone", title: pic.name }, icon("image", 20)))) : null,
+      item.text ? h("div", {}, item.text) : null)),
     reply,
     work,
     note: (item) => h("p", { class: "note" }, item.text),
@@ -172,7 +177,7 @@ export function createChat(root, jump) {
       feedRef = null;
       nodes.clear();
       open.clear();
-      column.replaceChildren();
+      column.replaceChildren(tail);
     },
     toEnd,
     column,
