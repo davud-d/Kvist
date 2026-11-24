@@ -218,6 +218,9 @@ class Task(Base):
     # A task is a session: what the person wrote after the first goal waits here until the machine has it
     # (it may be asleep, or the plan may have no free slot yet). Cleared when the machine's Kvist says hello.
     pending_text: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # The first message when it carries photos (rewritten, see images.py): sent to the machine instead of the
+    # goal, which then stays the few words that name the task. Cleared when Kvist on the machine has it.
+    start_envelope: Mapped[str] = mapped_column(Text, default="", server_default="")
     # The pending text is a slash command for Kvist (`/memory`), run in the task's session, not a message.
     pending_command: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     next_seq: Mapped[int] = mapped_column(Integer, default=1)

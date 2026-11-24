@@ -107,7 +107,7 @@ def start_message(app: FastAPI, db: Session, task: Task, chatgpt_access: dict | 
         "type": "start_task",
         "task_id": task.id,
         # The first goal starts the task; what was written later goes into the same conversation.
-        "goal": task.pending_text or task.goal,
+        "goal": task.pending_text or task.start_envelope or task.goal,
         "folder": project.folder if project is not None else "",
         "session": session,
         "follow_up": bool(task.pending_text),

@@ -13,7 +13,7 @@ from pydantic import Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import ledger
+from . import images, ledger
 from .auth import SESSION_COOKIE, ban_active, current_user, user_from_cookie
 from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
@@ -220,6 +220,7 @@ def ingest_event(app: FastAPI, db: Session, task: Task, event: dict) -> str:
     if kind == "hello" or (kind == "task_state" and event.get("state") == "running"):
         # Kvist on the machine is up and working, so it has the message that started this turn.
         task.pending_text = ""
+        task.start_envelope = ""
         task.pending_command = False
     if kind == "manifest":
         event = {"type": "manifest", **{name: event.get(name) or [] for name in MANIFEST_KEPT}}
@@ -253,8 +254,17 @@ def _first_done(db: Session, task: Task) -> None:
 # -- API ---------------------------------------------------------------------------------
 
 
+def prepare_text(text: str, limit: int = GOAL_LIMIT) -> images.Prepared:
+    """What the person wrote, ready to go on: photos rewritten (images.py), anything else checked for length."""
+    try:
+        return images.prepare(text, limit)
+    except images.ImageError as error:
+        raise ApiError(400, "bad_message", str(error)) from error
+
+
 class TaskIn(InputModel):
-    goal: str = Field(min_length=1, max_length=GOAL_LIMIT)
+    # Photos make a message large: the real limits are images.prepare's, which looks at the text first.
+    goal: str = Field(min_length=1, max_length=images.MAX_MESSAGE_CHARS)
     # A task belongs to a project (a folder on the machine). Without one it gets a folder of its own, as it
     # did before projects: the older screens still start tasks that way.
     project_id: int | None = None
@@ -262,7 +272,7 @@ class TaskIn(InputModel):
 
 
 class MessageIn(InputModel):
-    text: str = Field(min_length=1, max_length=GOAL_LIMIT)
+    text: str = Field(min_length=1, max_length=images.MAX_MESSAGE_CHARS)
 
 
 class CommandIn(InputModel):
@@ -349,6 +359,8 @@ async def create_task(
     from .limits import admit
 
     app = request.app
+    # First of all and cheapest: a photo that is not one is refused before a machine is woken for it.
+    prepared = prepare_text(payload.goal.strip())
     lock_account(db, user.id)
     can_run(db, user)
     project = None
@@ -367,14 +379,16 @@ async def create_task(
     task = Task(
         user_id=user.id,
         machine_id=machine.id,
-        goal=payload.goal.strip(),
+        # What names the task: the words; with photos only, a word for the photos.
+        goal=prepared.shown or "Photo",
+        start_envelope=prepared.forward if prepared.count else "",
         repo_url=repo_url,
         project_id=project.id if project is not None else None,
     )
     db.add(task)
     db.flush()
     admit(db, task)
-    record_user(app, db, task, task.goal)
+    record_user(app, db, task, prepared.stored)
     if first:
         record_step(db, "first_task_started", user_id=user.id)
     db.commit()
@@ -565,7 +579,7 @@ async def post_message(
     text = payload.text.strip()
     if not text:
         raise ApiError(400, "empty", "Write something first. / Сначала напиши что-нибудь.")
-    return await deliver(request.app, db, user, task, text)
+    return await deliver(request.app, db, user, task, prepare_text(text))
 
 
 @router.post("/api/tasks/{task_id}/commands")
@@ -587,11 +601,11 @@ async def post_command(
             403, "command_unavailable", "This command is not available here. / Эта команда здесь недоступна."
         )
     line = " ".join(["/" + payload.name, *payload.args])
-    return await deliver(request.app, db, user, task, line, command=True)
+    return await deliver(request.app, db, user, task, prepare_text(line), command=True)
 
 
 async def deliver(
-    app: FastAPI, db: Session, user: User, task: Task, text: str, command: bool = False
+    app: FastAPI, db: Session, user: User, task: Task, prepared: images.Prepared, command: bool = False
 ) -> dict[str, object]:
     """Gives the running Kvist the message (or command), or starts it again in the conversation to take it."""
     can_run(db, user)
@@ -604,15 +618,17 @@ async def deliver(
     if task.status in (TaskStatus.RUNNING, TaskStatus.WAITING_FOR_USER):
         # Kvist queues a goal that arrives during a turn and takes it when the turn ends.
         db.commit()
-        message = {"type": "message", "task_id": task.id, "text": text, **({"command": True} if command else {})}
+        message = {"type": "message", "task_id": task.id, "text": prepared.forward}
+        if command:
+            message["command"] = True
         delivered = await app.state.gateway.send(task.machine_id, message)
         if not delivered:
             raise ApiError(503, "machine_offline", "The machine is not reachable. / Машина недоступна.")
-        record_user(app, db, task, text)
+        record_user(app, db, task, prepared.stored)
         db.commit()
         return task_payload(db, task)
-    restart_with(db, task, text, command)
-    record_user(app, db, task, text)
+    restart_with(db, task, prepared.forward, command)
+    record_user(app, db, task, prepared.stored)
     db.commit()
     await _dispatch(app, task.machine_id)
     return task_payload(db, task)
