@@ -157,7 +157,7 @@ the workspace shows each session at its own address, **`/workspace/s/<id>`** (a 
 Typing the address, following a link or reloading opens that session without any button; the address bar follows
 what is in front, so back and forward move between sessions.
 
-The page at that address is the same for everyone (`pixel/index.html`); what it shows it asks the API for. The API
+The page at that address is the same for everyone (`workspace/index.html`); what it shows it asks the API for. The API
 resolves a session only for its owner: `GET /api/sessions/<id>` (and `/api/tasks/{n}`, `/events`, `/stream`, the
 screen routes) answer another account exactly as they answer an id that does not exist (404), and a signed-out visitor
 is sent to sign in and back to the same address. The page says "no such session, or it belongs to another account"

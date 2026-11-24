@@ -48,19 +48,19 @@ def install(app: FastAPI) -> None:
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
-    # The workspace page is built from cloud/pixel (where it came from) and served at /workspace.
-    pixel = dist / "pixel"
-    if pixel.is_dir():
+    # The workspace page is built from cloud/workspace and served at /workspace.
+    workspace = dist / "workspace"
+    if workspace.is_dir():
         async def workspace_page() -> FileResponse:
             # The same page at every address of a session or a project; what it shows, it asks the API for,
             # and the API answers only the owner.
-            return FileResponse(pixel / "index.html", media_type="text/html; charset=utf-8")
+            return FileResponse(workspace / "index.html", media_type="text/html; charset=utf-8")
 
         for path in ("/workspace/s/{public_id}", "/workspace/p/{project_id}"):
             app.add_api_route(path, workspace_page, methods=["GET"], include_in_schema=False)
         app.add_api_route("/pixel", old_workspace_address, methods=["GET"], include_in_schema=False)
         app.add_api_route("/pixel/{rest:path}", old_workspace_address, methods=["GET"], include_in_schema=False)
-        app.mount("/workspace", StaticFiles(directory=pixel, html=True), name="workspace")
+        app.mount("/workspace", StaticFiles(directory=workspace, html=True), name="workspace")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
     app.add_middleware(GZipMiddleware, minimum_size=500)
 

@@ -420,11 +420,11 @@ def test_a_wrong_login_and_a_missing_user_look_the_same(client_factory):
 def dist(tmp_path):
     folder = tmp_path / "dist"
     (folder / "assets").mkdir(parents=True)
-    (folder / "pixel").mkdir()
+    (folder / "workspace").mkdir()
     (folder / "app.en.html").write_text("<!doctype html><title>app</title>")
     (folder / "pricing.en.html").write_text("<!doctype html><title>pricing</title>")
     (folder / "assets" / "app.js").write_text("export {};")
-    (folder / "pixel" / "index.html").write_text("<!doctype html><title>pixel</title>")
+    (folder / "workspace" / "index.html").write_text("<!doctype html><title>pixel</title>")
     (tmp_path / "secret.txt").write_text("TOP-SECRET-OUTSIDE-DIST")
     (tmp_path / "data").mkdir(exist_ok=True)
     return folder

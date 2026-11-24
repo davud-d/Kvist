@@ -1,10 +1,10 @@
-# Kvist Pixel on the cloud
+# Kvist Workspace on the cloud
 
 *(Русская версия: [README.ru.md](README.ru.md))*
 
 The pixel-game window of [Kvist Pixel (Tauri)](../../frontends/gui/tauri/README.md), copied here and changed
 only where the cloud has different data. It is plain files, no bundler: `cloud/frontend/build.mjs` copies it to
-`dist/pixel/` and the server serves it at **`/workspace/`** (an old `/pixel/` address redirects there; the old pages stay as they are; the header has a "Workspace"
+`dist/workspace/` and the server serves it at **`/workspace/`** (an old `/pixel/` address redirects there; the old pages stay as they are; the header has a "Workspace"
 link). Every session has its own address, `/workspace/s/<id>` (an opaque id), so a link opens it; only its owner can open it.
 
 ## What is the same

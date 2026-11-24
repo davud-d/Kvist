@@ -17,7 +17,7 @@ const MACHINE_DOT = { ready: "idle", working: "running", waiting_for_you: "asks"
 function railButton(iconName, label, onclick, extra = {}) {
   const dot = h("span", { class: "rail-dot" });
   // Home wears Kvist's own mark (branding/icon.svg), not a line icon.
-  const mark = iconName === "kvist" ? h("img", { src: "/pixel/icon.svg", alt: "", width: 32, height: 32 }) : icon(iconName, 20);
+  const mark = iconName === "kvist" ? h("img", { src: "/workspace/icon.svg", alt: "", width: 32, height: 32 }) : icon(iconName, 20);
   const button = h("button", { class: "rail-btn", type: "button", onclick, ...extra }, h("span", { class: "rail-icon" }, mark, dot), h("span", { class: "rail-label" }, label));
   button.dot = dot;
   return button;

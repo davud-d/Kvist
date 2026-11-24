@@ -60,10 +60,10 @@ def test_security_headers_and_caching(client_factory, dist):
     assert font.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
-def test_the_pixel_window_is_served_and_may_show_pictures_it_fetched(client_factory, dist):
-    (dist / "pixel" / "js").mkdir(parents=True)
-    (dist / "pixel" / "index.html").write_text("<!doctype html><title>pixel</title>")
-    (dist / "pixel" / "js" / "main.js").write_text("export {};")
+def test_the_workspace_page_is_served_and_may_show_pictures_it_fetched(client_factory, dist):
+    (dist / "workspace" / "js").mkdir(parents=True)
+    (dist / "workspace" / "index.html").write_text("<!doctype html><title>pixel</title>")
+    (dist / "workspace" / "js" / "main.js").write_text("export {};")
     client = client_factory(FRONTEND_DIST=str(dist))
     page = client.get("/workspace/")
     assert "pixel" in page.text and page.headers["cache-control"] == "no-cache"
@@ -81,8 +81,8 @@ def test_the_old_new_task_page_leads_to_the_workspace(client_factory, dist):
 
 
 def test_an_old_pixel_address_opens_the_same_place_in_the_workspace(client_factory, dist):
-    (dist / "pixel").mkdir()
-    (dist / "pixel" / "index.html").write_text("<!doctype html><title>pixel</title>")
+    (dist / "workspace").mkdir()
+    (dist / "workspace" / "index.html").write_text("<!doctype html><title>pixel</title>")
     client = client_factory(FRONTEND_DIST=str(dist))
     for old, new in (
         ("/pixel", "/workspace/"),
