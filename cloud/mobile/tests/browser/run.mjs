@@ -287,6 +287,8 @@ scenario("typing folds the composer to one row; the model chip opens a dropdown,
   const input = await field.boundingBox();
   assert.ok(Math.abs(plus.y + plus.height / 2 - (input.y + input.height / 2)) < 12, "plus and field share one row");
   await shot(page, "typing");
+  const measured = await page.evaluate(() => [...document.querySelectorAll(".composer, .composer-input, .round, .tray, .composer-foot")].map((e) => `${e.className}:${e.getBoundingClientRect().height}`));
+  assert.ok((await page.locator(".composer").boundingBox()).height <= 48, `a compact box while typing: ${measured}`);
   await field.blur();
   await page.locator(".composer.typing").waitFor({ state: "detached" });
   await page.locator(".chip.small").first().click();
