@@ -433,6 +433,8 @@ def test_cli_pty_ctrl_c_stops_the_task_and_keeps_the_repl_alive(tmp_path):
         start = child.mark()
         child.send("wait for cancellation now\r")
         child.wait_for("⚡ Role:", start=start)
+        # A ^C that lands before the run takes its cancel handler closes the session (exit 130).
+        child.settle()
         child.send("\x03")
         stopped = child.wait_for("Agent run stopped by you.", start=start, timeout=15)
         assert "unexpectedly completed" not in stopped
