@@ -14,6 +14,21 @@ import { PROVIDER_MARKS } from "../provider-icons.js";
 import { openKeyDialog } from "./settings-dialogs.js";
 import { toast } from "./toast.js";
 
+// Brand colours for the marks. A brand that is black or white itself is left out: it follows the theme's text colour.
+const MARK_COLORS = {
+  anthropic: "#e07a4f", deepseek: "#4d6bfe", qwen: "#8f6bff", moonshot: "#3b82f6", kimi: "#3b82f6",
+  xiaomi: "#ff6900", "xiaomi-tokenplan": "#ff6900", minimax: "#ff4f5e", qianfan: "#2d5bff", modelscope: "#8b5cf6",
+  mistral: "#ff8205", perplexity: "#22b8cf", databricks: "#ff5f46", gemini: "#4c8bf5", doubao: "#2dd4ff",
+  scaleway: "#b57aff",
+};
+
+// A letter tile has no brand colour, so it gets a stable hue from the provider id.
+function letterHue(text) {
+  let value = 0;
+  for (const char of String(text)) value = (value * 31 + char.codePointAt(0)) % 360;
+  return value;
+}
+
 /** A provider's mark: its logo when there is one, else its first letter, on the same neutral tile. */
 export function providerMark(id, label = "") {
   const tile = h("span", { class: "provider-mark", "aria-hidden": "true" });
@@ -22,7 +37,11 @@ export function providerMark(id, label = "") {
   else if (id === "anymodel") tile.append(icon("twig", 14));
   // The person's own endpoint has no brand: it is an address on the web.
   else if (id === "other") tile.append(icon("globe", 14));
-  else tile.textContent = (label || id).replace(/^[^A-Za-zА-Яа-я0-9]+/, "").slice(0, 1).toUpperCase();
+  else {
+    tile.textContent = (label || id).replace(/^[^A-Za-zА-Яа-я0-9]+/, "").slice(0, 1).toUpperCase();
+    tile.style.color = `hsl(${letterHue(id || label)} 70% 62%)`;
+  }
+  if (MARK_COLORS[id]) tile.style.color = MARK_COLORS[id];
   return tile;
 }
 
