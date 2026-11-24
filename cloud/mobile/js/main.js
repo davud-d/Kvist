@@ -41,6 +41,7 @@ function centered(...children) {
 
 function signIn() {
   centered(
+    h("img", { class: "mark", src: "/m/icon.svg", width: "56", height: "56", alt: "" }),
     h("div", { class: "wordmark big" }, "Kvist Cloud"),
     h("h1", {}, t("gate title")),
     h("p", { class: "lead" }, t("gate lead")),

@@ -1,8 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#0a0a0b"/>
-  <g fill="none" stroke="#f1f1f2" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M256 408V176"/>
-    <path d="M256 296l-92-92"/>
-    <path d="M256 236l78-78"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Kvist">
+  <!-- The Kvist mark (branding/icon.svg) full-bleed: a phone's icon mask rounds the corners itself. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12303b"/>
+      <stop offset="1" stop-color="#0c1c24"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <path d="M150 150 L266 256 L150 362" fill="none" stroke="#43d3ff" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="286" y="332" width="118" height="42" rx="21" fill="#43d3ff"/>
 </svg>

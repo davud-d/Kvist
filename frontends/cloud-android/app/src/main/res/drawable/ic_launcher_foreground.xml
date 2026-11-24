@@ -1,14 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A twig: a stem and two branches, on the 108dp adaptive-icon canvas (the safe zone is the middle 66dp). -->
+<!-- The Kvist mark (branding/icon.svg): a prompt and a cursor, on the 108dp adaptive-icon canvas (safe zone: the middle 66dp). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:pathData="M54,78 L54,36 M54,60 L37,43 M54,49 L68,35"
-        android:strokeColor="#F1F1F2"
-        android:strokeWidth="6"
+        android:pathData="M31.6,31.6 L56.1,54 L31.6,76.4"
+        android:strokeColor="#43D3FF"
+        android:strokeWidth="9.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
+    <path
+        android:pathData="M64.8,74.5 L80.8,74.5"
+        android:strokeColor="#43D3FF"
+        android:strokeWidth="8.9"
+        android:strokeLineCap="round" />
 </vector>

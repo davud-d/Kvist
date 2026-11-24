@@ -115,6 +115,7 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .gate h1 { font-size: 28px; line-height: 1.2; letter-spacing: -.02em; font-weight: 600; }
 .lead { color: var(--text2); font-size: 16px; line-height: 1.55; }
 .wordmark { font-weight: 600; letter-spacing: -.01em; }
+.mark { border-radius: 14px; margin-bottom: 4px; }
 .wordmark.big { font-size: 15px; color: var(--text2); margin-bottom: 8px; }
 
 /* -- the bar --------------------------------------------------------------------------------------------------------- */

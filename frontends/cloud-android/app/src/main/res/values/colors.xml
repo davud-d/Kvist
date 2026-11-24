@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="ic_launcher_background">#0F2530</color>
     <color name="kvist_bg">#0A0A0B</color>
     <color name="kvist_text">#EDEDEE</color>
     <color name="kvist_text_dim">#A2A2A8</color>
