@@ -57,12 +57,14 @@ backend/kvist_cloud/   сервер управления (FastAPI, SQLAlchemy 2,
   gateway.py           WebSocket раннеров       tasks.py    API задач, статус из событий Kvist
   events.py            живая рассылка           ledger.py   журнал часов, лента, споры
   limits.py            очередь, конец часов     billing.py  callback-и Platega (по умолчанию выкл.)
+  wallet.py            Apple Pay / Google Pay через Stripe (по умолчанию выкл.)
   funnel.py            шаги воронки, конверсия  exports.py  экспорт архива
   web.py               собранный фронтенд, CSP, gzip        providers/  base, local, libvirt, remote
 backend/migrations/    Alembic; здесь же триггеры журнала против UPDATE/DELETE
 runner/kvist_runner/   процесс на машине: WebSocket, heartbeat, свой Kvist на задачу
 frontend/              ванильный JS + esbuild; build.mjs проверяет локали, контраст и бюджеты
 workspace/             рабочее окно (копия Kvist Pixel) на облаке: отдаётся по /workspace/ (старые ссылки /pixel/ ведут туда), см. workspace/README.ru.md
+mobile/                страница для телефона по /m (и внутри приложений Android и iOS в ../frontends/cloud-android, cloud-ios): см. mobile/README.ru.md
 scripts/dev.sh         локальный запуск одной командой   scripts/fake_model.py  фейковая модель
 scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   выкладка, см. docs/DEPLOY.ru.md
 scripts/backup*.sh, restore.sh, setup_backup_host.sh   бэкапы, см. docs/BACKUP.ru.md
@@ -127,6 +129,32 @@ Callback URL (кабинет: Настройки → Callback URLs) — `<PUBLIC
 - Callback-и `PARTIALLY_REFUNDED` и `DISPUTED` нельзя проверить через эндпоинт статуса, поэтому они
   ничего не меняют; разбирай их вручную в кабинете Platega и в ledger.
 - Списывается `PLATEGA_CURRENCY`; доллары в таблице тарифов — только каталог.
+
+### Apple Pay и Google Pay (Stripe)
+
+Приложения открывают встроенное платёжное окно операционной системы; деньги идут через Stripe, потому что токен кошелька может
+списать только процессор, который его принимает (в документации Platega такого способа нет). Выключено, пока нет
+`WALLET_ENABLED=true` (переменные в `env.example`); Platega остаётся для всего остального. Цены по умолчанию берутся из таблицы
+тарифов в USD (`WALLET_PRICE_*`).
+
+1. Панель Stripe: ключи API (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`; тестовый и боевой ключ смешивать нельзя) и
+   webhook `<PUBLIC_URL>/billing/stripe/webhook` на события `payment_intent.succeeded`, `charge.refunded` и
+   `charge.dispute.created` (его секрет подписи — `STRIPE_WEBHOOK_SECRET`).
+2. Для Google Pay в режиме `TEST` ничего не нужно; для боя см. `frontends/cloud-android/README.ru.md`. Для Apple Pay нужны Merchant ID
+   и его сертификат, загруженный в Stripe: `frontends/cloud-ios/README.ru.md`.
+
+**Чему верит бэкенд.** То же правило, что и для Platega, но с более сильным «звонком в дверь». Покупка существует только как строка
+`BillingCheckout`, которую создал сервер (`POST /api/wallet/checkout`, цена — серверная); телефон возвращает токен кошелька
+(`POST /api/wallet/pay`), сервер превращает его в токен Stripe (у Google он уже такой; токен Apple уходит в `POST /v1/tokens`), создаёт
+и подтверждает PaymentIntent с ключом идемпотентности из оплаты и засчитывает покупку, только если ответ самого Stripe — `succeeded`
+ровно на эту сумму, валюту и токен оплаты. Webhook Stripe подписан, но тоже служит лишь поводом ещё раз посмотреть PaymentIntent
+(так засчитывается платёж, если приложение закрыли после оплаты); полный возврат или спор забирает покупку обратно. Карта, которой
+нужен дополнительный шаг банка, не может пройти его в окне кошелька: PaymentIntent отменяется, а человеку предлагают оплатить другим
+способом.
+
+Не проверено на самом Stripe (здесь нет ключей; тесты используют `backend/tests/stripe_fake.py`): что Stripe принимает токен Apple Pay
+в `POST /v1/tokens` с `pk_token` так, как его отправляет iOS-библиотека, и точное поведение аккаунта с `allow_redirects=never`.
+Перед включением проведи один платёж в тестовом режиме с телефона.
 
 ### Remote: собственная машина клиента
 

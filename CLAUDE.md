@@ -18,7 +18,9 @@ back, and repeats until done. Several frontends drive the same Python core.
 - `kernel/session-rs/` — Rust crate `kvist-session`: `--session-op` without starting Python (Linux/macOS/BSD/Windows, optional;
   `kernel/session/native.py` hands requests to it, Python serves them when it is missing).
 - `frontends/` — `tui/{classic,ink,opencode,glass}`, `gui/{electron,tauri}`, `ide/{vscode,jetbrains}`, `android` and `ios` (iPhone/iPad; phone windows onto a computer's `kvist-web --lan`, one `/m/` page that turns into a three-pane tablet layout), `zed`,
-  `voice`, `kvide`, `tray`. Ink's TS modules are also imported by VS Code and OpenCode: check both sides.
+  `voice`, `kvide`, `tray`, `cloud-android` and `cloud-ios` (the Kvist Cloud phone app: a WebView on `cloud/mobile`, served at the cloud's `/m`,
+  plus the OS's own Google Pay / Apple Pay sheets; the cloud's side of paying is `cloud/backend/kvist_cloud/wallet.py`).
+  Ink's TS modules are also imported by VS Code and OpenCode: check both sides.
 - `scripts/` (installers, e2e smokes), `docs/` (`UI_API.md` = frontend protocol, `SKILLS.md`, `PLUGINS.md` = one-file plugins, `remote.md`),
   `branding/`, `site/`.
 - Imports are `kernel.<subpackage>.<module>`; the classic terminal and Zed frontend are imported by bare name
@@ -58,6 +60,9 @@ cd frontends/gui/electron && npm test
 cd frontends/android && ./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 21, ANDROID_HOME
 cd frontends/ios && swift test && scripts/live-check.sh   # KvistCore (Linux ok); the app itself builds only on macOS: xcodegen generate
 node frontends/web-local/tests/browser/tablet.mjs   # the /m/ page's tablet layout (Playwright)
+cd cloud/mobile && npm ci && npm test && node tests/browser/run.mjs   # the Kvist Cloud phone page; see cloud/mobile/README.md (workflow cloud-mobile.yml)
+cd frontends/cloud-android && ./gradlew :app:testDebugUnitTest :app:assembleDebug   # JDK 21, ANDROID_HOME
+cd frontends/cloud-ios && swift test   # the core (Linux ok); the app itself builds only on macOS: xcodegen generate
 cd frontends/gui/electron-legacy && npm test
 cd frontends/gui/tauri && node --test "tests/*.test.mjs" && (cd src-tauri && cargo test)
 ```

@@ -56,12 +56,14 @@ backend/kvist_cloud/   the control server (FastAPI, SQLAlchemy 2, Alembic)
   gateway.py           runners' WebSocket    tasks.py    tasks API, status from Kvist's events
   events.py            live fan-out          ledger.py   append-only hours ledger, feed, disputes
   limits.py            queue, hours running out          billing.py  Platega callbacks (off by default)
+  wallet.py            Apple Pay / Google Pay via Stripe (off by default)
   funnel.py            funnel steps, conversion          exports.py  archive export
   web.py               the built frontend, CSP, gzip     providers/  base, local, libvirt, remote
 backend/migrations/    Alembic; the ledger's no-UPDATE/no-DELETE triggers live here
 runner/kvist_runner/   the process on a machine: WebSocket, heartbeat, one Kvist per task
 frontend/              vanilla JS + esbuild; build.mjs checks locales, contrast and budgets
 workspace/             the workspace window (a copy of Kvist Pixel) on the cloud: served at /workspace/ (old /pixel/ links redirect there), see workspace/README.md
+mobile/                the phone page, served at /m (and inside the Android and iOS apps in ../frontends/cloud-android, cloud-ios): see mobile/README.md
 scripts/dev.sh         the one-command local run    scripts/fake_model.py  the fake model
 scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   shipping, see docs/DEPLOY.md
 scripts/backup*.sh, restore.sh, setup_backup_host.sh   backups, see docs/BACKUP.md
@@ -125,6 +127,31 @@ Things that follow from Platega's model, not choices:
 - `PARTIALLY_REFUNDED` and `DISPUTED` callbacks cannot be verified through the status endpoint, so they
   change nothing; handle them by hand in the Platega cabinet and in the ledger.
 - Prices are charged in `PLATEGA_CURRENCY`; the dollar figures in the plan table are only the catalogue.
+
+### Apple Pay and Google Pay (Stripe)
+
+The phone apps open the operating system's own payment sheet; the money goes through Stripe, because a wallet's token can only
+be charged by a processor that accepts it (Platega's documentation shows no such method). Off unless `WALLET_ENABLED=true`
+(variables in `env.example`); Platega stays for everything else. Prices default to the plan table in USD (`WALLET_PRICE_*`).
+
+1. Stripe dashboard: the API keys (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`; a test and a live key must not be mixed), and a
+   webhook endpoint `<PUBLIC_URL>/billing/stripe/webhook` for `payment_intent.succeeded`, `charge.refunded` and
+   `charge.dispute.created` (its signing secret is `STRIPE_WEBHOOK_SECRET`).
+2. Google Pay needs nothing for `TEST`; for production see `frontends/cloud-android/README.md`. Apple Pay needs a Merchant ID and its
+   certificate uploaded to Stripe: `frontends/cloud-ios/README.md`.
+
+**What the backend trusts.** The same rule as for Platega, with a stronger doorbell. A purchase exists only as a `BillingCheckout`
+row the server made (`POST /api/wallet/checkout`, the price is the server's); the phone returns a wallet token
+(`POST /api/wallet/pay`), the server turns it into a Stripe token (Google's already is one; Apple's goes to `POST /v1/tokens`),
+creates and confirms a PaymentIntent with an idempotency key made from the checkout, and credits only if Stripe's own answer
+says `succeeded` for exactly that amount, currency and checkout token. Stripe's webhook is signed, and is still only used to look
+at the PaymentIntent again (an app closed after paying is credited that way); a full refund or a dispute takes the purchase back.
+A card that wants its bank's extra step cannot do it in a wallet sheet: the PaymentIntent is cancelled and the person is told to
+pay another way.
+
+Not verified against Stripe itself (no keys here; tests use `backend/tests/stripe_fake.py`): that Stripe accepts an Apple Pay token
+at `POST /v1/tokens` with `pk_token` the way its iOS library sends it, and the exact account behaviour of `allow_redirects=never`.
+Run one test-mode payment from a phone before switching anything on.
 
 ### Remote: the customer's own machine
 
