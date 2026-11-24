@@ -168,6 +168,27 @@ URL or the agent environment. Repository inputs accept GitHub HTTPS URLs only (l
 a development-only exception). Authenticated fetch/push from the agent is not provided by this clone
 integration; existing archive export remains available.
 
+### Updates in place
+
+A customer's machine is a thin layer over the disk image it was created from, so it would keep the Kvist it was
+born with. Instead the server brings it up to the wheels in `WHEELS_DIR` (default `/opt/kvist-cloud/wheels`;
+`UPDATE_IDLE_SECONDS`, default 1800) without a new image (`backend/kvist_cloud/updates.py`, `runner/kvist_runner/release.py`):
+
+- A machine nobody has touched for 30 minutes (a sleeping one is woken, two per 30 s at most) is told to stage the
+  release: the runner downloads the two wheels with its own token, checks their checksums, unpacks them into
+  `releases/<id>/site` beside the running code and checks that Kvist and the runner import from there.
+- Staging never touches a running task. Someone who comes back meanwhile works on the old Kvist.
+- When staging is done the runner stops every running Kvist (killed after 5 s; the session is on disk), points
+  `current-release` at the new release and restarts itself. Each stopped task reports `core_updated`, and the server
+  continues it in the same session on the new Kvist as soon as the runner says hello again.
+- Only the server decides that a machine is "updating", and only in answer to an `update` it sent; a runner's
+  unasked `update_ready` or `core_updated` is ignored or becomes a plain pause. The page can read `updating`
+  from `GET /api/machines`; no route sets it.
+- It costs the customer nothing: hours are billed only for the intervals a running task's heartbeat names, and a
+  task being switched is `starting`, not `running`. Out of hours, a switched task is paused, never resumed.
+- Only the two wheels are replaced. A release that needs a dependency the image lacks fails its import check
+  and is not switched on; that needs a new image (`scripts/deploy.sh` builds one when the wheels change).
+
 ## Checks
 
 ```bash

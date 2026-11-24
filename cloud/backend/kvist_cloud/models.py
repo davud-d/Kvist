@@ -166,6 +166,8 @@ class Machine(Base):
     last_beat_second: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_beat_running: Mapped[list] = mapped_column(JSON, default=list)
     last_active_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # The release of Kvist and the runner it reported last (updates.py); empty for what the disk image came with.
+    runner_release: Mapped[str] = mapped_column(String(32), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     user: Mapped[User] = relationship(back_populates="machines")
 

@@ -4,7 +4,8 @@
 Messages to the server: hello, heartbeat, event (a Kvist event, unchanged, with its task id),
 task_reason, task_exit, export_done, message_undelivered, screen_frame (a picture of the agent's screen, only
 while the owner watches). From the server: start_task, message, input_response, control, export, screen_watch,
-chatgpt_access.
+chatgpt_access. Updates in place (release.py): from the server update (stage a release) and apply_release; to
+it update_ready and update_failed.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from collections import deque
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
+from . import release
 from .chatgpt import AccessError, lend
 from .config import RunnerConfig
 from .export import run_export
@@ -29,6 +31,9 @@ OUTBOX_LIMIT = 20_000
 FRAME_BACKLOG_LIMIT = 100
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 RECONNECT_MAX_SECONDS = 30.0
+# A running Kvist gets this long to stop on its own before it is killed for a switch to a new release; its
+# session is kept on disk either way, and the next run continues it.
+SWITCH_GRACE_SECONDS = 5.0
 
 
 class Runner:
@@ -42,6 +47,10 @@ class Runner:
         self._wakeup = asyncio.Event()
         self._connected = False
         self._stopping = False
+        # Set when the process must start again to run a release it has just switched to (__main__ does it).
+        self.restart = asyncio.Event()
+        self._staging = False
+        self._switching = False
         self.exporter = run_export
 
     # -- outgoing -------------------------------------------------------------------------
@@ -105,6 +114,7 @@ class Runner:
                 {
                     "type": "hello",
                     "runner_version": VERSION,
+                    "release": release.current(self.config),
                     "tasks": [{"task_id": task_id, "running": task.running} for task_id, task in self.tasks.items()],
                 }
             )
@@ -166,6 +176,10 @@ class Runner:
             await task.control(str(message.get("action", "")))
         elif kind == "prepare_project":
             self._spawn(self._prepare_project(message))
+        elif kind == "update":
+            self._spawn(self._stage(message))
+        elif kind == "apply_release":
+            self._spawn(self._switch(str(message.get("release", ""))))
         elif kind == "message":
             task_id = int(message.get("task_id") or 0)
             await self._message(task_id, str(message.get("text") or ""), bool(message.get("command")))
@@ -182,6 +196,50 @@ class Runner:
             log.info("message for a task this runner does not have: %s", kind)
         else:
             log.warning("unknown message from the server: %r", kind)
+
+    async def _stage(self, message: dict) -> None:
+        """Install a release beside the running one. Tasks are untouched; the server decides when to switch."""
+        if self._staging:
+            return
+        self._staging = True
+        try:
+            staged = await release.stage(self.config, message)
+        except release.ReleaseError as error:
+            log.error("release %s not staged: %s", message.get("release"), error)
+            self.emit({"type": "update_failed", "release": str(message.get("release", "")), "reason": str(error)})
+        else:
+            self.emit({"type": "update_ready", "release": staged})
+        finally:
+            self._staging = False
+
+    async def _switch(self, wanted: str) -> None:
+        """Stop every Kvist within seconds, point at the staged release and restart. The server resumes the tasks.
+
+        Each stopped task reports ``core_updated`` before the connection goes, so the server continues the same
+        session on the new release once this runner says hello again.
+        """
+        if self._switching:
+            return
+        if not release.is_ready(self.config, wanted):
+            self.emit({"type": "update_failed", "release": wanted, "reason": "the release is not staged"})
+            return
+        self._switching = True
+        try:
+            live = list(self.tasks.values())
+            runs = [run for task_id in self.tasks if (run := self._runs.get(task_id)) is not None]
+            await asyncio.gather(*(task.stop("core_updated", SWITCH_GRACE_SECONDS) for task in live),
+                                 return_exceptions=True)
+            if runs:
+                await asyncio.wait(runs, timeout=SWITCH_GRACE_SECONDS)
+            release.activate(self.config, wanted)
+            release.prune(self.config)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._drain(), 3.0)
+            self.restart.set()
+        except (release.ReleaseError, OSError) as error:
+            self._switching = False
+            log.error("switch to release %s failed: %s", wanted, error)
+            self.emit({"type": "update_failed", "release": wanted, "reason": str(error)})
 
     def _lend_chatgpt(self, access: dict) -> None:
         try:
@@ -212,6 +270,10 @@ class Runner:
         self.emit({"type": "message_undelivered", "task_id": task_id, "text": text, "command": command})
 
     def _start(self, message: dict) -> None:
+        if self._switching:
+            # The server dispatches nothing during a switch; one that crossed it is sent again after hello.
+            log.info("task %s: start dropped, the runner is switching releases", message.get("task_id"))
+            return
         task_id = int(message["task_id"])
         existing = self.tasks.get(task_id)
         if existing is not None:

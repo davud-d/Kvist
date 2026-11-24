@@ -24,6 +24,7 @@ ENV_FILE_NAME = ".env"
 # Platega's PaymentMethodInt: 2 SBP QR, 3 ERIP, 11 card acquiring, 12 international, 13 crypto, 14 Sberpay.
 PLATEGA_METHODS = frozenset({2, 3, 11, 12, 13, 14})
 PLATEGA_DEFAULT_METHODS = (2, 11, 12, 13)
+DEFAULT_WHEELS_DIR = Path("/opt/kvist-cloud/wheels")
 PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours", "remote")
 
 
@@ -56,6 +57,10 @@ class Settings:
     heartbeat_seconds: float = 15.0
     heartbeat_max_gap_seconds: float = 45.0
     machine_idle_sleep_seconds: float = 900.0
+    # Where the wheels of Kvist and the runner are (the ones customers' VMs are built from), and how long a machine
+    # must be left alone before it is brought up to date in place (updates.py). No directory: no in-place updates.
+    wheels_dir: Path | None = None
+    update_idle_seconds: float = 1800.0
     provider_outage_seconds: float = 300.0
     hours_grace_seconds: float = 300.0
     # "Sign in with ChatGPT" is off until OpenAI agrees to a hosted agent: many customers' plans used from one
@@ -197,6 +202,13 @@ def default_runner_command() -> tuple[str, ...]:
     return (sys.executable, "-m", "kvist_runner")
 
 
+def _wheels_dir(env: Mapping[str, str]) -> Path | None:
+    """The same directory the VM host builds its disk image from (``deploy/systemd/kvist-vm@.service``)."""
+    if env.get("WHEELS_DIR"):
+        return Path(env["WHEELS_DIR"])
+    return DEFAULT_WHEELS_DIR if DEFAULT_WHEELS_DIR.is_dir() else None
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = _environment() if env is None else env
     data_dir = Path(env.get("KVIST_CLOUD_DATA_DIR", "") or CLOUD_ROOT / ".cloud-data").resolve()
@@ -241,6 +253,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         heartbeat_seconds=_number(env, "HEARTBEAT_SECONDS", 15.0),
         heartbeat_max_gap_seconds=_number(env, "HEARTBEAT_MAX_GAP_SECONDS", 45.0),
         machine_idle_sleep_seconds=_number(env, "MACHINE_IDLE_SLEEP_SECONDS", 900.0),
+        wheels_dir=_wheels_dir(env),
+        update_idle_seconds=_number(env, "UPDATE_IDLE_SECONDS", 1800.0),
         provider_outage_seconds=_number(env, "PROVIDER_OUTAGE_SECONDS", 300.0),
         hours_grace_seconds=_number(env, "HOURS_GRACE_SECONDS", 300.0),
         chatgpt_signin=_flag(env, "CHATGPT_SIGNIN"),

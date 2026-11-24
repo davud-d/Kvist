@@ -44,7 +44,7 @@ MANIFEST_KEPT = ("slash_commands", "plugin_commands")
 # Reasons the runner gives for stopping a task that can be continued later.
 PAUSE_REASONS = frozenset(
     {"hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted",
-     "machine_sleeping", "machine_suspended"}
+     "machine_sleeping", "machine_suspended", "core_updated"}
 )
 # The core's own words when the model's provider answered with a client error (400-499) again and again.
 MODEL_REFUSED = re.compile(r"Failed to get model response: Error code: 4\d\d")

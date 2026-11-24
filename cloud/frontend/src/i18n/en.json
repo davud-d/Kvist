@@ -68,6 +68,7 @@
     "machine_restarted": "The machine restarted. Nothing is lost: press Continue.",
     "machine_suspended": "An administrator stopped the machine. Write to support.",
     "machine_sleeping": "The machine went to sleep. Press Continue.",
+    "core_updated": "The machine was updated. Press Continue.",
     "user": "You paused it. Press Continue when you want.",
     "cancelled": "You stopped this task.",
     "agent_error": "The agent hit an error and stopped. The events above say what happened.",

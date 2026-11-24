@@ -15,7 +15,7 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import chatgpt, commands, exports, ledger, limits, plans, projects, screens, tasks
+from . import chatgpt, commands, exports, ledger, limits, plans, projects, screens, tasks, updates
 from .chatgpt import ChatGPTError
 from .db import lock_account, session_scope, utcnow
 from .keys import has_model_access, kvist_environment
@@ -185,6 +185,9 @@ async def dispatch(app: FastAPI, machine_id: int, known: set[int] | None = None)
     if not app.state.gateway.connected(machine_id):
         spawn(app, wake(app, machine_id))
         return
+    if updates.is_applying(app, machine_id):
+        # The runner is switching to a new release and restarts; its hello dispatches what waits.
+        return
     access = await _chatgpt_access(app, machine_id)
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
@@ -267,6 +270,7 @@ async def _hello(app: FastAPI, machine_id: int, message: dict) -> None:
                 # The runner restarted and its Kvist process with it; the checkpoint is on disk.
                 tasks.apply_exit(task, "machine_restarted")
                 app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
+    await updates.on_hello(app, machine_id, message)
     await dispatch(app, machine_id, known)
     await exports.send_pending(app, machine_id)
     await _send_projects(app, machine_id)
@@ -373,6 +377,16 @@ def _exit(app: FastAPI, machine_id: int, message: dict) -> None:
             # The previous run of this session ending: the next one is already waiting for the machine.
             return
         before = task.status
+        if (message.get("reason") == "core_updated" and task.status in TaskStatus.ACTIVE
+                and updates.is_applying(app, machine_id)):
+            # Stopped to switch Kvist's release, not paused: it goes on in the same session once the runner is back.
+            # Only while this server has a switch under way: otherwise the claim is just a pause (PAUSE_REASONS).
+            task.resume_requested = True
+            task.started_at = None
+            task.status_reason = ""
+            limits.admit(db, task)
+            app.state.hub.publish(task.id, {"type": "task", "task": tasks.task_view(db, task)})
+            return
         if getattr(app.state, "shutting_down", False):
             reason = "machine_restarted"
         else:
@@ -406,6 +420,10 @@ async def handle(app: FastAPI, machine_id: int, message: dict) -> None:
         await limits.admit_queued(app, machine_id)
     elif kind == "export_done":
         exports.on_export_done(app, machine_id, message)
+    elif kind == "update_ready":
+        await updates.on_ready(app, machine_id, message)
+    elif kind == "update_failed":
+        updates.on_failed(app, machine_id, message)
     else:
         log.warning("machine %s sent an unknown message type %r", machine_id, kind)
 

@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import release
 from .config import RunnerConfig
 from .guard import provider_trouble, scrub, with_machine_limits
 from .screens import ScreenRelay
@@ -238,6 +239,8 @@ class TaskProcess:
             }
         )
         env.update(self.config.kvist_env)
+        # The release the runner was switched to; a task started before the switch keeps the one it began with.
+        env.update(release.overlay_env(self.config))
         env.update(self._model_env or {})
         return env
 
@@ -489,15 +492,15 @@ class TaskProcess:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
 
-    async def stop(self) -> None:
-        """Machine going to sleep: stop the agent (checkpoint kept), then make sure it is gone."""
-        self.stop_reason = self.stop_reason or "machine_sleeping"
+    async def stop(self, reason: str = "machine_sleeping", grace: float = 10.0) -> None:
+        """Stop the agent (checkpoint kept), then make sure it is gone: killed if it is still there after `grace`."""
+        self.stop_reason = self.stop_reason or reason
         await self._cancel()
         await self.close_stdin()
         process = self.process
         if process is None:
             return
         try:
-            await asyncio.wait_for(process.wait(), 10.0)
+            await asyncio.wait_for(process.wait(), grace)
         except TimeoutError:
             self.kill()

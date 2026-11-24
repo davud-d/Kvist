@@ -322,9 +322,13 @@ async def on_signed_in(request: Request, db: Session, user: User, _github_token:
 
 
 @router.get("/api/machines")
-def list_machines(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, object]]:
+def list_machines(
+    request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> list[dict[str, object]]:
+    from .updates import is_updating  # updates imports this module
+
     machines = db.scalars(machines_of(db, user.id).order_by(Machine.id))
-    return [machine_view(db, machine) for machine in machines]
+    return [{**machine_view(db, machine), "updating": is_updating(request.app, machine.id)} for machine in machines]
 
 
 @router.post("/api/machines", status_code=201)

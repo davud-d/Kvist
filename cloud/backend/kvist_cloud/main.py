@@ -31,6 +31,7 @@ from . import (
     review,
     screens,
     tasks,
+    updates,
     web,
 )
 from .config import Settings, load_settings
@@ -56,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     loops = [
         asyncio.create_task(machines.sweep_forever(app)),
         asyncio.create_task(billing.sweep_forever(app)),
+        asyncio.create_task(updates.sweep_forever(app)),
     ]
     if app.state.settings.chatgpt_signin:
         # Off, the server makes no request to OpenAI for anyone's plan.
@@ -109,6 +111,7 @@ def create_app(
     app.state.on_signed_in = machines.on_signed_in
     app.state.gateway = Gateway()
     app.state.hub = EventHub()
+    app.state.updates = updates.UpdateState()
     app.state.screens = ScreenStore()
     # The ledger's clock; tests move it by hand.
     app.state.clock = time.time
@@ -136,6 +139,7 @@ def create_app(
     app.include_router(chatgpt.router)
     app.include_router(machines.router)
     app.include_router(gateway.router)
+    app.include_router(updates.router)
     app.include_router(projects.router)
     app.include_router(tasks.router)
     app.include_router(commands.router)
