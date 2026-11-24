@@ -2,6 +2,7 @@
 """The built frontend: the prerendered pricing page, the app shell for every screen, the assets."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from urllib.parse import quote
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from .auth import SESSION_COOKIE, me, request_locale, user_from_cookie
 from .db import session_scope
+from .errors import ApiError
 from .funnel import record_pricing_view
 from .models import Task, User
 
@@ -29,6 +31,16 @@ APP_PATHS = ("/start", "/onboarding", "/dashboard", "/settings", "/admin")
 # sheet). Only /m/ gets it; no other page of the site may load a third party's script.
 GOOGLE_PAY_SCRIPT = "https://pay.google.com"
 GOOGLE_PAY_IMAGES = "https://www.gstatic.com https://pay.google.com"
+
+
+def mobile_build_id(folder: Path) -> str:
+    """Names the phone app's files as they are now: the address of every script and style carries it."""
+    digest = hashlib.sha256()
+    for file in sorted(folder.rglob("*")):
+        if file.is_file():
+            digest.update(str(file.relative_to(folder)).encode())
+            digest.update(file.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def is_phone_app(path: str) -> bool:
@@ -76,12 +88,24 @@ def install(app: FastAPI) -> None:
     # The phone app: one page at every address of a session or a project, the files beside it.
     mobile = dist / "mobile"
     if mobile.is_dir():
-        async def mobile_page() -> FileResponse:
-            return FileResponse(mobile / "index.html", media_type="text/html; charset=utf-8")
+        build = mobile_build_id(mobile)
+        page = (mobile / "index.html").read_text(encoding="utf-8").replace("__BUILD__", build)
 
-        for path in ("/m/s/{public_id}", "/m/p/{project_id}"):
+        async def mobile_page() -> Response:
+            return HTMLResponse(page, headers={"Cache-Control": "no-store"})
+
+        async def mobile_file(build_id: str, path: str) -> FileResponse:
+            """The page's scripts and styles live at /m/v/<build>/...: a new release is a new address, so a browser or a
+            proxy that keeps files for hours (Cloudflare's does) can never show an old version of the app."""
+            target = (mobile / path).resolve()
+            if not target.is_file() or mobile.resolve() not in target.parents:
+                raise ApiError(404, "not_found", "Not found. / Не найдено.")
+            return FileResponse(target)
+
+        for path in ("/m", "/m/", "/m/s/{public_id}", "/m/p/{project_id}"):
             app.add_api_route(path, mobile_page, methods=["GET"], include_in_schema=False)
-        app.mount("/m", StaticFiles(directory=mobile, html=True), name="mobile")
+        app.add_api_route("/m/v/{build_id}/{path:path}", mobile_file, methods=["GET"], include_in_schema=False)
+        app.mount("/m", StaticFiles(directory=mobile), name="mobile")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
