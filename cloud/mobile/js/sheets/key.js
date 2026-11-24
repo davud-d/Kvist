@@ -8,8 +8,6 @@ import { t } from "../i18n.js";
 import * as native from "../native.js";
 import { openSheet, toast } from "../sheet.js";
 
-const LEVELS = ["low", "medium", "high"];
-
 /** A second sheet over the first: the providers are many (forty and more), so they are searched, not scrolled. */
 function pickProvider(providers, chosen, onPick) {
   openSheet({
@@ -93,19 +91,6 @@ export function keySheet(then = () => {}) {
         }
       });
 
-      const effort = account.key?.set ? h("div", { class: "field-group" },
-        h("label", { class: "label" }, t("effort")),
-        h("div", { class: "segments" }, LEVELS.map((level) => h("button", { type: "button",
-          class: (account.key.effort || "medium") === level ? "on" : "", onclick: async (event) => {
-            try {
-              await api("/api/effort", { method: "PUT", body: { level } });
-              await refresh("key");
-              for (const sibling of event.currentTarget.parentElement.children) sibling.classList.toggle("on", sibling === event.currentTarget);
-            } catch (error) {
-              toast(error.localized, "error");
-            }
-          } }, t(`effort ${level}`))))) : null;
-
       return [
         h("p", { class: "dim" }, t("key intro")),
         h("div", { class: "group" }, picker),
@@ -113,7 +98,6 @@ export function keySheet(then = () => {}) {
         extra,
         message,
         save,
-        effort,
       ];
     },
   });

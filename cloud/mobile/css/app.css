@@ -381,3 +381,23 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .pop-rule { margin: 6px 12px; border: 0; border-top: 1px solid rgba(255, 255, 255, .1); }
 .pop-item.on .pop-label { font-weight: 600; }
 .pop-check { color: var(--text); display: grid; place-items: center; }
+
+/* -- the effort dial: a gauge by the send button, a slider above it --------------------------------------------------------- */
+.gauge-btn { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 17px; color: var(--text2); }
+.gauge-btn:active { background: rgba(255, 255, 255, .1); }
+.popover.custom { min-width: 0; width: 300px; padding: 14px 14px 16px; }
+.dial { display: grid; gap: 8px; }
+.dial-head { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; }
+.dial-gauge { display: grid; place-items: center; color: var(--text3); }
+.dial-word { text-align: center; font-size: 17px; font-weight: 600; color: #6ea4f5; font-variant-numeric: tabular-nums; }
+.dial-reset { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--text2); }
+.dial-reset:disabled { opacity: .3; }
+.dial-model { display: inline-flex; align-items: center; justify-content: center; gap: 6px; justify-self: center; font-size: 13px; color: var(--text2); max-width: 100%; }
+.dial-model span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dial-track { position: relative; height: 30px; margin-top: 6px; border-radius: 15px; background: rgba(255, 255, 255, .08); touch-action: none; outline: none; }
+.dial-fill { position: absolute; inset: 0 auto 0 0; border-radius: 15px; background: #4f8cff; }
+.dial-stop { position: absolute; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: var(--text3); pointer-events: none; }
+.dial-stop.passed { background: rgba(255, 255, 255, .6); }
+.dial-thumb { position: absolute; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); pointer-events: none; transition: left .16s cubic-bezier(.23, 1, .32, 1); }
+.dial-fill { transition: width .16s cubic-bezier(.23, 1, .32, 1); }
+.dial-track.dragging .dial-thumb { transform: translate(-50%, -50%) scale(1.1); }

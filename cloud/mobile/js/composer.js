@@ -10,14 +10,15 @@ import { mountAttachments } from "./attachments.js";
 
 const MAX_ROWS_PX = 160;
 
-export function createComposer({ onSend, onStop, chips, onPlus }) {
+export function createComposer({ onSend, onStop, chips, onPlus, onGauge }) {
   const field = h("textarea", {
     class: "composer-input", rows: "1", enterkeyhint: "send", autocapitalize: "sentences",
     "aria-label": t("message"), placeholder: t("composer placeholder"),
   });
   const action = h("button", { class: "round", type: "button" });
   const plus = h("button", { class: "plus", type: "button", aria: { label: t("attach") }, onclick: () => onPlus(plus) }, icon("plus", 22));
-  const box = h("div", { class: "composer" }, field, h("div", { class: "composer-foot" }, plus, chips, action));
+  const gauge = h("button", { class: "gauge-btn", type: "button", aria: { label: t("effort") }, hidden: true, onclick: () => onGauge(gauge) }, icon("gauge", 18));
+  const box = h("div", { class: "composer" }, field, h("div", { class: "composer-foot" }, plus, chips, gauge, action));
   const attachments = mountAttachments({ box, field, onChange: () => paint() });
   let mode = "send";
   let busy = false;
@@ -68,6 +69,10 @@ export function createComposer({ onSend, onStop, chips, onPlus }) {
       paint();
     },
     attachments,
+    /** The dial is for a person who has a model to think with. */
+    showGauge(visible) {
+      gauge.hidden = !visible;
+    },
     clear() {
       attachments.clear();
       field.value = "";

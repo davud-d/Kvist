@@ -11,7 +11,7 @@ import { createDrawer } from "./drawer.js";
 import { createFeed, working } from "./feed.js";
 import { createStatus } from "./status.js";
 import { providerMark } from "./mark.js";
-import { effortSheet, effortOf } from "./sheets/effort.js";
+import { openDial } from "./dial.js";
 import { imageGoal } from "./attachments.js";
 import { openPopover } from "./popover.js";
 import { clock, titleOf } from "./format.js";
@@ -44,7 +44,7 @@ export function startShell(root, { go, onAuth }) {
   feedEl.prepend(homeEl);
 
   const chips = h("div", { class: "chips" });
-  const composer = createComposer({ onSend: (text, images) => send(text, images), onStop: () => pause(), chips, onPlus: (anchor) => plusMenu(anchor) });
+  const composer = createComposer({ onSend: (text, images) => send(text, images), onStop: () => pause(), chips, onPlus: (anchor) => plusMenu(anchor), onGauge: (anchor) => openDial(anchor) });
   const bannerEl = h("div", { class: "banner-slot" });
   const dialogEl = h("div", { class: "dialog-slot" });
   const dock = h("footer", { class: "dock" }, bannerEl, dialogEl, composer.node);
@@ -86,17 +86,17 @@ export function startShell(root, { go, onAuth }) {
     menuDot.hidden = !account.tasks.some((item) => item.status === "waiting_for_user" && item.public_id !== view.publicId);
   }
 
-  /** The menu behind the plus: a photo from the camera or the library, and how hard the model thinks. */
+  /** The menu behind the plus: a photo from the camera or the library. */
   function plusMenu(anchor) {
     openPopover(anchor, [
       { icon: icon("camera", 20), label: t("camera"), onSelect: () => composer.attachments.takePhoto() },
       { icon: icon("image", 20), label: t("photo"), onSelect: () => composer.attachments.pickPhoto() },
-      ...(account.key?.set ? [{ icon: icon("gauge", 20), label: t("think"), detail: t(`effort ${effortOf()}`), onSelect: effortSheet }] : []),
     ]);
   }
 
   /** The row under the field: the project (a new session only), the model with its mark, how hard it thinks. */
   function paintChips() {
+    composer.showGauge(Boolean(account.key?.set));
     const key = account.key;
     const model = key?.set ? (key.model || key.label || key.provider) : t("model key");
     fill(chips,

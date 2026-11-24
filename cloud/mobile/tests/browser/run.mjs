@@ -255,6 +255,26 @@ scenario("a photo is shrunk in the browser, sent with the task, and shown in the
   assert.deepEqual(page.problems, []);
 });
 
+scenario("the gauge by the send button sets how hard the model thinks, like the web's slider", async (page) => {
+  await signIn(page);
+  await startTrial(page);
+  assert.equal(await page.locator(".gauge-btn").isVisible(), false, "no model, nothing to set");
+  await addKeyAndProject(page);
+  await page.locator(".gauge-btn").click();
+  await visible(page, ".dial-track");
+  assert.equal(await page.locator(".dial-word").innerText(), "Medium");
+  await shot(page, "dial");
+  const box = await page.locator(".dial-track").boundingBox();
+  // A tap near the far end goes to the last stop; the choice is saved when the finger lets go.
+  await page.mouse.click(box.x + box.width - 6, box.y + box.height / 2);
+  assert.equal(await page.locator(".dial-word").innerText(), "Max");
+  await page.waitForFunction(async () => (await (await fetch("/api/model-key")).json()).effort === "max");
+  await page.locator(".dial-reset").click();
+  assert.equal(await page.locator(".dial-word").innerText(), "Medium");
+  await page.waitForFunction(async () => (await (await fetch("/api/model-key")).json()).effort === "medium");
+  assert.deepEqual(page.problems, []);
+});
+
 scenario("the agent asks, the person answers", async (page) => {
   await signIn(page);
   await startTrial(page);
