@@ -46,9 +46,16 @@ async function afterPaid(close) {
 /** One purchase from start to finish through the phone's wallet. Resolves true when it was paid. */
 async function payWithWallet(kind, wallet) {
   const checkout = await post("/api/wallet/checkout", { plan: kind, wallet });
-  const result = await native.pay(wallet, checkout.request);
+  const result = await native.pay(wallet, checkout.request, account.wallet.google_environment);
   if (result.cancelled) return false;
-  await post("/api/wallet/pay", { checkout: checkout.checkout, wallet, token: result.token });
+  try {
+    await post("/api/wallet/pay", { checkout: checkout.checkout, wallet, token: result.token });
+  } catch (error) {
+    // The sheet is still open (Apple's) and must be told it failed, or it would hang until it gives up by itself.
+    await native.payDone(wallet, false);
+    throw error;
+  }
+  await native.payDone(wallet, true);
   return true;
 }
 

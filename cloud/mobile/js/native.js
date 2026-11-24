@@ -6,8 +6,8 @@
 //                                            window.__kvistReply(id, resultJson) when it is done
 //
 // Names the host understands: "wallets" (-> ["google_pay"] or ["apple_pay"], what this phone can pay with now),
-// "pay" ({wallet, request} -> {token} | {cancelled: true} | {error}), "open" ({url}), "haptic" ({kind}),
-// "share" ({text}), "copy" ({text}). The page never holds a payment card: the OS sheet hands it a token.
+// "pay" ({wallet, request, environment} -> {token} | {cancelled: true} | {error}), "open" ({url}), "haptic" ({kind}),
+// "payDone" ({wallet, ok}), "share" ({text}), "copy" ({text}). The page never holds a payment card: the OS sheet hands it a token.
 
 let counter = 0;
 const waiting = new Map();
@@ -39,13 +39,22 @@ export async function wallets() {
   return Array.isArray(found) ? found.filter((name) => name === "google_pay" || name === "apple_pay") : [];
 }
 
-/** Opens the OS payment sheet. Resolves to {token} or {cancelled: true}; rejects with the host's error code. */
-export async function pay(wallet, request) {
-  const result = await call("pay", { wallet, request });
+/**
+ * Opens the OS payment sheet. `environment` is the server's word for Google Pay ("TEST" or "PRODUCTION").
+ * Resolves to {token} or {cancelled: true}; rejects with the host's error code.
+ */
+export async function pay(wallet, request, environment = "TEST") {
+  const result = await call("pay", { wallet, request, environment });
   if (!result) throw Object.assign(new Error("no wallet"), { code: "wallet_unavailable" });
   if (result.error) throw Object.assign(new Error(result.error), { code: result.error });
   return result;
 }
+
+/**
+ * Tells the app whether the server charged the wallet's token. Apple's sheet stays open, spinning, until it hears it,
+ * and then shows its checkmark or its failure; Google's sheet closes when it hands over the token, so for it this is nothing.
+ */
+export const payDone = (wallet, ok) => (inApp() ? call("payDone", { wallet, ok }) : Promise.resolve());
 
 /** A link goes to the system browser from the app (a payment page or a repository), to a new tab elsewhere. */
 export function open(url) {

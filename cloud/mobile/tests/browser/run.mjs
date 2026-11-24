@@ -80,6 +80,7 @@ const bridge = ({ platform, wallet, pay }) => {
       window.__host.push({ name, args });
       let answer = null;
       if (name === "wallets") answer = pay === "none" ? [] : [wallet];
+      if (name === "payDone") answer = null;
       if (name === "pay") answer = pay === "cancel" ? { cancelled: true } : { token: wallet === "apple_pay" ? apple : google };
       setTimeout(() => window.__kvistReply(id, JSON.stringify(answer)), 10);
     },
@@ -242,6 +243,7 @@ for (const kind of ["google_pay", "apple_pay"]) {
     await page.locator(button).first().click();
     await page.getByText("Paid. Thank you.").waitFor({ timeout: 15000 });
     const [pay] = await hostCalls(page, "pay");
+    assert.deepEqual((await hostCalls(page, "payDone")).map((c) => c.args.ok), [true], "the sheet is told the charge went through");
     assert.equal(pay.args.wallet, kind);
     if (kind === "google_pay") {
       assert.equal(pay.args.request.transactionInfo.totalPrice, "15.00");
@@ -271,6 +273,7 @@ scenario("a declined card says so and charges nothing; closing the sheet is not 
   await page.locator(button).first().click();
   await visible(page, ".pay-status");
   assert.match(await page.locator(".pay-status").innerText(), /declined/i);
+  assert.deepEqual((await hostCalls(page, "payDone")).map((c) => c.args.ok), [false], "the sheet is told it failed");
   assert.equal(await hoursLeft(page), 5, "still on the trial");
   await shot(page, "pay-declined");
   // The person closes the sheet instead: nothing is said, nothing is charged.
