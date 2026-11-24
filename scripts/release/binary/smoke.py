@@ -84,6 +84,9 @@ def check_setup_screen_without_node(binary: Path) -> None:
                 seen += chunk
         finally:
             os.kill(pid, signal.SIGKILL)
+            # macOS lets a process with unread output on its terminal hang in exit; closing our end
+            # of the pty first lets it finish.
+            os.close(descriptor)
             os.waitpid(pid, 0)
     assert ALTERNATE_SCREEN in seen, "the setup screen did not open; the output was: " + seen[-400:].decode("utf-8", "replace")
     print("setup screen: opened with no node on PATH")
