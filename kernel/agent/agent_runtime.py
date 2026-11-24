@@ -872,6 +872,9 @@ def _native_tool_defs(self, role: str) -> list[dict[str, Any]]:
         # A helper never manages helpers and never asks the person directly:
         # its questions go through the main agent.
         tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user", "wait", "schedule", "feedback")]
+    if self.unattended:
+        # A calendar run has nobody to ask, no conversation to wait in, and must not breed schedules of its own.
+        tools = [tool for tool in tools if tool["function"]["name"] not in ("ask_user", "wait", "schedule")]
     tools.extend(self.skills.tool_definitions())
     return bestof_offer.tools_for_run(plan_mode.tools_for_run(tools, self), self)
 

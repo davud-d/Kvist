@@ -395,7 +395,8 @@ ACTION_TOOLS.update({
         "one time) or 'time' HH:MM with optional 'weekdays' or 'every_days' (recurring; no weekdays means every "
         "day), or 'every_minutes' (at least 5). list shows every schedule and the current time; update changes "
         "the task or the timing; pause, resume and cancel take the id. 'task' is a complete instruction to your "
-        "future self: it will not see this conversation.",
+        "future self: it will not see this conversation. A 'time' schedule runs in a clean session each time and "
+        "its final answer comes back here as a report, so 'task' must say what the report contains.",
         {
             "op": {"type": "string", "enum": ["add", "list", "update", "cancel", "pause", "resume"]},
             "id": _STRING,

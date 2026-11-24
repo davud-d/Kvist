@@ -235,7 +235,7 @@ def _schedule(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
     scheduler = _scheduler(agent)
     op = args["op"]
     if op == "add":
-        return scheduler.add(str(args["task"]), args)
+        return scheduler.add(str(args["task"]), args, origin=agent.current_session)
     if op == "list":
         return scheduler.list()
     if op == "cancel":
@@ -249,7 +249,7 @@ def _ask_user(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
     question = redact_text(str(args["question"]))
     options = [str(option) for option in args.get("options") or []]
     allow_text = bool(args.get("allow_text", not options))
-    if not getattr(agent.config, "interactive", False):
+    if agent.unattended or not getattr(agent.config, "interactive", False):
         return {"status": "no_interactive_user", "answer": None,
                 "note": "Nobody can answer here. Continue with a stated assumption, or end the turn and ask in your answer."}
     ru = agent._state.response_language == "ru"

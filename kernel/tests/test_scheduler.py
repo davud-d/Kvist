@@ -99,9 +99,39 @@ def test_an_occurrence_missed_while_closed_fires_once_and_says_it_was_late(sched
     scheduler.add("weekly digest", {"time": "10:00", "weekdays": ["mon"]})
     clock.at(datetime(2026, 10, 27, 12, 0))
     assert scheduler._take_due()
-    note = scheduler.take_note()
-    assert "Kvist was not running" in note
+    [fired] = scheduler.take_runs()
+    assert fired.late
     assert scheduler.list()["schedules"][0]["next_run"] == "2026-11-02 10:00"
+
+
+def test_a_calendar_occurrence_is_a_run_of_its_own_and_a_polling_one_is_not(scheduler, clock):
+    scheduler.add("morning report", {"time": "10:00"}, origin="main-chat")
+    scheduler.add("watch the build", {"every_minutes": 30}, origin="main-chat")
+    clock.at(datetime(2026, 10, 17, 10, 30))
+    assert scheduler._take_due()
+    assert scheduler.has_due() and scheduler.has_due_runs()
+    # The polling one stays in the conversation; the calendar one is not part of its note.
+    assert "watch the build" in scheduler.take_note()
+    assert "morning report" not in scheduler.take_note()
+    [fired] = scheduler.take_runs()
+    assert (fired.task, fired.origin, fired.run) == ("morning report", "main-chat", 1)
+    assert not scheduler.has_due_runs()
+
+
+def test_the_run_number_counts_occurrences(scheduler, clock):
+    scheduler.add("weekly", {"time": "10:00"})
+    for day, expected in ((17, 1), (18, 2)):
+        clock.at(datetime(2026, 10, day, 10, 0))
+        assert scheduler._take_due()
+        assert [item.run for item in scheduler.take_runs()] == [expected]
+
+
+def test_a_schedule_stored_before_origins_existed_still_loads(tmp_path, clock):
+    path = tmp_path / ".kvist" / "schedules.json"
+    path.parent.mkdir()
+    path.write_text('{"version": 1, "entries": [{"id": "s1", "kind": "recurring", "task": "old", '
+                    '"next_run": 1, "repeat": {"time": "10:00"}}]}', encoding="utf-8")
+    assert Scheduler(tmp_path, clock=clock).list()["schedules"][0]["id"] == "s1"
 
 
 def test_a_paused_schedule_does_not_fire_and_resumes_at_the_next_future_time(scheduler, clock):

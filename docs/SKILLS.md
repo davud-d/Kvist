@@ -42,7 +42,13 @@ The model uses small built-in tools to work with the platform: `skills`
 `memory`, `sessions`, `helper`, `ask_user`, and the timers `wait` (a background pause that wakes the agent, up to
 24 hours) and `schedule` (`add`, `list`, `update`, `cancel`, `pause`, `resume`: a one-time or recurring wake-up with
 a task, stored in `<workspace>/.kvist/schedules.json`). Timers fire only while Kvist runs in an interface that can
-wake the agent (the Ink terminal app and the IDE panels, `--wake`). Skill tools are mapped to the internal action type `skill_call`, so every
+wake the agent (the Ink terminal app and the IDE panels, `--wake`). A schedule on a time of day (`time`, with
+`weekdays` or `every_days` or neither) runs each time in a new session that holds only its recorded task, so a daily
+job never drags the earlier days along. Nobody can answer there: approvals are refused and `ask_user`, `wait` and
+`schedule` are not offered, so a question has to go into the report. The final answer is copied into the session
+the schedule was set from, inside a `<scheduled_report>` tag (the last ten stay in the prompt), and the run's session
+is deleted; if the origin session no longer exists it is kept. `every_minutes` schedules and one-time ones wake the
+conversation they were set in, as before. Skill tools are mapped to the internal action type `skill_call`, so every
 guard of the loop (repeat guard, reader/plan barriers, journal, pending action) applies.
 
 ## Package layout

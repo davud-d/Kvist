@@ -47,6 +47,8 @@ from kernel.session.agent_logging import (
     save_session,
     store_session_title,
 )
+from kernel.agent import scheduled_report
+from kernel.agent.scheduled_run import run_scheduled
 from kernel.agent.agent_tools import memory_model, memory_prompt_section
 from kernel.memory.auto import AutoProcessor
 from kernel.context.context_meter import ContextLedger, begin_call, note_generated, note_pending
@@ -295,6 +297,8 @@ class LocalAgent:
         # Set on a helper: messages from the main agent, drained before each request.
         self.inbox_source: Any = None
         self._wake_listener: Callable[[], None] | None = None
+        # True while a calendar schedule's run is going: nobody can answer a question or an approval.
+        self.unattended = False
         # The role of the answered turn that left helpers or jobs running; their wake-up turn keeps it.
         self._background_role: str | None = None
         self.console = console or Console()
@@ -643,6 +647,9 @@ class LocalAgent:
 
     def _memory_session_left(self, session: str) -> None:
         """The person moved on: read the session they left while they work in the next one."""
+        # A calendar run's session holds only what its report already says, and is deleted right after.
+        if session.startswith(scheduled_report.SESSION_PREFIX):
+            return
         if self._memory_auto is not None:
             self._memory_auto.session_left(session)
 
@@ -725,6 +732,8 @@ class LocalAgent:
         ``identity`` names a first-time approval (a skill id or ``mcp:<server>``) so a choice made at the
         start of the task can answer it; leave it empty when the content changed since an earlier approval.
         """
+        if self.unattended:
+            return False
         if self.auto_approval:
             return self.executor.approvals.confirm_capability(identity, title, body)
         return bool(self._ui.confirm(title, body))
@@ -759,9 +768,15 @@ class LocalAgent:
 
     def has_background_news(self) -> bool:
         """Whether a helper or background job ended on its own and the model has not been told."""
+        return self._has_news_for_this_conversation() or self._has_calendar_runs()
+
+    def _has_news_for_this_conversation(self) -> bool:
         helpers_done = self.helpers is not None and self.helpers.has_finish_notice()
         timer_due = self.scheduler is not None and self.scheduler.has_due()
         return helpers_done or timer_due or self.images.has_notice() or self.executor.jobs.has_unreported_finish()
+
+    def _has_calendar_runs(self) -> bool:
+        return self.scheduler is not None and self.scheduler.has_due_runs()
 
     def wake_due(self) -> bool:
         """Whether ``wake`` would run a turn now.
@@ -790,6 +805,14 @@ class LocalAgent:
         """
         if not self.wake_due():
             return None
+        answer = self._wake_conversation() if self._has_news_for_this_conversation() else None
+        # After the news for this conversation: a run's new session would take it along, and wait timers with it.
+        runs = self.scheduler.take_runs() if self.scheduler is not None else []
+        for fired in runs:
+            answer = run_scheduled(self, fired)
+        return answer
+
+    def _wake_conversation(self) -> str:
         self._journal.begin_turn("", woken=True)
         self._announce_turn_started()
         try:
@@ -1529,7 +1552,13 @@ class LocalAgent:
         history_lines = [_CHAT_HISTORY_PREAMBLE]
         # Newest first: when the budget cuts this message it keeps the
         # head and the tail, so the oldest turns are what goes.
+        reports = 0
         for entry in reversed(self._session_history):
+            if isinstance(entry.get("scheduled_report"), dict):
+                reports += 1
+                if reports <= scheduled_report.KEPT_IN_PROMPT:
+                    history_lines.extend(scheduled_report.render(entry, "    "))
+                continue
             history_lines.append(f"- [{entry['role']}] Asked: \"{entry['goal']}\"")
             if entry.get("stopped_by_user"):
                 history_lines.append("    Status: the user stopped this turn before it finished.")

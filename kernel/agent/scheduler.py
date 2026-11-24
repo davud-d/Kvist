@@ -6,6 +6,10 @@ A wait lives in memory and ends with the conversation. A schedule is stored in
 its time comes the scheduler queues a ``Fired`` record and calls the agent's
 wake listener; the agent then runs a turn of its own (``LocalAgent.wake``).
 
+A recurring schedule on a time of day is the exception to "the agent runs a turn of its own": its occurrence is
+a run of its own in a fresh session (``scheduled_run``), and ``take_runs`` hands it over separately from the
+wait/one-time note. ``every_minutes`` polls stay in the conversation they were set in.
+
 The file is the single source of truth for schedules, so several cores on one
 workspace share them. A core claims a due schedule by advancing its stored
 ``next_run`` under the file lock, which is what keeps two cores from running
@@ -55,6 +59,16 @@ class Entry:
     created_at: float = 0.0
     last_run: float | None = None
     runs: int = 0
+    # The session the schedule was set from: a run's report is copied back there.
+    origin: str = ""
+
+    @property
+    def isolated(self) -> bool:
+        """A calendar schedule (a time of day, some weekdays, every N days) runs in a session of its own.
+
+        ``every_minutes`` is a poll of the conversation it was set in, so it stays there.
+        """
+        return self.kind == RECURRING and "every_minutes" not in self.repeat
 
     def to_dict(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in self.__slots__}
@@ -65,7 +79,7 @@ class Entry:
             id=str(data["id"]), kind=str(data["kind"]), task=str(data["task"]), next_run=float(data["next_run"]),
             repeat=dict(data.get("repeat") or {}), paused=bool(data.get("paused", False)),
             created_at=float(data.get("created_at", 0.0)), last_run=data.get("last_run"),
-            runs=int(data.get("runs", 0)),
+            runs=int(data.get("runs", 0)), origin=str(data.get("origin") or ""),
         )
 
 
@@ -79,6 +93,10 @@ class Fired:
     due_at: float
     # True when the occurrence came due while no core was running to take it.
     late: bool
+    # Set for an occurrence of a calendar schedule: ``origin`` is the session it was set from, ``run`` counts its runs.
+    isolated: bool = False
+    origin: str = ""
+    run: int = 0
 
 
 def parse_clock(value: str) -> tuple[int, int]:
@@ -253,7 +271,8 @@ class Scheduler:
                     kept.append(raw)
                     continue
                 fired.append(Fired(entry.id, entry.kind, entry.task, entry.next_run,
-                                   late=now - entry.next_run > 2 * _TICK_SECONDS))
+                                   late=now - entry.next_run > 2 * _TICK_SECONDS,
+                                   isolated=entry.isolated, origin=entry.origin, run=entry.runs + 1))
                 entry.runs += 1
                 entry.last_run = now
                 if entry.kind == RECURRING:
@@ -267,13 +286,26 @@ class Scheduler:
     # ── what the model is told ───────────────────────────────────────────
 
     def has_due(self) -> bool:
+        """Whether a wait or a one-time or polling schedule is due, for the conversation it was set in."""
         with self._cond:
-            return bool(self._due)
+            return any(not item.isolated for item in self._due)
+
+    def has_due_runs(self) -> bool:
+        with self._cond:
+            return any(item.isolated for item in self._due)
+
+    def take_runs(self) -> list[Fired]:
+        """The calendar occurrences that came due; each one runs in a session of its own."""
+        with self._cond:
+            runs = [item for item in self._due if item.isolated]
+            self._due = [item for item in self._due if not item.isolated]
+        return runs
 
     def take_note(self) -> str:
         """The occurrences that came due since the last note, as facts for the next request; empty when none."""
         with self._cond:
-            fired, self._due = self._due, []
+            fired = [item for item in self._due if not item.isolated]
+            self._due = [item for item in self._due if item.isolated]
         lines = [f"Scheduled wake-ups that came due ({self._local(self._clock())}):"]
         for item in fired:
             when = f"was due {self._local(item.due_at)}, Kvist was not running" if item.late else f"due {self._local(item.due_at)}"
@@ -303,11 +335,11 @@ class Scheduler:
         return {"wait_id": entry.id, "wakes_at": self._local(entry.next_run),
                 "note": "You are woken when it ends. Say what you need to now, and end the turn."}
 
-    def add(self, task: str, args: dict[str, Any]) -> dict[str, Any]:
+    def add(self, task: str, args: dict[str, Any], origin: str = "") -> dict[str, Any]:
         now = self.now()
         kind, next_run, repeat = self._timing(args, now)
         entry = Entry(f"s{int(self._clock() * 1000) % 10**8:x}", kind, task, next_run.timestamp(), repeat,
-                      created_at=self._clock())
+                      created_at=self._clock(), origin=origin)
 
         def append(document: dict[str, Any]) -> dict[str, Any]:
             entries = list(document.get("entries", []))

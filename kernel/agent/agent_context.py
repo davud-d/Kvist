@@ -7,6 +7,7 @@ import textwrap
 from typing import Any
 
 from kernel.plan import end_session
+from kernel.agent import scheduled_report
 from kernel.agent.agent_state import PLAN_APPROVED, PLAN_PLANNING
 from kernel.sandbox.redaction import defang_prompt_boundary_tags
 from kernel.context.system_context import current_time_context, identity_fact
@@ -214,8 +215,14 @@ def render_session_history(history: Any, *, include_outputs: bool, with_ids: boo
         return ""
 
     lines: list[str] = []
+    reports = 0
     for entry in reversed(history):
         if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("scheduled_report"), dict):
+            reports += 1
+            if reports <= scheduled_report.KEPT_IN_PROMPT:
+                lines.extend(scheduled_report.render(entry, "    "))
             continue
         goal = str(entry.get("goal", "")).strip()
         if not goal:
