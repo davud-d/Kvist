@@ -18,6 +18,32 @@ xcodebuild … KVIST_CLOUD_URL=http://127.0.0.1:8742 build
 
 The product build talks to `https://cloud.kvist.site`.
 
+## Try it on your iPhone (no paid account)
+
+Use the file `Kvist-Cloud-ios-unsigned.ipa` from the GitHub release **"Kvist Cloud phone apps (rolling)"** (built by
+[`cloud-mobile-release.yml`](../../.github/workflows/cloud-mobile-release.yml); a manual run lets you choose the cloud address). It is
+unsigned: a sideloading tool signs it with your own Apple ID. **Apple Pay does not work in this build** (the entitlement needs a paid
+developer account and a Merchant ID); sign-in, the chat, plans and the other ways to pay do.
+
+1. The cloud at the address in the release notes must already run this version, or the app says "No connection".
+2. On the iPhone: Settings, Privacy & Security, **Developer Mode** on (iOS 16+; it restarts the phone).
+3. On a computer, install a sideloading tool: [AltStore](https://altstore.io) (macOS and Windows; AltServer sits in the tray and
+   installs over Wi-Fi or a cable), [Sideloadly](https://sideloadly.io) (macOS and Windows), or on Linux a community tool such as
+   AltServer-Linux or Sideloader. I could not test any of them: follow the tool's own instructions for "install an .ipa".
+4. Give it the `.ipa` and your Apple ID (a throwaway one is fine; the tool asks for an app-specific password if it has two-factor).
+5. On the iPhone: Settings, General, **VPN & Device Management**, your Apple ID, **Trust**. Open Kvist Cloud.
+6. The free Apple ID signature lasts **7 days** and allows 3 apps: reinstall (or let AltStore refresh over Wi-Fi) when it expires.
+
+What to check, in order: the sign-in screen; "Continue with GitHub" and back to the app; accepting the terms; the plans sheet (prices);
+a session (send a message, watch the work line fold); the keyboard (the composer stays above it and the last message is not hidden);
+rotating is off on iPhone; the drawer; Russian (account sheet, language); "pay another way". If something is off, send a screenshot
+and what you tapped.
+
+**With a paid developer account** (Apple Pay): make the Merchant ID `merchant.site.kvist.cloud` (or change it in
+[`KvistCloud.entitlements`](App/KvistCloud.entitlements) and the server's `APPLE_PAY_MERCHANT_ID`), `brew install xcodegen`,
+`xcodegen generate`, open `KvistCloud.xcodeproj`, choose your team under Signing, run on the phone. The wallet side also needs
+`WALLET_ENABLED` on the server with Stripe test keys (see [`cloud/README.md`](../../cloud/README.md)).
+
 ## How the page reaches the app
 
 A `WKUserScript` at document start ([`Bridge.startScript`](Sources/KvistCloudCore/Bridge.swift)) makes `window.KvistHost` out of a

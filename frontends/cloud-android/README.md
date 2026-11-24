@@ -15,6 +15,21 @@ cd frontends/cloud-android                      # JDK 21 and ANDROID_HOME with p
 
 The product build talks to `https://cloud.kvist.site` and refuses plain HTTP (the CI checks the merged manifest).
 
+## Try it on your Android phone
+
+Use `Kvist-Cloud-android.apk` from the GitHub release **"Kvist Cloud phone apps (rolling)"**
+([`cloud-mobile-release.yml`](../../.github/workflows/cloud-mobile-release.yml); a manual run lets you choose the cloud address).
+
+1. The cloud at the address in the release notes must already run this version, or the app says "No connection".
+2. Download the APK on the phone, open it, allow "install unknown apps" for the browser or file manager when asked, install. Or from a
+   computer: `adb install -r Kvist-Cloud-android.apk` (USB debugging on).
+3. The APK is signed with the build machine's debug key, a different one every build: to update, uninstall the older build first.
+4. Google Pay: the page offers it only when the server has `WALLET_ENABLED` and the phone has a card in Google Pay; the sheet is in
+   Google's **TEST** environment until the server is set to `PRODUCTION`, so no real card is charged.
+
+What to check: sign-in through GitHub and back; the terms; plans; a session; the keyboard (the composer above it); the back key (it closes
+a sheet, then the drawer, then goes to the start screen, then leaves); Russian; "pay another way" (opens the browser).
+
 ## How the page reaches the app
 
 `WebViewCompat.addWebMessageListener` makes a message channel that exists **only for the cloud's own origin**, and a document-start

@@ -1,0 +1,159 @@
+name: Cloud Mobile Release
+
+# The Kvist Cloud phone apps as installable files, in a release of their own: the Android APK and the iPhone/iPad .ipa.
+# Built on every change to them on main or experimental (a prerelease, so it never becomes "latest"), or by hand with
+# another cloud address (a tunnel to a test server, say). Both must build or nothing is published.
+#
+# Neither file is store-ready. The APK is signed with the runner's debug key (a different one on every build, so an
+# update over an older build asks to uninstall it first). The .ipa is unsigned on purpose, no certificate is kept in CI:
+# sideload it with AltStore, SideStore, Sideloadly or Sideloader, which sign it with your own Apple ID. Apple Pay does not
+# work in such a build (it needs a paid account and a Merchant ID): the rest of the app does. See frontends/cloud-ios/README.md.
+on:
+  push:
+    branches: [main, experimental]
+    paths:
+      - "frontends/cloud-android/**"
+      - "frontends/cloud-ios/**"
+      - "cloud/mobile/**"
+      - ".github/workflows/cloud-mobile-release.yml"
+  workflow_dispatch:
+    inputs:
+      cloud_url:
+        description: "The cloud the apps talk to (https, no trailing slash)"
+        default: "https://cloud.kvist.site"
+        required: true
+
+concurrency:
+  group: cloud-mobile-release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CLOUD_URL: ${{ inputs.cloud_url || 'https://cloud.kvist.site' }}
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Android SDK platform 36
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: Unit tests and APK
+        working-directory: frontends/cloud-android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug "-PkvistCloudUrl=$CLOUD_URL"
+
+      - name: Name the file
+        run: |
+          mkdir out
+          cp frontends/cloud-android/app/build/outputs/apk/debug/app-debug.apk out/Kvist-Cloud-android.apk
+
+      - name: Keep the APK for the release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cloud-mobile-android
+          path: out/Kvist-Cloud-android.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  ios:
+    name: iPhone and iPad .ipa
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Core tests
+        working-directory: frontends/cloud-ios
+        run: swift test
+
+      - name: Build for devices, unsigned
+        working-directory: frontends/cloud-ios
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild -project KvistCloud.xcodeproj -scheme KvistCloud -configuration Release -sdk iphoneos \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO "KVIST_CLOUD_URL=$CLOUD_URL" build
+          app=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          test -n "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :KvistCloudURL' "$app/Info.plist")" = "$CLOUD_URL"
+          mkdir -p Payload ../../out
+          cp -R "$app" Payload/
+          zip -qry ../../out/Kvist-Cloud-ios-unsigned.ipa Payload
+
+      - name: Keep the .ipa for the release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cloud-mobile-ios
+          path: out/Kvist-Cloud-ios-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 1
+
+  # Published only when both built: a release that lacks one app would point its readers at a 404.
+  publish:
+    name: Publish the rolling release
+    needs: [android, ios]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download both apps
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: cloud-mobile-*
+          path: apps
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd apps
+          sha256sum Kvist-Cloud-android.apk Kvist-Cloud-ios-unsigned.ipa | tee SHA256SUMS
+
+      - name: Publish/update rolling release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: latest-cloud-mobile-build
+          name: "Kvist Cloud phone apps (rolling)"
+          target_commitish: ${{ github.sha }}
+          body: |
+            Built from `${{ github.sha }}` (`${{ github.ref_name }}`). The apps talk to **${{ env.CLOUD_URL }}**: the cloud there must already run this version (the `/m` page), or they show "No connection".
+
+            | Asset | What it is |
+            | --- | --- |
+            | `Kvist-Cloud-android.apk` | Android 8+. Signed with a debug key: allow installing from this source and open the file. To update over an older build, uninstall it first. |
+            | `Kvist-Cloud-ios-unsigned.ipa` | iPhone and iPad, iOS 15+. **Unsigned**: install it with AltStore, SideStore, Sideloadly or Sideloader, which sign it with your own Apple ID (a free one lasts 7 days). **Apple Pay does not work in it**; sign-in, the chat, plans and the other ways to pay do. |
+            | `SHA256SUMS` | Checksums of both files. |
+
+            Step by step: [frontends/cloud-ios](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/frontends/cloud-ios/README.md), [frontends/cloud-android](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/frontends/cloud-android/README.md).
+          make_latest: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
+            apps/Kvist-Cloud-android.apk
+            apps/Kvist-Cloud-ios-unsigned.ipa
+            apps/SHA256SUMS
