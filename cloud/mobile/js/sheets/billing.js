@@ -85,33 +85,45 @@ export function payRows(kind, closeAll) {
   return rows;
 }
 
+/** Opens a hosted payment page in the system browser; when the person comes back, asks the server what became of it. */
+async function payOnPage(path, body, kind, say, closeAll) {
+  try {
+    const { redirect } = await post(path, body);
+    await native.open(redirect);
+    say("pay opened");
+    const settle = async () => {
+      if (document.hidden) return;
+      document.removeEventListener("visibilitychange", settle);
+      await post("/api/billing/sync");
+      await refresh("sub");
+      if (account.sub?.plan === kind || kind === "hours") closeAll();
+    };
+    document.addEventListener("visibilitychange", settle);
+  } catch (error) {
+    say(paymentProblem(error));
+  }
+}
+
 function otherWays(kind, say, closeAll) {
-  const charge = account.billing?.charge;
-  if (!account.billing?.enabled || !charge) return null;
-  const price = charge.prices?.[kind];
-  return h("div", { class: "ways" },
-    h("div", { class: "ways-label" }, account.wallets.length ? t("pay another way") : t("pay with")),
-    charge.methods.map((method) => h("button", { class: "row", type: "button", onclick: async () => {
-      try {
-        const { redirect } = await post("/api/billing/checkout", { plan: kind, method });
-        await native.open(redirect);
-        say("pay opened");
-        // The person comes back from the payment page by the app's own task switcher; this asks Platega what happened.
-        const settle = async () => {
-          if (document.hidden) return;
-          document.removeEventListener("visibilitychange", settle);
-          await post("/api/billing/sync");
-          await refresh("sub");
-          if (account.sub?.plan === kind || kind === "hours") closeAll();
-        };
-        document.addEventListener("visibilitychange", settle);
-      } catch (error) {
-        say(paymentProblem(error));
-      }
-    } },
+  const charge = account.billing?.enabled ? account.billing.charge : null;
+  const freedom = account.billing?.freedompay;
+  if (!charge && !freedom) return null;
+  const rows = [];
+  if (freedom) {
+    // Freedom Pay's own page shows its cards and, where connected, Apple Pay and Google Pay.
+    rows.push(h("button", { class: "row", type: "button", onclick: () => payOnPage("/api/freedompay/checkout", { plan: kind }, kind, say, closeAll) },
+      icon("card", 20),
+      h("span", { class: "row-main" }, t("method freedom")),
+      freedom.prices?.[kind] ? h("span", { class: "row-end" }, money(freedom.prices[kind], freedom.currency)) : null));
+  }
+  for (const method of charge?.methods ?? []) {
+    const price = charge.prices?.[kind];
+    rows.push(h("button", { class: "row", type: "button", onclick: () => payOnPage("/api/billing/checkout", { plan: kind, method }, kind, say, closeAll) },
       icon("card", 20),
       h("span", { class: "row-main" }, t(METHODS[method] ?? "method card")),
-      price ? h("span", { class: "row-end" }, money(price, charge.currency)) : null)));
+      price ? h("span", { class: "row-end" }, money(price, charge.currency)) : null));
+  }
+  return h("div", { class: "ways" }, h("div", { class: "ways-label" }, account.wallets.length ? t("pay another way") : t("pay with")), rows);
 }
 
 function devSkip(kind, closeAll) {

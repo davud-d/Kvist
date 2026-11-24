@@ -58,6 +58,7 @@ backend/kvist_cloud/   сервер управления (FastAPI, SQLAlchemy 2,
   events.py            живая рассылка           ledger.py   журнал часов, лента, споры
   limits.py            очередь, конец часов     billing.py  callback-и Platega (по умолчанию выкл.)
   wallet.py            Apple Pay / Google Pay через Stripe (по умолчанию выкл.)
+  freedompay.py        страница оплаты Freedom Pay, подписанные callback-и (по умолчанию выкл.)
   funnel.py            шаги воронки, конверсия  exports.py  экспорт архива
   web.py               собранный фронтенд, CSP, gzip        providers/  base, local, libvirt, remote
 backend/migrations/    Alembic; здесь же триггеры журнала против UPDATE/DELETE
@@ -129,6 +130,23 @@ Callback URL (кабинет: Настройки → Callback URLs) — `<PUBLIC
 - Callback-и `PARTIALLY_REFUNDED` и `DISPUTED` нельзя проверить через эндпоинт статуса, поэтому они
   ничего не меняют; разбирай их вручную в кабинете Platega и в ledger.
 - Списывается `PLATEGA_CURRENCY`; доллары в таблице тарифов — только каталог.
+
+### Freedom Pay (freedompay.kg)
+
+**Страница оплаты** Freedom Pay, Merchant API из [docs.freedompay.kz](https://docs.freedompay.kz) (хост `.kg` обслуживает Кыргызстан).
+Выключено, пока нет `FREEDOMPAY_ENABLED=true` (переменные в `env.example`; merchant id и платёжный секретный ключ — в личном
+кабинете). Страница для телефона показывает её среди «другим способом»; человек платит в системном браузере, где Freedom Pay показывает
+свои карты и, если у мерчанта подключены, **Apple Pay и Google Pay**. Их документация не описывает способ передать токен кошелька на
+сервер мерчанта, кроме Gateway API с PCI DSS, а запрос с токеном кошелька в прочитанном нет: поэтому собственные окна кошельков в
+приложениях (ниже) остаются на Stripe, а у менеджера Freedom Pay стоит спросить, предполагается ли их использовать с ним.
+
+Правило то же, что у Platega, но «звонок» надёжнее: покупка — строка `BillingCheckout`, которую создал сервер
+(`POST /api/freedompay/checkout`, цена из `FREEDOMPAY_PRICE_*`); callback `POST /billing/freedompay/result` несёт подпись MD5 от имени
+скрипта, отсортированных значений и секретного ключа и засчитывается, только если подпись верна, а заказ, id платежа, сумма и валюта —
+из строки; отвечаем `ok` в любом случае. Callback, который не пришёл, восполняется `get_status3.php`, когда человек возвращается
+(`POST /api/billing/sync`). Не сделано: возвраты и чарджбэки (вручную в кабинете и в ledger) и фоновая проверка. Тесты используют
+`backend/tests/freedompay_fake.py`, построенный по документации: они не проверяют настройки аккаунта, адрес callback
+(`<PUBLIC_URL>/billing/freedompay/result`, его нужно передать менеджеру) и то, в какой валюте может списывать мерчант из Кыргызстана.
 
 ### Apple Pay и Google Pay (Stripe)
 

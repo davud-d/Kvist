@@ -52,7 +52,7 @@ test("the keys built at run time are all there", () => {
     "key ": ["invalid_key", "no_funds", "rate_limited", "provider_down", "bad_endpoint", "model_not_found", "model_missing", "unknown_provider", "model_fixed"],
     "pause ": ["user", "hours_exhausted", "provider_unavailable", "invalid_key", "command_time_limit", "machine_restarted", "machine_sleeping", "machine_suspended", "core_updated", "agent_error"],
     "pay ": ["declined", "needs auth", "review", "too many", "already", "failed", "opened"],
-    "method ": ["sbp", "erip", "card", "intl", "crypto", "sber"],
+    "method ": ["sbp", "erip", "card", "intl", "crypto", "sber", "freedom"],
     "machine waking": [" long"], "machine creating": [" long"], "machine suspended": [" long"],
   };
   for (const [stem, tails] of Object.entries(families)) for (const tail of tails) assert.ok(`${stem}${tail}` in en, `${stem}${tail}`);

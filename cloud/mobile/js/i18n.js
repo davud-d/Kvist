@@ -211,6 +211,7 @@ const EN = {
   "method intl": "International card",
   "method crypto": "Crypto",
   "method sber": "SberPay",
+  "method freedom": "Freedom Pay (cards, Apple Pay, Google Pay)",
 };
 
 const RU = {
@@ -412,6 +413,7 @@ const RU = {
   "method intl": "Международная карта",
   "method crypto": "Криптовалюта",
   "method sber": "SberPay",
+  "method freedom": "Freedom Pay (карты, Apple Pay, Google Pay)",
 };
 
 const TABLES = { en: EN, ru: RU };

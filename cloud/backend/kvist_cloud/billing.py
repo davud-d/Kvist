@@ -69,6 +69,8 @@ SWEEP_SECONDS = 300.0
 # BillingCheckout.payment_method of a purchase made with the phone's own wallet (wallet.py); Platega's are 2..14.
 # Platega is never asked about these: no sweep, no "payment pending" for them.
 WALLET_METHOD = 100
+# Freedom Pay's hosted page (freedompay.py): also never Platega's to look up.
+FREEDOMPAY_METHOD = 101
 
 
 class CheckoutIn(InputModel):
@@ -241,7 +243,8 @@ def admin_grant_plan(db: Session, user_id: int, plan_id: str, days: int | None, 
 
 
 def _source(checkout: BillingCheckout) -> str:
-    return "Apple Pay / Google Pay" if checkout.payment_method == WALLET_METHOD else "Platega"
+    names = {WALLET_METHOD: "Apple Pay / Google Pay", FREEDOMPAY_METHOD: "Freedom Pay"}
+    return names.get(checkout.payment_method, "Platega")
 
 
 def _grant_hours(db: Session, checkout: BillingCheckout) -> bool:
@@ -315,7 +318,7 @@ async def sync_pending(app: FastAPI, user_id: int | None = None) -> None:
     now = utcnow()
     query = select(BillingCheckout.transaction_id).where(
         BillingCheckout.status == CheckoutStatus.PENDING, BillingCheckout.transaction_id.is_not(None),
-        BillingCheckout.payment_method != WALLET_METHOD)
+        BillingCheckout.payment_method < WALLET_METHOD)
     if user_id is not None:
         query = query.where(BillingCheckout.user_id == user_id, BillingCheckout.created_at > now - SYNC_MAX_AGE)
         limit = SYNC_MAX_COUNT
@@ -431,6 +434,13 @@ async def sweep_forever(app: FastAPI) -> None:
 # -- API -------------------------------------------------------------------------------------
 
 
+def freedompay_offer(settings: Settings) -> dict[str, object] | None:
+    fp = settings.freedompay
+    if fp is None:
+        return None
+    return {"currency": fp.currency, "prices": {key: str(price) for key, price in fp.prices.items()}}
+
+
 @router.get("/api/billing/config")
 def billing_config(request: Request) -> dict[str, object]:
     settings: Settings = request.app.state.settings
@@ -445,6 +455,7 @@ def billing_config(request: Request) -> dict[str, object]:
         "plans": plans.public_catalog(),
         "hour_pack": {"hours": plans.HOUR_PACK_HOURS, "price_usd": plans.HOUR_PACK_PRICE_USD},
         "remote": plans.remote_offer(),
+        "freedompay": freedompay_offer(settings),
     }
 
 
@@ -457,7 +468,7 @@ def get_subscription(user: User = Depends(current_user), db: Session = Depends(g
 def eligibility(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     pending = db.scalar(select(BillingCheckout.id).where(
         BillingCheckout.user_id == user.id, BillingCheckout.status == CheckoutStatus.PENDING,
-        BillingCheckout.transaction_id.is_not(None), BillingCheckout.payment_method != WALLET_METHOD,
+        BillingCheckout.transaction_id.is_not(None), BillingCheckout.payment_method < WALLET_METHOD,
         BillingCheckout.created_at > utcnow() - SYNC_MAX_AGE))
     return {"trial_eligible": trial_eligible(user), "trial_used": user.trial_used_at is not None,
             "payment_pending": pending is not None}
@@ -469,6 +480,11 @@ async def sync_my_payments(request: Request, user: User = Depends(current_user),
     if request.app.state.settings.billing_enabled:
         user_id = user.id
         await sync_pending(request.app, user_id)
+        db.expire_all()
+    if request.app.state.settings.freedompay is not None:
+        from .freedompay import sync_user
+
+        await sync_user(request.app, user.id)
         db.expire_all()
     return subscription_view(db, user)
 

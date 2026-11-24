@@ -57,6 +57,7 @@ backend/kvist_cloud/   the control server (FastAPI, SQLAlchemy 2, Alembic)
   events.py            live fan-out          ledger.py   append-only hours ledger, feed, disputes
   limits.py            queue, hours running out          billing.py  Platega callbacks (off by default)
   wallet.py            Apple Pay / Google Pay via Stripe (off by default)
+  freedompay.py        Freedom Pay's hosted page, signed callbacks (off by default)
   funnel.py            funnel steps, conversion          exports.py  archive export
   web.py               the built frontend, CSP, gzip     providers/  base, local, libvirt, remote
 backend/migrations/    Alembic; the ledger's no-UPDATE/no-DELETE triggers live here
@@ -127,6 +128,23 @@ Things that follow from Platega's model, not choices:
 - `PARTIALLY_REFUNDED` and `DISPUTED` callbacks cannot be verified through the status endpoint, so they
   change nothing; handle them by hand in the Platega cabinet and in the ledger.
 - Prices are charged in `PLATEGA_CURRENCY`; the dollar figures in the plan table are only the catalogue.
+
+### Freedom Pay (freedompay.kg)
+
+Freedom Pay's **hosted payment page**, the Merchant API of [docs.freedompay.kz](https://docs.freedompay.kz) (the `.kg` host serves
+Kyrgyzstan). Off unless `FREEDOMPAY_ENABLED=true` (variables in `env.example`; the merchant id and the payment secret key are in its
+personal account). The phone page shows it under "pay another way"; the person pays in the system browser, where Freedom Pay shows its
+cards and, where the merchant has them connected, **Apple Pay and Google Pay**. Its documentation describes no way to hand a wallet
+token to a merchant's server except the PCI DSS Gateway API, whose wallet-token request is not in what we could read: so the apps'
+own wallet sheets (below) stay on Stripe, and ask Freedom Pay's manager whether they are meant to be used with it.
+
+The rule is Platega's, with a stronger doorbell: a purchase is a `BillingCheckout` row the server made (`POST /api/freedompay/checkout`,
+price from `FREEDOMPAY_PRICE_*`); the callback `POST /billing/freedompay/result` carries an MD5 signature over the script name, the sorted
+values and the secret key, and is credited only if the signature is right and the order, payment id, amount and currency are the row's;
+answered `ok` either way. A callback that never came is made up for by `get_status3.php` when the person comes back
+(`POST /api/billing/sync`). Not built: refunds and chargebacks (do them in the cabinet and in the ledger by hand), and a background sweep.
+Tests use `backend/tests/freedompay_fake.py`, built from the docs: they cannot verify the account's settings, the callback URL
+(`<PUBLIC_URL>/billing/freedompay/result`, give it to the manager) or which currency a Kyrgyz merchant may charge.
 
 ### Apple Pay and Google Pay (Stripe)
 

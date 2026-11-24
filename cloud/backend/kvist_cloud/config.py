@@ -56,6 +56,20 @@ class WalletSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class FreedomPaySettings:
+    """Freedom Pay's hosted payment page (Merchant API, docs.freedompay.kz). None in Settings means switched off."""
+
+    merchant_id: str
+    secret: str = field(repr=False)
+    base_url: str = "https://api.freedompay.kg"
+    currency: str = "KGS"
+    # What each purchase costs in ``currency``; the server alone decides amounts.
+    prices: Mapping[str, Decimal] = field(default_factory=dict)
+    # pg_testing_mode=1: Freedom Pay's test cards work and nothing is charged.
+    testing: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     data_dir: Path
     database_url: str
@@ -75,6 +89,7 @@ class Settings:
     # What each purchase costs in ``platega_currency``; the server alone decides amounts.
     platega_prices: Mapping[str, Decimal] = field(default_factory=dict)
     wallet: WalletSettings | None = None
+    freedompay: FreedomPaySettings | None = None
     machine_provider: str = "local"
     runner_command: tuple[str, ...] = ()
     kvist_command: tuple[str, ...] = ()
@@ -267,6 +282,36 @@ def _wallet(env: Mapping[str, str]) -> WalletSettings | None:
     )
 
 
+def _freedompay(env: Mapping[str, str]) -> FreedomPaySettings | None:
+    if not _flag(env, "FREEDOMPAY_ENABLED"):
+        return None
+    merchant, secret = env.get("FREEDOMPAY_MERCHANT_ID", "").strip(), env.get("FREEDOMPAY_SECRET", "").strip()
+    if not merchant.isdigit():
+        raise ConfigError("FREEDOMPAY_ENABLED needs FREEDOMPAY_MERCHANT_ID (a number)")
+    if not secret:
+        raise ConfigError("FREEDOMPAY_ENABLED needs FREEDOMPAY_SECRET (the payment secret key)")
+    base_url = (env.get("FREEDOMPAY_BASE_URL", "") or "https://api.freedompay.kg").rstrip("/")
+    if not base_url.startswith("https://"):
+        raise ConfigError("FREEDOMPAY_BASE_URL must be https")
+    currency = (env.get("FREEDOMPAY_CURRENCY", "") or "KGS").strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", currency):
+        raise ConfigError("FREEDOMPAY_CURRENCY must be an ISO 4217 code")
+    prices: dict[str, Decimal] = {}
+    for key in WALLET_KINDS:
+        raw = env.get(f"FREEDOMPAY_PRICE_{key.upper()}", "").strip()
+        if not raw:
+            raise ConfigError(f"FREEDOMPAY_ENABLED needs FREEDOMPAY_PRICE_{key.upper()}")
+        try:
+            amount = Decimal(raw)
+        except InvalidOperation as error:
+            raise ConfigError(f"FREEDOMPAY_PRICE_{key.upper()} must be a number, got {raw!r}") from error
+        if not amount.is_finite() or amount <= 0 or amount != amount.quantize(Decimal("0.01")):
+            raise ConfigError(f"FREEDOMPAY_PRICE_{key.upper()} must be positive with at most 2 decimals")
+        prices[key] = amount.quantize(Decimal("0.01"))
+    return FreedomPaySettings(merchant_id=merchant, secret=secret, base_url=base_url, currency=currency,
+                              prices=prices, testing=_flag(env, "FREEDOMPAY_TESTING"))
+
+
 def default_kvist_command() -> tuple[str, ...]:
     """The repository's own core, run from its virtual environment when there is one."""
     repo_python = REPO_ROOT / ".venv" / "bin" / "python"
@@ -324,6 +369,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         platega_payment_methods=methods,
         platega_prices=prices,
         wallet=_wallet(env),
+        freedompay=_freedompay(env),
         machine_provider=env.get("MACHINE_PROVIDER", "local"),
         runner_command=_argv(env, "RUNNER_COMMAND", default_runner_command()),
         kvist_command=_argv(env, "KVIST_COMMAND", default_kvist_command()),
