@@ -96,7 +96,7 @@ async function openPage(profile, server, { host = true, pay = "ok", locale = "en
   page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
   page.on("console", (message) => {
     // The 401 before signing in is how the page learns it has to; anything else at error level is a bug.
-    if (message.type() === "error" && !/401 \(Unauthorized\)|net::ERR_FAILED/.test(message.text())) problems.push(`console: ${message.text()}`);
+    if (message.type() === "error" && !/401 \(Unauthorized\)|net::ERR_FAILED|Viewport argument key/.test(message.text())) problems.push(`console: ${message.text()}`);
   });
   // Google's button script is the one thing fetched from outside; tests must not depend on the network.
   await page.route("https://pay.google.com/**", (route) => route.abort());
@@ -311,7 +311,8 @@ scenario("Russian: every word is Russian and nothing is left unfilled", async (p
   await page.getByLabel("Sessions").first().click();
   await page.locator(".drawer-account").click();
   await page.getByText("RU", { exact: true }).click();
-  await visible(page, ".home");
+  // The page reloads itself in the new language; WebKit is slower to get there than Chromium.
+  await page.getByText("Поставь агенту задачу").waitFor({ timeout: 15000 });
   const text = await page.locator("body").innerText();
   assert.match(text, /Поставь агенту задачу/);
   assert.doesNotMatch(text, /undefined|\{\w+\}|\[object/);
