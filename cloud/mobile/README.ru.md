@@ -35,6 +35,7 @@
 | `wallets` | | `["google_pay"]`, `["apple_pay"]` или `[]` |
 | `pay` | `{wallet, request, environment}` | `{token}`, `{cancelled: true}` или `{error}` |
 | `payDone` | `{wallet, ok}` | ничего (окно Apple ждёт его; окно Google закрывается само) |
+| `signIn` | | `{started: true}`, когда приложение взяло вход на себя (системный браузер входит, приложение перезагружает страницу уже со входом); `null`: страница входит обычным способом |
 | `open` `copy` `share` `haptic` | `{url}` `{text}` `{text}` `{kind}` | ничего |
 
 ## Тесты

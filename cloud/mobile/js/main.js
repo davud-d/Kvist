@@ -45,10 +45,13 @@ function signIn() {
     h("div", { class: "wordmark big" }, "Kvist Cloud"),
     h("h1", {}, t("gate title")),
     h("p", { class: "lead" }, t("gate lead")),
-    h("a", { class: "btn primary wide", href: `/auth/github/login?next=${encodeURIComponent("/m/")}`, onclick: (event) => {
-      // The sign-in page is GitHub's; the app opens it in the same window so the session cookie lands here.
+    h("a", { class: "btn primary wide", href: `/auth/github/login?next=${encodeURIComponent("/m/")}`, onclick: async (event) => {
       event.preventDefault();
-      location.assign(event.currentTarget.getAttribute("href"));
+      const href = event.currentTarget.getAttribute("href");
+      // In the apps the system browser signs in (GitHub's page, and Google's behind it, will not run in a web view)
+      // and the app reloads this page signed in; anywhere else it is the ordinary redirect.
+      if (native.inApp() && (await native.signIn())) return;
+      location.assign(href);
     } }, icon("github", 20), t("continue github")),
     h("p", { class: "fine" }, t("gate fine")));
 }

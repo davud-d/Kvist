@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from . import (
     admin,
+    appauth,
     auth,
     billing,
     chatgpt,
@@ -136,6 +137,7 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(appauth.router)
     app.include_router(review.router)
     app.include_router(keys.router)
     app.include_router(chatgpt.router)

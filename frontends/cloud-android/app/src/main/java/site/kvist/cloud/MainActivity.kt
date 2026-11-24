@@ -23,6 +23,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.JavaScriptReplyProxy
@@ -46,6 +47,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var pay: GooglePay
     private val cloudUrl = BuildConfig.CLOUD_URL
     private var failed = false
+    // The nonce of the sign-in in the browser right now: only this app knows it, and the cloud wants it back with the code.
+    private var signInNonce: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,6 +88,13 @@ class MainActivity : ComponentActivity() {
             }
         })
         webView.loadUrl("$cloudUrl/m/")
+        handleSignInResult(intent)
+    }
+
+    // singleTask: the browser's last redirect (kvistcloud://signed-in?code=...) arrives here.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleSignInResult(intent)
     }
 
     override fun onDestroy() {
@@ -115,6 +125,10 @@ class MainActivity : ComponentActivity() {
         when (call.name) {
             "wallets" -> pay.isReady { ready -> answer(JSONArray(if (ready) listOf("google_pay") else emptyList<String>())) }
             "pay" -> pay.pay(call.args) { result -> answer(result) }
+            "signIn" -> {
+                signIn()
+                answer(org.json.JSONObject().put("started", true))
+            }
             "open" -> {
                 open(call.args.optString("url"))
                 answer(null)
@@ -133,6 +147,25 @@ class MainActivity : ComponentActivity() {
             }
             else -> answer(null)
         }
+    }
+
+    /** GitHub's page, and Google's behind "sign in with Google", will not run in this web view: a Custom Tab does it. */
+    private fun signIn() {
+        val nonce = AppSignIn.makeNonce()
+        signInNonce = nonce
+        try {
+            CustomTabsIntent.Builder().build().launchUrl(this, Uri.parse(AppSignIn.startUrl(cloudUrl, nonce)))
+        } catch (error: ActivityNotFoundException) {
+            signInNonce = null
+            webView.loadUrl("$cloudUrl/auth/github/login?next=%2Fm%2F")
+        }
+    }
+
+    private fun handleSignInResult(intent: Intent?) {
+        val code = AppSignIn.codeFrom(intent?.dataString) ?: return
+        val nonce = signInNonce ?: return
+        signInNonce = null
+        webView.loadUrl(AppSignIn.exchangeUrl(cloudUrl, code, nonce))
     }
 
     private fun open(url: String) {

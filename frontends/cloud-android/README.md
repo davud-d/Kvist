@@ -30,6 +30,13 @@ Use `Kvist-Cloud-android.apk` from the GitHub release **"Kvist Cloud phone apps 
 What to check: sign-in through GitHub and back; the terms; plans; a session; the keyboard (the composer above it); the back key (it closes
 a sheet, then the drawer, then goes to the start screen, then leaves); Russian; "pay another way" (opens the browser).
 
+## Signing in
+
+GitHub's page (and Google's behind it) will not run in a web view, so a Custom Tab signs in with the browser's own session and the
+cloud hands the app a short-lived code through `kvistcloud://signed-in?code=` (an intent filter on the activity); the web view trades
+it, with a nonce only this app knows, for its own session. Same server side as iOS: [`appauth.py`](../../cloud/backend/kvist_cloud/appauth.py),
+[`AppSignIn.kt`](app/src/main/java/site/kvist/cloud/AppSignIn.kt).
+
 ## How the page reaches the app
 
 `WebViewCompat.addWebMessageListener` makes a message channel that exists **only for the cloud's own origin**, and a document-start

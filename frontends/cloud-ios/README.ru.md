@@ -45,6 +45,15 @@ xcodebuild … KVIST_CLOUD_URL=http://127.0.0.1:8742 build
 `xcodegen generate`, открой `KvistCloud.xcodeproj`, выбери свою команду в Signing и запусти на телефоне. Для стороны кошелька на сервере
 ещё нужен `WALLET_ENABLED` с тестовыми ключами Stripe (см. [`cloud/README.ru.md`](../../cloud/README.ru.md)).
 
+## Вход
+
+Страница GitHub, и страница Google за кнопкой «войти через Google», не работают во встроенном браузере, а если открыть их в Safari,
+сессия останется в Safari. Поэтому приложение входит через собственную сессию системного браузера (`ASWebAuthenticationSession`,
+она делит cookie с Safari), а облако отдаёт приложению короткоживущий подписанный код (`/auth/app/start`,
+`kvistcloud://signed-in?code=`); веб-вид меняет его вместе со случайным nonce, который знает только это приложение, на свою сессию
+(`/auth/app/exchange`). См. [`appauth.py`](../../cloud/backend/kvist_cloud/appauth.py) и
+[`AppSignIn.swift`](Sources/KvistCloudCore/AppSignIn.swift).
+
 ## Как страница достаёт до приложения
 
 `WKUserScript`, запускаемый до страницы ([`Bridge.startScript`](Sources/KvistCloudCore/Bridge.swift)), делает `window.KvistHost`

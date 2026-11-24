@@ -44,6 +44,14 @@ and what you tapped.
 `xcodegen generate`, open `KvistCloud.xcodeproj`, choose your team under Signing, run on the phone. The wallet side also needs
 `WALLET_ENABLED` on the server with Stripe test keys (see [`cloud/README.md`](../../cloud/README.md)).
 
+## Signing in
+
+GitHub's page, and Google's behind "sign in with Google", will not run in a web view, and if they were opened in Safari the
+session would stay in Safari. So the app signs in through the system browser's own session (`ASWebAuthenticationSession`, which
+shares Safari's cookies) and the cloud hands the app a short-lived signed code (`/auth/app/start`, `kvistcloud://signed-in?code=`);
+the web view trades it, with a random nonce only this app knows, for its own session (`/auth/app/exchange`). See
+[`appauth.py`](../../cloud/backend/kvist_cloud/appauth.py) and [`AppSignIn.swift`](Sources/KvistCloudCore/AppSignIn.swift).
+
 ## How the page reaches the app
 
 A `WKUserScript` at document start ([`Bridge.startScript`](Sources/KvistCloudCore/Bridge.swift)) makes `window.KvistHost` out of a

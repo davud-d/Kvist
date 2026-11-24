@@ -34,6 +34,8 @@ android {
 dependencies {
     implementation("androidx.activity:activity:1.10.1")
     implementation("androidx.webkit:webkit:1.18.0")
+    // The Custom Tab that signs in (GitHub's page will not run in a web view).
+    implementation("androidx.browser:browser:1.8.0")
     // Google Pay: the operating system's own payment sheet (PaymentsClient).
     implementation("com.google.android.gms:play-services-wallet:20.0.0")
     testImplementation("junit:junit:4.13.2")

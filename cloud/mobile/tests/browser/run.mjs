@@ -69,7 +69,7 @@ async function browserFor(profile) {
  * The phone app's side of the bridge. `pay` says what the operating system's sheet does: "ok" hands back a wallet's
  * token, "cancel" is the person closing the sheet, "none" means this phone has no wallet.
  */
-const bridge = ({ platform, wallet, pay }) => {
+const bridge = ({ platform, wallet, pay, signin }) => {
   window.__host = [];
   const google = JSON.stringify({ id: "tok_goodGooglePayToken01", object: "token", type: "card" });
   const apple = JSON.stringify({ paymentData: '{"version":"EC_v1","data":"x"}', transactionIdentifier: "tx-1", network: "Visa", displayName: "Visa 4242" });
@@ -81,16 +81,22 @@ const bridge = ({ platform, wallet, pay }) => {
       let answer = null;
       if (name === "wallets") answer = pay === "none" ? [] : [wallet];
       if (name === "payDone") answer = null;
+      if (name === "signIn") {
+        answer = signin === "none" ? null : { started: true };
+        // The app's real round trip (system browser, code, exchange) ends with the web view signed in: with a dev server
+        // that is the dev sign-in. "hold" stays where it is, to see what the page asked for.
+        if (signin === "app") setTimeout(() => location.assign("/auth/github/login?next=%2Fm%2F"), 30);
+      }
       if (name === "pay") answer = pay === "cancel" ? { cancelled: true } : { token: wallet === "apple_pay" ? apple : google };
       setTimeout(() => window.__kvistReply(id, JSON.stringify(answer)), 10);
     },
   };
 };
 
-async function openPage(profile, server, { host = true, pay = "ok", locale = "en-US", viewport } = {}) {
+async function openPage(profile, server, { host = true, pay = "ok", signin = "app", locale = "en-US", viewport } = {}) {
   const browser = await browserFor(profile);
   const context = await browser.newContext({ ...pw.devices[profile.device], locale, ...(viewport ? { viewport } : {}) });
-  if (host) await context.addInitScript(bridge, { platform: profile.platform, wallet: profile.wallet, pay });
+  if (host) await context.addInitScript(bridge, { platform: profile.platform, wallet: profile.wallet, pay, signin });
   const page = await context.newPage();
   const problems = [];
   page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
@@ -194,6 +200,22 @@ scenario("first run: sign in, terms, trial, key, project, first task", async (pa
   assert.match(await page.locator(".drawer-account").innerText(), /left/);
   await shot(page, "drawer");
   assert.deepEqual(page.problems, []);
+});
+
+scenario("in the app, signing in is handed to the app (GitHub's page will not run in a web view)", async (page) => {
+  await page.goto(`${page.base}/m/`);
+  await page.getByText("Continue with GitHub").click();
+  await page.waitForTimeout(800);
+  assert.equal((await hostCalls(page, "signIn")).length, 1);
+  assert.match(page.url(), /\/m\/$/, "the web view itself did not go to GitHub");
+  assert.deepEqual(page.problems, []);
+});
+
+scenario("a host that cannot sign in falls back to the ordinary redirect", async (page) => {
+  await page.goto(`${page.base}/m/`);
+  await page.getByText("Continue with GitHub").click();
+  // The host answered "cannot": the page went the ordinary way, and signing in worked (the terms follow).
+  await visible(page, "#t1");
 });
 
 scenario("the agent asks, the person answers", async (page) => {
@@ -358,7 +380,7 @@ for (const profile of PROFILES) {
     const label = `${profile.name}: ${name}`;
     if (ONLY && !ONLY.test(label)) continue;
     const server = await startServer();
-    const page = await openPage(profile, server, { host: !/plain browser/.test(name) });
+    const page = await openPage(profile, server, { host: !/plain browser/.test(name), signin: /cannot sign in/.test(name) ? "none" : /handed to the app/.test(name) ? "hold" : "app" });
     const started = Date.now();
     try {
       page.on("response", (r) => r.url().includes("/api/wallet") && console.log(`     ${r.status()} ${r.url().replace(page.base, "")}`));

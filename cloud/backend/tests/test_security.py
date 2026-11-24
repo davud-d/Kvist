@@ -141,6 +141,10 @@ FIELDS = [
     ("POST", "/api/admin/users/1/admin", {"value": True}, "value"),
     *[("POST", "/api/admin/users/1/ban", {"days": 1, "reason": "abuse"}, k) for k in ("permanent", "days", "reason")],
     *[("POST", "/api/billing/checkout", {"plan": "trial"}, k) for k in ("plan", "method")],
+    *[("POST", "/api/wallet/checkout", {"plan": "start", "wallet": "google_pay"}, k) for k in ("plan", "wallet")],
+    *[("POST", "/api/wallet/pay", {"checkout": "0" * 48, "wallet": "google_pay", "token": "{}"}, k)
+      for k in ("checkout", "wallet", "token")],
+    ("POST", "/api/freedompay/checkout", {"plan": "start"}, "plan"),
     ("POST", "/api/chatgpt/start", {"next": "/onboarding"}, "next"),
     ("POST", "/api/chatgpt/finish", {"callback": "http://127.0.0.1:38457/auth/callback?code=a&state=b"}, "callback"),
 ]

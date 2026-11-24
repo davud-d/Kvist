@@ -1,3 +1,4 @@
+import AuthenticationServices
 import KvistCloudCore
 import UIKit
 import WebKit
@@ -8,12 +9,14 @@ import WebKit
 /// The page reaches this class only through a message handler, and only a message from the cloud's own origin in the
 /// main frame is answered (Bridge.startScript makes the handler look like `window.KvistHost`); GitHub's sign-in page and
 /// anything else loaded here is refused.
-final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
+final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply,
+    ASWebAuthenticationPresentationContextProviding {
     private let background = UIColor(red: 10 / 255, green: 10 / 255, blue: 11 / 255, alpha: 1)
     private let cloudURL: String = (Bundle.main.object(forInfoDictionaryKey: "KvistCloudURL") as? String) ?? "https://cloud.kvist.site"
     private let applePay = ApplePay()
     private var webView: WKWebView!
     private var offline: UIView!
+    private var signInSession: ASWebAuthenticationSession?
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
 
@@ -98,6 +101,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
                 return
             }
             applePay.pay(request) { replyHandler($0, nil) }
+        case "signIn":
+            signIn()
+            replyHandler(["started": true], nil)
         case "payDone":
             applePay.finish(ok: call.args["ok"] as? Bool ?? false)
             replyHandler(nil, nil)
@@ -116,6 +122,31 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         default:
             replyHandler(nil, nil)
         }
+    }
+
+    // MARK: signing in
+
+    /// GitHub's page, and Google's behind "sign in with Google", will not run in this web view: the system browser's own
+    /// sign-in session does it (it shares Safari's cookies, so a person already signed in to GitHub there is not asked
+    /// again), and hands back a code that this web view trades for its session (appauth.py).
+    private func signIn() {
+        let nonce = AppSignIn.makeNonce()
+        guard signInSession == nil, let url = AppSignIn.startURL(cloudURL: cloudURL, nonce: nonce) else { return }
+        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: AppSignIn.scheme) { [weak self] callback, _ in
+            guard let self else { return }
+            self.signInSession = nil
+            // Cancelled, or the system browser ended somewhere else: the page stays as it was.
+            guard let callback, let code = AppSignIn.code(from: callback),
+                  let exchange = AppSignIn.exchangeURL(cloudURL: self.cloudURL, code: code, nonce: nonce) else { return }
+            self.webView.load(URLRequest(url: exchange))
+        }
+        session.presentationContextProvider = self
+        signInSession = session
+        if !session.start() { signInSession = nil }
+    }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        view.window ?? ASPresentationAnchor()
     }
 
     private func open(_ link: String) {

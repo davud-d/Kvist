@@ -7,7 +7,7 @@
 //
 // Names the host understands: "wallets" (-> ["google_pay"] or ["apple_pay"], what this phone can pay with now),
 // "pay" ({wallet, request, environment} -> {token} | {cancelled: true} | {error}), "open" ({url}), "haptic" ({kind}),
-// "payDone" ({wallet, ok}), "share" ({text}), "copy" ({text}). The page never holds a payment card: the OS sheet hands it a token.
+// "payDone" ({wallet, ok}), "signIn" (-> {started} once the app has taken the sign-in over), "share" ({text}), "copy" ({text}). The page never holds a payment card: the OS sheet hands it a token.
 
 let counter = 0;
 const waiting = new Map();
@@ -55,6 +55,16 @@ export async function pay(wallet, request, environment = "TEST") {
  * and then shows its checkmark or its failure; Google's sheet closes when it hands over the token, so for it this is nothing.
  */
 export const payDone = (wallet, ok) => (inApp() ? call("payDone", { wallet, ok }) : Promise.resolve());
+
+/**
+ * Signs in through the system browser's own session (GitHub's and Google's pages refuse to run in an app's web view).
+ * Resolves true when the app took it over (it reloads the page signed in), false when the host cannot: the page
+ * then signs in the ordinary way.
+ */
+export async function signIn() {
+  const result = await call("signIn");
+  return Boolean(result);
+}
 
 /** A link goes to the system browser from the app (a payment page or a repository), to a new tab elsewhere. */
 export function open(url) {
