@@ -35,14 +35,38 @@ pub struct Canvas {
     pub edge: [u8; 3],
 }
 
+/// Runs `work(first_row, rows)` over horizontal bands of `buf` on several threads, so the load
+/// spreads over the cores instead of heating one. Bands are disjoint, so the result is the same
+/// as a single pass.
+fn par_rows(buf: &mut [u8], row_len: usize, work: impl Fn(usize, &mut [u8]) + Sync) {
+    let rows = buf.len() / row_len.max(1);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8).min(rows.max(1));
+    if threads == 1 {
+        return work(0, buf);
+    }
+    let band = rows.div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (index, chunk) in buf.chunks_mut(band * row_len).enumerate() {
+            let work = &work;
+            scope.spawn(move || work(index * band, chunk));
+        }
+    });
+}
+
 impl Canvas {
     /// Blur step `index` (`0..LEVELS`): 0 is the lightest.
     pub fn level(&self, index: usize) -> &RgbImage {
         let levels = self.levels.get_or_init(|| {
-            [(1, 2, 0.93), (1, 3, 0.84), (2, 2, 0.75), (3, 3, 0.66)]
-                .iter()
-                .map(|&(divisor, radius, light)| brightness(&blur(&self.soft, divisor, radius), light))
-                .collect()
+            let steps = [(1, 2, 0.93), (1, 3, 0.84), (2, 2, 0.75), (3, 3, 0.66)];
+            std::thread::scope(|scope| {
+                let tasks: Vec<_> = steps
+                    .iter()
+                    .map(|&(divisor, radius, light)| {
+                        scope.spawn(move || brightness(&blur(&self.soft, divisor, radius), light))
+                    })
+                    .collect();
+                tasks.into_iter().map(|t| t.join().expect("a blur step does not panic")).collect()
+            })
         });
         &levels[index]
     }
@@ -104,16 +128,17 @@ pub fn cover(source: &RgbImage, width: u32, height: u32) -> RgbImage {
 fn vignette(photo: &RgbImage) -> RgbImage {
     let height = photo.height() as f32;
     let mut out = photo.clone();
-    for (y, row) in out.enumerate_rows_mut() {
-        // The light depends only on the row.
-        let v = y as f32 / height;
-        let light = 1.0 - 0.42 * smoothstep(0.70, 1.0, v) - 0.22 * smoothstep(0.22, 0.0, v);
-        for (_, _, pixel) in row {
-            for channel in pixel.0.iter_mut() {
+    let row_len = photo.width() as usize * 3;
+    par_rows(&mut out, row_len, |first, band| {
+        for (i, row) in band.chunks_exact_mut(row_len).enumerate() {
+            // The light depends only on the row.
+            let v = (first + i) as f32 / height;
+            let light = 1.0 - 0.42 * smoothstep(0.70, 1.0, v) - 0.22 * smoothstep(0.22, 0.0, v);
+            for channel in row.iter_mut() {
                 *channel = (*channel as f32 * light) as u8;
             }
         }
-    }
+    });
     out
 }
 
@@ -133,12 +158,19 @@ fn box_blur(image: &mut RgbImage, radius: u32) {
     let r = radius as i64;
     let window = (2 * r + 1) as u32;
     let mut line = vec![[0u8; 3]; width.max(height) as usize];
-    for y in 0..height {
-        for x in 0..width {
-            line[x as usize] = image.get_pixel(x, y).0;
+    // Rows are independent: blur them in bands on several threads.
+    let row_len = width as usize * 3;
+    par_rows(image, row_len, |_, band| {
+        let mut row_line = vec![[0u8; 3]; width as usize];
+        for row in band.chunks_exact_mut(row_len) {
+            for (x, pixel) in row.chunks_exact(3).enumerate() {
+                row_line[x] = [pixel[0], pixel[1], pixel[2]];
+            }
+            running_average(&row_line, r, window, |x, value| {
+                row[x as usize * 3..x as usize * 3 + 3].copy_from_slice(&value);
+            });
         }
-        running_average(&line[..width as usize], r, window, |x, value| image.put_pixel(x, y, image::Rgb(value)));
-    }
+    });
     for x in 0..width {
         for y in 0..height {
             line[y as usize] = image.get_pixel(x, y).0;
@@ -168,9 +200,12 @@ fn running_average(line: &[[u8; 3]], r: i64, window: u32, mut put: impl FnMut(u3
 
 pub fn brightness(image: &RgbImage, light: f32) -> RgbImage {
     let mut out = image.clone();
-    for channel in out.iter_mut() {
-        *channel = (*channel as f32 * light) as u8;
-    }
+    let row_len = image.width() as usize * 3;
+    par_rows(&mut out, row_len, |_, band| {
+        for channel in band.iter_mut() {
+            *channel = (*channel as f32 * light) as u8;
+        }
+    });
     out
 }
 
@@ -197,7 +232,11 @@ pub fn card(source: &RgbImage, x: i64, y: i64, width: u32, height: u32, glass: &
     let half_w = width as f32 / 2.0;
     let half_h = height as f32 / 2.0;
     let radius = glass.radius.min(half_w).min(half_h);
-    for (px, py, pixel) in out.enumerate_pixels_mut() {
+    par_rows(&mut out, width as usize * 4, |first, band| {
+    for (i, row) in band.chunks_exact_mut(width as usize * 4).enumerate() {
+    let py = (first + i) as u32;
+    for (px, pixel) in row.chunks_exact_mut(4).enumerate() {
+        let px = px as u32;
         let d = rounded_rect_distance(px as f32 + 0.5 - half_w, py as f32 + 0.5 - half_h, half_w, half_h, radius);
         let coverage = (0.5 - d).clamp(0.0, 1.0);
         if coverage <= 0.0 {
@@ -216,8 +255,10 @@ pub fn card(source: &RgbImage, x: i64, y: i64, width: u32, height: u32, glass: &
             rgba[c] = (mixed + light + grain).clamp(0.0, 255.0) as u8;
         }
         rgba[3] = (coverage * 255.0) as u8;
-        pixel.0 = rgba;
+        pixel.copy_from_slice(&rgba);
     }
+    }
+    });
     out
 }
 
