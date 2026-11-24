@@ -23,13 +23,29 @@ pub struct Canvas {
     pub sharp: RgbImage,
     /// What glass shows through: the sharp backdrop, heavily blurred.
     pub frost: RgbImage,
-    /// Progressively blurred and darker, for an opened dialog or browser.
-    pub levels: Vec<RgbImage>,
+    /// Progressively blurred and darker, for an opened dialog or browser. Made on first use:
+    /// most frames of a live backdrop never show them.
+    levels: OnceLock<Vec<RgbImage>>,
+    /// The small source the levels are blurred from.
+    soft: RgbImage,
     /// The photograph rising from black, for the first seconds.
     pub rise: Vec<RgbImage>,
     /// Average colour of the backdrop's border: the terminal's padding around
     /// the cells is painted with it, so the picture has no frame.
     pub edge: [u8; 3],
+}
+
+impl Canvas {
+    /// Blur step `index` (`0..LEVELS`): 0 is the lightest.
+    pub fn level(&self, index: usize) -> &RgbImage {
+        let levels = self.levels.get_or_init(|| {
+            [(1, 2, 0.93), (1, 3, 0.84), (2, 2, 0.75), (3, 3, 0.66)]
+                .iter()
+                .map(|&(divisor, radius, light)| brightness(&blur(&self.soft, divisor, radius), light))
+                .collect()
+        });
+        &levels[index]
+    }
 }
 
 pub fn decode_photo() -> RgbImage {
@@ -45,17 +61,13 @@ pub fn build(source: &RgbImage, width: u32, height: u32, with_rise: bool) -> Can
     // Frosted textures have no fine detail; keeping them small avoids five redundant upscales per frame.
     let soft = imageops::resize(&sharp, (sharp.width() / 4).max(1), (sharp.height() / 4).max(1), FilterType::Triangle);
     let frost = blur(&soft, 2, 2);
-    let levels = [(1, 2, 0.93), (1, 3, 0.84), (2, 2, 0.75), (3, 3, 0.66)]
-        .iter()
-        .map(|&(divisor, radius, light)| brightness(&blur(&soft, divisor, radius), light))
-        .collect();
     let rise = if with_rise {
         [0.08, 0.22, 0.40, 0.60, 0.80, 0.93].iter().map(|&light| brightness(&photo, light)).collect()
     } else {
         Vec::new()
     };
     let edge = edge_color(&sharp);
-    Canvas { width, height, photo, sharp, frost, levels, rise, edge }
+    Canvas { width, height, photo, sharp, frost, levels: OnceLock::new(), soft, rise, edge }
 }
 
 fn edge_color(image: &RgbImage) -> [u8; 3] {
@@ -81,6 +93,10 @@ pub fn cover(source: &RgbImage, width: u32, height: u32) -> RgbImage {
     let scale = (width as f32 / source.width() as f32).max(height as f32 / source.height() as f32);
     let scaled_w = ((source.width() as f32 * scale).ceil() as u32).max(width);
     let scaled_h = ((source.height() as f32 * scale).ceil() as u32).max(height);
+    // The video is already scaled to the window's grid; resampling at 1:1 only costs time.
+    if (scaled_w, scaled_h) == source.dimensions() {
+        return imageops::crop_imm(source, (scaled_w - width) / 2, (scaled_h - height) / 2, width, height).to_image();
+    }
     let scaled = imageops::resize(source, scaled_w, scaled_h, FilterType::Lanczos3);
     imageops::crop_imm(&scaled, (scaled_w - width) / 2, (scaled_h - height) / 2, width, height).to_image()
 }
@@ -88,11 +104,14 @@ pub fn cover(source: &RgbImage, width: u32, height: u32) -> RgbImage {
 fn vignette(photo: &RgbImage) -> RgbImage {
     let height = photo.height() as f32;
     let mut out = photo.clone();
-    for (_, y, pixel) in out.enumerate_pixels_mut() {
+    for (y, row) in out.enumerate_rows_mut() {
+        // The light depends only on the row.
         let v = y as f32 / height;
         let light = 1.0 - 0.42 * smoothstep(0.70, 1.0, v) - 0.22 * smoothstep(0.22, 0.0, v);
-        for channel in pixel.0.iter_mut() {
-            *channel = (*channel as f32 * light) as u8;
+        for (_, _, pixel) in row {
+            for channel in pixel.0.iter_mut() {
+                *channel = (*channel as f32 * light) as u8;
+            }
         }
     }
     out

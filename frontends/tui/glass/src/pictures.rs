@@ -404,7 +404,7 @@ impl Pictures {
             Backdrop::Rise(i) => canvas.rise.get(i).unwrap_or(&canvas.photo),
             Backdrop::Photo => &canvas.photo,
             Backdrop::Sharp | Backdrop::Level(0) => &canvas.sharp,
-            Backdrop::Level(k) => &canvas.levels[k.min(LEVELS) - 1],
+            Backdrop::Level(k) => canvas.level(k.min(LEVELS) - 1),
         };
         let ids = self.backdrop.get_or_insert_with(HashMap::new);
         if let Some(id) = ids.get(&backdrop) { return Ok(Some(*id)); }
@@ -426,9 +426,9 @@ impl Pictures {
             }
             None => {
                 let source = match spec.style {
-                    CardStyle::Dialog | CardStyle::Dimmed => &canvas.levels[LEVELS - 1],
+                    CardStyle::Dialog | CardStyle::Dimmed => canvas.level(LEVELS - 1),
                     CardStyle::Menu(0) => &canvas.sharp,
-                    CardStyle::Menu(1) => &canvas.levels[0],
+                    CardStyle::Menu(1) => canvas.level(0),
                     _ => &canvas.frost,
                 };
                 let scale = (source.width() as f32 / canvas.width as f32, source.height() as f32 / canvas.height as f32);
