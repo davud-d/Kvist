@@ -12,7 +12,7 @@ const MAX_ROWS_PX = 160;
 
 export function createComposer({ onSend, onStop, chips, onPlus, onGauge }) {
   const field = h("textarea", {
-    class: "composer-input", rows: "1", enterkeyhint: "send", autocapitalize: "sentences",
+    class: "composer-input", rows: "1", enterkeyhint: "enter", autocapitalize: "sentences",
     "aria-label": t("message"), placeholder: t("composer placeholder"),
   });
   const action = h("button", { class: "round", type: "button" });

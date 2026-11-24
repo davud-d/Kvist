@@ -141,8 +141,18 @@ export function startShell(root, { go, onAuth }) {
     chat.reset();
   }
 
+  /** The project the person works in stays theirs between visits; "none" is a choice too, not a gap to fill. */
+  function rememberedProject() {
+    const stored = localStorage.getItem("kvist.project");
+    if (stored === "none") return "";
+    const known = account.projects.find((p) => String(p.id) === stored) ?? account.projects[0];
+    return known ? String(known.id) : "";
+  }
+
   function showNew(projectId = "") {
     stop();
+    projectId = projectId || rememberedProject();
+    if (projectId) localStorage.setItem("kvist.project", String(projectId));
     view = { kind: "new", projectId };
     drawer.setCurrent("");
     homeEl.hidden = false;
@@ -257,7 +267,10 @@ export function startShell(root, { go, onAuth }) {
   function projectMenu(anchor) {
     const current = view.kind === "session" ? view.task?.project_id : view.projectId;
     openPopover(anchor, [
-      { icon: icon("folder", 20), label: t("no project"), on: !current, check: icon("check", 18), onSelect: () => go("/m/", true) },
+      { icon: icon("folder", 20), label: t("no project"), on: !current, check: icon("check", 18), onSelect: () => {
+        localStorage.setItem("kvist.project", "none");
+        go("/m/", true);
+      } },
       ...account.projects.map((project) => ({ icon: icon("folder", 20), label: project.name, on: String(project.id) === String(current), check: icon("check", 18), onSelect: () => go(`/m/p/${project.id}`, true) })),
       { divider: true },
       { icon: icon("plus", 20), label: t("new project"), onSelect: () => projectSheet((project) => go(`/m/p/${project.id}`, true)) },

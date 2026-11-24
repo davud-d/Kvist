@@ -46,6 +46,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         if #available(iOS 16.4, *) { webView.isInspectable = isDebugBuild }
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
+        webView.hideKeyboardAccessoryBar()
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: view.topAnchor),
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -253,5 +254,27 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -24),
         ])
         return container
+    }
+}
+
+
+extension WKWebView {
+    /// The "up, down, Done" strip above the keyboard belongs to forms; a chat has one box, and the strip only makes the
+    /// keyboard taller. The web view's content view answers "no accessory" through a subclass made for it.
+    func hideKeyboardAccessoryBar() {
+        guard let content = scrollView.subviews.first(where: { String(describing: type(of: $0)).hasPrefix("WKContent") }),
+              let base = object_getClass(content) else { return }
+        let name = "\(NSStringFromClass(base))_NoAccessory"
+        var target: AnyClass? = NSClassFromString(name)
+        if target == nil, let made = objc_allocateClassPair(base, name, 0) {
+            let selector = #selector(getter: UIResponder.inputAccessoryView)
+            let nothing: @convention(block) (AnyObject) -> UIView? = { _ in nil }
+            if let method = class_getInstanceMethod(base, selector) {
+                class_addMethod(made, selector, imp_implementationWithBlock(nothing), method_getTypeEncoding(method))
+            }
+            objc_registerClassPair(made)
+            target = made
+        }
+        if let target { object_setClass(content, target) }
     }
 }
