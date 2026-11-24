@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "id": "self_review",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {"en": "Self-review", "ru": "Самокритика"},
+  "summary": {
+    "en": "Attach before the final report on any task that changed something or claims a result: how to criticise your own work first.",
+    "ru": "Подключай перед итоговым отчётом по любой задаче, которая что-то меняла или заявляет результат: как сначала раскритиковать собственную работу."
+  },
+  "instructions": "SKILL.md",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {"required": []}
+}

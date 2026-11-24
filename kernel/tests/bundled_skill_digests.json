@@ -9,6 +9,7 @@
   "gmail": {"version": "0.3.0", "digest": "sha256:c464f6b407fd66dacc37736996ba21917965295ddd76e0061e34d6eac13caf34"},
   "kvist_docs": {"version": "0.1.7", "digest": "sha256:a9e098f6accdc748bae924f3733c692719de8a0887dda079e69348275853d61b"},
   "project_overview": {"version": "0.1.0", "digest": "sha256:7c44b6c7f01f9c8572afca0fac233849b003ebcd05c1e101d44f1aec316f3190"},
+  "self_review": {"version": "0.1.0", "digest": "sha256:4831eb3be42c90080555c8c6cb126636c630e4930565688bd79d9a81d4624176"},
   "skill_authoring": {"version": "0.2.0", "digest": "sha256:0ac3f8d2d991df5f0ee44ca198f5f39390d93213bad82dd962467e4803a0d212"},
   "static_checks": {"version": "0.1.0", "digest": "sha256:f87caff902a36e93bd1bbf7b4e47455bd4a0deda80e89224f2b4878397f91b73"},
   "telegram": {"version": "0.3.1", "digest": "sha256:c13d3ef0d2bd24b689fdad91dc51fdf079e18f53236c0cd2dc230294e0da0f3a"},
