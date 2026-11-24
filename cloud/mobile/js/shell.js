@@ -80,7 +80,7 @@ export function startShell(root, { go, onAuth }) {
   function paintBar() {
     const task = view.task;
     const projectId = view.kind === "session" ? task?.project_id : view.projectId;
-    title.textContent = account.projects.find((p) => String(p.id) === String(projectId))?.name || "Kvist Cloud";
+    title.textContent = account.projects.find((p) => String(p.id) === String(projectId))?.name || t("no project");
     // The dot on the menu: another session is waiting for an answer.
     pill.hidden = view.kind !== "session";
     menuDot.hidden = !account.tasks.some((item) => item.status === "waiting_for_user" && item.public_id !== view.publicId);
