@@ -143,13 +143,13 @@ async function addKeyAndProject(page) {
   await page.locator("input[type=password]").fill("sk-test-12345678");
   await page.locator(".sheet .btn.primary").click();
   await page.locator(".sheet").waitFor({ state: "detached" });
-  // The project is a chip under the field.
-  await page.locator(".chips .chip", { hasText: "No project" }).click();
-  await page.locator(".sheet .row", { hasText: "New project" }).click();
+  // The project is the bar's title; tapping it opens the projects and a way to make a new one.
+  await page.locator(".title-btn").click();
+  await page.locator(".pop-item", { hasText: "New project" }).click();
   await page.locator("input[placeholder='Project name']").fill("demo");
   await page.locator(".sheet .btn.primary").click();
   await page.locator(".sheet").waitFor({ state: "detached" });
-  await visible(page, ".chips .chip:has-text('demo')");
+  await page.locator(".title-btn", { hasText: "demo" }).waitFor();
 }
 
 async function sendTask(page, text) {
@@ -192,7 +192,8 @@ scenario("first run: sign in, terms, trial, key, project, first task", async (pa
   await visible(page, ".call-label");
   assert.equal(await page.locator(".call-label").first().innerText(), "writes hello.txt");
   await shot(page, "chat");
-  assert.equal(await page.locator(".bar-title .t1").innerText(), "demo", "the bar says only the project");
+  assert.equal((await page.locator(".bar-title .t1").innerText()).trim(), "demo", "the bar says only the project");
+  assert.equal(await page.locator(".glass-pill").isVisible(), true, "a session has its new-session and more buttons");
   // The address is the session: a reload comes back to it with its history.
   await page.reload();
   await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 15000 });

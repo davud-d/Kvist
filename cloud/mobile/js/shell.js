@@ -51,12 +51,14 @@ export function startShell(root, { go, onAuth }) {
 
   const title = h("div", { class: "t1" });
   const menuDot = h("i", { class: "dot", hidden: true });
+  // New session and more: only once there is a session to leave or to act on; an empty start has neither.
+  const pill = h("div", { class: "glass-pill", hidden: true },
+    h("button", { type: "button", aria: { label: t("new session") }, onclick: () => go("/m/") }, icon("new-chat", 20)),
+    h("button", { type: "button", aria: { label: t("more") }, onclick: () => sessionMenu() }, icon("more", 20)));
   const bar = h("header", { class: "bar" },
     h("button", { class: "glass-btn", type: "button", aria: { label: t("sessions") }, onclick: () => drawer.open() }, icon("menu", 20), menuDot),
-    h("div", { class: "bar-title" }, title),
-    h("div", { class: "glass-pill" },
-      h("button", { type: "button", aria: { label: t("new session") }, onclick: () => go("/m/") }, icon("new-chat", 20)),
-      h("button", { type: "button", aria: { label: t("more") }, onclick: () => sessionMenu() }, icon("more", 20))));
+    h("div", { class: "bar-title" }, h("button", { class: "title-btn", type: "button", "aria-haspopup": "menu", onclick: (event) => projectMenu(event.currentTarget) }, title, icon("chevron-down", 16))),
+    pill);
 
   const drawer = createDrawer({
     onNew: () => go("/m/"),
@@ -80,6 +82,7 @@ export function startShell(root, { go, onAuth }) {
     const projectId = view.kind === "session" ? task?.project_id : view.projectId;
     title.textContent = account.projects.find((p) => String(p.id) === String(projectId))?.name || "Kvist Cloud";
     // The dot on the menu: another session is waiting for an answer.
+    pill.hidden = view.kind !== "session";
     menuDot.hidden = !account.tasks.some((item) => item.status === "waiting_for_user" && item.public_id !== view.publicId);
   }
 
@@ -96,9 +99,7 @@ export function startShell(root, { go, onAuth }) {
   function paintChips() {
     const key = account.key;
     const model = key?.set ? (key.model || key.label || key.provider) : t("model key");
-    const project = view.kind === "new" ? [h("button", { class: "chip small", type: "button", onclick: () => chooseProject(view.projectId) },
-      icon("folder", 14), h("span", {}, account.projects.find((p) => String(p.id) === String(view.projectId))?.name || t("no project")))] : [];
-    fill(chips, project,
+    fill(chips,
       h("button", { class: "chip small", type: "button", onclick: () => keySheet() },
         key?.set ? providerMark(key.provider, key.label, 14) : null, h("span", {}, model)),
       null);
@@ -251,24 +252,15 @@ export function startShell(root, { go, onAuth }) {
     }
   }
 
-  function chooseProject(current) {
-    openSheet({
-      title: t("project"),
-      build: (close) => [
-        h("button", { class: `row${current ? "" : " on"}`, type: "button", onclick: () => {
-          close();
-          go("/m/", true);
-        } }, icon("folder", 20), h("span", { class: "row-main" }, t("no project"))),
-        account.projects.map((project) => h("button", { class: `row${String(project.id) === String(current) ? " on" : ""}`, type: "button", onclick: () => {
-          close();
-          go(`/m/p/${project.id}`, true);
-        } }, icon("folder", 20), h("span", { class: "row-main" }, project.name))),
-        h("button", { class: "row", type: "button", onclick: () => {
-          close();
-          projectSheet((project) => go(`/m/p/${project.id}`, true));
-        } }, icon("plus", 20), h("span", { class: "row-main" }, t("new project"))),
-      ],
-    });
+  /** Under the project's name: the projects to look through, and a new one (made the way the web workspace makes it). */
+  function projectMenu(anchor) {
+    const current = view.kind === "session" ? view.task?.project_id : view.projectId;
+    openPopover(anchor, [
+      { icon: icon("folder", 20), label: t("no project"), on: !current, check: icon("check", 18), onSelect: () => go("/m/", true) },
+      ...account.projects.map((project) => ({ icon: icon("folder", 20), label: project.name, on: String(project.id) === String(current), check: icon("check", 18), onSelect: () => go(`/m/p/${project.id}`, true) })),
+      { divider: true },
+      { icon: icon("plus", 20), label: t("new project"), onSelect: () => projectSheet((project) => go(`/m/p/${project.id}`, true)) },
+    ], { below: true });
   }
 
   function sessionMenu() {

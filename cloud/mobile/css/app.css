@@ -373,3 +373,11 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .pic.gone { display: grid; place-items: center; color: var(--text3); }
 .bubble:has(.pics) { padding: 6px; }
 .bubble:has(.pics) > div:last-child:not(.pics) { padding: 2px 8px 4px; }
+
+.title-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 8px 10px; border-radius: 14px; font-size: 16px; font-weight: 600; }
+.title-btn:active { background: rgba(255, 255, 255, .08); }
+.title-btn svg { flex: none; color: var(--text2); }
+.popover.below { transform-origin: 50% 0; min-width: 280px; max-height: 60dvh; overflow-y: auto; }
+.pop-rule { margin: 6px 12px; border: 0; border-top: 1px solid rgba(255, 255, 255, .1); }
+.pop-item.on .pop-label { font-weight: 600; }
+.pop-check { color: var(--text); display: grid; place-items: center; }
