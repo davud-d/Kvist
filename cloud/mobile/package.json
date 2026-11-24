@@ -1,0 +1,14 @@
+{
+  "name": "kvist-cloud-mobile",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "test:browser": "node tests/browser/run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}

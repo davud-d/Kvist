@@ -8,7 +8,15 @@ import pytest
 from conftest import dev_login, make_user
 from sqlalchemy import select
 from stripe_fake import (
-    APPLE_TOKEN, GOOD_TOKEN, PUBLISHABLE, SECRET, WALLET, WEBHOOK_SECRET, event, open_checkout, pay, signed,
+    APPLE_TOKEN,
+    PUBLISHABLE,
+    SECRET,
+    WALLET,
+    WEBHOOK_SECRET,
+    event,
+    open_checkout,
+    pay,
+    signed,
     wallet_client,
 )
 
@@ -62,7 +70,8 @@ def test_config_endpoint_says_what_the_apps_may_offer(client_factory):
     off = client_factory().get("/api/wallet/config").json()
     assert off == {"enabled": False, "google_pay": False, "apple_pay": False}
     client, _ = wallet_client(client_factory)
-    assert client.get("/api/wallet/config").json()["apple_pay"] is True
+    config = client.get("/api/wallet/config").json()
+    assert config["apple_pay"] is True and config["google_environment"] == "TEST"
     bare = {k: v for k, v in WALLET.items() if k != "APPLE_PAY_MERCHANT_ID"}
     other = client_factory(**bare)
     assert other.get("/api/wallet/config").json()["apple_pay"] is False

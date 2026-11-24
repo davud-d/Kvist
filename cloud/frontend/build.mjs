@@ -12,6 +12,7 @@ import { checkLocales } from "./tools/i18n-check.mjs";
 const SRC = new URL("./src/", import.meta.url);
 const DIST = new URL("./dist/", import.meta.url);
 const WORKSPACE = new URL("../workspace/", import.meta.url);
+const MOBILE = new URL("../mobile/", import.meta.url);
 const BUDGET_BYTES = 100 * 1024;
 const FONTS = {
   latin: ["kvist-mono-latin-400.woff2", "kvist-mono-latin-700.woff2"],
@@ -71,6 +72,8 @@ async function buildOnce() {
   }
   // The workspace page is plain files (no bundler), served as they are under /workspace.
   cpSync(WORKSPACE, new URL("workspace/", DIST), { recursive: true, filter: (from) => !/\/(tests|node_modules)(\/|$)/.test(from) });
+  // The phone app is plain files too, served under /m.
+  cpSync(MOBILE, new URL("mobile/", DIST), { recursive: true, filter: (from) => !/\/(tests|node_modules|package(-lock)?\.json)(\/|$)/.test(from) });
   const styles = await css();
   await build({
     entryPoints: [new URL("js/app.js", SRC).pathname],

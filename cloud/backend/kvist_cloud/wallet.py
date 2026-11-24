@@ -102,7 +102,8 @@ def google_request(wallet: WalletSettings, checkout: BillingCheckout) -> dict[st
         "merchantInfo": merchant,
         "allowedPaymentMethods": [{
             "type": "CARD",
-            "parameters": {"allowedAuthMethods": ["PAN_ONLY", "CRYPTOGRAM_3DS"], "allowedCardNetworks": GOOGLE_NETWORKS},
+            "parameters": {"allowedAuthMethods": ["PAN_ONLY", "CRYPTOGRAM_3DS"],
+                           "allowedCardNetworks": GOOGLE_NETWORKS},
             "tokenizationSpecification": {
                 "type": "PAYMENT_GATEWAY",
                 "parameters": {"gateway": "stripe", "stripe:version": STRIPE_GATEWAY_VERSION,
@@ -190,7 +191,8 @@ async def apple_stripe_token(app: FastAPI, token: str) -> str:
     if not isinstance(parsed, dict) or not all(isinstance(parsed.get(name), str) for name in fields) \
             or not parsed["paymentData"]:
         raise ApiError(400, "bad_wallet_token", "The wallet's token is not valid. / Токен кошелька не подходит.")
-    created = await stripe_request(app, "POST", "/v1/tokens", key=app.state.settings.wallet.stripe_publishable_key, data={
+    publishable = app.state.settings.wallet.stripe_publishable_key
+    created = await stripe_request(app, "POST", "/v1/tokens", key=publishable, data={
         "pk_token": parsed["paymentData"],
         "pk_token_instrument_name": parsed["displayName"],
         "pk_token_payment_network": parsed["network"],
@@ -286,6 +288,7 @@ def wallet_config(request: Request) -> dict[str, object]:
         "apple_pay": bool(wallet.apple_merchant_id),
         "currency": wallet.currency,
         "prices": {key: str(price) for key, price in wallet.prices.items()},
+        "google_environment": wallet.google_environment,
     }
 
 
@@ -416,6 +419,11 @@ def signature_valid(secret: str, header: str, body: bytes, now: float | None = N
     return any(hmac.compare_digest(expected, candidate) for candidate in parts.get("v1", []))
 
 
+def takes_back(kind: str, obj: dict) -> bool:
+    """A refund counts only when it is the whole charge; a dispute always takes the purchase back."""
+    return kind == "charge.dispute.created" or obj.get("refunded") is True
+
+
 @router.post("/billing/stripe/webhook")
 async def stripe_webhook(request: Request) -> dict[str, bool]:
     settings: Settings = request.app.state.settings
@@ -430,16 +438,16 @@ async def stripe_webhook(request: Request) -> dict[str, bool]:
         event = json.loads(body)
     except (ValueError, UnicodeDecodeError) as error:
         raise ApiError(400, "bad_payload", "Not JSON.") from error
-    kind = event.get("type") if isinstance(event, dict) else None
-    obj = event.get("data", {}).get("object") if isinstance(event, dict) and isinstance(event.get("data"), dict) else None
+    data = event.get("data") if isinstance(event, dict) else None
+    obj = data.get("object") if isinstance(data, dict) else None
     if not isinstance(obj, dict):
         return {"ok": True}
+    kind = event.get("type")
     if kind == "payment_intent.succeeded":
         metadata = obj.get("metadata") if isinstance(obj.get("metadata"), dict) else {}
         await sync_intent(request.app, _intent_id(obj.get("id")), metadata.get("checkout"))
     elif kind in {"charge.refunded", "charge.dispute.created"}:
-        # A refund counts only when it is the whole charge; a dispute always takes the purchase back.
         intent = obj.get("payment_intent")
-        if isinstance(intent, str) and INTENT_ID.fullmatch(intent) and (kind == "charge.dispute.created" or obj.get("refunded") is True):
+        if isinstance(intent, str) and INTENT_ID.fullmatch(intent) and takes_back(kind, obj):
             reverse_intent(request.app, intent)
     return {"ok": True}

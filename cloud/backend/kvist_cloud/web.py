@@ -25,17 +25,29 @@ LEGAL_FILES = {"/terms": "terms.html", "/privacy": "privacy.html",
 APP_PATHS = ("/start", "/onboarding", "/dashboard", "/settings", "/admin")
 
 
-def csp(public_url: str) -> str:
+# What the phone app's page loads from Google besides itself: the Google Pay button (its script, its picture, its
+# sheet). Only /m/ gets it; no other page of the site may load a third party's script.
+GOOGLE_PAY_SCRIPT = "https://pay.google.com"
+GOOGLE_PAY_IMAGES = "https://www.gstatic.com https://pay.google.com"
+
+
+def is_phone_app(path: str) -> bool:
+    return path == "/m" or path.startswith("/m/")
+
+
+def csp(public_url: str, google_pay: bool = False) -> str:
     socket = public_url.replace("https://", "wss://").replace("http://", "ws://")
     return "; ".join(
         [
             "default-src 'self'",
-            "script-src 'self'",
+            "script-src 'self'" + (f" {GOOGLE_PAY_SCRIPT}" if google_pay else ""),
             "style-src 'self' 'unsafe-inline'",
             # blob: is the pixel window showing the agent's screen, one picture at a time, from a fetch it made itself.
-            "img-src 'self' data: blob: https://avatars.githubusercontent.com",
+            "img-src 'self' data: blob: https://avatars.githubusercontent.com"
+            + (f" {GOOGLE_PAY_IMAGES}" if google_pay else ""),
             "font-src 'self'",
-            f"connect-src 'self' {socket}",
+            f"connect-src 'self' {socket}" + (f" {GOOGLE_PAY_SCRIPT}" if google_pay else ""),
+            *([f"frame-src {GOOGLE_PAY_SCRIPT}"] if google_pay else []),
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "form-action 'self' https://github.com",
@@ -61,13 +73,24 @@ def install(app: FastAPI) -> None:
         app.add_api_route("/pixel", old_workspace_address, methods=["GET"], include_in_schema=False)
         app.add_api_route("/pixel/{rest:path}", old_workspace_address, methods=["GET"], include_in_schema=False)
         app.mount("/workspace", StaticFiles(directory=workspace, html=True), name="workspace")
+    # The phone app: one page at every address of a session or a project, the files beside it.
+    mobile = dist / "mobile"
+    if mobile.is_dir():
+        async def mobile_page() -> FileResponse:
+            return FileResponse(mobile / "index.html", media_type="text/html; charset=utf-8")
+
+        for path in ("/m/s/{public_id}", "/m/p/{project_id}"):
+            app.add_api_route(path, mobile_page, methods=["GET"], include_in_schema=False)
+        app.mount("/m", StaticFiles(directory=mobile, html=True), name="mobile")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
-        response.headers.setdefault("Content-Security-Policy", csp(app.state.settings.public_url))
+        settings = app.state.settings
+        google_pay = settings.wallet is not None and is_phone_app(request.url.path)
+        response.headers.setdefault("Content-Security-Policy", csp(settings.public_url, google_pay))
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         if request.url.path.startswith("/assets/fonts/"):

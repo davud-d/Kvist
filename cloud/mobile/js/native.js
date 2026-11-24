@@ -1,0 +1,70 @@
+// The page's door to the phone app around it. In a plain browser there is no app: wallets are absent, links open
+// in a tab, haptics do nothing. In the Android and iOS apps the host injects `window.KvistHost`:
+//
+//   KvistHost.platform                       "android" | "ios"
+//   KvistHost.call(id, name, json)           starts an async request; the host answers with
+//                                            window.__kvistReply(id, resultJson) when it is done
+//
+// Names the host understands: "wallets" (-> ["google_pay"] or ["apple_pay"], what this phone can pay with now),
+// "pay" ({wallet, request} -> {token} | {cancelled: true} | {error}), "open" ({url}), "haptic" ({kind}),
+// "share" ({text}), "copy" ({text}). The page never holds a payment card: the OS sheet hands it a token.
+
+let counter = 0;
+const waiting = new Map();
+
+window.__kvistReply = (id, payload) => {
+  const resolve = waiting.get(id);
+  if (!resolve) return;
+  waiting.delete(id);
+  resolve(typeof payload === "string" ? JSON.parse(payload) : payload);
+};
+
+export const host = () => window.KvistHost ?? null;
+export const inApp = () => host() !== null;
+export const platform = () => host()?.platform ?? "web";
+
+function call(name, args = {}) {
+  const app = host();
+  if (!app) return Promise.resolve(null);
+  const id = `c${++counter}`;
+  return new Promise((resolve) => {
+    waiting.set(id, resolve);
+    app.call(id, name, JSON.stringify(args));
+  });
+}
+
+/** The wallets this phone can pay with right now, e.g. ["google_pay"]. */
+export async function wallets() {
+  const found = await call("wallets");
+  return Array.isArray(found) ? found.filter((name) => name === "google_pay" || name === "apple_pay") : [];
+}
+
+/** Opens the OS payment sheet. Resolves to {token} or {cancelled: true}; rejects with the host's error code. */
+export async function pay(wallet, request) {
+  const result = await call("pay", { wallet, request });
+  if (!result) throw Object.assign(new Error("no wallet"), { code: "wallet_unavailable" });
+  if (result.error) throw Object.assign(new Error(result.error), { code: result.error });
+  return result;
+}
+
+/** A link goes to the system browser from the app (a payment page or a repository), to a new tab elsewhere. */
+export function open(url) {
+  if (inApp()) return call("open", { url });
+  window.open(url, "_blank", "noopener,noreferrer");
+  return Promise.resolve();
+}
+
+/** A tap's tiny vibration: "tick" | "success" | "warn". */
+export const haptic = (kind = "tick") => (inApp() ? call("haptic", { kind }) : Promise.resolve());
+
+export async function copy(text) {
+  if (inApp()) return call("copy", { text });
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Not allowed outside a secure page; the text stays selectable.
+  }
+  return null;
+}
+
+export const share = (text) => (inApp() ? call("share", { text }) : Promise.resolve());
