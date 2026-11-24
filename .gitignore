@@ -127,6 +127,8 @@ CYBER_WALL_REPORT.md
 progress.json
 progress.json.bak-20260919
 tools/
+# The cloud frontend's build gates (contrast, locale parity) live in tools/ and build.mjs imports them.
+!cloud/frontend/tools/
 frontends/web-local/design.md
 
 # Local implementation brief
