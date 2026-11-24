@@ -1,0 +1,3 @@
+"offline_title" = "No connection";
+"offline_body" = "Kvist Cloud is not reachable. Check the network and try again.";
+"retry" = "Try again";

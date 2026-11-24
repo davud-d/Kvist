@@ -1,0 +1,56 @@
+# Generated into KvistCloud.xcodeproj by XcodeGen (`brew install xcodegen && xcodegen generate`); the project file is
+# not kept in git, so there is one place that says what the app is. See README.md.
+name: KvistCloud
+options:
+  bundleIdPrefix: site.kvist
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "15.0"
+packages:
+  KvistCloudCore:
+    path: .
+targets:
+  KvistCloud:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: KvistCloudCore
+    entitlements:
+      path: App/KvistCloud.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: site.kvist.cloud
+        PRODUCT_NAME: Kvist Cloud
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The cloud this build talks to: xcodebuild … KVIST_CLOUD_URL=http://127.0.0.1:8742 points a test build at a
+        # server on this computer (App Transport Security allows plain HTTP to local addresses only, see below).
+        KVIST_CLOUD_URL: https://cloud.kvist.site
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Kvist Cloud
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, ru]
+        ITSAppUsesNonExemptEncryption: false
+        KvistCloudURL: $(KVIST_CLOUD_URL)
+        UIUserInterfaceStyle: Dark
+        UIViewControllerBasedStatusBarAppearance: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
