@@ -103,7 +103,7 @@ the mouse.
 | | press and drag over the conversation | pour water on the text: the selection flows after the pointer and is copied when the button is released |
 | | double / triple click | pour over a word / a line and copy it |
 | Esc | click elsewhere | let the water drain (while a pool is on the glass, Esc drains it first) |
-| Ctrl+C | | quit |
+| Ctrl+C | | empty the input; on an empty one a second press quits |
 
 Selecting text is pouring water on the glass. The left button lets a drop fall
 where it is pressed; dragging pours, and the water runs along the text after

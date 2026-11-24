@@ -65,6 +65,8 @@ const FRONTEND_REQUEST: &str = "local:frontend";
 const SWITCH_FRONTEND: u8 = 64;
 /// A second Esc within this time stops the running turn.
 const STOP_CONFIRM: Duration = Duration::from_secs(3);
+/// A second Ctrl+C within the notice's life leaves.
+const EXIT_CONFIRM: Duration = TOAST;
 /// How long a finished write's code block stays before it folds.
 const CODE_LINGER: Duration = Duration::from_secs(2);
 /// Two presses on the same cell this close are a double click (a word), three a line.
@@ -240,6 +242,8 @@ pub struct App {
     pub scroll: usize,
     pub layout: Layout,
     quit: bool,
+    /// When Ctrl+C asked for a second press on the empty input; the second one leaves.
+    quit_armed: Option<Instant>,
     /// What the program exits with: 0, or 64 to start another interface.
     exit_code: u8,
     /// Everything sent to the core, for tests that have no core to receive it.
@@ -330,6 +334,7 @@ impl App {
             scroll: 0,
             layout: Layout::default(),
             quit: false,
+            quit_armed: None,
             exit_code: 0,
             #[cfg(test)]
             sent: Vec::new(),
@@ -1249,8 +1254,7 @@ impl App {
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
-            self.quit = true;
-            return;
+            return self.interrupt(now);
         }
         if matches!(self.phase, Phase::Splash) {
             return;
@@ -1749,6 +1753,31 @@ impl App {
         }
         self.stop_armed = Some(now);
         self.notify(strings().stop_hint.to_string(), false, now);
+    }
+
+    /// Ctrl+C empties the input first. On an empty one a notice asks for a
+    /// second press, and that one leaves; the splash has no input and leaves
+    /// at once.
+    fn interrupt(&mut self, now: Instant) {
+        if matches!(self.phase, Phase::Splash) {
+            self.quit = true;
+            return;
+        }
+        if !self.input.is_empty() && !self.input_locked() {
+            self.input.clear();
+            self.cursor = 0;
+            self.pick = 0;
+            self.recall = None;
+            self.quit_armed = None;
+            return;
+        }
+        if self.quit_armed.is_some_and(|at| now.saturating_duration_since(at) < EXIT_CONFIRM) {
+            self.quit_armed = None;
+            self.quit = true;
+            return;
+        }
+        self.quit_armed = Some(now);
+        self.notify(strings().quit_hint.to_string(), false, now);
     }
 
     /// The core moved to another session: the cards go and the input glides
@@ -3019,6 +3048,45 @@ mod tests {
         assert_eq!(app.cursor, 3);
         press_with(&mut app, KeyCode::Char('f'), KeyModifiers::ALT);
         assert_eq!((app.cursor, app.input.as_str()), (5, "ab cd"));
+    }
+
+    #[test]
+    fn ctrl_c_empties_the_input_and_a_second_press_on_the_empty_one_leaves() {
+        let mut app = main_app();
+        typing(&mut app, "fix the tests");
+        press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!((app.input.as_str(), app.cursor), ("", 0));
+        assert!(!app.quit && app.toast.is_none(), "the first press only emptied the field");
+
+        press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(!app.quit, "an empty input asks first");
+        let toast = app.toast.as_ref().expect("the notice");
+        assert_eq!((toast.text.as_str(), toast.error), (strings().quit_hint, false));
+
+        press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.quit, "the second press leaves");
+    }
+
+    #[test]
+    fn a_ctrl_c_after_the_notice_has_gone_is_a_first_press_again() {
+        let mut app = main_app();
+        let now = Instant::now();
+        let ctrl_c = |app: &mut App, at: Instant| app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL), at);
+        ctrl_c(&mut app, now);
+        assert!(!app.quit && app.quit_armed.is_some());
+        ctrl_c(&mut app, now + EXIT_CONFIRM + Duration::from_millis(1));
+        assert!(!app.quit, "a late press is the first one again");
+        assert!(app.quit_armed.is_some());
+        ctrl_c(&mut app, now + EXIT_CONFIRM + Duration::from_millis(2));
+        assert!(app.quit);
+    }
+
+    #[test]
+    fn ctrl_c_on_the_splash_leaves_at_once() {
+        let mut app = app();
+        assert!(matches!(app.phase, Phase::Splash));
+        press_with(&mut app, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(app.quit);
     }
 
     #[test]
