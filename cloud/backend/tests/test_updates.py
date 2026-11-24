@@ -323,3 +323,15 @@ def test_the_page_can_read_that_an_update_is_going_on_but_no_route_can_say_so(cl
     assert client.get("/api/machines").json()[0]["updating"] is True
     # The state is the server's alone: nothing under /api takes it from a browser.
     assert not [path for path in client.app.openapi()["paths"] if "updat" in path and path.startswith("/api")]
+
+
+def test_a_runner_that_predates_updates_is_recorded_and_never_woken_for_one(client_factory, tmp_path, engine):
+    seed(engine, status=TaskStatus.DONE)
+    client = client_factory(WHEELS_DIR=str(wheels(tmp_path)))
+    client.app.state.updates.wanted.add(1)
+    with connect(client) as ws:
+        ws.send_json({"type": "hello", "tasks": []})  # no "release": the old runner
+        eventually(lambda: read(engine, Machine, 1).runner_release == updates.LEGACY)
+        make_idle(engine, release=updates.LEGACY)
+        sweep(client)
+        assert not client.app.state.updates.staging

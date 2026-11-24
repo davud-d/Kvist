@@ -38,6 +38,9 @@ log = logging.getLogger("kvist_cloud.updates")
 # The two wheels a release is made of; every other wheel in the directory is a dependency, which only a new disk
 # image changes.
 WHEEL_PREFIXES = ("kvist-", "kvist_runner-")
+# What a machine is recorded as when its runner predates in-place updates (its hello has no "release"): it cannot be
+# updated this way, and waking it again and again to find that out would only cost the host.
+LEGACY = "legacy"
 # A failed release is not tried again on the same machine for this long: a broken one must not wake machines all day.
 RETRY_AFTER = timedelta(hours=1)
 # A machine that was told to stage has this long before it is asked again.
@@ -129,13 +132,13 @@ async def on_hello(app: FastAPI, machine_id: int, message: dict) -> None:
     """The runner says which release it runs; a machine woken for an update is told to stage it now."""
     state: UpdateState = app.state.updates
     state.applying.pop(machine_id, None)
-    reported = str(message.get("release") or "")[:32]
+    reported = str(message["release"] or "")[:32] if "release" in message else LEGACY
     with session_scope(app.state.session_factory) as db:
         machine = db.get(Machine, machine_id)
         if machine is not None:
             machine.runner_release = reported
     release = current_release(app)
-    if release is not None and reported != release.id and machine_id in state.wanted:
+    if release is not None and reported not in (release.id, LEGACY) and machine_id in state.wanted:
         await _send_update(app, machine_id, release)
     state.wanted.discard(machine_id)
 
@@ -171,7 +174,7 @@ def on_failed(app: FastAPI, machine_id: int, message: dict) -> None:
 
 def _due(app: FastAPI, db: Session, machine: Machine, release: Release, now) -> bool:
     state: UpdateState = app.state.updates
-    if machine.runner_release == release.id or machine.provider == REMOTE_PROVIDER or machine.suspended:
+    if machine.runner_release in (release.id, LEGACY) or machine.provider == REMOTE_PROVIDER or machine.suspended:
         return False
     if machine.status not in (MachineStatus.AWAKE, MachineStatus.ASLEEP):
         return False
