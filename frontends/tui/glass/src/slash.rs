@@ -75,7 +75,7 @@ pub const COMMANDS: [Command; 40] = [
 ];
 
 /// The commands this interface answers itself (or the core expands as an ordinary request): they are
-/// offered whatever the core's manifest lists, since the core never names them.
+/// offered whatever the manifest lists, since this core's command table carries none of them.
 const LOCAL: [&str; 6] = ["help", "website", "copy", "clear", "tui", "quit"];
 
 /// What `/help` prints: every command and what it does, as Markdown.
