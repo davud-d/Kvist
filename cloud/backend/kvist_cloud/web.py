@@ -94,6 +94,10 @@ def install(app: FastAPI) -> None:
         async def mobile_page() -> Response:
             return HTMLResponse(page, headers={"Cache-Control": "no-store"})
 
+        async def mobile_build() -> Response:
+            """What the open page asks when the app comes back to the front: has a new release been put up meanwhile."""
+            return PlainTextResponse(build, headers={"Cache-Control": "no-store"})
+
         async def mobile_file(build_id: str, path: str) -> FileResponse:
             """The page's scripts and styles live at /m/v/<build>/...: a new release is a new address, so a browser or a
             proxy that keeps files for hours (Cloudflare's does) can never show an old version of the app."""
@@ -104,6 +108,7 @@ def install(app: FastAPI) -> None:
 
         for path in ("/m", "/m/", "/m/s/{public_id}", "/m/p/{project_id}"):
             app.add_api_route(path, mobile_page, methods=["GET"], include_in_schema=False)
+        app.add_api_route("/m/build", mobile_build, methods=["GET"], include_in_schema=False)
         app.add_api_route("/m/v/{build_id}/{path:path}", mobile_file, methods=["GET"], include_in_schema=False)
         app.mount("/m", StaticFiles(directory=mobile), name="mobile")
     # HTML, CSS, JS and JSON shrink to about a third; on slow 3G that is most of the first screen.

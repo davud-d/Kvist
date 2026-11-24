@@ -275,6 +275,27 @@ scenario("the gauge by the send button sets how hard the model thinks, like the 
   assert.deepEqual(page.problems, []);
 });
 
+scenario("typing folds the composer to one row; the model chip opens a dropdown, not a sheet", async (page) => {
+  await signIn(page);
+  await startTrial(page);
+  await addKeyAndProject(page);
+  const field = page.locator(".composer-input");
+  await field.focus();
+  await page.locator(".composer.typing").waitFor();
+  assert.equal(await page.locator(".composer .chips").isVisible(), false, "the chips give way while typing");
+  const plus = await page.locator(".composer .plus").boundingBox();
+  const input = await field.boundingBox();
+  assert.ok(Math.abs(plus.y + plus.height / 2 - (input.y + input.height / 2)) < 12, "plus and field share one row");
+  await shot(page, "typing");
+  await field.blur();
+  await page.locator(".composer.typing").waitFor({ state: "detached" });
+  await page.locator(".chip.small").first().click();
+  await visible(page, ".model-menu");
+  assert.equal(await page.locator(".sheet").count(), 0, "a dropdown, not a bottom sheet");
+  await shot(page, "model-menu");
+  assert.deepEqual(page.problems, []);
+});
+
 scenario("the agent asks, the person answers", async (page) => {
   await signIn(page);
   await startTrial(page);

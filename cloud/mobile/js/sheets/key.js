@@ -31,13 +31,13 @@ function pickProvider(providers, chosen, onPick) {
   });
 }
 
-export function keySheet(then = () => {}) {
+export function keySheet(then = () => {}, providerId = "") {
   openSheet({
     title: t("model key"),
     variant: "tall",
     build: (close) => {
       const providers = account.providers.filter((p) => !p.sign_in);
-      let chosen = providers.find((p) => p.id === account.key?.provider) ?? providers[0];
+      let chosen = providers.find((p) => p.id === (providerId || account.key?.provider)) ?? providers[0];
       const key = h("input", { class: "field", type: "password", autocomplete: "off", autocapitalize: "off", spellcheck: "false",
         placeholder: account.key?.set ? `•••• ${account.key.last4}` : t("key placeholder"), enterkeyhint: "done" });
       const base = h("input", { class: "field", type: "url", inputmode: "url", autocapitalize: "off", spellcheck: "false",

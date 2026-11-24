@@ -11,6 +11,7 @@ import { createDrawer } from "./drawer.js";
 import { createFeed, working } from "./feed.js";
 import { createStatus } from "./status.js";
 import { providerMark } from "./mark.js";
+import { openModelMenu, pickedLabel } from "./modelmenu.js";
 import { openDial } from "./dial.js";
 import { imageGoal } from "./attachments.js";
 import { openPopover } from "./popover.js";
@@ -25,6 +26,7 @@ import { accountSheet } from "./sheets/account.js";
 import { plansSheet } from "./sheets/billing.js";
 import { keySheet } from "./sheets/key.js";
 import { projectSheet } from "./sheets/project.js";
+import { reloadIfOutdated } from "./update.js";
 
 const TASK_REFRESH_MS = 30_000;
 
@@ -98,10 +100,9 @@ export function startShell(root, { go, onAuth }) {
   function paintChips() {
     composer.showGauge(Boolean(account.key?.set));
     const key = account.key;
-    const model = key?.set ? (key.model || key.label || key.provider) : t("model key");
     fill(chips,
-      h("button", { class: "chip small", type: "button", onclick: () => keySheet() },
-        key?.set ? providerMark(key.provider, key.label, 14) : null, h("span", {}, model)),
+      h("button", { class: "chip small", type: "button", "aria-haspopup": "tree", onclick: (event) => openModelMenu(event.currentTarget) },
+        key?.set ? providerMark(key.provider, key.label, 14) : null, h("span", {}, pickedLabel())),
       null);
   }
 
@@ -316,7 +317,11 @@ export function startShell(root, { go, onAuth }) {
   }
 
   setInterval(() => !document.hidden && refresh("tasks", "sub", "machines").catch(() => {}), TASK_REFRESH_MS);
-  document.addEventListener("visibilitychange", () => !document.hidden && refresh("tasks", "sub", "machines").catch(() => {}));
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    refresh("tasks", "sub", "machines").catch(() => {});
+    reloadIfOutdated(() => composer.value.trim().length > 0);
+  });
 
   return {
     showNew,

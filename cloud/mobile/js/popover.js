@@ -10,9 +10,9 @@ export function closePopover() {
 }
 
 /** items: [{icon: Node, label, detail?, onSelect}]; `anchor` is the button the menu stands above. */
-export function openPopover(anchor, items, { below = false, content = null } = {}) {
+export function openPopover(anchor, items, { below = false, content = null, wide = false } = {}) {
   closePopover();
-  const card = h("div", { class: `popover${below ? " below" : ""}${content ? " custom" : ""}`, role: content ? "dialog" : "menu" }, content ?? items.map((item) =>
+  const card = h("div", { class: `popover${below ? " below" : ""}${content ? " custom" : ""}${wide ? " wide" : ""}`, role: content ? "dialog" : "menu" }, content ?? items.map((item) =>
     item.divider ? h("hr", { class: "pop-rule" }) : h("button", { class: `pop-item${item.on ? " on" : ""}`, type: "button", role: "menuitem", onclick: () => {
       close();
       item.onSelect();
@@ -27,7 +27,7 @@ export function openPopover(anchor, items, { below = false, content = null } = {
     card.style.left = `${Math.min(Math.max(12, box.left + box.width / 2 - 140), window.innerWidth - 292)}px`;
   } else {
     // Above the button, as far left as the screen lets it stand.
-    card.style.left = `${Math.min(Math.max(12, box.left), window.innerWidth - (content ? 316 : 12))}px`;
+    card.style.left = `${Math.min(Math.max(12, box.left), window.innerWidth - (wide ? 372 : content ? 316 : 12))}px`;
     card.style.bottom = `${window.innerHeight - box.top + 10}px`;
   }
   document.getElementById("layer").append(scrim, card);
