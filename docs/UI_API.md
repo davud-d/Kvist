@@ -738,6 +738,7 @@ counts as yes, anything else (`false`, no answer, EOF) does nothing.
 |---|---|---|
 | `role` | `[auto\|coder\|reader\|devops\|chat]` | `{"role": str}` — also the role every following goal is submitted with; saved as the global preference |
 | `effort` | `[false\|low\|medium\|high\|xhigh\|max]` | `{"effort": str, "advisory": str}` — `advisory` is how the level maps onto the active provider (may be empty) |
+| `mode` | `[manual\|accept_edits]` | `{"mode": str}` — `manual` asks before overwriting an existing file (with a diff), `accept_edits` lets file changes through unasked; commands still ask in both. Saved for the next sessions; `AGENT_WRITE_APPROVAL` overrides it |
 | `verbose` | `[true\|false]` (none = toggle) | `{"verbose": bool}` — this process only |
 | `style` | `[NAME]` | `{"style": {"name": str, "applied_to_session": bool}}` — one pick sets the agent style and the chat style that goes with it; `false` means the running session keeps its styles until the next session |
 | `session` | `[switch NAME]`, `[new [NAME]]`, `[delete NAME]`; none = the picker | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |

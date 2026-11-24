@@ -64,6 +64,9 @@ cd frontends/gui/tauri && node --test "tests/*.test.mjs" && (cd src-tauri && car
 
 ## Things that bite
 
+- Searching: use `git grep` / `git ls-files` (tracked files only). Never `grep -r` / `find` over the repo: it walks
+  `node_modules`, `.venv`, build output and is very slow.
+
 - Config: `~/.kvist/config.json`. Use `KVIST_CONFIG_DIR=<dir>` to try a first run; never fake `HOME` for it.
   Never print config secrets: read exact non-secret keys only.
 - Per-project state lives in `<workspace>/.kvist/` (sessions, change journal, logs). Frontends use

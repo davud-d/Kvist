@@ -858,6 +858,7 @@ from kernel.config.user_config import (
     save_frontend,
     save_role_selection,
     get_saved_reasoning_effort,
+    save_edit_mode,
     save_reasoning_effort,
     get_saved_title_model,
     save_title_model,
@@ -2760,6 +2761,32 @@ def choose_effort(
     )
 
 
+_EDIT_MODE_OPTIONS = (
+    ("manual", "Manual mode", "Every overwrite of an existing file asks you first, with a diff"),
+    ("accept_edits", "Accept edits mode", "File changes go through without a question; only commands still ask"),
+)
+
+
+def choose_edit_mode(current: str, verbose: bool, ui: AgentUI | None = None) -> str | None:
+    """Pick whether file edits need a confirmation. Returns the mode or None."""
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
+    return ui.choose_option(
+        title="Edit approval mode",
+        current_value=current,
+        options=[
+            {"value": value, "label": label, "description": description}
+            for value, label, description in _EDIT_MODE_OPTIONS
+        ],
+        help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
+    )
+
+
+def apply_edit_mode(agent, mode: str) -> None:
+    """Switch the live executor between asking about file edits and accepting them."""
+    agent.executor.write_approval_enabled = mode == "manual"
+
+
 def choose_style(verbose: bool, ui: AgentUI | None = None) -> str | None:
     """Pick the working style; the chat style follows from it.
 
@@ -4114,6 +4141,29 @@ def _stdio_verbose(ctx: CommandContext) -> CommandResult:
     )
 
 
+def _stdio_mode(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    modes = [value for value, _label, _description in _EDIT_MODE_OPTIONS]
+    if len(ctx.args) == 1:
+        selected = ctx.args[0].casefold().replace("-", "_")
+        if selected not in modes:
+            return CommandResult(False, "Mode must be one of: " + ", ".join(modes))
+    elif ctx.args:
+        return CommandResult(False, "Usage: mode [manual|accept_edits]")
+    else:
+        current = "manual" if agent.executor.write_approval_enabled else "accept_edits"
+        selected = choose_edit_mode(current, agent.config.verbose, ui=ctx.ui)
+    if selected is None:
+        return _command_cancelled()
+    apply_edit_mode(agent, selected)
+    note = ""
+    try:
+        save_edit_mode(selected)
+    except RuntimeError as error:
+        note = _save_failure_note(error)
+    return CommandResult(True, f"Edit approval mode set to: {selected}" + note, {"mode": selected})
+
+
 def _stdio_style(ctx: CommandContext) -> CommandResult:
     agent = ctx.session.agent
     if len(ctx.args) == 1:
@@ -4888,6 +4938,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "commit-message": _stdio_commit_message,
     "role": _stdio_role,
     "effort": _stdio_effort,
+    "mode": _stdio_mode,
     "web-search-provider": _stdio_web_search_provider,
     "verbose": _stdio_verbose,
     "style": _stdio_style,
@@ -6384,6 +6435,26 @@ def main() -> None:
                             "yellow",
                         )
                     )
+                continue
+
+            if user_goal.lower() == "/mode":
+                current_mode = "manual" if agent.executor.write_approval_enabled else "accept_edits"
+                with paused_interactive_screen(interactive_screen):
+                    selected_mode = choose_edit_mode(current_mode, verbose)
+                if selected_mode is None:
+                    console.print("[yellow]Edit approval mode unchanged.[/yellow]")
+                    continue
+                apply_edit_mode(agent, selected_mode)
+                try:
+                    save_edit_mode(selected_mode)
+                except RuntimeError as error:
+                    console.print(
+                        _display_text(
+                            f"Edit approval mode not saved: {sanitize_display_text(str(error))}",
+                            "yellow",
+                        )
+                    )
+                console.print(_display_text(f"Edit approval mode set to: {selected_mode}", "green"))
                 continue
 
             if user_goal.lower() == "/effort":

@@ -37,6 +37,8 @@ LLM_MODELS_KEY = "llm_models"
 ROLE_SELECTION_KEY = "role_selection"
 REASONING_EFFORT_KEY = "reasoning_effort"
 REASONING_EFFORT_ENV = "KVIST_REASONING_EFFORT"
+EDIT_MODE_KEY = "edit_mode"
+EDIT_MODES = ("manual", "accept_edits")
 TITLE_MODEL_KEY = "title_model"
 API_SETTINGS_KEY = "api_settings"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
@@ -594,6 +596,24 @@ def save_reasoning_effort(level: str, config_path: Path | None = None) -> None:
         return payload
 
     _update_user_config(save_effort, config_path)
+
+
+def get_saved_edit_mode(config_path: Path | None = None) -> str:
+    """The persisted file-edit approval mode: 'manual' (default) or 'accept_edits'."""
+    value = load_user_config(config_path).get(EDIT_MODE_KEY)
+    return value if value in EDIT_MODES else "manual"
+
+
+def save_edit_mode(mode: str, config_path: Path | None = None) -> None:
+    """Persist the file-edit approval mode for future sessions."""
+    if mode not in EDIT_MODES:
+        raise ValueError(f"edit mode must be one of {EDIT_MODES}, got {mode!r}")
+
+    def save_mode(payload: dict[str, object]) -> dict[str, object]:
+        payload[EDIT_MODE_KEY] = mode
+        return payload
+
+    _update_user_config(save_mode, config_path)
 
 
 def get_saved_title_model(config_path: Path | None = None) -> str | None:

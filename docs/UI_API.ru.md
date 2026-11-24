@@ -746,6 +746,7 @@ kvist --commit-message < payload.json
 |---|---|---|
 | `role` | `[auto\|coder\|reader\|devops\|chat]` | `{"role": str}` — это же роль, с которой отправляются все следующие цели; сохраняется как глобальная настройка |
 | `effort` | `[false\|low\|medium\|high\|xhigh\|max]` | `{"effort": str, "advisory": str}` — `advisory` объясняет, как уровень ложится на активного провайдера (может быть пустым) |
+| `mode` | `[manual\|accept_edits]` | `{"mode": str}` — `manual` спрашивает перед перезаписью существующего файла (с диффом), `accept_edits` пропускает правки файлов без вопросов; команды спрашивают в обоих режимах. Сохраняется на следующие сессии; `AGENT_WRITE_APPROVAL` важнее |
 | `verbose` | `[true\|false]` (без аргумента — переключить) | `{"verbose": bool}` — только для этого процесса |
 | `style` | `[ИМЯ]` | `{"style": {"name": str, "applied_to_session": bool}}` — один выбор задаёт стиль агента и подходящий ему стиль чата; `false` значит, что текущая сессия сохраняет свои стили до следующей сессии |
 | `session` | `[switch ИМЯ]`, `[new [ИМЯ]]`, `[delete ИМЯ]`; без аргументов — выбор из списка | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |

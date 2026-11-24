@@ -356,6 +356,34 @@ def test_effort_wizard_applies_and_persists(home, agent_factory):
     assert _saved("reasoning_effort") == "high"
 
 
+def test_mode_dialog_switches_to_accept_edits_and_back(home, agent_factory, monkeypatch):
+    monkeypatch.delenv("AGENT_WRITE_APPROVAL", raising=False)
+    agent = agent_factory()
+    agent.executor.write_approval_enabled = True
+
+    result, requests, _ = _run_handler("mode", agent, answers=["accept_edits"])
+    assert requests[0].current_value == "manual"
+    assert result.ok and result.effects == {"mode": "accept_edits"}
+    assert agent.executor.write_approval_enabled is False
+    assert _saved("edit_mode") == "accept_edits"
+
+    result, requests, _ = _run_handler("mode", agent, answers=["manual"])
+    assert requests[0].current_value == "accept_edits"
+    assert agent.executor.write_approval_enabled is True
+    assert _saved("edit_mode") == "manual"
+
+
+def test_mode_cancelled_and_unknown_change_nothing(home, agent_factory):
+    agent = agent_factory()
+    before = agent.executor.write_approval_enabled
+    result, _, _ = _run_handler("mode", agent, answers=[None])
+    assert result.ok and result.effects == {"cancelled": True}
+    result, _, _ = _run_handler("mode", agent, args=["yolo"])
+    assert result.ok is False
+    assert agent.executor.write_approval_enabled is before
+    assert _saved("edit_mode") is None
+
+
 def test_web_search_provider_saves_choice_and_key(home, agent_factory):
     result, requests, _ = _run_handler(
         "web-search-provider", agent_factory(), answers=["tavily", "tvly-secret"]
@@ -649,7 +677,7 @@ def test_rate_offers_good_or_bad_and_files_the_session(home, agent_factory, monk
 
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
-        "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
+        "role", "effort", "mode", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
         "strime", "headers", "revert", "bug", "feedback", "rate", "commit-message", "web-search-provider", "context", "memory", "doctor",
         "permissions", "machines", "remote", "update", "gmail", "telegram",

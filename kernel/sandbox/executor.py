@@ -58,7 +58,7 @@ from kernel.sandbox.approvals import ApprovalGate, DenyApprovalGate, TerminalApp
 from kernel.sandbox.auto_approval import AutoApprovalGate, Classifier, refusal_note
 from kernel.sandbox.scratchpad import Scratchpad, ScratchpadFull
 from kernel.sandbox.permission_policy import append_web_domain, load_policy
-from kernel.config.user_config import get_web_search_settings
+from kernel.config.user_config import get_saved_edit_mode, get_web_search_settings
 from kernel.context.system_context import AGENT_INSTRUCTIONS_FILE, CHAT_INSTRUCTIONS_FILE
 from kernel.sandbox.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
 from kernel.sandbox.terminal_handoff import FOREGROUND_HANDOFF_SECONDS
@@ -315,9 +315,10 @@ class SafeExecutor:
 
         # Overwriting an existing file requires interactive approval with a
         # diff preview. AGENT_WRITE_APPROVAL=0 disables the gate (CI /
-        # non-interactive runs).
+        # non-interactive runs); without it the /mode choice decides.
+        write_env = self._read_int_env("AGENT_WRITE_APPROVAL", default=-1, min_value=-1, max_value=1)
         self.write_approval_enabled = (
-            self._read_int_env("AGENT_WRITE_APPROVAL", default=1, min_value=0, max_value=1) == 1
+            get_saved_edit_mode() == "manual" if write_env < 0 else write_env == 1
         )
         self.max_diff_preview_chars = 4000
 

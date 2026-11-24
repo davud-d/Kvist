@@ -49,12 +49,14 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     ),
     SlashCommand("role", "Choose auto, coder, devops or chat role"),
     SlashCommand("effort", "Set the model's reasoning effort level"),
+    SlashCommand("mode", "Choose manual mode or accept edits mode (file changes go through unasked)"),
     SlashCommand(
         "web-search-provider",
         "Choose the web search provider and enter its API key",
         aliases=("web_search_provider", "websearch"),
     ),
     SlashCommand("session", "Create, switch or delete saved sessions"),
+    SlashCommand("rename", "Set the active session's title by hand"),
     SlashCommand(
         "export",
         "Import sessions from Claude Code, Codex, OpenCode, Cursor and other agents",
@@ -149,7 +151,6 @@ def slash_commands_context() -> str:
         rows.append(f"- {names}: {description}")
     if ink:
         rows.extend([
-            "- /rename <name>: Set the active session's title",
             "- /copy: Copy the last answer to the clipboard",
             "- /debug: Show or hide debug events",
             "- /clear: Clear the screen",
@@ -169,7 +170,7 @@ def slash_commands_context() -> str:
         "Do not invent slash commands, flags, subcommands or arguments from their "
         "descriptions or from other assistants' conventions. When frontend details "
         "are unknown, recommend the bare command. /role, /models, /provider, "
-        "/effort, /style, /web-search-provider and /settings-api open selection/configuration dialogs; "
+        "/effort, /mode, /style, /web-search-provider and /settings-api open selection/configuration dialogs; "
         "describe the choice to make in that dialog separately from the command. "
         "Some frontends also accept inline selections, but that syntax is not "
         "portable: do not assume it is available. /role offers auto, coder, reader, "
