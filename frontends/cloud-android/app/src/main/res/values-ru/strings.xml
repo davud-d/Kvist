@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Kvist Cloud</string>
+    <string name="offline_title">Нет соединения</string>
+    <string name="offline_body">Kvist Cloud недоступен. Проверь сеть и повтори.</string>
+    <string name="retry">Повторить</string>
+    <string name="update_webview">Обнови Android System WebView, чтобы пользоваться Kvist Cloud.</string>
+    <string name="share">Поделиться</string>
+</resources>

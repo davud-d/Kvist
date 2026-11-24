@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.KvistCloud" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/kvist_bg</item>
+        <item name="android:statusBarColor">@color/kvist_bg</item>
+        <item name="android:navigationBarColor">@color/kvist_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>
