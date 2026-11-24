@@ -66,6 +66,9 @@ SWEEP_MAX_COUNT = 50
 RENEW_WINDOW = timedelta(days=3)
 REMINDER_BEFORE = timedelta(days=2)
 SWEEP_SECONDS = 300.0
+# BillingCheckout.payment_method of a purchase made with the phone's own wallet (wallet.py); Platega's are 2..14.
+# Platega is never asked about these: no sweep, no "payment pending" for them.
+WALLET_METHOD = 100
 
 
 class CheckoutIn(InputModel):
@@ -237,9 +240,13 @@ def admin_grant_plan(db: Session, user_id: int, plan_id: str, days: int | None, 
     return subscription
 
 
+def _source(checkout: BillingCheckout) -> str:
+    return "Apple Pay / Google Pay" if checkout.payment_method == WALLET_METHOD else "Platega"
+
+
 def _grant_hours(db: Session, checkout: BillingCheckout) -> bool:
     try:
-        entry = ledger.purchase(db, checkout.user_id, plans.HOUR_PACK_HOURS * 3600, "Hour pack (Platega)")
+        entry = ledger.purchase(db, checkout.user_id, plans.HOUR_PACK_HOURS * 3600, f"Hour pack ({_source(checkout)})")
     except ledger.LedgerError:
         return False
     checkout.ledger_entry_id = entry.id
@@ -264,7 +271,7 @@ def revoke(db: Session, checkout: BillingCheckout) -> None:
         original = db.get(LedgerEntry, checkout.ledger_entry_id)
         db.add(LedgerEntry(user_id=original.user_id, period_start=original.period_start, kind=LedgerKind.REVERSAL,
                            seconds=-original.seconds, refers_to=original.id,
-                           reason=f"Platega reversal of checkout {checkout.id}"))
+                           reason=f"{_source(checkout)} reversal of checkout {checkout.id}"))
     if checkout.subscription_row_id is not None:
         db.get(Subscription, checkout.subscription_row_id).status = SubscriptionStatus.CANCELLED
     checkout.status = CheckoutStatus.REVOKED
@@ -307,7 +314,8 @@ async def sync_pending(app: FastAPI, user_id: int | None = None) -> None:
     """Look up unfinished checkouts (one person's, or recent ones of everybody) without waiting for a callback."""
     now = utcnow()
     query = select(BillingCheckout.transaction_id).where(
-        BillingCheckout.status == CheckoutStatus.PENDING, BillingCheckout.transaction_id.is_not(None))
+        BillingCheckout.status == CheckoutStatus.PENDING, BillingCheckout.transaction_id.is_not(None),
+        BillingCheckout.payment_method != WALLET_METHOD)
     if user_id is not None:
         query = query.where(BillingCheckout.user_id == user_id, BillingCheckout.created_at > now - SYNC_MAX_AGE)
         limit = SYNC_MAX_COUNT
@@ -449,7 +457,8 @@ def get_subscription(user: User = Depends(current_user), db: Session = Depends(g
 def eligibility(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     pending = db.scalar(select(BillingCheckout.id).where(
         BillingCheckout.user_id == user.id, BillingCheckout.status == CheckoutStatus.PENDING,
-        BillingCheckout.transaction_id.is_not(None), BillingCheckout.created_at > utcnow() - SYNC_MAX_AGE))
+        BillingCheckout.transaction_id.is_not(None), BillingCheckout.payment_method != WALLET_METHOD,
+        BillingCheckout.created_at > utcnow() - SYNC_MAX_AGE))
     return {"trial_eligible": trial_eligible(user), "trial_used": user.trial_used_at is not None,
             "payment_pending": pending is not None}
 

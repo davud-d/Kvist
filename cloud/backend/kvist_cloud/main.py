@@ -32,6 +32,7 @@ from . import (
     screens,
     tasks,
     updates,
+    wallet,
     web,
 )
 from .config import Settings, load_settings
@@ -145,6 +146,7 @@ def create_app(
     app.include_router(commands.router)
     app.include_router(screens.router)
     app.include_router(billing.router)
+    app.include_router(wallet.router)
     app.include_router(ledger.router)
     app.include_router(funnel.router)
     app.include_router(admin.router)

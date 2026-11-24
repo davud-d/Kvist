@@ -26,10 +26,33 @@ PLATEGA_METHODS = frozenset({2, 3, 11, 12, 13, 14})
 PLATEGA_DEFAULT_METHODS = (2, 11, 12, 13)
 DEFAULT_WHEELS_DIR = Path("/opt/kvist-cloud/wheels")
 PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours", "remote")
+# What the phone's own wallets (Google Pay, Apple Pay) can buy, and the currencies whose amounts have two decimals.
+WALLET_KINDS = ("start", "pro", "max", "hours")
+WALLET_CURRENCIES = frozenset({"USD", "EUR", "GBP"})
 
 
 class ConfigError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class WalletSettings:
+    """Payments made with the phone's own wallet; the processor is Stripe. None in Settings means switched off."""
+
+    stripe_secret_key: str = field(repr=False)
+    stripe_publishable_key: str
+    webhook_secret: str = field(repr=False)
+    base_url: str = "https://api.stripe.com"
+    currency: str = "USD"
+    # What each purchase costs in ``currency``; the server alone decides amounts.
+    prices: Mapping[str, Decimal] = field(default_factory=dict)
+    # The country of the account that receives the money (the sheets show it and the card networks ask for it).
+    country: str = "US"
+    merchant_name: str = "Kvist Cloud"
+    google_environment: str = "TEST"
+    google_merchant_id: str = ""
+    # The Merchant ID made in the Apple developer account, e.g. merchant.site.kvist.cloud. Empty: no Apple Pay.
+    apple_merchant_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +74,7 @@ class Settings:
     platega_payment_methods: tuple[int, ...] = PLATEGA_DEFAULT_METHODS
     # What each purchase costs in ``platega_currency``; the server alone decides amounts.
     platega_prices: Mapping[str, Decimal] = field(default_factory=dict)
+    wallet: WalletSettings | None = None
     machine_provider: str = "local"
     runner_command: tuple[str, ...] = ()
     kvist_command: tuple[str, ...] = ()
@@ -191,6 +215,58 @@ def _platega(env: Mapping[str, str], enabled: bool) -> tuple[str, str, str, str,
     return merchant, secret, base_url, currency, methods, prices
 
 
+def _wallet(env: Mapping[str, str]) -> WalletSettings | None:
+    if not _flag(env, "WALLET_ENABLED"):
+        return None
+    secret = env.get("STRIPE_SECRET_KEY", "").strip()
+    publishable = env.get("STRIPE_PUBLISHABLE_KEY", "").strip()
+    webhook = env.get("STRIPE_WEBHOOK_SECRET", "").strip()
+    if not re.fullmatch(r"(sk|rk)_(test|live)_\w+", secret):
+        raise ConfigError("WALLET_ENABLED needs STRIPE_SECRET_KEY (sk_… or rk_…)")
+    if not re.fullmatch(r"pk_(test|live)_\w+", publishable):
+        raise ConfigError("WALLET_ENABLED needs STRIPE_PUBLISHABLE_KEY (pk_…)")
+    if not webhook.startswith("whsec_"):
+        raise ConfigError("WALLET_ENABLED needs STRIPE_WEBHOOK_SECRET (whsec_…)")
+    # A live key and a test key of the same account are one mistake away from each other: refuse the mix.
+    if (secret.split("_")[1], publishable.split("_")[1]) not in {("test", "test"), ("live", "live")}:
+        raise ConfigError("STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY must both be test or both be live keys")
+    base_url = (env.get("STRIPE_BASE_URL", "") or "https://api.stripe.com").rstrip("/")
+    if not base_url.startswith("https://"):
+        raise ConfigError("STRIPE_BASE_URL must be https")
+    currency = (env.get("WALLET_CURRENCY", "") or "USD").strip().upper()
+    if currency not in WALLET_CURRENCIES:
+        raise ConfigError(f"WALLET_CURRENCY must be one of {sorted(WALLET_CURRENCIES)}")
+    from . import plans
+
+    prices: dict[str, Decimal] = {}
+    for key in WALLET_KINDS:
+        default = plans.HOUR_PACK_PRICE_USD if key == "hours" else plans.get_plan(key).price_usd
+        raw = env.get(f"WALLET_PRICE_{key.upper()}", "").strip() or str(default)
+        try:
+            amount = Decimal(raw)
+        except InvalidOperation as error:
+            raise ConfigError(f"WALLET_PRICE_{key.upper()} must be a number, got {raw!r}") from error
+        if not amount.is_finite() or amount <= 0 or amount != amount.quantize(Decimal("0.01")):
+            raise ConfigError(f"WALLET_PRICE_{key.upper()} must be positive with at most 2 decimals")
+        prices[key] = amount.quantize(Decimal("0.01"))
+    environment = (env.get("GOOGLE_PAY_ENVIRONMENT", "") or "TEST").strip().upper()
+    if environment not in {"TEST", "PRODUCTION"}:
+        raise ConfigError("GOOGLE_PAY_ENVIRONMENT must be TEST or PRODUCTION")
+    google_merchant = env.get("GOOGLE_PAY_MERCHANT_ID", "").strip()
+    if environment == "PRODUCTION" and not google_merchant:
+        raise ConfigError("GOOGLE_PAY_ENVIRONMENT=PRODUCTION needs GOOGLE_PAY_MERCHANT_ID")
+    country = (env.get("WALLET_COUNTRY", "") or "US").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", country):
+        raise ConfigError("WALLET_COUNTRY must be a two-letter country code")
+    return WalletSettings(
+        stripe_secret_key=secret, stripe_publishable_key=publishable, webhook_secret=webhook, base_url=base_url,
+        currency=currency, prices=prices, country=country,
+        merchant_name=(env.get("WALLET_MERCHANT_NAME", "") or "Kvist Cloud").strip()[:60],
+        google_environment=environment, google_merchant_id=google_merchant,
+        apple_merchant_id=env.get("APPLE_PAY_MERCHANT_ID", "").strip(),
+    )
+
+
 def default_kvist_command() -> tuple[str, ...]:
     """The repository's own core, run from its virtual environment when there is one."""
     repo_python = REPO_ROOT / ".venv" / "bin" / "python"
@@ -247,6 +323,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         platega_currency=currency,
         platega_payment_methods=methods,
         platega_prices=prices,
+        wallet=_wallet(env),
         machine_provider=env.get("MACHINE_PROVIDER", "local"),
         runner_command=_argv(env, "RUNNER_COMMAND", default_runner_command()),
         kvist_command=_argv(env, "KVIST_COMMAND", default_kvist_command()),
