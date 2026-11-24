@@ -153,9 +153,12 @@ them shows the counts only.
 
 ## Commands of this interface
 
-The `/` list has the same commands as the Ink app. Most go to the core
-(`/export`, `/resume`, `/feedback`, `/gmail`, `/telegram` too). `/website` is
-sent as an ordinary request, which the core expands. Four are answered here and
+The `/` list comes from the core: the manifest's `slash_commands` names the
+commands this core carries out (`via: "core"`), and the menu offers exactly
+those, with this interface's own words for the ones it knows and the core's
+description for the rest. A command the core gains appears there without a
+change in this code; `/rename` and `/mode` are in it the same way. `/website`
+is sent as an ordinary request, which the core expands. Four are answered here and
 never reach the core: `/help` (the command list, in the conversation), `/copy
 [N]` (the latest answer, or the N-th from the end, to the clipboard), `/clear`
 (the conversation on screen starts over; not while a turn runs) and `/quit`

@@ -25,7 +25,7 @@ const fn command(name: &'static str, en: &'static str, ru: &'static str) -> Comm
     Command { name, en, ru, needs_argument: false }
 }
 
-pub const COMMANDS: [Command; 39] = [
+pub const COMMANDS: [Command; 40] = [
     command("help", "Show the commands", "Показать команды"),
     command("new", "Start a new session (the current one is kept)", "Начать новую сессию (текущая сохранится)"),
     command("session", "Pick a session, or /session <name> to switch", "Выбрать сессию или /session <имя>"),
@@ -33,6 +33,7 @@ pub const COMMANDS: [Command; 39] = [
     Command { needs_argument: true, ..command("rename", "Set the active session's title", "Задать название сессии") },
     command("role", "Agent role: auto, coder, reader, devops, chat", "Роль агента: auto, coder, reader, devops, chat"),
     command("effort", "Reasoning effort: false … max", "Глубина рассуждений: false … max"),
+    command("mode", "File edits: manual asks first, accept_edits does not", "Правки файлов: manual спрашивает, accept_edits — нет"),
     command("models", "Pick the fast and smart models", "Выбрать быструю и умную модели"),
     command("web-search-provider", "Web search provider and its API key", "Провайдер веб-поиска и его ключ"),
     command("style", "Working style of the agent and the chat", "Стиль работы агента и чата"),
@@ -73,6 +74,10 @@ pub const COMMANDS: [Command; 39] = [
     command("quit", "Exit (also /exit, /bye)", "Выйти (также /exit, /bye)"),
 ];
 
+/// The commands this interface answers itself (or the core expands as an ordinary request): they are
+/// offered whatever the core's manifest lists, since the core never names them.
+const LOCAL: [&str; 6] = ["help", "website", "copy", "clear", "tui", "quit"];
+
 /// What `/help` prints: every command and what it does, as Markdown.
 pub fn help_text() -> String {
     let russian = crate::strings::russian();
@@ -105,6 +110,32 @@ pub fn set_plugins(plugins: &[(String, String)]) {
     *PLUGINS.lock().unwrap() = plugin_commands(plugins);
 }
 
+// The commands the core said it serves in its last manifest (`slash_commands` marked `via: "core"`),
+// in the core's order. `None` before any manifest, when the built-in list is all there is.
+static CORE: Mutex<Option<Vec<&'static Command>>> = Mutex::new(None);
+
+/// Replace the core's commands with the manifest's `slash_commands` entries this core carries out
+/// (name, description). An empty list leaves the built-in one: the manifest said nothing about serving.
+pub fn set_core(commands: &[(String, String)]) {
+    let mut core = CORE.lock().unwrap();
+    *core = (!commands.is_empty()).then(|| core_commands(commands));
+}
+
+/// The core's entries as commands: a name this interface knows keeps its own hints and
+/// `needs_argument`; one only the core knows takes the manifest's description in both languages.
+fn core_commands(commands: &[(String, String)]) -> Vec<&'static Command> {
+    commands
+        .iter()
+        .map(|(name, description)| {
+            COMMANDS.iter().find(|command| command.name == name).unwrap_or_else(|| {
+                let hint: &'static str = Box::leak(description.clone().into_boxed_str());
+                let name: &'static str = Box::leak(name.clone().into_boxed_str());
+                &*Box::leak(Box::new(command(name, hint, hint)))
+            })
+        })
+        .collect()
+}
+
 /// True for a typed name the core expands itself, so the line travels as an ordinary request.
 pub fn is_goal(name: &str) -> bool {
     name == "website" || PLUGINS.lock().unwrap().iter().any(|command| command.name == name)
@@ -124,7 +155,24 @@ fn plugin_commands(plugins: &[(String, String)]) -> Vec<&'static Command> {
 }
 
 fn offered() -> Vec<&'static Command> {
-    COMMANDS.iter().chain(PLUGINS.lock().unwrap().iter().copied()).collect()
+    let core = CORE.lock().unwrap();
+    let plugins = PLUGINS.lock().unwrap();
+    offered_from(core.as_deref(), &plugins)
+}
+
+/// The menu's commands: this interface's own, then the ones the core serves in its order (the known
+/// ones at their usual place), then the plugins. Without a core list, everything built in.
+fn offered_from(core: Option<&[&'static Command]>, plugins: &[&'static Command]) -> Vec<&'static Command> {
+    let mut offered: Vec<&'static Command> = match core {
+        None => COMMANDS.iter().collect(),
+        Some(core) => COMMANDS
+            .iter()
+            .filter(|command| LOCAL.contains(&command.name) || core.iter().any(|served| served.name == command.name))
+            .chain(core.iter().copied().filter(|served| !COMMANDS.iter().any(|command| command.name == served.name)))
+            .collect(),
+    };
+    offered.extend(plugins.iter().copied());
+    offered
 }
 
 pub fn name_width() -> usize {
@@ -178,6 +226,36 @@ mod tests {
         assert_eq!(names("/s"), ["session", "style", "settings-api", "strime"]);
         assert_eq!(names("/SE"), ["session", "settings-api"]);
         assert!(names("/zzz").is_empty());
+        assert!(names("/m").contains(&"mode"), "/mode is a core command and belongs in the list");
+    }
+
+    #[test]
+    fn the_core_decides_which_commands_the_menu_offers() {
+        let core = core_commands(&[("mode".into(), String::new()), ("frobnicate".into(), "Frob it".into())]);
+        let shown: Vec<&str> = offered_from(Some(&core), &[]).iter().map(|command| command.name).collect();
+        assert!(shown.contains(&"mode"), "the core's list brings its own commands");
+        assert!(shown.contains(&"frobnicate"), "a command this interface never heard of is offered too");
+        assert!(!shown.contains(&"models"), "a command the core did not list is not offered");
+        for local in LOCAL {
+            assert!(shown.contains(&local), "{local} is answered here, whatever the core lists");
+        }
+    }
+
+    #[test]
+    fn a_command_only_the_core_knows_takes_its_manifest_description() {
+        let core = core_commands(&[("frobnicate".into(), "Frob it".into())]);
+        let command = offered_from(Some(&core), &[]).into_iter().find(|command| command.name == "frobnicate").expect("offered");
+        assert_eq!((command.hint(false), command.hint(true), command.needs_argument), ("Frob it", "Frob it", false));
+
+        // A name this interface knows keeps its own words; the manifest's description is the core's English.
+        let core = core_commands(&[("mode".into(), "Choose manual mode or accept edits mode".into())]);
+        let command = offered_from(Some(&core), &[]).into_iter().find(|command| command.name == "mode").expect("offered");
+        assert!(command.hint(true).starts_with("Правки файлов"));
+    }
+
+    #[test]
+    fn without_a_core_list_the_built_in_one_is_offered() {
+        assert_eq!(offered_from(None, &[]).len(), COMMANDS.len());
     }
 
     #[test]

@@ -832,7 +832,7 @@ impl App {
                 self.location = text("location");
                 self.take_models(event.get("models"));
             }
-            "manifest" => self.take_plugins(event, now),
+            "manifest" => self.take_manifest(event, now),
             "plan" => {
                 self.pending_plan = Some(text("markdown"));
                 for change in protocol::translate(event) {
@@ -875,9 +875,17 @@ impl App {
         }
     }
 
-    fn take_plugins(&mut self, manifest: &Value, now: Instant) {
+    fn take_manifest(&mut self, manifest: &Value, now: Instant) {
         let list = |key: &str| manifest.get(key).and_then(Value::as_array).cloned().unwrap_or_default();
         let field = |entry: &Value, key: &str| entry.get(key).and_then(Value::as_str).unwrap_or("").to_string();
+        // The core names the commands it carries out (`via: "core"`); the menu offers exactly those,
+        // so a command the core gains appears here without a change in this file.
+        let core: Vec<(String, String)> = list("slash_commands")
+            .iter()
+            .filter(|entry| field(entry, "via") == "core")
+            .map(|entry| (field(entry, "name"), field(entry, "description")))
+            .collect();
+        slash::set_core(&core);
         let plugins: Vec<(String, String)> = list("plugin_commands").iter().map(|entry| (field(entry, "name"), field(entry, "description"))).collect();
         slash::set_plugins(&plugins);
         let problems: Vec<String> = list("plugin_problems").iter().filter_map(|problem| problem.as_str().map(str::to_string)).collect();
