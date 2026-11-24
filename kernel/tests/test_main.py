@@ -1218,21 +1218,17 @@ def test_build_agent_skips_discovery_when_dynamic_loading_is_off(
     assert any("Dynamic model loading is off" in warning for warning in warnings)
 
 
-def test_list_models_op_sends_each_models_multiplier_next_to_the_id_list(monkeypatch):
-    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: (["am/b", "am/a"], None))
-    monkeypatch.setattr(main, "model_coefficient_labels", lambda provider, credentials: {"am/a": "x0"})
+def test_list_models_op_returns_the_sorted_id_list(monkeypatch):
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: (["m/b", "m/a"], None))
 
     reply = main._run_list_models_op({"provider": "anymodel", "api_key": "test-key"})
 
-    # `models` keeps its old shape for frontends that do not know the multiplier.
-    assert reply == {"ok": True, "provider": "anymodel", "models": ["am/a", "am/b"], "coefficients": {"am/a": "x0"}, "error": None}
+    assert reply == {"ok": True, "provider": "anymodel", "models": ["m/a", "m/b"], "error": None}
 
 
-def test_list_models_op_does_not_ask_for_multipliers_when_the_catalog_failed(monkeypatch):
+def test_list_models_op_reports_a_failed_catalog(monkeypatch):
     monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: ([], "unreachable"))
-    monkeypatch.setattr(main, "model_coefficient_labels", lambda provider, credentials: pytest.fail("second request after a failed catalog"))
 
     reply = main._run_list_models_op({"provider": "anymodel", "api_key": "test-key"})
 
-    assert reply["coefficients"] == {}
     assert reply["error"] == "unreachable"

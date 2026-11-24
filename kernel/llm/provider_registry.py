@@ -6,9 +6,9 @@ know which providers exist, such as Kvist Cloud's provider picker, can read it w
 """
 from __future__ import annotations
 
-# Manual-tier entry (see MANUAL_OPENAI_PROVIDERS) that also needs naming here:
-# it is the blank-start default and the one manual-tier provider whose
-# streaming is verified, so two capability lookups have to reference it.
+# A plain manual-tier entry (see MANUAL_OPENAI_PROVIDERS) that still has to be named
+# here: saved configs use it, and a few capability lookups (streaming, pacing,
+# image generation) key on it.
 ANYMODEL_PROVIDER = "anymodel"
 KIMI_PROVIDER = "kimi"
 
@@ -203,6 +203,12 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
         "base_url_key": "baseten_base_url",
         "default_base_url": "https://inference.baseten.co/v1",
     },
+    ANYMODEL_PROVIDER: {
+        "label": "AnyModel",
+        "api_key_key": "anymodel_api_key",
+        "base_url_key": "anymodel_base_url",
+        "default_base_url": "https://anymodel.org/v1",
+    },
     "sambanova": {
         "label": "SambaNova",
         "api_key_key": "sambanova_api_key",
@@ -288,11 +294,5 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
         "api_key_key": "inception_api_key",
         "base_url_key": "inception_base_url",
         "default_base_url": "https://api.inceptionlabs.ai/v1",
-    },
-    ANYMODEL_PROVIDER: {
-        "label": "AnyModel",
-        "api_key_key": "anymodel_api_key",
-        "base_url_key": "anymodel_base_url",
-        "default_base_url": "https://anymodel.org/v1",
     },
 }

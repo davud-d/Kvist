@@ -29,7 +29,7 @@ await page.route('**/api/v1/**', async (route) => {
         requests.push({ path, body });
     const json = value => route.fulfill({ json: value });
     if (path === '/ssh-aliases') return json({aliases:['server-gz8q', 'build-box']});
-    if (path === '/configuration') return json({provider:'test-provider',setup_required:false,providers:[{id:'test-provider',label:'Test provider',defaults:{fast:'test-model',smart:'test-smart'},credential_fields:[],options:['test-model','test-smart']}],custom_providers:[],effort:'high',effort_levels:['low','high'],model_roles:['fast','smart'],environment_overrides:[],registration_url:'https://anymodel.org/app/register'});
+    if (path === '/configuration') return json({provider:'test-provider',setup_required:false,providers:[{id:'test-provider',label:'Test provider',defaults:{fast:'test-model',smart:'test-smart'},credential_fields:[],options:['test-model','test-smart']}],custom_providers:[],effort:'high',effort_levels:['low','high'],model_roles:['fast','smart'],environment_overrides:[]});
     if (path === '/command') return json({ok:true});
     if (path === '/bootstrap')
         return expired ? route.fulfill({ status: 401, json: { error: 'Expired' } }) : json({ protocol_version: 1, navigation: f.inbox(), event_stream: { cursor, epoch: 'test-epoch' } });

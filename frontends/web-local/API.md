@@ -92,10 +92,8 @@ the submitted response is never included in an event DTO.
   metadata. Credential values are never returned.
 - `GET /api/v1/configuration?server=` → the core's provider catalog and saved
   defaults: providers with credential presence (never values), `setup_required`,
-  `registration_url` (the core's AnyModel registration address), `effort`,
-  `effort_levels`, `effort_info` and `roles` (values with the core's descriptions),
-  the saved `role`, and `recommended_models` (per provider, in order: the first one
-  the live catalog offers is the first run's preselected model).
+  `effort`, `effort_levels`, `effort_info` and `roles` (values with the core's
+  descriptions) and the saved `role`.
 
 ## Mutation endpoints
 
@@ -114,8 +112,7 @@ the submitted response is never included in an event DTO.
 - `POST /api/v1/configuration` — check supplied credentials and save provider,
   models, `effort` and an optional `role` through the core's writers.
 - `POST /api/v1/configuration/models` — the provider's live model list for saved
-  or supplied credentials, saving nothing. A typed AnyModel key is checked first, so
-  a refused key and an unreachable AnyModel give different messages.
+  or supplied credentials, saving nothing.
 - `POST /api/v1/command` — `models`, `effort` or `role` for an idle session's
   running core; the answer arrives as a transient `command_result` event.
 

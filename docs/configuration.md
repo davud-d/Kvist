@@ -11,7 +11,7 @@ file in another folder. Per-project state is under `<workspace>/.kvist/`
 
 `/provider` selects and configures a provider. Available:
 
-- AnyModel (the default on a blank config), OpenAI, Anthropic, DeepSeek,
+- OpenAI, Anthropic, DeepSeek,
   OpenRouter, OmniRoute (a local OpenAI-compatible gateway on
   `http://localhost:20128/v1`) and FreeFlow LLM (beta);
 - ChatGPT Plus/Pro through browser sign-in, with no API key;
@@ -41,26 +41,12 @@ depend on the membership tier.
 
 ### AnyModel
 
-[AnyModel](https://anymodel.org) is the default provider on a clean machine:
-
-- **Prices up to 90% lower** than the original providers. The per-model billing
-  coefficient from the catalog drives the cost shown for every step.
-- **Many models behind one key**: OpenAI, Anthropic, DeepSeek and other families
-  share one endpoint; pick the fast and smart models with `/models`.
-- **Features only AnyModel has**: image generation. The `generate_image` action
-  draws a picture with AnyModel's image models and saves it into the workspace
-  (`high_quality` selects the better model). It is offered only when the session
-  talks to AnyModel.
-
-If `ANYMODEL_API_KEY` is set, Kvist starts without prompts. Otherwise the first
-launch shows a screen: Enter opens the registration page and asks for the key,
-Esc goes to the provider list. The key is checked against AnyModel's catalog
-immediately, so a wrong key fails at once. The same endpoint returns the
-per-model billing coefficient used for cost tracking:
-
-```bash
-curl -H "Authorization: Bearer $ANYMODEL_API_KEY" https://anymodel.org/v1/models
-```
+AnyModel is an ordinary OpenAI-compatible provider (id `anymodel`, key
+`ANYMODEL_API_KEY`) in the same list as the other third-party providers. An
+existing configuration keeps working. One feature depends on it: the
+`generate_image` action draws a picture with its image models and saves it into
+the workspace (`high_quality` selects the better model). It is offered only when
+the session talks to AnyModel.
 
 ### ChatGPT Plus/Pro
 

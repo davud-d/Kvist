@@ -117,14 +117,14 @@ def test_kvist_environment_per_provider():
     assert (env["OMNIROUTE_BASE_URL"], env["AGENT_SMART_MODEL"]) == (other.model_base_url, "m1")
 
 
-def test_the_core_providers_are_all_offered_with_the_partner_first():
+def test_the_core_providers_are_all_offered_none_of_them_first_by_favour():
     from kernel.llm.provider_registry import MANUAL_OPENAI_PROVIDERS
 
     ids = list(PROVIDERS)
-    assert ids[0] == "anymodel" and PROVIDERS["anymodel"].partner
-    assert [p for p in PROVIDERS.values() if p.partner] == [PROVIDERS["anymodel"]]
+    assert ids[0] == "deepseek"
+    assert 0 < ids.index("anymodel") < len(ids) - 2
     assert set(MANUAL_OPENAI_PROVIDERS) | {"deepseek", "openai", "anthropic", "chatgpt", "other"} == set(ids)
-    assert len(ids) - 1 == 41  # the core's 40 and the ChatGPT sign-in, then the customer's own endpoint
+    assert len(ids) == len(MANUAL_OPENAI_PROVIDERS) + 5  # plus four vendors and "other"
 
 
 def test_registry_provider_environment_uses_the_names_the_core_reads():

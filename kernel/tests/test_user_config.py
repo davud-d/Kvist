@@ -280,15 +280,16 @@ def test_prompt_provider_choice_accepts_manual_provider_name(monkeypatch):
     assert user_config.prompt_provider_choice() == "qwen"
 
 
-def test_prompt_provider_choice_offers_anymodel_first(monkeypatch, capsys):
-    monkeypatch.setattr("builtins.input", lambda prompt="": "1")
-    assert user_config.prompt_provider_choice() == "anymodel"
-    assert "1. AnyModel" in capsys.readouterr().out
+def test_prompt_provider_choice_lists_anymodel_among_the_manual_tier_not_first(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda prompt="": "openai")
+    assert user_config.prompt_provider_choice() == "openai"
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1] == "1. OpenAI"
+    assert sum("AnyModel" in line for line in lines) == 1
 
 
 def test_prompt_provider_choice_accepts_legacy_numbered_options(monkeypatch):
-    # AnyModel took option 1, so the old option 2 (OpenAI) is 2 and Anthropic is 3.
-    monkeypatch.setattr("builtins.input", lambda prompt="": "3")
+    monkeypatch.setattr("builtins.input", lambda prompt="": "2")
     assert user_config.prompt_provider_choice() == "anthropic"
 
 

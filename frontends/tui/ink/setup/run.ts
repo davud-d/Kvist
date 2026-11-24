@@ -22,7 +22,6 @@ import {
   type ImportsReply,
   type InstallScript,
   type ListModelsReply,
-  type RegistrationReply,
   type SetProviderReply,
 } from "./ops.js"
 import { PICTURE_Z, pictureSize, renderPicture } from "./picture.js"
@@ -371,8 +370,6 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
           return void configOp<ImportsReply>(command, "list-imports", { workspace: effect.workspace }).then((reply) => dispatch({ type: "imports", reply }))
         case "importSessions":
           return void configOp<ImportReply>(command, "import-sessions", { workspace: effect.workspace, agents: effect.agents }, IMPORT_TIMEOUT_MS).then((reply) => dispatch({ type: "imported", reply }))
-        case "register":
-          return void configOp<RegistrationReply>(command, "open-registration", { provider: effect.provider }).then((reply) => dispatch({ type: "registered", reply }))
       }
     }
 

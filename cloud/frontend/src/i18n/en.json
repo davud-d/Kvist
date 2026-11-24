@@ -236,8 +236,6 @@
     "keysLink": "Where to get a key",
     "otherName": "Other",
     "otherNote": "Any OpenAI-compatible API",
-    "partnerBadge": "Partner",
-    "partnerNote": "Kvist's partner: one key, many models",
     "signInNote": "ChatGPT plan, no key",
     "keyLabel": "API key",
     "paste": "Paste",

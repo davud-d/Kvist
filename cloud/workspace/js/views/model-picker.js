@@ -34,7 +34,6 @@ export function providerMark(id, label = "") {
   const tile = h("span", { class: "provider-mark", "aria-hidden": "true" });
   const path = PROVIDER_MARKS[id];
   if (path) tile.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="${path}"/></svg>`;
-  else if (id === "anymodel") tile.append(icon("twig", 14));
   // The person's own endpoint has no brand: it is an address on the web.
   else if (id === "other") tile.append(icon("globe", 14));
   else {

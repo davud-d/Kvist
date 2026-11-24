@@ -223,7 +223,7 @@ export function createMock(emit) {
       after(agent, 20, { type: "session", session: `chat-${Date.now()}`, has_checkpoint: false });
       result(true, "New session / Новая сессия", { session: `chat-${Date.now()}`, sessions: [], has_checkpoint: false, changed: true });
     } else if (name === "catalog")
-      result(true, "", { providers: [{ provider: "anymodel", label: "AnyModel", current: true, chosen: { fast: "ds/flash", smart: "ds/pro" }, models: ["ds/flash", "ds/pro", "cc/sonnet"] }, { provider: "openai", label: "OpenAI", current: false, chosen: { fast: "gpt-5-mini", smart: "gpt-5" }, models: ["gpt-5-mini", "gpt-5"] }] });
+      result(true, "", { providers: [{ provider: "deepseek", label: "DeepSeek", current: true, chosen: { fast: "ds/flash", smart: "ds/pro" }, models: ["ds/flash", "ds/pro", "cc/sonnet"] }, { provider: "openai", label: "OpenAI", current: false, chosen: { fast: "gpt-5-mini", smart: "gpt-5" }, models: ["gpt-5-mini", "gpt-5"] }] });
     else if (name === "models") result(true, "Models saved / Модели сохранены", { provider: message.args?.[0], models: { fast: message.args?.[1], smart: message.args?.[2] } });
     else if (name === "rename") result(true, "Renamed / Переименовано", { session: "mock", title: (message.args ?? []).join(" ") });
     else if (name === "changes") result(true, "src/parser.py  +3 −1 / src/parser.py  +3 −1", {});
@@ -237,7 +237,7 @@ export function createMock(emit) {
       if (name === "set_transparent" || name === "restart_app") return undefined;
       if (name === "agent_open") {
         sessions.set(args.id, args.session);
-        after(args.id, 150, { type: "hello", protocol_version: 1, provider: "anymodel", models: { fast: "ds/flash", smart: "ds/pro" }, role: "auto", approval_mode: "ask", session: args.session ?? "chat-demo", has_checkpoint: false, effort: "medium", commands: ["new", "role", "effort", "style", "models", "session", "catalog", "rename", "changes", "verbose", "resume"] });
+        after(args.id, 150, { type: "hello", protocol_version: 1, provider: "deepseek", models: { fast: "ds/flash", smart: "ds/pro" }, role: "auto", approval_mode: "ask", session: args.session ?? "chat-demo", has_checkpoint: false, effort: "medium", commands: ["new", "role", "effort", "style", "models", "session", "catalog", "rename", "changes", "verbose", "resume"] });
         after(args.id, 170, MANIFEST);
         return undefined;
       }

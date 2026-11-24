@@ -12,7 +12,7 @@
     <p>Full videos at 60 fps: <a href="https://youtu.be/eF0gsdJZCfA">Classic interface</a>, <a href="https://youtu.be/6idLmVHNBgk">Claude-style interface</a>.</p>
     <p>Kvist is a coding agent that works on one project folder at a time. You describe a task,
     it reads the code, edits files, runs commands and tests in a sandbox, and tells you what changed.
-    It runs on your machine and uses the model provider you choose (AnyModel, OpenAI, Anthropic,
+    It runs on your machine and uses the model provider you choose (OpenAI, Anthropic,
     DeepSeek, OpenRouter, ChatGPT sign-in, or any OpenAI-compatible endpoint).</p>
     <ul>
       <li>Chat tool window with streamed answers, diffs for every edit, and approvals before risky commands.</li>
@@ -104,4 +104,4 @@
             />
         </group>
     </actions>
-</idea-plugin>
+</idea-plugin>

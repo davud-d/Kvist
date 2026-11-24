@@ -15,7 +15,6 @@ from typing import Any
 
 from kernel.config.brand_icons import model_icon, provider_icon
 from kernel.llm.llm_clients import (
-    ANYMODEL_PROVIDER,
     ANTHROPIC_PROVIDER,
     CUSTOM_PROVIDER_PREFIX,
     DEEPSEEK_PROVIDER,
@@ -42,12 +41,10 @@ from kernel.config.user_config import (
     secret_label_for_key,
 )
 
-# The providers the GUI offers as first-class choices. AnyModel leads: it is the
-# partner provider and the blank-start default. Custom providers are appended
+# The providers the GUI offers as first-class choices. Custom providers are appended
 # separately because their credentials and models live in their own config block
 # rather than in the shared secret/model keys.
 _BUILTIN_PROVIDERS = (
-    ANYMODEL_PROVIDER,
     OPENAI_PROVIDER,
     ANTHROPIC_PROVIDER,
     DEEPSEEK_PROVIDER,
@@ -60,7 +57,7 @@ _BUILTIN_PROVIDERS = (
 ) + tuple(
     provider
     for provider in MANUAL_OPENAI_PROVIDERS
-    if provider not in (ANYMODEL_PROVIDER, OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER)
+    if provider not in (OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER)
 )
 
 

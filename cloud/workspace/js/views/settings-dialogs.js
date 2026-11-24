@@ -35,14 +35,13 @@ export function openRename(agent) {
   input.focus();
 }
 
-// How many providers get a button of their own after the partner; the rest are one pick in a list.
+// How many providers get a button of their own; the rest are one pick in a list.
 const SHOWN_PROVIDERS = 3;
 
-// The partner on a row of its own, the usual providers and "Other" as buttons, the long tail in a select.
+// The usual providers and "Other" as buttons, the long tail in a select.
 function providerPicker(list, current, choose) {
-  const seg = (item) => h("button", { class: `seg${item.partner ? " partner" : ""}${item.id === current ? " on" : ""}`, type: "button", onclick: () => choose(item.id) }, item.id === "other" ? t("other") : item.label);
-  const partners = list.filter((item) => item.partner);
-  const usual = list.filter((item) => !item.partner && item.id !== "other");
+  const seg = (item) => h("button", { class: `seg${item.id === current ? " on" : ""}`, type: "button", onclick: () => choose(item.id) }, item.id === "other" ? t("other") : item.label);
+  const usual = list.filter((item) => item.id !== "other");
   const other = list.find((item) => item.id === "other");
   const shown = usual.slice(0, SHOWN_PROVIDERS);
   const rest = usual.slice(SHOWN_PROVIDERS);
@@ -53,7 +52,6 @@ function providerPicker(list, current, choose) {
       rest.map((item) => h("option", { value: item.id, selected: item.id === current }, item.label)))
     : null;
   return [
-    partners.length ? h("div", { class: "segment provider-row" }, partners.map(seg)) : null,
     h("div", { class: "segment provider-row" }, [...shown, ...(other ? [other] : [])].map(seg)),
     select,
   ];

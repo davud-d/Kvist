@@ -13,11 +13,10 @@ import type { ConfigInfo, ProviderInfo, SessionInfo, ToHost, ToWebview } from '.
 // The newest events of a session: enough for well over a hundred turns of a typical run.
 const HISTORY_LIMIT = 1000;
 
-// The provider ids offered on first run, in priority order: AnyModel first (Kvist's own
-// shipped default, DEFAULT_BLANK_START_PROVIDER in llm_clients.py), then config_info.py's
-// curated "built-in six". The other ~35 manual-tier vendors and custom endpoints stay
+// The provider ids offered on first run, in order: config_info.py's curated "built-in six".
+// The other ~35 manual-tier vendors and custom endpoints stay
 // reachable later through Settings once the panel is actually running.
-const FIRST_RUN_PROVIDERS = ['anymodel', 'openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow', 'chatgpt'];
+const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow', 'chatgpt'];
 
 export class KvistChatView implements vscode.WebviewViewProvider {
     static readonly viewType = 'kvist.chat';
@@ -101,8 +100,6 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.setProvider(message.provider, message.apiKey, message.model);
             case 'listModels':
                 return this.listModels(message.provider, message.apiKey);
-            case 'openRegistration':
-                return this.openRegistration(message.provider);
             case 'submit':
                 return this.send(() => this.core?.send(message.text));
             case 'command':
@@ -206,8 +203,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         const info = await readJson<ConfigInfo>(command, workspace, ['--config-info']);
         const current = info && findProvider(info, info.saved_provider);
         if (info && !current?.has_credentials) {
-            // FIRST_RUN_PROVIDERS' own order is the priority order (AnyModel first, Kvist's
-            // own shipped default); the source list isn't sorted that way, so this is too.
+            // FIRST_RUN_PROVIDERS' own order is the display order; the source list isn't
+            // sorted that way, so this is too.
             const providers = FIRST_RUN_PROVIDERS
                 .map((id) => info.providers.find((item) => item.id === id))
                 .filter((item): item is ProviderInfo => item !== undefined);
@@ -228,19 +225,12 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         }
     }
 
-    // The first-run screen's "which model?" field for a router/gateway provider (AnyModel,
-    // OpenRouter, OmniRoute): offers the provider's live /v1/models catalog for the key the
+    // The first-run screen's "which model?" field for a router/gateway provider (OpenRouter,
+    // OmniRoute): offers the provider's live /v1/models catalog for the key the
     // person just typed, same as the terminal's own picker, before that key is ever saved.
     private async listModels(provider: string, apiKey: string): Promise<void> {
-        const result = await this.runConfigOp<{ ok: boolean; error?: string; models?: string[]; coefficients?: Record<string, string> }>('list-models', { provider, api_key: apiKey });
-        this.post({ type: 'modelList', provider, ok: result.ok, models: result.models ?? [], coefficients: result.coefficients ?? {}, error: result.error });
-    }
-
-    // AnyModel is Kvist's own shipped default; the first-run screen offers to pop its signup
-    // page the same way the terminal wizard does (`anymodel_onboarding.py`).
-    private async openRegistration(provider: string): Promise<void> {
-        const result = await this.runConfigOp<{ ok: boolean; opened?: boolean; url?: string | null }>('open-registration', { provider });
-        this.post({ type: 'registrationOpened', provider, opened: result.opened === true, url: result.url ?? null });
+        const result = await this.runConfigOp<{ ok: boolean; error?: string; models?: string[] }>('list-models', { provider, api_key: apiKey });
+        this.post({ type: 'modelList', provider, ok: result.ok, models: result.models ?? [], error: result.error });
     }
 
     private async runConfigOp<T extends { ok: boolean; error?: string }>(op: string, payload: unknown): Promise<T> {

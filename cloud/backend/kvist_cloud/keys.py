@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from kernel.llm.provider_registry import ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS
+from kernel.llm.provider_registry import MANUAL_OPENAI_PROVIDERS
 from pydantic import Field
 from sqlalchemy.orm import Session
 
@@ -46,7 +46,6 @@ class ModelProvider:
     base_url_env: str = ""
     # Vendors that change model ids too often for Kvist to guess: the customer types one.
     needs_model: bool = False
-    partner: bool = False
     # No key to paste: the customer signs in with their ChatGPT plan (chatgpt.py).
     sign_in: bool = False
 
@@ -63,14 +62,12 @@ def _registry_provider(provider_id: str, config: dict[str, str]) -> ModelProvide
         needs_base_url=not config["default_base_url"],
         base_url_env=config["base_url_key"].upper(),
         needs_model=True,
-        partner=provider_id == ANYMODEL_PROVIDER,
     )
 
 
-# The partner first, then the three vendors with their own balance check, then the rest of the core's
-# list, then the customer's own endpoint.
+# The vendors with their own balance check first, then the rest of the core's list, then the
+# customer's own endpoint.
 PROVIDERS: dict[str, ModelProvider] = {
-    ANYMODEL_PROVIDER: _registry_provider(ANYMODEL_PROVIDER, MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]),
     "deepseek": ModelProvider(
         "deepseek", "DeepSeek", "https://platform.deepseek.com/api_keys", "deepseek", "DEEPSEEK_API_KEY"
     ),
@@ -82,7 +79,6 @@ PROVIDERS: dict[str, ModelProvider] = {
     **{
         provider_id: _registry_provider(provider_id, config)
         for provider_id, config in MANUAL_OPENAI_PROVIDERS.items()
-        if provider_id != ANYMODEL_PROVIDER
     },
     # Any OpenAI-compatible endpoint, run through Kvist's omniroute provider.
     "other": ModelProvider(
@@ -306,7 +302,7 @@ def list_providers(request: Request) -> list[dict[str, object]]:
     sign_in_allowed = request.app.state.settings.chatgpt_signin
     return [
         {"id": p.id, "label": p.label, "keys_page": p.keys_page, "needs_base_url": p.needs_base_url,
-         "needs_model": p.needs_model, "partner": p.partner, "sign_in": p.sign_in}
+         "needs_model": p.needs_model, "sign_in": p.sign_in}
         for p in PROVIDERS.values()
         if sign_in_allowed or not p.sign_in
     ]

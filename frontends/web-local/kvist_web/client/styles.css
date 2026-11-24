@@ -1232,12 +1232,6 @@ details[open] > summary > .chevron {
   margin-bottom: 8px;
 }
 
-.setup-register {
-  border: 1px solid var(--line-strong);
-  padding: 6px 12px;
-  color: var(--text);
-}
-
 /* The one large control of the screen: the key is what the person came with. */
 .setup-key {
   display: block;

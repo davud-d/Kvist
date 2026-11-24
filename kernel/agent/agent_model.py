@@ -1000,7 +1000,7 @@ _STREAM_LOSES_ARGUMENTS: set[tuple[str, str]] = set()
 class StreamedArgumentsLost(Exception):
     """A streamed call ended with no argument text at all.
 
-    AnyModel's GPT routes stream parallel calls as bare headers (name, empty
+    Some gateways' GPT routes stream parallel calls as bare headers (name, empty
     arguments) and drop the rest; the same request without streaming is whole.
     A real call always sends at least ``{}``.
     """

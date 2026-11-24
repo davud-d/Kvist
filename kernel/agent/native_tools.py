@@ -471,10 +471,10 @@ _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _PROTOCOL_SECTIONS = ("RESPONSE FORMAT", "ARGS SCHEMAS", "EXAMPLES", "SELF-CHECK")
 ELIDED_OUTPUT = "[output removed to fit the context window; run the action again if you need it]"
 # Closes the first user message of a native run. Said only in the system
-# prompt, the opening line lost to a gateway's own hidden prompt (Claude via
-# AnyModel stayed silent on every first turn); beside the task it held. The
+# prompt, the opening line lost to a gateway's own hidden prompt (Claude via a
+# router stayed silent on every first turn); beside the task it held. The
 # grammatical gender rule rides along for the same reason: in the constitution
-# alone, Claude via AnyModel answered "перенёс" after the interface said "она".
+# alone, Claude through a gateway answered "перенёс" after the interface said "она".
 OPENING_NOTE = (
     "\n\nOPENING: the person has just handed you this task and sees nothing until you write. "
     "Your first response opens with your line to them, in the language of the person's request and in the voice "
@@ -553,7 +553,7 @@ def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:
 
 
 # A call with an empty argument object was lost on the way at least one
-# gateway (Claude through AnyModel): git_status arrived as a response with
+# gateway (Claude through a router): git_status arrived as a response with
 # neither text nor a call, nine times in one run. The two tools with no
 # argument of their own therefore ask for the fact the call should settle, which is also
 # the constitution's test of whether a call earns its step; the runtime drops
@@ -647,7 +647,7 @@ def _last_call_cut(turn: NativeTurn, last: ToolCallRequest) -> bool:
 def decode_arguments(raw: str) -> Any:
     """The JSON value of a call's arguments, tolerating one gateway quirk.
 
-    AnyModel's Claude routes return the arguments object written twice
+    Some gateways' Claude routes return the arguments object written twice
     (``{"ok":true}{"ok":true}``). Only an exact repeat is accepted; any other
     text after the first value is still an error.
     """

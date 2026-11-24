@@ -5,7 +5,6 @@
 `/provider` selects and configures one. Settings live in `~/.kvist/config.json`
 (`KVIST_CONFIG_DIR` moves the folder).
 
-- **AnyModel**: the default on a blank config, with its own registration flow.
 - Core providers: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute (a local
   OpenAI-compatible gateway, default `http://localhost:20128/v1`), FreeFlow (beta).
 - **ChatGPT Plus/Pro** by browser sign-in, no API key; tokens are stored in the config

@@ -236,8 +236,6 @@
     "keysLink": "Где взять ключ",
     "otherName": "Другой",
     "otherNote": "Любой OpenAI-совместимый API",
-    "partnerBadge": "Партнёр",
-    "partnerNote": "Партнёр Kvist: один ключ, много моделей",
     "signInNote": "Подписка ChatGPT, без ключа",
     "keyLabel": "API-ключ",
     "paste": "Вставить",

@@ -20,7 +20,7 @@ docs, tests, CI and style. Kvist is in beta and has no newer tag yet.
 - **Providers.** Sign in with a ChatGPT Plus/Pro plan, waiting out a spent plan
   window, native tool calling through the Anthropic adapter, Kimi Code, Inception,
   extra HTTP headers for custom providers (`/headers`), a bundled per-model price
-  table and AnyModel's price multiplier next to each model.
+  table.
 - **Sandbox and approvals.** Container mode for benchmark tasks, auto mode that
   remembers allows and pre-approves skills, and a net broker for skill network access.
 - **Skills.** A skills platform in every frontend, bundled browser, design,

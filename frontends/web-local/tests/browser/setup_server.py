@@ -9,15 +9,9 @@ sys.path[:0] = [str(repo), str(repo / 'frontends/web-local')]
 
 def serve(root):
     from kernel.llm import llm_clients
-    from kernel.providers import anymodel_pricing
     from kvist_web.controller import WebController
     from kvist_web.storage import WebStateStore
     from kvist_web.http_api import ControllerHTTPServer
-
-    def verify(key, **kwargs):
-        if key != 'qa-valid-key':
-            raise anymodel_pricing.AnyModelAuthError('invalid test key')
-        return {}
 
     def catalog(provider, credentials, **kwargs):
         if any(v == 'qa-empty-catalog-key' for v in credentials.values()):
@@ -26,7 +20,6 @@ def serve(root):
             return [], 'invalid key'
         return ['example/fast', 'example/smart'], None
 
-    anymodel_pricing.fetch_model_coefficients = verify
     llm_clients.fetch_available_models = catalog
     workspace = root / 'workspace'
     workspace.mkdir()

@@ -6,14 +6,13 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || process.argv[
 const output = process.env.KVIST_QA_OUTPUT || '/tmp/kvist-web-qa';
 await mkdir(`${output}/screenshots`, {recursive:true});
 const fixtureEnv = {...process.env};
-for (const key of ['AGENT_LLM_PROVIDER','AGENT_FAST_MODEL','AGENT_SMART_MODEL','AGENT_REASONING_EFFORT','ANYMODEL_API_KEY']) delete fixtureEnv[key];
+for (const key of ['AGENT_LLM_PROVIDER','AGENT_FAST_MODEL','AGENT_SMART_MODEL','AGENT_REASONING_EFFORT','OPENAI_API_KEY']) delete fixtureEnv[key];
 const fixture = spawn(process.env.KVIST_TEST_PYTHON || '.venv/bin/python', [fileURLToPath(new URL('./setup_server.py', import.meta.url))], {stdio:['ignore','pipe','inherit'],env:fixtureEnv});
 const base = await new Promise((resolve,reject) => { fixture.once('error',reject); fixture.once('exit', code=>reject(new Error(`Fixture exited: ${code}`))); fixture.stdout.once('data', data=>resolve(data.toString().trim())); });
 const browser = await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE || process.argv[3],headless:true});
 const context = await browser.newContext({viewport:{width:1440,height:900}});
 const page = await context.newPage(), errors=[];
 page.on('pageerror', e=>errors.push(e.message));
-await context.route('https://anymodel.org/**', route=>route.fulfill({contentType:'text/html',body:'<title>Registration test</title>Registration page'}));
 // The model chip opens a menu; the provider dialog is its "Providers and keys…" item.
 const openProviders=async()=>{await page.locator('#model-selector').click();await page.getByRole('menuitem',{name:/^Providers and keys/}).click();await page.locator('#provider-form').waitFor();};
 const shot=async name=>{await page.waitForTimeout(240);await page.screenshot({path:`${output}/screenshots/${name}.png`});};
@@ -22,30 +21,26 @@ try {
  assert.equal(await page.title(),'Kvist');
  // The first run is a screen in the main column (setup.js), not a dialog.
  await page.getByRole('heading',{name:'Connect a model'}).waitFor();
- await shot('first-run-anymodel');
+ await shot('first-run');
  assert(await page.locator('#modal').isHidden());
  assert(await page.locator('#prompt').isHidden(), 'the input waits behind the first run');
  assert.equal(await page.evaluate(()=>document.activeElement.id),'setup-key');
- const popupPromise=page.waitForEvent('popup');
- await page.getByRole('button',{name:'Create an AnyModel account'}).click();
- const popup=await popupPromise; await popup.waitForLoadState();
- assert.equal(popup.url(),'https://anymodel.org/app/register'); await popup.close();
- await page.getByText('Registration opened in a new tab.',{exact:false}).waitFor();
- console.log('PASS Blank start and registration in browser tab');
- const noCsrf=await context.request.post(`${base}/api/v1/configuration`,{data:{provider:'anymodel'}});
+ await page.locator('#setup-provider').selectOption('openai');
+ console.log('PASS Blank start offers a provider list');
+ const noCsrf=await context.request.post(`${base}/api/v1/configuration`,{data:{provider:'openai'}});
  assert.equal(noCsrf.status(),403);
  console.log('PASS Configuration mutation rejects missing CSRF');
  const setupKey=page.locator('#setup-key'), start=page.getByRole('button',{name:'Start'});
  await setupKey.fill('qa-invalid-key'); await setupKey.press('Enter');
- await page.getByText('AnyModel did not accept this key. Copy it again from your AnyModel account.').waitFor();
- assert.equal(await setupKey.getAttribute('aria-invalid'),'true'); assert(await start.isDisabled());
+ await page.getByText('Could not load models. Check the API key, provider address and connection.').waitFor();
+ assert.equal(await setupKey.getAttribute('aria-invalid'),'true');
  const info=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert(info.setup_required);
  await shot('first-run-invalid-key');
  console.log('PASS Invalid key is rejected before saving');
  await setupKey.fill('qa-valid-key'); await setupKey.press('Enter');
  await page.getByText('The key works. 2 models available.').waitFor();
- assert(await start.isDisabled(), 'no default model for AnyModel yet: the person chooses one');
+ assert(await start.isDisabled(), 'no default model for this catalog: the person chooses one: the person chooses one');
  await page.locator('#setup-model').selectOption('example/fast');
  assert(await start.isEnabled());
  await shot('provider-models');
@@ -63,9 +58,8 @@ try {
  await page.reload(); await page.locator('#app').waitFor();
  assert(await page.locator('#modal').isHidden());
  await openProviders();
- assert.equal(await page.locator('[data-credential=anymodel_api_key]').inputValue(),'');
+ assert.equal(await page.locator('[data-credential=openai_api_key]').inputValue(),'');
  await page.locator('[name=provider]').selectOption('deepseek');
- assert(await page.locator('#registration').isHidden());
  // Before a key: the core's built-in DeepSeek options, in a list rather than a text field.
  assert(await page.locator('#model-pick').isVisible());
  assert((await page.locator('#model-pick option').allTextContents()).includes('DeepSeek V4 Pro'));

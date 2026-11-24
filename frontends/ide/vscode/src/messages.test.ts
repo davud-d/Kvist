@@ -10,7 +10,7 @@ const provider = (id: string, custom: boolean, hasCredentials = true): ProviderI
 const info: ConfigInfo = {
     saved_provider: 'custom:inception',
     saved_role: 'auto',
-    providers: [provider('anymodel', false), provider('deepseek', false)],
+    providers: [provider('openai', false), provider('deepseek', false)],
     custom_providers: [provider('custom:inception', true)]
 };
 
@@ -22,6 +22,6 @@ test('a provider the person defined is found beside the built-in ones', () => {
 
 test('an older core that lists no custom providers still resolves the built-in ones', () => {
     const { custom_providers: _unused, ...older } = info;
-    assert.equal(findProvider(older, 'anymodel')?.id, 'anymodel');
+    assert.equal(findProvider(older, 'openai')?.id, 'openai');
     assert.equal(findProvider(older, 'custom:inception'), undefined);
 });

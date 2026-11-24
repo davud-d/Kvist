@@ -48,7 +48,7 @@ def test_build_config_info_reports_saved_defaults_and_credentials(isolated_confi
     assert set(by_id) == {
         "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow", "chatgpt",
     } | set(MANUAL_OPENAI_PROVIDERS)
-    assert [p["id"] for p in info["providers"]][:3] == ["anymodel", "openai", "anthropic"]
+    assert [p["id"] for p in info["providers"]][:3] == ["openai", "anthropic", "deepseek"]
 
     qwen = by_id["qwen"]
     assert qwen["requires_manual_models"] is True

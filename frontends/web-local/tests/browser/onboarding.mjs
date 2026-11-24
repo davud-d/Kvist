@@ -28,7 +28,6 @@ async function fixture(setup = 'blank', env = {}) {
 }
 async function open(base, viewport = { width: 1440, height: 900 }) {
   const context = await browser.newContext({ viewport });
-  await context.route('https://anymodel.org/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Registration test</title>Registration page' }));
   const page = await context.newPage(), errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(base);
@@ -52,49 +51,41 @@ async function paste(page, locator, text) {
 try {
   // The first run. One action is one click, one paste, one typed text or one key press.
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-    const { base } = await fixture('blank', { KVIST_FIXTURE_DEFAULT_MODELS: 'missing/model,gpt-5.6-luna' });
+    const { base } = await fixture('blank');
     const { context, page, errors } = await open(base, viewport);
     await page.getByRole('heading', { name: 'Connect a model' }).waitFor();
     assert.match(await page.locator('.setup-path').textContent(), /my-project$/, 'the working folder is on screen before Start');
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'setup-key');
     await shot(page, `first-run-${viewport.width}`);
-    await paste(page, page.locator('#setup-key'), 'qa-valid-key');                       // 1
+    await page.locator('#setup-provider').selectOption('deepseek');                      // 1
+    await paste(page, page.locator('#setup-key'), 'qa-valid-key');                       // 2
     await page.getByText('The key works. 3 models available.').waitFor();
-    assert.equal(await page.locator('#setup-model').inputValue(), 'gpt-5.6-luna', 'the first default the catalog offers');
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'setup-start');
+    await page.locator('#setup-model').selectOption('gpt-5.6-luna');                  // 3
+    const model = 'gpt-5.6-luna';
     await shot(page, `first-run-ready-${viewport.width}`);
-    await page.keyboard.press('Enter');                                                  // 2
+    await page.locator('#setup-start').click();                                          // 4
     await page.locator('.setup').waitFor({ state: 'detached' });
-    await page.keyboard.insertText('Explain this project');                              // 3
-    await page.keyboard.press('Control+Enter');                                          // 4
+    await page.keyboard.insertText('Explain this project');                              // 5
+    await page.keyboard.press('Control+Enter');                                          // 6
     await page.getByText('a sample project with one README file').first().waitFor({ timeout: 60000 });
-    assert.equal(await page.locator('#model-label').textContent(), 'gpt-5.6-luna');
+    assert.equal(await page.locator('#model-label').textContent(), model);
     await shot(page, `first-task-${viewport.width}`);
     assert.deepEqual(errors, []);
     await context.close();
-    console.log(`PASS ${viewport.width}px: key to first task in 4 actions with a default model: paste, Start, type, send`);
+    console.log(`PASS ${viewport.width}px: key to first task in 6 actions: provider, paste, model, Start, type, send`);
   }
   {
     const { base } = await fixture('blank');
     const { context, page, errors } = await open(base);
-    await page.addInitScript(() => { window.open = () => null; });
-    await page.reload(); await page.getByRole('heading', { name: 'Connect a model' }).waitFor();
-    await page.getByRole('button', { name: 'Create an AnyModel account' }).click();
-    await page.getByText('Your browser blocked the new tab.', { exact: false }).waitFor();
-    assert.equal(await page.getByRole('link', { name: 'anymodel.org/app/register' }).getAttribute('href'), 'https://anymodel.org/app/register');
-    await shot(page, 'first-run-tab-blocked');
-    console.log('PASS a blocked registration tab gives the address as a link');
-
+    await page.getByRole('heading', { name: 'Connect a model' }).waitFor();
+    await page.locator('#setup-provider').selectOption('deepseek');
     const key = page.locator('#setup-key'), start = page.getByRole('button', { name: 'Start' });
-    await paste(page, key, 'qa-offline');
-    await page.getByText("Couldn't reach AnyModel. Check your connection, then try again.").waitFor();
-    await key.fill(''); await paste(page, key, 'qa-wrong');
-    await page.getByText('AnyModel did not accept this key. Copy it again from your AnyModel account.').waitFor();
-    assert(await start.isDisabled());
-    console.log('PASS an unreachable AnyModel and a refused key are told apart; nothing can start');
+    await paste(page, key, 'qa-wrong');
+    await page.getByText('Could not load models. Check the API key, provider address and connection.').waitFor();
+    assert.equal((await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json()).setup_required, true);
+    console.log('PASS a refused key is reported; nothing is saved');
 
     await key.fill(''); await paste(page, key, 'qa-empty-catalog-key');
-    await page.getByText('The key works. AnyModel returned no model list, so enter the model ID.').waitFor();
+    await page.getByText('The key works. DeepSeek returned no model list, so enter the model ID.').waitFor();
     assert(await page.locator('#setup-model-field').isHidden());
     assert.equal(await page.evaluate(() => document.activeElement.id), 'setup-id');
     await shot(page, 'first-run-empty-catalog');
@@ -102,9 +93,7 @@ try {
     assert(await start.isEnabled());
     console.log('PASS an empty model list gives a model ID field');
 
-    await page.getByRole('button', { name: 'I have another provider' }).click();
-    await page.locator('#setup-provider').selectOption('deepseek');
-    assert((await page.locator('#setup-model option').allTextContents()).includes('DeepSeek V4 Pro'), 'built-in options before a key');
+    await key.fill('');
     await paste(page, page.locator('#setup-key'), 'qa-valid-key');
     await page.getByText('The key works. 3 models available.').waitFor();
     await page.locator('#setup-model').selectOption('ds-web/deepseek-v4-pro');
@@ -123,7 +112,7 @@ try {
     // provider dialog and a model change. The key may be in two places only: the bodies of the requests that
     // carry it to this server's configuration endpoints, and the core's own config file.
     const secret = `qa-valid-leak-${Math.random().toString(36).slice(2)}`, wrong = `qa-wrong-leak-${Math.random().toString(36).slice(2)}`;
-    const { base, home, out } = await fixture('blank', { KVIST_FIXTURE_DEFAULT_MODELS: 'gpt-5.6-luna' });
+    const { base, home, out } = await fixture('blank');
     const { context, page, errors } = await open(base);
     const seen = [], consoleText = [], carriers = new Set();
     page.on('console', message => consoleText.push(message.text()));
@@ -133,14 +122,16 @@ try {
         if ((request.postData() || '').includes(value)) carriers.add(new URL(request.url()).pathname);
     });
     const key = page.locator('#setup-key');
+    await page.locator('#setup-provider').selectOption('deepseek');
     await paste(page, key, wrong);
-    await page.getByText('AnyModel did not accept this key.', { exact: false }).waitFor();
+    await page.getByText('Could not load models.', { exact: false }).waitFor();
     assert.equal(await key.getAttribute('type'), 'password');
     assert.equal(await key.getAttribute('name'), null, 'no name: a native form submit could not carry the key');
     assert.equal(await key.getAttribute('autocomplete'), 'off');
     await key.fill(''); await paste(page, key, secret);
     await page.getByText('The key works.', { exact: false }).waitFor();
-    await page.keyboard.press('Enter');
+    await page.locator('#setup-model').selectOption('gpt-5.6-luna');
+    await page.locator('#setup-start').click();
     await page.locator('.setup').waitFor({ state: 'detached' });
     const kept = () => page.evaluate(async () => JSON.stringify({
       url: location.href, local: { ...localStorage }, session: { ...sessionStorage }, cookie: document.cookie,
@@ -153,7 +144,7 @@ try {
     await page.locator('#model-selector').click();
     await page.getByRole('menuitem', { name: /^Providers and keys/ }).click();
     await page.locator('#provider-form').waitFor();
-    assert.equal(await page.locator('[data-credential=anymodel_api_key]').inputValue(), '');
+    assert.equal(await page.locator('[data-credential=deepseek_api_key]').inputValue(), '');
     await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' });
     await page.locator('#model-selector').click();
     await page.getByRole('menuitemradio', { name: /^kr\/claude-sonnet-4\.5/ }).click();
@@ -217,7 +208,7 @@ try {
     const model = page.locator('#model-selector');
     assert.equal(await model.getAttribute('aria-label'), 'Model: kr/claude-sonnet-4.5');
     await model.click();
-    await page.locator('.chip-menu .menu-head').getByText('AnyModel models. Applies to this session and new ones.').waitFor();
+    await page.locator('.chip-menu .menu-head').getByText('DeepSeek models. Applies to this session and new ones.').waitFor();
     await page.getByRole('menuitemradio', { name: /^gpt-5\.6-luna/ }).waitFor();
     assert.equal(await page.getByRole('menuitemradio', { name: /^kr\/claude-sonnet-4\.5/ }).getAttribute('aria-checked'), 'true');
     await shot(page, 'model-menu');
@@ -257,6 +248,7 @@ try {
     const sends = [];
     page.on('request', request => { if (request.url().includes('/api/v1/send')) sends.push(request.postData()); });
     const prompt = page.locator('#prompt'), menu = page.locator('#slash-menu');
+    await page.locator('#model-selector').waitFor(); // the chips appear once the configuration has arrived
     await prompt.click(); await page.keyboard.type('/');
     await menu.waitFor();
     assert.equal(await prompt.getAttribute('aria-expanded'), 'true');

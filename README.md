@@ -149,11 +149,10 @@ fail and fix it".
 
 ## Providers
 
-On a clean machine Kvist offers [AnyModel](https://anymodel.org) as the default
-provider: press Enter to register in the browser and paste the key. Press Esc to
-pick another provider and enter its key at the masked `API key:` prompt. The
-choice is saved in `~/.kvist/config.json`. If `ANYMODEL_API_KEY` is already set,
-Kvist starts without asking.
+On a clean machine Kvist asks which provider to use and takes its key at the
+masked `API key:` prompt. The choice is saved in `~/.kvist/config.json`. If the
+provider's key variable (for example `OPENAI_API_KEY`) is already set together
+with `AGENT_LLM_PROVIDER`, Kvist starts without asking.
 
 Switch later with `/provider`, change a key with `/change-api`, pick the fast and
 smart models with `/models`. The full list of providers and the settings for each
@@ -296,8 +295,6 @@ contact are below; all paths are under `kernel/`.
 | OpenAI | the `openai` SDK default, no address in `kernel/` (`llm/llm_clients.py`: `resolve_openai_accessible_models`) | `api.openai.com/v1` | Only if OpenAI is your provider |
 | Other providers | `llm/provider_registry.py`: `MANUAL_OPENAI_PROVIDERS`; `llm/llm_clients.py`: `REGIONAL_BASE_URL_CANDIDATES` | full list below | Only the provider you selected |
 | Your own endpoint | `llm/custom_provider.py`: `normalize_base_url` | the address you typed | Only if you added one |
-| AnyModel | `llm/provider_registry.py`: `MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]`; `providers/anymodel_pricing.py`: `ANYMODEL_MODELS_URL` | `anymodel.org/v1`, `anymodel.org/v1/models` (model list and prices) | When AnyModel is your provider |
-| AnyModel sign-up page | `llm/anymodel_onboarding.py`: `ANYMODEL_REGISTER_URL` | `anymodel.org/app/register` | Opened in your browser at first run, Kvist itself sends nothing |
 | ChatGPT plan sign-in | `providers/chatgpt_endpoints.py`: `ISSUER`, `RESOURCE` | `auth.openai.com`, `api.openai.com/v1` | Only if you sign in with a ChatGPT plan |
 | Update check | `config/self_update.py`: `RELEASE_API` | `api.github.com` (a plain GET of the release list, nothing about you in the body) | Shortly after start, then every 6 hours until a new version is found; `auto_update: false` or `KVIST_AUTO_UPDATE=0` turns it off |
 | Update download | `config/self_update.py`: `DOWNLOAD_BASE` | `github.com/davud-d/Kvist/releases` | Only when you type `/update` |
@@ -355,7 +352,6 @@ the docstring of `config/theme.py`) and are never requested.
 - `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["iflytek-spark"]`: https://spark-api-open.xf-yun.com/v1
 - `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["scaleway"]`: https://api.scaleway.ai/v1
 - `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["inception"]`: https://api.inceptionlabs.ai/v1
-- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]`: https://anymodel.org/v1
 
 Regional alternatives, tried for the same provider:
 

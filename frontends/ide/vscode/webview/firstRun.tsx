@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useState } from "preact/hooks"
 
 import type { ProviderInfo } from "../src/messages"
 
-// A short, friendly line per provider — AnyModel (Kvist's own shipped default) plus
-// config_info.py's curated "built-in six". Everything else (the ~35 other manual-tier
+// A short, friendly line per provider for config_info.py's curated "built-in six". Everything else (the ~35 other manual-tier
 // vendors, custom endpoints) is reachable later via Settings.
 const BLURBS: Record<string, string> = {
-  anymodel: "Kvist's own default router",
   openai: "GPT-5.6 and friends",
   chatgpt: "Use your ChatGPT Plus or Pro plan",
   anthropic: "Claude, direct from Anthropic",
@@ -16,23 +14,11 @@ const BLURBS: Record<string, string> = {
   freeflow: "Free Gemini and Groq models",
 }
 
-// Only AnyModel has a signup page Kvist knows about (`anymodel_onboarding.py`); the
-// other router-style providers still get a live model picker further down.
-const REGISTERABLE_PROVIDER = "anymodel"
-
 export interface ModelListState {
   provider: string
   busy: boolean
   options: string[]
-  // The price multiplier AnyModel shows after a model's id ("x0"); empty for other providers.
-  coefficients: Record<string, string>
   error: string
-}
-
-export interface RegistrationState {
-  provider: string
-  opened: boolean
-  url: string | null
 }
 
 interface Props {
@@ -43,32 +29,18 @@ interface Props {
   submit: (provider: string, apiKey: string, model: string) => void
   modelList: ModelListState
   onListModels: (provider: string, apiKey: string) => void
-  registration: RegistrationState | null
-  onOpenRegistration: (provider: string) => void
 }
 
-export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, onListModels, registration, onOpenRegistration }: Props) {
+export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, onListModels }: Props) {
   const [providerId, setProviderId] = useState(providers[0]?.id ?? "")
   const [apiKey, setApiKey] = useState("")
   const [model, setModel] = useState("")
-  const autoOpened = useRef(false)
   const provider = providers.find((item) => item.id === providerId)
   // A router/gateway provider has no default model list; the id typed or picked here is
   // used for both roles (fast/smart), tuneable per role later from Settings.
   const needsModel = provider?.requires_manual_models === true
   const oauth = provider?.auth_type === "oauth"
-  const canRegister = providerId === REGISTERABLE_PROVIDER
   const models = modelList.provider === providerId ? modelList : null
-
-  // Matches the terminal's own first-run screen: AnyModel is the default pick, so a
-  // fresh install pops its signup page once without the person having to ask for it.
-  // Re-selecting AnyModel later (after backing out to another provider) also offers it,
-  // but only ever once per visit to this screen — never on every keystroke or re-render.
-  useEffect(() => {
-    if (!canRegister || autoOpened.current || apiKey.trim()) return
-    autoOpened.current = true
-    onOpenRegistration(providerId)
-  }, [canRegister, providerId])
 
   function onSubmit(event: Event): void {
     event.preventDefault()
@@ -98,16 +70,6 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
           </button>
         ))}
       </div>
-
-      {canRegister ? (
-        <div class="row-hint first-run-register">
-          {registration?.provider === providerId && registration.opened
-            ? "Registration opened in your browser — paste the key it gives you below."
-            : registration?.provider === providerId && registration.url
-              ? <>No browser to open here — register at <a href={registration.url} onClick={(event) => { event.preventDefault(); onOpenRegistration(providerId) }}>{registration.url}</a></>
-              : <>No key yet? <a href="#" onClick={(event) => { event.preventDefault(); onOpenRegistration(providerId) }}>Open AnyModel registration</a></>}
-        </div>
-      ) : null}
 
       <form class="first-run-form" onSubmit={onSubmit}>
         {oauth ? (
@@ -142,7 +104,7 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
               </button>
             </div>
             <datalist id="first-run-model-options">
-              {(models?.options ?? []).map((id) => <option key={id} value={id} label={models?.coefficients[id]} />)}
+              {(models?.options ?? []).map((id) => <option key={id} value={id} />)}
             </datalist>
             {models && !models.busy && models.options.length > 0 ? (
               <div class="row-hint first-run-model-hint">{models.options.length} models loaded — start typing to filter.</div>

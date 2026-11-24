@@ -128,7 +128,6 @@ kbd { font-family: var(--font-text); font-size: 11.5px; padding: 1px 6px; border
 .segment { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--r-sm); background: var(--surface-2); }
 .seg { border: 0; cursor: pointer; padding: 5px 12px; font-size: var(--t-ui); font-weight: 500; border-radius: 6px; background: transparent; color: var(--dim); transition: background-color var(--d-hover) ease, color var(--d-hover) ease; }
 .seg.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-1), 0 0 0 1px var(--line); }
-.seg.partner { display: block; width: 100%; padding: 10px 14px; font-size: var(--t-md); font-weight: 600; }
 @media (hover: hover) and (pointer: fine) { .seg:hover:not(.on) { color: var(--text); } }
 
 .switch { position: relative; width: 40px; height: 24px; border: 0; cursor: pointer; border-radius: var(--r-pill); background: var(--line-strong); flex: none; transition: background-color var(--d-pop) ease; }

@@ -2,7 +2,7 @@
 // at most one thing to do come out. Drawing is scene.ts, running the operations is run.ts.
 import { breadthOf, initialFolder, updateFolder, type Breadth, type FolderState, type FolderTarget, type Listing } from "./folders.js"
 import type { InputEvent } from "./keys.js"
-import type { ConfigInfo, ImportReply, ImportsReply, InstallEvent, InstallReply, ListModelsReply, OpReply, PlanReply, ProviderInfo, RegistrationReply, SetProviderReply } from "./ops.js"
+import type { ConfigInfo, ImportReply, ImportsReply, InstallEvent, InstallReply, ListModelsReply, OpReply, PlanReply, ProviderInfo, SetProviderReply } from "./ops.js"
 
 // "components" and "installing" come before "welcome" when the installer started this screen.
 export type Step = "components" | "installing" | "welcome" | "broad" | "folder" | "provider" | "key" | "models" | "working" | "interface" | "import" | "importing" | "starting"
@@ -51,11 +51,8 @@ export interface InstallState {
 }
 
 // Providers a newcomer is offered, in order; the other 40+ are reached through "More providers".
-export const CURATED_PROVIDERS = ["anymodel", "chatgpt", "openai", "anthropic", "deepseek", "openrouter", "freeflow"] as const
+export const CURATED_PROVIDERS = ["chatgpt", "openai", "anthropic", "deepseek", "openrouter", "freeflow"] as const
 export const MORE_PROVIDERS = "__more__"
-export const RECOMMENDED_PROVIDER = "anymodel"
-// Only AnyModel has a signup page the core knows how to open.
-export const REGISTERABLE_PROVIDER = "anymodel"
 
 // Where a key comes from, for the providers that have a stable console address.
 export const KEY_PAGES: Readonly<Record<string, string>> = {
@@ -94,7 +91,6 @@ export type Effect =
   | { type: "install"; only: string[] }
   | { type: "listModels"; provider: string; key: string }
   | { type: "connect"; provider: string; key: string; model: string }
-  | { type: "register"; provider: string }
   | { type: "cancel" }
   | { type: "list"; path: string }
   | { type: "make"; parent: string; name: string }
@@ -102,7 +98,7 @@ export type Effect =
 
 export type Target =
   | { kind: "option"; index: number }
-  | { kind: "button"; id: "primary" | "back" | "quit" | "register" | "folder" | "anyway" | "skip" }
+  | { kind: "button"; id: "primary" | "back" | "quit" | "folder" | "anyway" | "skip" }
   | { kind: "folder"; target: FolderTarget }
 
 export type Action =
@@ -112,7 +108,6 @@ export type Action =
   | { type: "catalog"; reply: OpReply<ConfigInfo> }
   | { type: "models"; reply: OpReply<ListModelsReply> }
   | { type: "connected"; reply: OpReply<SetProviderReply> }
-  | { type: "registered"; reply: OpReply<RegistrationReply> }
   | { type: "imports"; reply: OpReply<ImportsReply> }
   | { type: "imported"; reply: OpReply<ImportReply> }
   | { type: "listing"; listing: Listing }
@@ -143,9 +138,7 @@ export interface SetupState {
   provider: ProviderInfo | null
   key: string
   cursor: number
-  registration: RegistrationReply | null
-  // `labels` holds the price multiplier AnyModel shows after a model's id ("x0"); empty for other providers.
-  models: { status: "loading" | "ready" | "failed"; all: string[]; labels: Record<string, string> }
+  models: { status: "loading" | "ready" | "failed"; all: string[] }
   filter: string
   filterCursor: number
   modelIndex: number
@@ -186,8 +179,7 @@ export function initialState(workspace = "", home = "", drives = false, scope: "
     provider: null,
     key: "",
     cursor: 0,
-    registration: null,
-    models: { status: "loading", all: [], labels: {} },
+    models: { status: "loading", all: [] },
     filter: "",
     filterCursor: 0,
     modelIndex: 0,
@@ -274,7 +266,7 @@ function chooseProvider(state: SetupState, index: number): Update {
   const offered = offeredProviders(state)
   const provider = offered[index]
   if (!provider) return { state, effect: { type: "finish", outcome: { kind: "classic" } } }
-  const next = { ...state, providerIndex: index, provider, key: "", cursor: 0, registration: null, error: "" }
+  const next = { ...state, providerIndex: index, provider, key: "", cursor: 0, error: "" }
   // An OAuth provider has no key to paste, and one whose key is already saved needs none.
   if (provider.auth_type === "oauth" || provider.has_credentials) {
     return toWorking(next, { type: "connect", provider: provider.id, key: "", model: "" }, "provider")
@@ -286,12 +278,11 @@ function submitKey(state: SetupState, strings: { keyEmpty: string }): Update {
   const provider = state.provider
   if (!provider) return { state }
   if (!state.key.trim()) {
-    if (provider.id === REGISTERABLE_PROVIDER && !state.registration) return { state, effect: { type: "register", provider: provider.id } }
     return { state: { ...state, error: strings.keyEmpty, errorKind: "input" } }
   }
   if (provider.requires_manual_models) {
     return {
-      state: { ...state, step: "models", error: "", models: { status: "loading", all: [], labels: {} }, filter: "", filterCursor: 0, modelIndex: 0 },
+      state: { ...state, step: "models", error: "", models: { status: "loading", all: [] }, filter: "", filterCursor: 0, modelIndex: 0 },
       effect: { type: "listModels", provider: provider.id, key: state.key.trim() },
     }
   }
@@ -566,8 +557,6 @@ function onClick(state: SetupState, target: Target, strings: { keyEmpty: string 
         return back(state)
       case "quit":
         return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
-      case "register":
-        return state.provider ? { state, effect: { type: "register", provider: state.provider.id } } : { state }
       case "folder":
         return state.step === "welcome" || state.step === "broad" ? openFolder(state) : { state }
       case "anyway":
@@ -626,9 +615,9 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
         : { state: { ...state, catalog: "failed", error: action.reply.error } }
     case "models": {
       if (state.step !== "models") return { state }
-      if (!action.reply.ok) return { state: { ...state, models: { status: "failed", all: [], labels: {} }, error: action.reply.error, errorKind: "connect" } }
+      if (!action.reply.ok) return { state: { ...state, models: { status: "failed", all: [] }, error: action.reply.error, errorKind: "connect" } }
       const all = action.reply.models
-      return { state: { ...state, models: { status: all.length ? "ready" : "failed", all, labels: action.reply.coefficients ?? {} }, error: "" } }
+      return { state: { ...state, models: { status: all.length ? "ready" : "failed", all }, error: "" } }
     }
     case "connected":
       // An answer that arrives after the person pressed Esc is not theirs any more.
@@ -644,8 +633,6 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
       // A failed import is not worth keeping Kvist from starting: the person is told and can use /export.
       if (!action.reply.ok) return { state: { ...state, step: "import", error: action.reply.error } }
       return startChosen(state)
-    case "registered":
-      return action.reply.ok ? { state: { ...state, registration: { opened: action.reply.opened, url: action.reply.url } } } : { state: { ...state, error: action.reply.error } }
     case "plan": {
       if (!state.install) return { state }
       if (!action.reply.ok) return { state: withInstall(state, { plan: "failed", error: action.reply.error }) }

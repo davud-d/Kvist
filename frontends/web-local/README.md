@@ -220,8 +220,7 @@ framework. `features/connections.js` owns server/workspace dialogs,
 accessible controls and safe Markdown. The transport adapter
 retains the v1 API and now renews expired browser credentials without reloading.
 
-The composer opens `features/configuration.js`: provider/model discovery and
-first-run AnyModel registration use the Python core services on the selected host.
+The composer opens `features/configuration.js`: provider/model discovery use the Python core services on the selected host.
 POST `/api/v1/configuration` saves defaults; `/api/v1/configuration/models` fetches
 the catalog without saving credentials. `/api/v1/command` forwards only model and
 reasoning commands to an idle session. GET `/api/v1/ssh-aliases` lists concrete

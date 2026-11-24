@@ -1,12 +1,11 @@
 """Real controller and real core sessions on a temporary HOME; only the model provider is fake.
 
-The AnyModel and DeepSeek base URLs point at a loopback OpenAI-compatible server and
+The DeepSeek base URL points at a loopback OpenAI-compatible server and
 HTTP(S)_PROXY at a dead port, so nothing leaves the machine. Keys starting with
 `qa-valid` work, `qa-empty-catalog-key` works with an empty model list, `qa-offline`
 cannot reach the provider, anything else is refused. KVIST_FIXTURE_SETUP=configured
-saves AnyModel with `qa-valid-key` and the first catalog model before the controller
-starts; the default is a blank start. KVIST_FIXTURE_DEFAULT_MODELS (comma-separated) stands in
-for the AnyModel default model list. Prints the controller URL, then the HOME path.
+saves DeepSeek with `qa-valid-key` and the first catalog model before the controller
+starts; the default is a blank start. Prints the controller URL, then the HOME path.
 """
 import json
 import os
@@ -85,7 +84,7 @@ def isolate(root: Path) -> Path:
     home = root / 'home'
     home.mkdir()
     for key in list(os.environ):
-        if key.startswith(('AGENT_', 'ANYMODEL', 'DEEPSEEK', 'OPENAI', 'ANTHROPIC', 'OPENROUTER')):
+        if key.startswith(('AGENT_', 'DEEPSEEK', 'OPENAI', 'ANTHROPIC', 'OPENROUTER')):
             del os.environ[key]
     dead = 'http://127.0.0.1:9'
     os.environ.update(HOME=str(home), USERPROFILE=str(home), HTTP_PROXY=dead, HTTPS_PROXY=dead,
@@ -100,28 +99,13 @@ def serve(root: Path) -> None:
     fake_url = f'http://127.0.0.1:{fake.server_address[1]}/v1'
     sys.path[:0] = [str(REPO), str(REPO / 'frontends/web-local')]
     from kernel.config import user_config
-    from kernel.providers import anymodel_pricing
 
-    user_config.set_provider_secret('anymodel_base_url', fake_url)
     user_config.set_provider_secret('deepseek_base_url', fake_url)
     if os.environ.get('KVIST_FIXTURE_SETUP') == 'configured':
-        user_config.set_provider_secret('anymodel_api_key', 'qa-valid-key')
-        user_config.save_models_for_provider('anymodel', {'fast': MODELS[0], 'smart': MODELS[0]})
-        user_config.set_provider_secret(user_config.LLM_PROVIDER_KEY, 'anymodel')
+        user_config.set_provider_secret('deepseek_api_key', 'qa-valid-key')
+        user_config.save_models_for_provider('deepseek', {'fast': MODELS[0], 'smart': MODELS[0]})
+        user_config.set_provider_secret(user_config.LLM_PROVIDER_KEY, 'deepseek')
 
-    # AnyModel's key check calls anymodel.org itself, not the base URL; the same rule as the fake provider.
-    def verify(key, **kwargs):
-        if key == 'qa-offline':
-            raise anymodel_pricing.AnyModelUnavailableError('test provider is offline')
-        if not (key.startswith('qa-valid') or key == 'qa-empty-catalog-key'):
-            raise anymodel_pricing.AnyModelAuthError('invalid test key')
-        return {}
-
-    anymodel_pricing.fetch_model_coefficients = verify
-    from kvist_web import configuration
-    # Stands in for the owner's list in kernel/llm/anymodel_onboarding.py, which is empty until chosen.
-    if os.environ.get('KVIST_FIXTURE_DEFAULT_MODELS'):
-        configuration.ANYMODEL_DEFAULT_MODELS = tuple(os.environ['KVIST_FIXTURE_DEFAULT_MODELS'].split(','))
     from kvist_web.controller import WebController
     from kvist_web.http_api import ControllerHTTPServer
     from kvist_web.storage import WebStateStore

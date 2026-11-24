@@ -26,11 +26,9 @@ function post(resource, body = {}) {
         body: JSON.stringify(body),
     }).then(decode);
 }
-// A catalog reply as the pickers want it: {value, label} per model. AnyModel's reply carries a
-// price multiplier per id ("x0", "x1.5"); the label shows it after the name, the value stays the id.
+// A catalog reply as the pickers want it: {value, label} per model.
 function catalogEntries(reply) {
-    const multipliers = reply.coefficients || {};
-    return { ...reply, models: reply.models.map(value => ({ value, label: multipliers[value] ? `${value}  ${multipliers[value]}` : value })) };
+    return { ...reply, models: reply.models.map(value => ({ value, label: value })) };
 }
 function ref(selection) {
     return { server_id: selection.serverId, workspace: selection.workspace, session: selection.session };

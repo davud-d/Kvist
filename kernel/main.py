@@ -329,7 +329,6 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "get-config",
             "set-provider",
             "list-models",
-            "open-registration",
             "list-imports",
             "import-sessions",
             "chatgpt-login",
@@ -588,7 +587,7 @@ def _run_set_provider_op(raw: object) -> dict:
 
     provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
     api_key = str(raw.get("api_key", "")).strip() if isinstance(raw, dict) else ""
-    # Only asked for a router/gateway provider (OpenRouter, OmniRoute, AnyModel, the
+    # Only asked for a router/gateway provider (OpenRouter, OmniRoute, the
     # manual tier) that has no default model list — the same one id is used for all
     # three roles, matching the simplest choice a person would make by hand anyway.
     model = str(raw.get("model", "")).strip() if isinstance(raw, dict) else ""
@@ -651,25 +650,7 @@ def _run_list_models_op(raw: object) -> dict:
     required = required_secret_keys_for_provider(normalized, [])
     credentials = {key: api_key for key in required}
     models, error = fetch_available_models(normalized, credentials, force_refresh=True)
-    # `models` stays a plain id list for frontends that predate the multiplier; they
-    # look each id up in `coefficients` ({} for providers that do not price this way).
-    coefficients = {} if error else model_coefficient_labels(normalized, credentials)
-    return {"ok": True, "provider": normalized, "models": sorted(models), "coefficients": coefficients, "error": error}
-
-
-def _run_open_registration_op(raw: object) -> dict:
-    """Open a provider's signup page in a GUI browser (a first-run "register" button).
-
-    Only AnyModel has one today (``anymodel_onboarding.py``); any other
-    provider id is a no-op the caller falls back to plain key entry for.
-    """
-    from kernel.llm.anymodel_onboarding import ANYMODEL_REGISTER_URL, open_registration_page
-
-    provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
-    normalized = normalize_provider(provider)
-    if normalized != DEFAULT_BLANK_START_PROVIDER:
-        return {"ok": True, "opened": False, "url": None}
-    return {"ok": True, "opened": open_registration_page(), "url": ANYMODEL_REGISTER_URL}
+    return {"ok": True, "provider": normalized, "models": sorted(models), "error": error}
 
 
 def _setup_workspace(raw: object) -> Path:
@@ -778,10 +759,8 @@ from kernel.llm.llm_clients import (
     create_llm_client,
     configured_freeflow_backends,
     ANTHROPIC_PROVIDER,
-    ANYMODEL_PROVIDER,
     CUSTOM_PROVIDER_PREFIX,
     CUSTOM_PROVIDER_PLACEHOLDER,
-    DEFAULT_BLANK_START_PROVIDER,
     FREEFLOW_PROVIDER,
     get_model_options,
     is_custom_provider,
@@ -799,7 +778,6 @@ from kernel.llm.llm_clients import (
     provider_supports_streaming,
     SUPPORTED_LLM_PROVIDERS,
     fetch_available_models,
-    model_coefficient_labels,
     normalize_provider,
     provider_label,
     required_secret_keys_for_provider,
@@ -824,7 +802,6 @@ from bestof_turns import run_follow_up_turn, run_turn_goal
 from terminal_banner import SetupCancelled, TerminalBannerUI, ctrl_c_stops_setup
 from window_title import pop_window_title, push_window_title, set_window_title
 from terminal_image import print_exit_logo
-from kernel.llm.anymodel_onboarding import offer_anymodel_registration
 from kernel.config.performance_logger import PerfLogger
 from kernel.session.agent_logging import (
     delete_session as delete_agent_session,
@@ -1911,13 +1888,6 @@ def paused_interactive_screen(screen: InteractiveScreen | None):
             screen.resume()
 
 
-def _anymodel_key_available() -> bool:
-    """Is the AnyModel key already reachable (env var or saved config)?"""
-    api_key_key = MANUAL_OPENAI_PROVIDERS[DEFAULT_BLANK_START_PROVIDER]["api_key_key"]
-    credentials = load_available_credentials((api_key_key,))
-    return bool(credentials.get(api_key_key))
-
-
 def resolve_startup_provider(
     provider_override: str | None = None,
     interactive_ui: AgentUI | None = None,
@@ -1933,33 +1903,16 @@ def resolve_startup_provider(
     if saved_provider:
         return saved_provider
 
-    # Blank start: nothing saved yet. AnyModel ships as the default — if its
-    # key is already reachable (env var, or a config partially written by a
-    # prior run), use it directly instead of asking about the other five
-    # built-in providers.
-    if _anymodel_key_available():
-        return DEFAULT_BLANK_START_PROVIDER
-
+    # Blank start: nothing saved yet, so the person picks. An event frontend
+    # answers through its own picker; a terminal gets the generic one.
     if interactive_ui is not None:
-        # An event frontend has no browser/OAuth registration screen; the
-        # picker lists AnyModel like any other provider.
         selected = choose_provider("openai", False, ui=interactive_ui)
         if selected:
             return selected
         raise RuntimeError("No provider was selected.")
 
-    # First run, no AnyModel key either: use RichUI if available, fall back
-    # to plain-text. The AnyModel registration screen is offered first (it
-    # is the shipped default); Esc there falls through to the generic
-    # picker, with AnyModel excluded since it was just offered separately.
     if sys.stdin.isatty():
-        registration_ui = TerminalBannerUI(console=console, verbose=False)
-        selected = offer_anymodel_registration(registration_ui)
-        if selected:
-            return selected
-        selected = choose_provider(
-            "openai", False, exclude=frozenset({DEFAULT_BLANK_START_PROVIDER})
-        )
+        selected = choose_provider("openai", False)
         if selected:
             return selected
     return prompt_provider_choice()
@@ -2399,21 +2352,14 @@ def render_startup_banner(
 def choose_provider(
     current_provider: str,
     verbose: bool,
-    exclude: frozenset[str] | None = None,
     ui: AgentUI | None = None,
 ) -> str | None:
     if ui is None:
         ui = TerminalBannerUI(console=console, verbose=verbose)
 
-    # Built-in providers in order: AnyModel first (partner provider and blank-start
-    # default), then OpenAI, Anthropic, DeepSeek, the two OpenCode gateways,
-    # OpenRouter, OmniRoute.
+    # Built-in providers in order: OpenAI, Anthropic, DeepSeek, the two OpenCode
+    # gateways, OpenRouter, OmniRoute.
     options: list[dict[str, str]] = [
-        {
-            "value": ANYMODEL_PROVIDER,
-            "label": "AnyModel",
-            "description": "Kvist's default router — one key, many models",
-        },
         {
             "value": "openai",
             "label": "OpenAI",
@@ -2464,7 +2410,7 @@ def choose_provider(
     # Third-party OpenAI-compatible providers — one API key, manual model entry
     # (same tier as OmniRoute above; see MANUAL_OPENAI_PROVIDERS in llm_clients.py).
     for slug, config in MANUAL_OPENAI_PROVIDERS.items():
-        if slug in (ANYMODEL_PROVIDER, OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER):
+        if slug in (OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER):
             # Already listed above; skip them so none is offered twice.
             continue
         options.append({
@@ -2496,8 +2442,6 @@ def choose_provider(
         "description": "Add a new OpenAI- or Anthropic-compatible endpoint",
     })
 
-    if exclude:
-        options = [option for option in options if option["value"] not in exclude]
 
     selected = ui.choose_option(
         title="Select LLM Provider",
@@ -3173,9 +3117,7 @@ def _model_picker_options(provider: str) -> tuple[list[dict[str, str]], bool]:
         required_keys = required_secret_keys_for_provider(provider, [])
         credentials = load_available_credentials(required_keys)
         available_models, _error = fetch_available_models(provider, credentials)
-        options = get_model_options(
-            provider, available_models, model_coefficient_labels(provider, credentials)
-        )
+        options = get_model_options(provider, available_models)
         if options:
             return options, True
     except Exception:
@@ -5104,8 +5046,6 @@ def main() -> None:
                 if (raw or {}).get("account"):
                     select_account(raw["account"])
                 payload = {"ok": True, **account_status()}
-            elif args.config_op == "open-registration":
-                payload = _run_open_registration_op(raw)
             elif args.config_op == "list-imports":
                 payload = _run_list_imports_op(raw)
             elif args.config_op == "import-sessions":

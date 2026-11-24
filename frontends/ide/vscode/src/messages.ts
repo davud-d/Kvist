@@ -46,8 +46,7 @@ export type ToWebview =
     | { type: 'history'; name: string; events: JournalEvent[]; hasMore: boolean }
     | { type: 'needsSetup'; providers: ProviderInfo[] }
     | { type: 'setupResult'; ok: boolean; error?: string }
-    | { type: 'modelList'; provider: string; ok: boolean; models: string[]; coefficients: Record<string, string>; error?: string }
-    | { type: 'registrationOpened'; provider: string; opened: boolean; url: string | null }
+    | { type: 'modelList'; provider: string; ok: boolean; models: string[]; error?: string }
     | { type: 'showSettings' };
 
 export type ToHost =
@@ -70,7 +69,6 @@ export type ToHost =
     | { type: 'getHistory'; name: string }
     | { type: 'setProvider'; provider: string; apiKey: string; model: string }
     | { type: 'listModels'; provider: string; apiKey: string }
-    | { type: 'openRegistration'; provider: string }
     | { type: 'openFile'; path: string; line: number | null }
     | { type: 'openLink'; url: string }
     | { type: 'openScreen'; url: string }

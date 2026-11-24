@@ -36,7 +36,7 @@ Shell commands run in a sandbox (Bubblewrap on Linux) with a private home direct
 2. Open the Kvist icon in the secondary side bar (Ctrl+Alt+B toggles it) and choose a provider on the first screen.
 3. Type a task, for example "add a --verbose flag to the CLI and cover it with a test".
 
-Kvist works with AnyModel, OpenAI, Anthropic, DeepSeek, OpenRouter, ChatGPT sign-in, a local OpenAI-compatible gateway, and about forty other OpenAI-compatible providers. Answers and prompts are written in English or Russian, matching the language you use.
+Kvist works with OpenAI, Anthropic, DeepSeek, OpenRouter, ChatGPT sign-in, a local OpenAI-compatible gateway, and about forty other OpenAI-compatible providers. Answers and prompts are written in English or Russian, matching the language you use.
 
 ## Kvist in the terminal
 

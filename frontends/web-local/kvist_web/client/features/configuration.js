@@ -56,7 +56,6 @@ export async function showModel() {
         root.querySelector('p').outerHTML = `<p>Configure ${esc(serverName === 'local' ? 'this computer' : serverName)}. Keys stay in its Kvist configuration.</p>
         <form id="provider-form"><div class="form-grid">
         <label class="full">Provider<select name="provider">${options}</select></label>
-        <div id="registration" class="full" hidden><p>Start with AnyModel: register, create an API key, then paste it below. You can also choose another provider above.</p><a id="register-anymodel" class="primary-button" target="_blank" rel="noopener noreferrer">Open AnyModel registration ↗</a></div>
         <div id="provider-credentials" class="full"></div>
         <label id="model-pick-field" class="full">Model<select id="model-pick"></select></label>
         <label id="model-id-field" class="full">Model ID<input name="fast" required autocomplete="off" placeholder="Enter the model ID from your provider"></label>
@@ -69,11 +68,7 @@ export async function showModel() {
         ${info.environment_overrides.length ? `<p class="inline-error">Environment overrides take priority: ${info.environment_overrides.map(esc).join(', ')}.</p>` : ''}
         <div class="modal-actions"><button id="save-provider" class="primary-button">Save defaults</button></div></form>`;
         const form = root.querySelector('form'), provider = form.elements.provider, status = $('#configuration-status');
-        provider.value = activeProvider && providers.some(p => p.id === activeProvider) ? activeProvider : info.provider;
-        const registration = root.querySelector('#register-anymodel');
-        // This URL comes from the core's onboarding constant, not provider metadata.
-        const url = new URL(info.registration_url);
-        if (url.protocol === 'https:') registration.href = url.href;
+        provider.value = activeProvider && providers.some(p => p.id === activeProvider) ? activeProvider : (info.provider || providers[0].id);
         let catalogGeneration = 0;
         const selectedProvider = () => providers.find(p => p.id === provider.value);
         const pick = root.querySelector('#model-pick'), note = root.querySelector('#model-note'), idField = root.querySelector('#model-id-field');
@@ -110,7 +105,6 @@ export async function showModel() {
             catalogGeneration++;
             const p = selectedProvider();
             status.textContent = '';
-            root.querySelector('#registration').hidden = p.id !== 'anymodel';
             root.querySelector('#provider-credentials').innerHTML = p.credential_fields.map(f => `<label class="credential-field">${esc(f.label)}<input type="password" data-credential="${esc(f.id)}" autocomplete="new-password" placeholder="${f.present ? 'Saved · leave blank to keep' : 'Paste API key'}"></label>`).join('');
             if (p.auth_type === 'oauth') chatgptControls(root.querySelector('#provider-credentials'), serverId, ready => { if (ready !== false) loadModels(); });
             root.querySelector('#base-url-field').hidden = !p.can_edit_base_url;

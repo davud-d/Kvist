@@ -27,10 +27,9 @@ kvist
   filesystem root it uses `Documents/Kvist Workspace` instead.
 - A clean machine shows a setup screen: welcome, provider, API key, (model for providers
   without defaults), interface, and an import step if sessions of other agents were found.
-  Enter on the key field of AnyModel opens its registration page. Esc goes back; Esc on
-  the first screen or Ctrl+C quits with nothing saved. Without Node.js the plain
+  Esc goes back; Esc on the first screen or Ctrl+C quits with nothing saved. Without Node.js the plain
   terminal wizard asks the same questions.
-- `ANYMODEL_API_KEY` (or the key variable of another provider with `AGENT_LLM_PROVIDER`)
+- The key variable of a provider (for example `OPENAI_API_KEY`) together with `AGENT_LLM_PROVIDER`
   skips the questions.
 - On the first launch Kvist creates `KVIST.md` and `KVIST-CHAT.md` in the workspace
   (project instructions; see the `safety` page).

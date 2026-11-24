@@ -14,11 +14,11 @@ import { detectLocale, stringsFor } from "../setup/strings.js"
 const strings = stringsFor("en")
 const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "")
 
-const providers = ["anymodel", "chatgpt", "openai", "openrouter"].map((id) => ({
+const providers = ["chatgpt", "openai", "openrouter"].map((id) => ({
   id,
   label: id,
   auth_type: id === "chatgpt" ? ("oauth" as const) : ("api_key" as const),
-  requires_manual_models: id === "anymodel" || id === "openrouter",
+  requires_manual_models: id === "openrouter",
   has_credentials: false,
 }))
 
@@ -133,7 +133,6 @@ test("a picture shown as an image leaves the cells around the panel empty", () =
 test("a provider with a key leads through the key to the interface choice", () => {
   let state = send(ready(), key("enter")).state
   assert.equal(state.step, "provider")
-  state = send(state, key("down")).state // chatgpt
   state = send(state, key("down")).state // openai
   const chosen = send(state, key("enter"))
   assert.equal(chosen.state.step, "key")
@@ -192,44 +191,23 @@ test("sessions of other agents are offered after the interface and before Kvist 
   assert.equal(send(atImport, key("escape")).state.step, "interface")
 })
 
-test("an empty key on AnyModel opens registration instead of complaining", () => {
-  const state = send(send(ready(), key("enter")).state, key("enter")).state
-  assert.equal(state.provider?.id, "anymodel")
-  assert.deepEqual(send(state, key("enter")).effect, { type: "register", provider: "anymodel" })
-  const registered = send(state, { type: "registered", reply: { ok: true, opened: true, url: "https://x" } }).state
-  assert.equal(send(registered, key("enter")).state.error, strings.keyEmpty)
-})
-
 test("a provider without default models picks one from the live catalog or types an id", () => {
-  let state = send(send(ready(), key("enter")).state, key("enter")).state
-  state = typed(state, "sk-any")
+  let state = send(send(send(send(ready(), key("enter")).state, key("down")).state, key("down")).state, key("enter")).state
+  state = typed(state, "sk-key")
   const listing = send(state, key("enter"))
-  assert.deepEqual(listing.effect, { type: "listModels", provider: "anymodel", key: "sk-any" })
-  state = send(listing.state, { type: "models", reply: { ok: true, provider: "anymodel", models: ["a/one", "b/two", "b/three"] } }).state
+  assert.deepEqual(listing.effect, { type: "listModels", provider: "openrouter", key: "sk-key" })
+  state = send(listing.state, { type: "models", reply: { ok: true, provider: "openrouter", models: ["a/one", "b/two", "b/three"] } }).state
   state = typed(state, "b/")
   assert.equal(send(state, key("down")).state.modelIndex, 1)
   const picked = send(send(state, key("down")).state, key("enter"))
-  assert.deepEqual(picked.effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "b/three" })
+  assert.deepEqual(picked.effect, { type: "connect", provider: "openrouter", key: "sk-key", model: "b/three" })
   // Nothing matches: what was typed is the id.
   const custom = typed({ ...state, filter: "", filterCursor: 0 }, "my/model")
-  assert.deepEqual(send(custom, key("enter")).effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "my/model" })
-})
-
-test("the model list shows AnyModel's multiplier after each id, and the id that is connected stays bare", () => {
-  let state = send(send(ready(), key("enter")).state, key("enter")).state
-  state = typed(state, "sk-any")
-  const coefficients = { "a/one": "x0", "b/two": "x1/3" }
-  state = send(send(state, key("enter")).state, { type: "models", reply: { ok: true, provider: "anymodel", models: ["a/one", "b/two", "c/none"], coefficients } }).state
-  const shown = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
-  assert.match(shown, /a\/one\s+x0/)
-  assert.match(shown, /b\/two\s+x1\/3/)
-  // A model the catalog did not price carries no multiplier, and the filter still matches ids only.
-  assert.doesNotMatch(shown, /c\/none\s+x/)
-  assert.deepEqual(send(send(state, key("down")).state, key("enter")).effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "b/two" })
+  assert.deepEqual(send(custom, key("enter")).effect, { type: "connect", provider: "openrouter", key: "sk-key", model: "my/model" })
 })
 
 test("an OAuth provider connects without asking for a key", () => {
-  const state = send(send(ready(), key("enter")).state, key("down")).state
+  const state = send(ready(), key("enter")).state
   const chosen = send(state, key("enter"))
   assert.deepEqual(chosen.effect, { type: "connect", provider: "chatgpt", key: "", model: "" })
   const failed = send(chosen.state, { type: "connected", reply: { ok: false, error: "closed" } }).state
@@ -256,7 +234,7 @@ test("every frame is exactly as wide as the window and its hit boxes answer clic
   const options = scene.hits.filter((hit) => hit.target.kind === "option")
   assert.equal(options.length, providers.length + 1)
   const text = scene.rows.map(plain)
-  assert.match(text[options[1]!.row]!, /chatgpt/)
+  assert.match(text[options[0]!.row]!, /chatgpt/)
 })
 
 test("without colour there is no picture, only the panel", () => {
@@ -287,14 +265,13 @@ test("frames in motion are sent smaller", () => {
   assert.deepEqual([half.width, half.height], [full.width / 2, full.height / 2])
 })
 
-const toKey = (state: SetupState) => send(send(ready(), key("enter")).state, key("enter")).state
+const toKey = (state: SetupState) => send(send(send(send(ready(), key("enter")).state, key("down")).state, key("down")).state, key("enter")).state
 
 test("a pasted key loses quotes and a Bearer prefix; Tab shows it in clear", () => {
   let state = send(toKey(ready()), key("down")).state
   state = send(ready(), key("enter")).state
   state = send(state, key("down")).state
-  state = send(state, key("down")).state
-  state = send(state, key("down")).state // anthropic
+  state = send(state, key("down")).state // openrouter
   state = send(state, key("enter")).state
   assert.equal(state.provider?.id, "openai" === state.provider?.id ? "openai" : state.provider?.id)
   const pasted = send(state, { type: "input", event: { type: "paste", text: '"Bearer sk-abc"\n' } }).state
@@ -305,7 +282,6 @@ test("a pasted key loses quotes and a Bearer prefix; Tab shows it in clear", () 
 
 test("Esc during a connection abandons it and its late answer changes nothing", () => {
   let state = send(ready(), key("enter")).state
-  state = send(state, key("down")).state
   state = send(state, key("down")).state
   state = send(state, key("enter")).state
   state = typed(state, "sk-1")
@@ -320,7 +296,7 @@ test("Esc during a connection abandons it and its late answer changes nothing", 
 })
 
 test("a failed connection says what happened and what to do; success is confirmed on the next screen", () => {
-  const base = (): SetupState => ({ ...ready(), step: "working", returnStep: "key", provider: providers[2] as never, key: "sk-1" })
+  const base = (): SetupState => ({ ...ready(), step: "working", returnStep: "key", provider: providers[1] as never, key: "sk-1" })
   const failed = send(base(), { type: "connected", reply: { ok: false, error: "401 unauthorized" } }).state
   const scene = (state: SetupState, rows = 40) =>
     renderScene({ state, strings, cols: 100, rows, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
@@ -384,7 +360,6 @@ test("a provider-only setup has no folder or interface step and ends with the pr
   assert.doesNotMatch(shown, /Working folder/)
   // Provider, key: two steps.
   let state = send(send(base, key("enter")).state, key("down")).state
-  state = send(state, key("down")).state
   state = send(state, key("enter")).state // openai
   const scene = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
   assert.match(scene, /Step 2 of 2/)
@@ -815,7 +790,7 @@ test("without colour the button Enter presses is in inverse video and no other b
 
 test("without colour the highlighted provider is a marked inverse row and follows the arrows", () => {
   let state = send(ready(), key("enter")).state
-  for (const expected of ["anymodel", "chatgpt", "openai"]) {
+  for (const expected of ["chatgpt", "openai", "openrouter"]) {
     const rows = mono(state)
     const marked = rows.map(plain).filter((row) => row.includes("│ >"))
     assert.equal(marked.length, 1, "exactly one marked row")
@@ -828,13 +803,13 @@ test("without colour the highlighted provider is a marked inverse row and follow
 
 test("without colour the highlighted row is marked on the model, interface and installer steps", () => {
   const marked = (state: SetupState) => mono(state, { rows: 34 }).map(plain).filter((row) => row.includes("│ >"))
-  let models = send(send(ready(), key("enter")).state, key("enter")).state
-  models = send(send(typed(models, "sk-any"), key("enter")).state, { type: "models", reply: { ok: true, provider: "anymodel", models: ["a/one", "b/two"] } }).state
+  let models = send(send(send(send(ready(), key("enter")).state, key("down")).state, key("down")).state, key("enter")).state
+  models = send(send(typed(models, "sk-key"), key("enter")).state, { type: "models", reply: { ok: true, provider: "openrouter", models: ["a/one", "b/two"] } }).state
   models = send(models, key("down")).state
   assert.equal(marked(models).length, 1)
   assert.match(marked(models)[0]!, />\s*b\/two/)
 
-  const connected = send(send(send(ready(), key("enter")).state, key("down")).state, key("down")).state
+  const connected = send(send(ready(), key("enter")).state, key("down")).state
   const openai = send(connected, key("enter")).state
   const toInterface = send(send(typed(openai, "sk-1"), key("enter")).state, { type: "connected", reply: { ok: true, provider: "openai", models: {} } }).state
   assert.equal(toInterface.step, "interface")
@@ -893,9 +868,9 @@ test("without colour the pointer is underlined and a held button changes again",
 test("the step total on the provider screen is the one the key screen shows", () => {
   const total = (state: SetupState) =>
     plain(renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.join("\n")).match(/Step \d of (\d)/)?.[1]
-  const atProvider = send(ready(), key("enter")).state
-  // AnyModel has no built-in models (a model step follows); OpenAI has (it does not).
-  const openai = send(send(atProvider, key("down")).state, key("down")).state
+  // OpenRouter has no built-in models (a model step follows); OpenAI has (it does not).
+  const atProvider = send(send(send(ready(), key("enter")).state, key("down")).state, key("down")).state
+  const openai = send(send(ready(), key("enter")).state, key("down")).state
   for (const [onProvider, expected] of [[atProvider, "4"], [openai, "3"]] as const) {
     assert.equal(total(onProvider), expected)
     assert.equal(total(send(onProvider, key("enter")).state), expected)

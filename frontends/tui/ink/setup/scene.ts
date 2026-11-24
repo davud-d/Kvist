@@ -10,8 +10,6 @@ import {
   type InterfaceId,
   KEY_PAGES,
   MORE_PROVIDERS,
-  RECOMMENDED_PROVIDER,
-  REGISTERABLE_PROVIDER,
   BUILD_TOOLS,
   NEEDS_RIGHTS,
   choiceRows,
@@ -207,7 +205,7 @@ const text = (value: string, tone: Tone = "text"): PanelLine => ({ segments: [{ 
 const blank = (): PanelLine => text("")
 const paragraph = (value: string, width: number, tone: Tone = "text"): PanelLine[] => wrapText(value, width).map((line) => text(line, tone))
 
-function button(label: string, id: "primary" | "back" | "quit" | "register" | "folder" | "anyway" | "skip", tone: Tone): Segment {
+function button(label: string, id: "primary" | "back" | "quit" | "folder" | "anyway" | "skip", tone: Tone): Segment {
   return { text: ` ${label} `, tone, hit: { kind: "button", id } }
 }
 
@@ -364,8 +362,7 @@ function providerLines(state: SetupState, strings: Strings, width: number): Pane
   const offered = offeredProviders(state)
   const labelWidth = Math.min(18, Math.max(...offered.map((provider) => provider.label.length), strings.moreProviders.length) + 2)
   offered.forEach((provider, index) => {
-    const tag = provider.id === RECOMMENDED_PROVIDER ? `(${strings.recommended})` : ""
-    lines.push(optionRow(index, state.providerIndex === index, provider.label, strings.providerBlurbs[provider.id] ?? "", tag, width, labelWidth))
+    lines.push(optionRow(index, state.providerIndex === index, provider.label, strings.providerBlurbs[provider.id] ?? "", "", width, labelWidth))
   })
   lines.push(optionRow(offered.length, state.providerIndex === offered.length, strings.moreProviders, strings.moreProvidersBlurb, "", width, labelWidth))
   if (state.catalog === "failed") lines.push(blank(), text(`${strings.catalogFailed} ${state.error}`.trim(), "err"))
@@ -629,11 +626,7 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       if (prefix && state.key.trim() && !state.key.trim().startsWith(prefix)) lines.push(text(strings.wrongPrefix(label, prefix), "warm"))
       const failure = failureLines(state, strings, width)
       lines.push(...failure, ...(failure.length ? [blank()] : []))
-      if (provider?.id === REGISTERABLE_PROVIDER) {
-        if (state.registration?.opened) lines.push(text(strings.registrationOpened, "ok"))
-        else if (state.registration?.url) lines.push(text(strings.registrationNoBrowser, "dim"), text(state.registration.url, "accent"))
-        else lines.push(buttons(button(strings.openRegistration, "register", "secondary")))
-      } else if (provider && KEY_PAGES[provider.id]) {
+      if (provider && KEY_PAGES[provider.id]) {
         lines.push({ segments: [{ text: `${strings.getKey}: `, tone: "dim" }, { text: KEY_PAGES[provider.id]!, tone: "accent" }] })
       }
       lines.push(blank(), buttons(button(strings.continue, "primary", "primary"), button(strings.back, "back", "secondary")))
@@ -656,7 +649,7 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       const idWidth = Math.min(width - 10, Math.max(0, ...shown.map((id) => id.length)))
       shown.forEach((id, offset) => {
         const index = first + offset
-        lines.push(optionRow(index, index === state.modelIndex, id, "", state.models.labels[id] ?? "", width, idWidth, false))
+        lines.push(optionRow(index, index === state.modelIndex, id, "", "", width, idWidth, false))
       })
       lines.push(...failureLines(state, strings, width))
       lines.push(blank(), buttons(button(strings.continue, "primary", "primary"), button(strings.back, "back", "secondary")))

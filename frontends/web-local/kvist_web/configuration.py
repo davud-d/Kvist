@@ -12,7 +12,6 @@ import threading
 from kernel.llm import llm_clients as llm
 
 from kernel.config import user_config as config
-from kernel.llm.anymodel_onboarding import ANYMODEL_DEFAULT_MODELS, ANYMODEL_REGISTER_URL
 from kernel.config.config_info import build_config_info
 from kernel.providers.chatgpt_auth import account_status
 # The manifest's own builders: the status chips need roles and reasoning levels with
@@ -26,7 +25,7 @@ ROLE_CHOICES = frozenset(entry["value"] for entry in _roles())
 
 def configuration_info() -> dict:
     info = build_config_info()
-    provider = os.getenv("AGENT_LLM_PROVIDER") or config.get_saved_provider_or_none() or llm.DEFAULT_BLANK_START_PROVIDER
+    provider = os.getenv("AGENT_LLM_PROVIDER") or config.get_saved_provider_or_none() or ""
     entries = info["providers"] + info["custom_providers"]
     selected = next((entry for entry in entries if entry["id"] == provider), None)
     for entry in entries:
@@ -44,9 +43,7 @@ def configuration_info() -> dict:
     info.update(
         provider=provider,
         setup_required=not selected or not selected["has_credentials"] or any(not v for v in selected["defaults"].values()),
-        registration_url=ANYMODEL_REGISTER_URL,
         chatgpt_accounts=account_status(),
-        recommended_models={llm.DEFAULT_BLANK_START_PROVIDER: list(ANYMODEL_DEFAULT_MODELS)},
         model_roles=list(llm.MODEL_ROLES),
         effort=config.get_saved_reasoning_effort(),
         effort_levels=list(EFFORT_LEVELS),
@@ -94,33 +91,17 @@ def _credentials(entry: dict, payload: dict) -> tuple[dict, dict]:
     return values, supplied
 
 
-def _verify_anymodel_key(key: str) -> None:
-    """Tell a refused AnyModel key from an unreachable AnyModel; the first run shows the message as is."""
-    from kernel.providers.anymodel_pricing import AnyModelAuthError, AnyModelUnavailableError, fetch_model_coefficients
-
-    try:
-        fetch_model_coefficients(key, force_refresh=True)
-    except AnyModelAuthError as error:
-        raise ValueError("AnyModel did not accept this key. Copy it again from your AnyModel account.") from error
-    except AnyModelUnavailableError as error:
-        raise ValueError("Couldn't reach AnyModel. Check your connection, then try again.") from error
-
-
 def model_catalog(payload: dict) -> dict:
     entry = _provider(payload)
     credentials, supplied = _credentials(entry, payload)
     if not entry["custom"] and entry.get("auth_type") != "oauth" and not any(credentials.get(f["id"]) for f in entry["credential_fields"]):
         raise ValueError("Enter an API key to load models.")
-    if entry["id"] == llm.DEFAULT_BLANK_START_PROVIDER and supplied:
-        _verify_anymodel_key(credentials["anymodel_api_key"])
     models, error = llm.fetch_available_models(entry["id"], credentials, force_refresh=True)
     if error:
         # Provider errors can contain request bodies; don't send raw exceptions
         # containing freshly entered credentials back to the browser.
         raise ValueError("Could not load models. Check the API key, provider address and connection.")
-    coefficients = llm.model_coefficient_labels(entry["id"], credentials)
-    # Clients that predate the multiplier read `models` alone; the key is left out when empty.
-    return {"models": models, **({"coefficients": coefficients} if coefficients else {})}
+    return {"models": models}
 
 
 def save_configuration(payload: dict) -> dict:
@@ -151,14 +132,7 @@ def save_configuration(payload: dict) -> dict:
         if issues:
             raise ValueError("\n".join(issues))
         if supplied or payload.get("base_url", "").strip():
-            if provider == llm.DEFAULT_BLANK_START_PROVIDER:
-                from kernel.providers.anymodel_pricing import fetch_model_coefficients
-                try:
-                    fetch_model_coefficients(credentials["anymodel_api_key"], force_refresh=True)
-                except Exception as error:
-                    raise ValueError("AnyModel could not verify this key. Check the key and your connection; nothing was saved.") from error
-            else:
-                model_catalog(payload)
+            model_catalog(payload)
         # Use the core's existing atomic configuration writers, not a second
         # credential store owned by the web frontend.
         if entry["custom"]:

@@ -28,8 +28,8 @@ import java.util.concurrent.TimeoutException
 // The newest events of a session: enough for well over a hundred turns of a typical run.
 private const val HISTORY_LIMIT = 1000
 
-// The provider ids offered on first run, in priority order (same list as the VS Code panel).
-private val FIRST_RUN_PROVIDERS = listOf("anymodel", "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow", "chatgpt")
+// The provider ids offered on first run, in order (same list as the VS Code panel).
+private val FIRST_RUN_PROVIDERS = listOf("openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow", "chatgpt")
 
 private const val CORE_STOP_WAIT_SECONDS = 5L
 
@@ -93,7 +93,6 @@ internal class KvistChatHost(
                 setProvider(message.stringField("provider").orEmpty(), message.stringField("apiKey").orEmpty(), message.stringField("model").orEmpty())
             }
             "listModels" -> background { listModels(message.stringField("provider").orEmpty(), message.stringField("apiKey").orEmpty()) }
-            "openRegistration" -> background { openRegistration(message.stringField("provider").orEmpty()) }
             "submit" -> send { it.send(message.stringField("text").orEmpty()) }
             "command" -> send { it.sendCommand(message.stringField("name").orEmpty(), message.stringList("args")) }
             "respond" -> respond(message)
@@ -285,17 +284,7 @@ internal class KvistChatHost(
             addProperty("provider", provider)
             addProperty("ok", result.booleanField("ok") == true)
             add("models", jsonArray(result.stringList("models")))
-            add("coefficients", result.get("coefficients") as? JsonObject ?: JsonObject())
             result.stringField("error")?.let { addProperty("error", it) }
-        })
-    }
-
-    private fun openRegistration(provider: String) {
-        val result = configOp("open-registration", JsonObject().apply { addProperty("provider", provider) })
-        post(message("registrationOpened") {
-            addProperty("provider", provider)
-            addProperty("opened", result.booleanField("opened") == true)
-            addProperty("url", result.stringField("url"))
         })
     }
 

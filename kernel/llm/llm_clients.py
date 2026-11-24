@@ -21,7 +21,6 @@ from urllib.parse import urlparse
 from kernel.context.language_utils import choose_localized_text
 from kernel.llm.prompt_prefix import split_style_tail
 from kernel.llm.provider_registry import ANYMODEL_PROVIDER, KIMI_PROVIDER, MANUAL_OPENAI_PROVIDERS
-from kernel.providers.anymodel_pricing import coefficient_labels
 from kernel.sandbox.redaction import redact_text
 
 
@@ -65,27 +64,16 @@ DEEPSEEK_BASE_URL_KEY = "deepseek_base_url"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 
 
-# The blank-start default: a fresh install with no saved provider and no
-# AGENT_LLM_PROVIDER override falls to this one (see
-# main.resolve_startup_provider) instead of forcing every first run through
-# the generic provider picker. It stays a plain manual-tier entry above —
-# this constant only decides what "nothing configured yet" resolves to.
-DEFAULT_BLANK_START_PROVIDER = ANYMODEL_PROVIDER
-
 MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
 
-# AnyModel leads the list: it is a partner provider and the blank-start
-# default, so the frontends fed from this tuple show it first. It stays a
-# plain manual-tier entry in MANUAL_OPENAI_PROVIDERS above, and is skipped in
-# the manual tail to keep the tuple free of duplicates.
 SUPPORTED_LLM_PROVIDERS = (
-    ANYMODEL_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
+    OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
     OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER,
     FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER, CHATGPT_PROVIDER,
 ) + tuple(
     provider
     for provider in MANUAL_OPENAI_PROVIDERS
-    if provider not in (ANYMODEL_PROVIDER, OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER)
+    if provider not in (OPENCODE_GO_PROVIDER, OPENCODE_ZEN_PROVIDER)
 )
 
 # Manual-tier providers with more than one known regional/mirror endpoint. A
@@ -999,19 +987,6 @@ def fetch_available_models(
     )
 
 
-def model_coefficient_labels(provider: str, credentials: dict[str, str]) -> dict[str, str]:
-    """``{model_id: "x1.5"}``: the price multiplier a picker shows next to a model's name.
-
-    Only AnyModel prices its catalog this way; every other provider gets ``{}``.
-    """
-    if normalize_provider(provider) != ANYMODEL_PROVIDER:
-        return {}
-    api_key = str(credentials.get(MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]["api_key_key"]) or "").strip()
-    if not api_key:
-        return {}
-    return coefficient_labels(api_key)
-
-
 def resolve_accessible_models(
     provider: str,
     requested_models: dict[str, str],
@@ -1152,9 +1127,8 @@ def provider_supports_streaming(provider: str) -> bool:
     chat completions correctly but break on ``stream=true``. Streaming is opt-in
     per provider via its saved ``streaming`` flag, defaulting to off.
 
-    AnyModel is listed because it is the blank-start default and its streaming
-    was verified live. Kimi Code documents streaming Chat Completions on its
-    membership endpoint. OpenCode Go streams reasoning and sends none without
+    AnyModel's streaming was verified live. Kimi Code documents streaming Chat
+    Completions on its membership endpoint. OpenCode Go streams reasoning and sends none without
     it (see the entry in the return below); the remaining manual tier stays
     unverified.
     """
@@ -1277,24 +1251,17 @@ def validate_model_selection(
 def get_model_options(
     provider: str,
     available_models: list[str] | set[str] | None = None,
-    coefficients: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """Return selectable model options for the given provider.
 
     Pass ``available_models`` (from :func:`fetch_available_models`) to build
     the list from the provider's live /v1/models catalog; when it is empty or
-    omitted, the static curated hints are used instead. ``coefficients``
-    (from :func:`model_coefficient_labels`) puts each model's price multiplier
-    after its name in the label; the value stays the bare id.
+    omitted, the static curated hints are used instead.
     """
     if available_models is not None:
         live_ids = sorted({str(item).strip() for item in available_models if str(item).strip()})
         if live_ids:
-            labels = coefficients or {}
-            return [
-                {"value": item, "label": f"{item}  {labels[item]}" if item in labels else item, "description": ""}
-                for item in live_ids
-            ]
+            return [{"value": item, "label": item, "description": ""} for item in live_ids]
     normalized_provider = normalize_provider(provider)
     if (
         normalized_provider == OMNIROUTE_PROVIDER

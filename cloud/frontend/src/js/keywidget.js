@@ -177,9 +177,9 @@ export function keyWidget({ providers, saved, onValid }) {
       h("legend.sr", { text: t("onboarding.modelTitle") }),
       providers.map((item) => {
         const name = item.id === "other" ? t("onboarding.otherName") : item.label;
-        const note = item.partner ? t("onboarding.partnerNote") : item.id === "other" ? t("onboarding.otherNote")
+        const note = item.id === "other" ? t("onboarding.otherNote")
           : item.sign_in ? t("onboarding.signInNote") : "";
-        return h(item.partner ? "label.tile.partner" : "label.tile", {},
+        return h("label.tile", {},
           h("input", {
             type: "radio", name: "provider", value: item.id, checked: item.id === provider,
             onchange: () => {
@@ -190,7 +190,6 @@ export function keyWidget({ providers, saved, onValid }) {
               keyInput.focus({ preventScroll: true });
             },
           }),
-          item.partner ? h("span.badge", { text: t("onboarding.partnerBadge") }) : null,
           h("span.name", { text: name }),
           item.keys_page
             ? h("a.where.inline", { href: item.keys_page, target: "_blank", rel: "noopener",

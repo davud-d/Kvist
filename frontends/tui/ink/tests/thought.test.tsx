@@ -10,7 +10,7 @@ import { ClaudeItemView } from "../ui/skins/claude-code/claude.js"
 import { ItemView } from "../ui/skins/kvist/items.js"
 import { applySkin } from "../ui/theme.js"
 
-const view = { workspace: "/work/project", info: { provider: "anymodel", model: "sonnet", role: "chat", session: "s", kvistVersion: "1.2.3" }, effort: "high", pointer: null, expanded: false }
+const view = { workspace: "/work/project", info: { provider: "deepseek", model: "sonnet", role: "chat", session: "s", kvistVersion: "1.2.3" }, effort: "high", pointer: null, expanded: false }
 const thought: Item = { id: 1, kind: "thought", seconds: 3, text: "**Reading the failure**\nthe fixture is stale" }
 
 afterEach(() => applySkin("ink"))

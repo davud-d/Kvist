@@ -4,7 +4,6 @@ import json
 import pytest
 
 from kernel.config import user_config
-from kernel.providers import anymodel_pricing
 from kvist_web import configuration as service
 from kvist_web.ssh.config import ssh_aliases
 from kvist_web.events import EventBroker
@@ -15,62 +14,48 @@ from kvist_web.bridge.service import BridgeApplication
 
 @pytest.fixture(autouse=True)
 def clean_provider_environment(monkeypatch):
-    for key in ('AGENT_LLM_PROVIDER', 'AGENT_FAST_MODEL', 'AGENT_SMART_MODEL', 'AGENT_REASONING_EFFORT', 'ANYMODEL_API_KEY'):
+    for key in ('AGENT_LLM_PROVIDER', 'AGENT_FAST_MODEL', 'AGENT_SMART_MODEL', 'AGENT_REASONING_EFFORT', 'DEEPSEEK_API_KEY'):
         monkeypatch.delenv(key, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def offline_catalog(monkeypatch):
+    monkeypatch.setattr(service.llm, 'fetch_available_models', lambda *a, **k: (['example/model'], None))
+
+
 def payload(**changes):
-    value = dict(provider='anymodel', models={'fast': 'example/model', 'smart': 'example/model'}, effort='high', credentials={'anymodel_api_key': 'test-only-secret'})
+    value = dict(provider='deepseek', models={'fast': 'example/model', 'smart': 'example/model'}, effort='high', credentials={'deepseek_api_key': 'test-only-secret'})
     value.update(changes)
     return value
 
 
-def test_blank_start_offers_anymodel_without_starting_a_core():
+def test_blank_start_needs_setup_without_starting_a_core():
     info = service.configuration_info()
     assert info['setup_required']
-    assert info['provider'] == 'anymodel'
-    assert info['registration_url'] == 'https://anymodel.org/app/register'
+    assert info['provider'] == ''
     assert info['model_roles'] == ['fast', 'smart']
     assert 'max' in info['effort_levels']
-
-
-def test_invalid_anymodel_key_is_not_saved_or_echoed(monkeypatch):
-    def fail(*args, **kwargs):
-        raise ValueError('provider echoed test-only-secret')
-    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', fail)
-    with pytest.raises(ValueError, match='nothing was saved') as error:
-        service.save_configuration(payload())
-    assert 'test-only-secret' not in str(error.value)
-    assert user_config.load_user_config() == {}
+    assert 'registration_url' not in info
+    assert 'recommended_models' not in info
 
 
 def test_setup_uses_existing_storage_and_returns_presence_only(monkeypatch):
-    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', lambda *a, **k: {})
     info = service.save_configuration(payload())
     assert info['setup_required'] is False
     assert 'test-only-secret' not in json.dumps(info)
     saved = user_config.load_user_config()
-    assert saved['anymodel_api_key'] == 'test-only-secret'
-    assert user_config.get_saved_models('anymodel')['fast'] == 'example/model'
+    assert saved['deepseek_api_key'] == 'test-only-secret'
+    assert user_config.get_saved_models('deepseek')['fast'] == 'example/model'
     assert user_config.get_saved_reasoning_effort() == 'high'
-    assert user_config.get_saved_provider_or_none() == 'anymodel'
+    assert user_config.get_saved_provider_or_none() == 'deepseek'
     # An empty password means retain, never erase the saved credential.
     service.save_configuration(payload(credentials={}))
-    assert user_config.load_user_config()['anymodel_api_key'] == 'test-only-secret'
-
-
-def test_model_catalog_sends_the_multipliers_beside_the_unchanged_id_list(monkeypatch):
-    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', lambda *a, **k: {})
-    monkeypatch.setattr(service.llm, 'fetch_available_models', lambda *a, **k: (['am/free', 'am/paid'], None))
-    monkeypatch.setattr(service.llm, 'model_coefficient_labels', lambda provider, credentials: {'am/free': 'x0'})
-    assert service.model_catalog(payload()) == {'models': ['am/free', 'am/paid'], 'coefficients': {'am/free': 'x0'}}
+    assert user_config.load_user_config()['deepseek_api_key'] == 'test-only-secret'
 
 
 def test_model_catalog_is_read_only_and_does_not_echo_provider_errors(monkeypatch):
-    # A typed AnyModel key is checked before the catalog (the first run tells a refused key apart).
-    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', lambda *a, **k: {})
     def discover(provider, credentials, **kwargs):
-        assert credentials['anymodel_api_key'] == 'test-only-secret'
+        assert credentials['deepseek_api_key'] == 'test-only-secret'
         return ['example/model'], None
     monkeypatch.setattr(service.llm, 'fetch_available_models', discover)
     assert service.model_catalog(payload()) == {'models': ['example/model']}
@@ -149,25 +134,10 @@ def test_chips_get_roles_reasoning_descriptions_and_save_a_role(monkeypatch):
     assert [r['value'] for r in info['roles']][:2] == ['auto', 'coder']
     assert all(r['description'] for r in info['roles'])
     assert [e['value'] for e in info['effort_info']] == info['effort_levels']
-    assert info['recommended_models'] == {'anymodel': []}
-    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', lambda *a, **k: {})
     service.save_configuration(payload(role='reader'))
     assert user_config.get_saved_role() == 'reader'
     with pytest.raises(ValueError, match='Unknown role'):
         service.save_configuration(payload(role='admin'))
-
-
-@pytest.mark.parametrize('error, message', [
-    (anymodel_pricing.AnyModelAuthError('401'), 'did not accept this key'),
-    (anymodel_pricing.AnyModelUnavailableError('timeout'), "Couldn't reach AnyModel"),
-])
-def test_first_run_catalog_tells_a_refused_key_from_an_unreachable_anymodel(monkeypatch, error, message):
-    def fail(*args, **kwargs):
-        raise error
-    monkeypatch.setattr(anymodel_pricing, 'fetch_model_coefficients', fail)
-    with pytest.raises(ValueError, match=message) as raised:
-        service.model_catalog(payload())
-    assert 'test-only-secret' not in str(raised.value)
 
 
 def test_remote_configuration_dispatch_stays_on_remote_runtime(tmp_path):

@@ -27,7 +27,7 @@
 .settings-group .action-grid .setting:first-child { grid-column: 1 / -1; }
 .repo-list { max-height: 220px; overflow-y: auto; }
 
-/* The key dialog: the partner on top, the three usual providers, the rest behind a picker. */
+/* The key dialog: the three usual providers, the rest behind a picker. */
 .provider-more { display: flex; flex-direction: column; gap: 8px; }
 .provider-row { display: flex; width: 100%; }
 .provider-row .seg { flex: 1; }

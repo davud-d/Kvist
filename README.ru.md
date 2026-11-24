@@ -149,11 +149,10 @@ kvist
 
 ## Провайдеры
 
-На чистой машине Kvist предлагает провайдера по умолчанию, [AnyModel](https://anymodel.org):
-нажмите Enter, зарегистрируйтесь в браузере и вставьте ключ. Esc открывает выбор
-другого провайдера, ключ вводится в замаскированном поле `API key:`. Выбор
-сохраняется в `~/.kvist/config.json`. Если `ANYMODEL_API_KEY` уже задан, Kvist
-запускается без вопросов.
+На чистой машине Kvist спрашивает, каким провайдером пользоваться, и принимает
+ключ в замаскированном поле `API key:`. Выбор сохраняется в `~/.kvist/config.json`.
+Если переменная с ключом провайдера (например `OPENAI_API_KEY`) уже задана вместе
+с `AGENT_LLM_PROVIDER`, Kvist запускается без вопросов.
 
 Позже провайдера меняет `/provider`, ключ — `/change-api`, быструю и умную модели —
 `/models`. Полный список провайдеров и настройки каждого — в
@@ -299,8 +298,6 @@ Kvist может обращаться, перечислены ниже; все �
 | OpenAI | значение по умолчанию в SDK `openai`, адреса в `kernel/` нет (`llm/llm_clients.py`: `resolve_openai_accessible_models`) | `api.openai.com/v1` | Только если OpenAI — ваш провайдер |
 | Остальные провайдеры | `llm/provider_registry.py`: `MANUAL_OPENAI_PROVIDERS`; `llm/llm_clients.py`: `REGIONAL_BASE_URL_CANDIDATES` | полный список ниже | Только выбранный вами провайдер |
 | Ваш собственный endpoint | `llm/custom_provider.py`: `normalize_base_url` | адрес, который вы ввели | Только если вы его добавили |
-| AnyModel | `llm/provider_registry.py`: `MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]`; `providers/anymodel_pricing.py`: `ANYMODEL_MODELS_URL` | `anymodel.org/v1`, `anymodel.org/v1/models` (список моделей и цены) | Когда AnyModel — ваш провайдер |
-| Страница регистрации AnyModel | `llm/anymodel_onboarding.py`: `ANYMODEL_REGISTER_URL` | `anymodel.org/app/register` | Открывается в вашем браузере при первом запуске, сам Kvist ничего не отправляет |
 | Вход по подписке ChatGPT | `providers/chatgpt_endpoints.py`: `ISSUER`, `RESOURCE` | `auth.openai.com`, `api.openai.com/v1` | Только если вы входите по подписке ChatGPT |
 | Проверка обновлений | `config/self_update.py`: `RELEASE_API` | `api.github.com` (простой GET списка релиза, в запросе ничего о вас) | Вскоре после запуска, затем раз в 6 часов, пока не найдена новая версия; `auto_update: false` или `KVIST_AUTO_UPDATE=0` отключают |
 | Загрузка обновления | `config/self_update.py`: `DOWNLOAD_BASE` | `github.com/davud-d/Kvist/releases` | Только когда вы набрали `/update` |
@@ -358,7 +355,6 @@ Kvist никогда не запрашивает.
 - `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["iflytek-spark"]`: https://spark-api-open.xf-yun.com/v1
 - `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["scaleway"]`: https://api.scaleway.ai/v1
 - `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS["inception"]`: https://api.inceptionlabs.ai/v1
-- `provider_registry.py`, `MANUAL_OPENAI_PROVIDERS[ANYMODEL_PROVIDER]`: https://anymodel.org/v1
 
 Региональные альтернативы, которые пробуются для того же провайдера:
 

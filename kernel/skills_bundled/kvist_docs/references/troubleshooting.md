@@ -9,7 +9,7 @@ nothing. Only the optional last step touches the network: it asks, then sends th
 | Symptom | Likely cause and what to try |
 | --- | --- |
 | Starts in the plain terminal instead of the chosen look | Node.js, the built bundle, Bun, kitty graphics or a TTY is missing; Kvist printed the reason; `/doctor` lists the prerequisite |
-| Asks for the key again | The key was not saved; run `/change-api` and watch for a rejected key; `ANYMODEL_API_KEY` set in the environment skips the question |
+| Asks for the key again | The key was not saved; run `/change-api` and watch for a rejected key; the provider's key variable set in the environment skips the question |
 | A request is rejected as too long | Kvist lowers the budget and resends by itself; `/context` shows usage; `/new` frees it |
 | Requests are slow or rate-limited | `/settings-api`: interval, timeout, retries; a cheaper fast model with `/models` |
 | The model ignores tools or the JSON protocol | The run falls back by itself; weak models may need `/models` to a smarter one or `/effort` higher |

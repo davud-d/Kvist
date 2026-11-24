@@ -9,7 +9,7 @@ import { actionTarget, exploreSummary, initialState, lastInflight, reduce, reque
 import { relaunchOf, remoteNotice } from "../../../tui/ink/remote"
 import { findProvider, type ConfigInfo, type ProviderInfo, type SessionInfo, type ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
-import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
+import { FirstRun, type ModelListState } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Home } from "./home"
 import { Icon, Ring } from "./icons"
@@ -58,8 +58,7 @@ export function App() {
   const [needsSetup, setNeedsSetup] = useState<ProviderInfo[] | null>(null)
   const [setupBusy, setSetupBusy] = useState(false)
   const [setupError, setSetupError] = useState("")
-  const [modelList, setModelList] = useState<ModelListState>({ provider: "", busy: false, options: [], coefficients: {}, error: "" })
-  const [registration, setRegistration] = useState<RegistrationState | null>(null)
+  const [modelList, setModelList] = useState<ModelListState>({ provider: "", busy: false, options: [], error: "" })
   // When each shell command started, by step: the light around it begins after a couple of seconds.
   const shellStarts = useRef(new Map<number, number>())
   const bottom = useRef<HTMLDivElement>(null)
@@ -103,12 +102,8 @@ export function App() {
   }
 
   function listModels(provider: string, apiKey: string): void {
-    setModelList({ provider, busy: true, options: [], coefficients: {}, error: "" })
+    setModelList({ provider, busy: true, options: [], error: "" })
     post({ type: "listModels", provider, apiKey })
-  }
-
-  function openRegistration(provider: string): void {
-    post({ type: "openRegistration", provider })
   }
 
   useEffect(() => {
@@ -177,9 +172,7 @@ export function App() {
           setSetupError("")
           return setNeedsSetup(null)
         case "modelList":
-          return setModelList({ provider: message.provider, busy: false, options: message.models, coefficients: message.coefficients, error: message.ok ? message.error ?? "" : message.error || "Could not load models." })
-        case "registrationOpened":
-          return setRegistration({ provider: message.provider, opened: message.opened, url: message.url })
+          return setModelList({ provider: message.provider, busy: false, options: message.models, error: message.ok ? message.error ?? "" : message.error || "Could not load models." })
       }
     }
     const stop = onMessage(handle)
@@ -360,8 +353,6 @@ export function App() {
           submit={submitProvider}
           modelList={modelList}
           onListModels={listModels}
-          registration={registration}
-          onOpenRegistration={openRegistration}
         />
       </>
     )

@@ -17,7 +17,7 @@ import { applySkin } from "../ui/theme.js"
 
 const plain = (text: string | undefined) => (text ?? "").replace(/\x1b\[[0-9;]*m/g, "")
 const ok = { ok: true, summary: "Read 120 lines", output: "", exit_code: null, path: null, first_line: null }
-const view = { workspace: "/work/project", info: { provider: "anymodel", model: "sonnet", role: "coder", session: "s", kvistVersion: "1.2.3" }, effort: "high", pointer: null, expanded: false }
+const view = { workspace: "/work/project", info: { provider: "deepseek", model: "sonnet", role: "coder", session: "s", kvistVersion: "1.2.3" }, effort: "high", pointer: null, expanded: false }
 
 before(() => applySkin("claude"))
 after(() => applySkin("ink"))
@@ -49,7 +49,7 @@ test("the compact logo is three rows of half blocks, the large one six rows of d
 test("the banner names Kvist with its version, the model and effort, the provider and the workspace", () => {
   const out = frame(createElement(ClaudeItemView, { item: item({ kind: "banner" }), showDebug: false }))
   assert.match(out, /Kvist v1\.2\.3/)
-  assert.match(out, /sonnet with high effort · anymodel/)
+  assert.match(out, /sonnet with high effort · deepseek/)
   assert.match(out, /\/work\/project/)
   assert.doesNotMatch(out, /Claude/)
 })
