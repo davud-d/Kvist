@@ -155,8 +155,7 @@ a = Analysis(
         *_node_datas,
         *_voice_datas,
     ],
-    # jwt: chatgpt_auth loads it lazily, so PyInstaller no longer sees the import.
-    hiddenimports=[*local_hiddenimports, 'jwt'],
+    hiddenimports=local_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

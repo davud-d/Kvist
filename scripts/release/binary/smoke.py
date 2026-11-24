@@ -9,6 +9,7 @@ with no Node.js on PATH, which only works if it runs the packed one.
 """
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import subprocess
@@ -93,6 +94,8 @@ def main() -> int:
         print(__doc__)
         return 2
     binary = Path(sys.argv[1]).resolve(strict=True)
+    # A hang would otherwise run into the job's 10-minute cut-off with nothing to show where it sat.
+    faulthandler.dump_traceback_later(240, exit=True)
     check_version(binary)
     check_session_op(binary)
     check_archive(binary)
