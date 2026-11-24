@@ -196,6 +196,10 @@ def _isolate_home(request, monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    # On POSIX user_home() reads the passwd entry and ignores HOME, so tmp_path is never "the home
+    # directory" of a test workspace there. Windows has only USERPROFILE, which this fixture just
+    # pointed at tmp_path, so every test workspace would count as the home and run outside the sandbox.
+    monkeypatch.setattr("kernel.sandbox.terminal.user_home", lambda: None)
 
 
 @pytest.fixture(autouse=True)

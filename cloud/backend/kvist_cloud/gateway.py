@@ -373,7 +373,10 @@ def _exit(app: FastAPI, machine_id: int, message: dict) -> None:
             # The previous run of this session ending: the next one is already waiting for the machine.
             return
         before = task.status
-        reason = "machine_restarted" if getattr(app.state, "shutting_down", False) else str(message.get("reason", "crashed"))[:60]
+        if getattr(app.state, "shutting_down", False):
+            reason = "machine_restarted"
+        else:
+            reason = str(message.get("reason", "crashed"))[:60]
         tasks.apply_exit(task, reason)
         if task.status in TaskStatus.FINISHED:
             app.state.screens.forget_task(task.id)

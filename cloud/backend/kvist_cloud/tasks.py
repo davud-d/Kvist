@@ -642,7 +642,8 @@ async def answer_input(
         raise ApiError(503, "machine_offline", "The machine is not reachable. / Машина недоступна.")
     # The core closes a request itself only on a timeout or a cancel. Without this line an answered one stays "open"
     # in the stored history and every page that reloads it asks the person the same question again.
-    ingest_event(request.app, db, task, {"type": "input_closed", "request_id": payload.request_id, "reason": "answered"})
+    closed = {"type": "input_closed", "request_id": payload.request_id, "reason": "answered"}
+    ingest_event(request.app, db, task, closed)
     db.commit()
     return {"ok": True}
 
