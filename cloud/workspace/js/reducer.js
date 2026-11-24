@@ -257,6 +257,9 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "task_state":
       agent.taskState = ev.state;
+      // The core closes a dialog itself only on a timeout or a cancel; an answered one just stops being asked. Any state
+      // but "awaiting_input" means nobody is waiting for an answer, so a dialog still open is a leftover of the history.
+      if (ev.state !== "awaiting_input") agent.dialogs = [];
       return;
     case "step": {
       settleStreams(agent);
@@ -377,6 +380,7 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "final":
       settleStreams(agent);
+      agent.dialogs = [];
       if (repeatsLastReply(agent, ev.message)) return;
       if (ev.closed) push(agent, { kind: "reply", text: ev.message, live: false });
       else push(agent, { kind: "final", text: ev.message, outcome: ev.outcome ?? "done", paused: ev.paused === true });
@@ -390,6 +394,7 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "turn_end":
       settleStreams(agent);
+      agent.dialogs = [];
       for (const call of agent.calls.values()) {
         if (call.phase !== "run") continue;
         call.phase = "fail";

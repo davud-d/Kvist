@@ -66,6 +66,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        # From here on a runner that reports an exit was stopped by this restart, not by a fault of its own.
+        app.state.shutting_down = True
         for loop in loops:
             loop.cancel()
         for task in list(app.state.background):

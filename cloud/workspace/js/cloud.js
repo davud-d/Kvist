@@ -132,7 +132,11 @@ const PAUSE_REASONS = ["hours_exhausted", "provider_unavailable", "invalid_key",
 export function warnings(state, agent = null, extra = []) {
   const found = [...extra];
   const { sub, key, machine } = state;
-  if (state.ready && !state.projects?.length) found.push({ id: "no-projects", level: "warn", text: "warn no projects", action: "project" });
+  // The server is being replaced: what the page holds may be stale and the answers are not coming, so say only that.
+  if (state.updating) return [{ id: "updating", level: "warn", text: "warn updating" }, ...found];
+  // Before the account has loaded there is no plan, key or machine yet; showing "none" would flash false alarms.
+  if (!state.ready) return withTask(found, agent);
+  if (!state.projects?.length) found.push({ id: "no-projects", level: "warn", text: "warn no projects", action: "project" });
   if (!sub || sub.status === "none") found.push({ id: "no-plan", level: "warn", text: "warn no plan", action: "start" });
   else if (sub.balance_seconds <= 0) found.push({ id: "no-hours", level: "error", text: "warn no hours", action: "plan" });
   else if (sub.balance_seconds < LOW_SECONDS || share(sub.balance_seconds, sub.plan_seconds) < LOW_SHARE) {
@@ -150,6 +154,11 @@ export function warnings(state, agent = null, extra = []) {
     found.push({ id: "machine-error", level: "error", text: known ? `warn machine ${detail}` : "warn machine error",
       value: detail, action: detail === "create_failed" ? undefined : "machine" });
   }
+  return withTask(found, agent);
+}
+
+/** What the open task itself says: it stopped, and why. */
+function withTask(found, agent) {
   const cloud = agent?.cloud;
   if (cloud?.status === "paused" && PAUSE_REASONS.includes(cloud.reason)) {
     found.push({ id: `paused-${cloud.reason}`, level: "warn", text: "warn paused", reason: `pause: ${cloud.reason}`, action: cloud.reason === "invalid_key" ? "key" : cloud.reason === "hours_exhausted" ? "plan" : undefined });
@@ -160,7 +169,7 @@ export function warnings(state, agent = null, extra = []) {
 
 // -- the account ----------------------------------------------------------------------------
 
-export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], projects: [], ready: false,
+export const account = { me: null, machine: null, sub: null, feed: [], key: { set: false }, providers: [], tasks: [], projects: [], ready: false, updating: false,
   // What "/" offers: Kvist's own list (its last manifest the cloud kept) and what the cloud takes away from it.
   commands: { hidden: [], manifest: null } };
 
@@ -177,6 +186,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The server stopped answering, most likely because a new release is being switched in. Say so, wait until it is
+ * healthy again and load the page once more, so the person gets the new code without doing anything.
+ */
+function markUpdating() {
+  if (account.updating) return;
+  account.updating = true;
+  changed();
+  const poll = async () => {
+    try {
+      const reply = await fetch("/healthz", { cache: "no-store" });
+      if (reply.ok) return location.reload();
+    } catch {
+      // Still down: ask again.
+    }
+    setTimeout(poll, 2000);
+  };
+  setTimeout(poll, 2000);
+}
+
 export async function api(path, { method = "GET", body } = {}) {
   let response;
   try {
@@ -187,8 +216,11 @@ export async function api(path, { method = "GET", body } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
+    markUpdating();
     throw new ApiError(0, "network", "No connection. / Нет связи.");
   }
+  // 502/503/504 come from the proxy while the server restarts for a new release.
+  if ([502, 503, 504].includes(response.status)) markUpdating();
   if (response.status === 401) {
     location.assign(loginUrl());
     throw new ApiError(401, "signed_out", "Signed out. / Вход не выполнен.");

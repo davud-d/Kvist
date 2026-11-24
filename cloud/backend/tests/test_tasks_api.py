@@ -208,6 +208,10 @@ def test_cancel_and_answer_go_to_the_runner(client_factory, engine, fake_provide
         assert client.post(f"/api/tasks/{task_id}/input", json={"request_id": "r1", "approved": True}).json()["ok"]
         assert ws.receive_json() == {"type": "input_response", "task_id": task_id,
                                      "response": {"request_id": "r1", "approved": True}}
+        # The answer closes the request in the stored history, so a page that reloads it does not ask again.
+        closed = [row["event"] for row in client.get(f"/api/tasks/{task_id}/events?after=0").json()["events"]
+                  if row["event"]["type"] == "input_closed"]
+        assert closed == [{"type": "input_closed", "request_id": "r1", "reason": "answered"}]
         client.post(f"/api/tasks/{task_id}/cancel")
         assert ws.receive_json() == {"type": "control", "task_id": task_id, "action": "cancel"}
         relay(ws, task_id, {"type": "task_state", "state": "cancelled", "reason": ""})
