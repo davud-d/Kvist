@@ -12,6 +12,7 @@ For example:
 ### IMPORT
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import os
 import platform
 import re
@@ -50,8 +51,24 @@ def _timezone_name(local: datetime) -> str:
     return name if marker else local.strftime("%Z")
 
 
+def _person_timezone() -> ZoneInfo | None:
+    """The zone Kvist Cloud learned from the person's browser or phone; None outside the cloud or when unusable."""
+    name = os.environ.get("KVIST_USER_TZ", "")
+    if not name or os.environ.get("KVIST_CLOUD_WORKSPACE") != "1":
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
 def current_time_context():
     """Returns the current time as 'YYYY-MM-DD Weekday HH:MM:SS Zone (UTC+hh:mm)'."""
+    person_zone = _person_timezone()
+    if person_zone is not None:
+        local = datetime.now(person_zone)
+        offset = local.strftime("%z")
+        return {"current_time": f"{local:%Y-%m-%d %A %H:%M:%S} {person_zone.key} (UTC{offset[:3]}:{offset[3:]}), the person's own time zone"}
     local = datetime.now().astimezone()
     offset = local.strftime("%z")
     text = f"{local:%Y-%m-%d %A %H:%M:%S} {_timezone_name(local)} (UTC{offset[:3]}:{offset[3:]})"

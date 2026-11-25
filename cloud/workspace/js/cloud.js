@@ -212,7 +212,7 @@ export async function api(path, { method = "GET", body } = {}) {
     response = await fetch(path, {
       method,
       credentials: "same-origin",
-      headers: { "X-Kvist-Client": "1", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { "X-Kvist-Client": "1", "X-Time-Zone": Intl.DateTimeFormat().resolvedOptions().timeZone, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {

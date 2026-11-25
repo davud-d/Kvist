@@ -165,3 +165,14 @@ def test_cloud_clock_is_marked_as_the_servers(monkeypatch):
     assert "Netherlands" not in current_time_context()["current_time"]
     monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
     assert "Netherlands" in current_time_context()["current_time"]
+
+
+def test_cloud_clock_is_the_persons_when_the_zone_is_known(monkeypatch):
+    from kernel.context.system_context import current_time_context
+
+    monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
+    monkeypatch.setenv("KVIST_USER_TZ", "Asia/Tokyo")
+    text = current_time_context()["current_time"]
+    assert "Asia/Tokyo (UTC+09:00)" in text and "Netherlands" not in text
+    monkeypatch.setenv("KVIST_USER_TZ", "Not/AZone")
+    assert "Netherlands" in current_time_context()["current_time"]

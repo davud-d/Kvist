@@ -18,6 +18,7 @@ export async function api(path, { method = "GET", body } = {}) {
       credentials: "same-origin",
       headers: {
         "X-Kvist-Client": "1",
+        "X-Time-Zone": Intl.DateTimeFormat().resolvedOptions().timeZone,
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),

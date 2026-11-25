@@ -242,3 +242,20 @@ def test_legal_documents_are_public(client_factory):
                        ("/privacy.pdf", "application/pdf")):
         response = client.get(path)
         assert response.status_code == 200 and response.headers["content-type"].startswith(kind), path
+
+
+def test_timezone_header_is_remembered_and_junk_is_ignored(client_factory):
+    from sqlalchemy import select
+
+    from kvist_cloud.keys import kvist_environment
+    from kvist_cloud.models import User
+
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.get("/api/tasks", headers={"X-Time-Zone": "Asia/Tokyo"}).status_code == 200
+    assert client.get("/api/tasks", headers={"X-Time-Zone": "Not/AZone"}).status_code == 200
+    with client.app.state.session_factory() as db:
+        user = db.scalars(select(User)).one()
+        assert user.timezone == "Asia/Tokyo"
+        user.model_provider = "deepseek"
+        assert kvist_environment(user, "k")["KVIST_USER_TZ"] == "Asia/Tokyo"

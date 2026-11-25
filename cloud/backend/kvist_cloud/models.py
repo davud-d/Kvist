@@ -110,6 +110,8 @@ class User(Base):
     chatgpt_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # When the person ticked both boxes (terms of service and privacy policy) after the first sign-in.
     terms_accepted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # The person's own IANA time zone, as their browser or phone reports it (auth.remember_timezone); "" = not yet seen.
+    timezone: Mapped[str] = mapped_column(String(64), default="", server_default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     # Navigation only, not a schema change: the link is machines.user_id.
     machines: Mapped[list[Machine]] = relationship(back_populates="user")

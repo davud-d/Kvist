@@ -9,6 +9,7 @@ enforced in config.py).
 from __future__ import annotations
 
 import secrets
+import zoneinfo
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Literal
@@ -118,7 +119,20 @@ def ban_view(user: User) -> dict[str, object] | None:
             "reason": user.ban_reason}
 
 
-def current_user(user: User = Depends(signed_user)) -> User:
+def remember_timezone(db: Session, user: User, name: str | None) -> None:
+    """Keep the zone the client reports; a name that is not a real IANA zone is ignored, not an error."""
+    if not name or name == user.timezone or len(name) > 64:
+        return
+    try:
+        zoneinfo.ZoneInfo(name)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        return
+    user.timezone = name
+    db.commit()
+
+
+def current_user(request: Request, user: User = Depends(signed_user), db: Session = Depends(get_db)) -> User:
+    remember_timezone(db, user, request.headers.get("X-Time-Zone"))
     view = ban_view(user)
     if view is not None:
         raise ApiError(403, "banned", "This account is blocked. / Аккаунт заблокирован.", ban=view)

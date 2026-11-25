@@ -260,6 +260,8 @@ def kvist_environment(user: User, key: str, headers: dict[str, str] | None = Non
         env["AGENT_SMART_MODEL"] = user.model_name
     if user.effort:
         env["KVIST_REASONING_EFFORT"] = user.effort
+    if user.timezone:
+        env["KVIST_USER_TZ"] = user.timezone
     return env
 
 
