@@ -41,6 +41,22 @@ _MIME = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp", "GIF": 
          "BMP": "image/bmp", "TIFF": "image/tiff"}
 
 
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def clipboard_names(session: str, names: list[str], now: float | None = None) -> list[str]:
+    """The names a message's pictures are kept under: ``clipboard-<session>-<time>[-n]<suffix>``.
+
+    Whatever the picture was called where it came from (a phone's "IMG_0042", "clipboard.png", a page's own name) says
+    nothing to the model and may say too much about the device; the session and the moment say where it belongs.
+    """
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+    owner = _UNSAFE_NAME.sub("-", session).strip("-.") or "session"
+    many = len(names) > 1
+    return [f"clipboard-{owner}-{stamp}{f'-{index}' if many else ''}{Path(name).suffix.lower()}"
+            for index, name in enumerate(names, 1)]
+
+
 class AttachmentError(ValueError):
     """An attachment that cannot be stored or read; the message says why."""
 

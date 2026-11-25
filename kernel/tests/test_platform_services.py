@@ -166,6 +166,19 @@ def test_a_user_image_becomes_an_attachment_and_its_bytes_never_reach_the_goal(a
     assert len(stored) == 1 and stored[0].has_alpha
     assert stored[0].id in agent._state.user_goal
     assert "base64" not in agent._state.user_goal
+    # Kept under the session and the moment, not under whatever the sender called it.
+    assert stored[0].name.startswith("clipboard-") and stored[0].name.endswith(".png")
+    assert "a.png" not in agent._state.user_goal and stored[0].name in agent._state.user_goal
+
+
+def test_clipboard_names_say_the_session_and_the_moment():
+    from kernel.context.attachments import clipboard_names
+
+    moment = time.mktime((2026, 11, 25, 20, 16, 34, 0, 0, -1))
+    assert clipboard_names("auto-20261125", ["IMG_0042.HEIC"], moment) == ["clipboard-auto-20261125-20261125-201634.heic"]
+    assert clipboard_names("my task/../x", ["a.png", "b"], moment) == [
+        "clipboard-my-task-..-x-20261125-201634-1.png", "clipboard-my-task-..-x-20261125-201634-2"]
+    assert clipboard_names("", ["c.jpg"], moment) == ["clipboard-session-20261125-201634.jpg"]
 
 
 def test_vision_unavailable_is_an_error_not_an_analysis(agent_factory, tmp_path):

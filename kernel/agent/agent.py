@@ -878,11 +878,13 @@ class LocalAgent:
             self._announce_turn_finished()
 
     def _store_attachments(self, images: list[dict]) -> None:
-        """Keep each attached image's original privately and give it an id; drop the bytes from the dict."""
-        from kernel.context.attachments import AttachmentError, AttachmentStore
+        """Name each attached image after the session and the moment, keep its original privately and give it an id."""
+        from kernel.context.attachments import AttachmentError, AttachmentStore, clipboard_names
 
         store = AttachmentStore(self.executor.workspace)
-        for image in images:
+        names = clipboard_names(self.current_session or "", [image["name"] for image in images])
+        for image, name in zip(images, names, strict=True):
+            image["name"] = name
             original = image.pop("_original", None)
             if original is None:
                 continue
