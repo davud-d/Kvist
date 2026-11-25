@@ -68,9 +68,10 @@ start work, see what is happening, come back to earlier work. There are no stand
   their answer stands in the conversation; the page runs `/provider`, `/models`, `/change-api`, `/effort`, `/rename`
   and `/new` itself. Home offers only what needs no task. Shift+Esc from anywhere puts the cursor in the
   field: the home one or the open task's.
-* **The side sheet** (`js/views/sheet.js`) opens on request and closes with Esc: the server and the hours (from the
-  rail), the agent's screen, its helpers, its background commands (from the task header, shown only when the task
-  has them). The column moves over for it instead of being covered.
+* **The screen** opens beside the chat when the agent starts a browser or a graphical app. On narrow windows
+  it opens below the chat. You can watch the agent's pointer, close the preview with Esc and reopen it from
+  the task header. The preview only receives pictures. The server, hours, helpers and background commands
+  have their own on-demand sheets (`js/views/sheet.js`).
 
 ## How it looks
 

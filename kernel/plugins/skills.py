@@ -18,7 +18,7 @@ that changes its own tools mid-run is a conversation nobody has tested.
 from __future__ import annotations
 
 import json
-
+import os
 import sys
 import threading
 import time
@@ -119,6 +119,9 @@ class SkillManager:
         if not entries and not self.attached and not servers:
             return ""
         lines = []
+        if os.environ.get("KVIST_CLOUD_WORKSPACE") == "1":
+            lines.append("In this cloud workspace, show websites with browser and operate graphical apps with "
+                         "app_screen. The person watches the virtual screen beside the chat.")
         for name, server in sorted(servers.items()):
             state = "attached" if name in self.mcp_attached else "MCP server"
             lines.append(f"- mcp:{name} ({state}) — {server.description or 'tools of a configured MCP server'}")

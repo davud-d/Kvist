@@ -42,6 +42,7 @@ export function createAgent(id, workspace, session = "") {
     screen: null,
     // Every screen the agent has open (browser, desktop), by screen_id; `screen` is the latest of them.
     screens: new Map(),
+    screenDismissed: false,
     // The cloud task behind this agent ({id, goal, status, reason, used_seconds}); null while it is a draft.
     cloud: null,
     // The id in the session's address (/workspace/s/<publicId>), known once the cloud has told about the task.
@@ -189,6 +190,7 @@ function applyEffects(agent, name, effects = {}) {
       agent.helpers.clear();
       agent.jobs.clear();
       agent.screen = null;
+      agent.screens.clear();
       agent.needsHistory = true;
     }
   }
@@ -230,6 +232,10 @@ export function reduce(agent, ev, { replay = false } = {}) {
       agent.observer = ev.role === "observer" ? (ev.notice ?? "") : null;
       return;
     case "remote_state": {
+      if (ev.state === "reconnecting") {
+        agent.screens.clear();
+        agent.screen = null;
+      }
       const words = [ev.reason || ev.host];
       if (ev.state === "reconnecting" && typeof ev.retry_in === "number") words.push(`${Math.round(ev.retry_in)} s`);
       agent.remote = ev.state === "connected" ? null : { state: ev.state, text: words.join(" · ") };
@@ -457,11 +463,18 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     }
     case "screen":
+      if (replay) return;
       if (ev.state === "closed") agent.screens.delete(ev.screen_id);
       else agent.screens.set(ev.screen_id, ev);
       agent.screen = [...agent.screens.values()].at(-1) ?? null;
+      if (!agent.screen) agent.screenDismissed = false;
       return;
     case "cloud_task":
+      if (FINISHED.has(ev.task.status)) {
+        agent.screens.clear();
+        agent.screen = null;
+        agent.screenDismissed = false;
+      }
       agent.cloud = ev.task;
       agent.publicId = ev.task.public_id ?? agent.publicId;
       if (!agent.title) agent.title = String(ev.task.goal ?? "").trim().split("\n")[0].slice(0, 120);

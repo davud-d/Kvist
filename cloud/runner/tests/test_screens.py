@@ -106,6 +106,13 @@ async def test_pictures_flow_only_while_someone_watches(viewer, monkeypatch):
     assert "w=960" in server.requests[0] and "q=65" in server.requests[0]
     await asyncio.sleep(0.15)
     assert len(sent) == 1
+    # A new watcher also gets an idle page after the server's old frame expires.
+    monkeypatch.setattr(screens, "REFRESH_STATIC_SECONDS", 0.1)
+    for _ in range(50):
+        if len(sent) > 1:
+            break
+        await asyncio.sleep(0.02)
+    assert sent[1] == sent[0]
     await relay.stop()
 
 

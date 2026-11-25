@@ -50,7 +50,7 @@ function card(agent, view) {
   const key = `${agent.id}:${view.screen_id}`;
   const known = watchers.get(key);
   if (known && known.frameUrl === view.frame_url) return known.paint(view);
-  const picture = h("img", { class: "screen-view", alt: view.title || view.skill, hidden: true });
+  const picture = h("img", { class: "screen-view", alt: view.title || view.skill, draggable: "false", hidden: true });
   const waiting = h("p", { class: "dim pad" }, t("waiting picture"));
   const bar = h("div", { class: "screen-bar" });
   const el = h("div", { class: "screen-card" }, bar, picture, waiting);

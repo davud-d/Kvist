@@ -19,7 +19,10 @@
 .feed-row.plus b { color: var(--ok); }
 .feed-when { grid-column: 1 / -1; font-size: var(--t-xs); color: var(--faint); }
 
-.screen-view { display: block; width: 100%; height: auto; background: #000; border-radius: var(--r-sm); }
+.screen-view { display: block; width: 100%; height: auto; object-fit: contain; pointer-events: none; user-select: none; }
+@media (max-width: 900px) {
+  .screen-view { max-height: calc(40dvh - 86px); }
+}
 .screen-card[hidden], .screen-view[hidden] { display: none; }
 .privacy { font-size: var(--t-sm); }
 .dialog .bad { color: var(--err); }

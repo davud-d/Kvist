@@ -1,6 +1,4 @@
-// The side sheet: details that matter now and then, on request, never as a standing column. The server and the
-// hours (from the rail), the agent's screen, its helpers and background commands (from the task). It sits over the edge of the stage and leaves the work visible; the same button, the cross or Esc
-// closes it. Its content is the old inspector's panels, unchanged.
+// The agent's live screen opens beside the chat. Other sheets open from the rail or task header.
 
 import { onAccount } from "../cloud.js";
 import { fill, frameThrottle, h, icon } from "../dom.js";
@@ -47,6 +45,7 @@ export function mountSheet(root) {
       return;
     }
     if (!shown) show();
+    document.getElementById("app").classList.toggle("has-screen", sheet.kind === "screen");
     shown = sheet;
     title.textContent = kind.title(sheet);
     kind.render(body, sheet);
@@ -60,7 +59,8 @@ export function mountSheet(root) {
 
   async function hide() {
     shown = null;
-    document.getElementById("app").classList.remove("has-sheet");
+    document.getElementById("app").classList.remove("has-sheet", "has-screen");
+    fill(body);
     await finished(animate(root, [{ transform: "none", opacity: 1 }, { transform: "translateX(16px)", opacity: 0 }], { ms: 160, fill: "forwards" }));
     if (!store.sheet) root.hidden = true;
     root.getAnimations().forEach((animation) => animation.cancel());

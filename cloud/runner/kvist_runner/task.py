@@ -228,6 +228,7 @@ class TaskProcess:
             {
                 "HOME": str(home),
                 "KVIST_CONFIG_DIR": str(home / ".kvist"),
+                "KVIST_CLOUD_WORKSPACE": "1",
                 "LANG": "C.UTF-8",
                 "PYTHONUNBUFFERED": "1",
                 "PYTHONUTF8": "1",

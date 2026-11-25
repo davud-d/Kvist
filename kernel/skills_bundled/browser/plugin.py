@@ -40,20 +40,37 @@ _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 # (milliseconds since the start, share of the distance covered by then).
 _GLIDE_CURVE = ((0, 0.0), (750, 0.4), (950, 0.62), (1400, 1.0))
 
+_CURSOR_JS = """
+() => {
+  let cursor = document.getElementById('kvist-cursor');
+  if (cursor) return cursor;
+  const ns = 'http://www.w3.org/2000/svg';
+  cursor = document.createElementNS(ns, 'svg');
+  cursor.id = 'kvist-cursor';
+  cursor.setAttribute('aria-hidden', 'true');
+  cursor.setAttribute('viewBox', '0 0 32 32');
+  cursor.style.cssText = 'position:fixed;left:0;top:0;width:32px;height:32px;z-index:2147483647;' +
+    'pointer-events:none;will-change:transform;filter:drop-shadow(0 0 5px rgba(40,110,220,.95)) ' +
+    'drop-shadow(0 0 12px rgba(40,110,220,.55))';
+  cursor.style.transform = `translate(${innerWidth / 2 - 3}px, ${innerHeight / 2 - 3}px)`;
+  const arrow = document.createElementNS(ns, 'path');
+  arrow.setAttribute('d', 'M3 3 L27 12 L13.5 13.5 L12 27 Z');
+  arrow.setAttribute('fill', '#000');
+  arrow.setAttribute('stroke', '#c9ced6');
+  arrow.setAttribute('stroke-width', '2.2');
+  arrow.setAttribute('stroke-linejoin', 'round');
+  cursor.appendChild(arrow);
+  document.documentElement.appendChild(cursor);
+  return cursor;
+}
+"""
+# A new document loses its overlay, including after a link click or redirect.
+_CURSOR_INIT_JS = f"if (window === window.top) document.addEventListener('DOMContentLoaded', ({_CURSOR_JS}), {{once:true}})"
 _GLIDE_JS = """
-([from, to, curve]) => {
-  const ID = 'kvist-cursor';
-  let cursor = document.getElementById(ID);
-  if (!cursor) {
-    cursor = document.createElement('div');
-    cursor.id = ID;
-    cursor.style.cssText = 'position:fixed;left:0;top:0;width:32px;height:32px;z-index:2147483647;' +
-      'pointer-events:none;will-change:transform;filter:drop-shadow(0 0 5px rgba(40,110,220,.95)) ' +
-      'drop-shadow(0 0 12px rgba(40,110,220,.55))';
-    cursor.innerHTML = '<svg width="32" height="32" viewBox="0 0 32 32"><path d="M3 3 L27 12 L13.5 13.5 L12 27 Z" ' +
-      'fill="#000" stroke="#c9ced6" stroke-width="2.2" stroke-linejoin="round"/></svg>';
-    document.documentElement.appendChild(cursor);
-  }
+([to, curve]) => {
+  const cursor = (CURSOR_FACTORY)();
+  const rect = cursor.getBoundingClientRect();
+  const from = [rect.left + 3, rect.top + 3];
   // Monotone cubic Hermite through the curve points, resting at both ends, so speed never kinks or overshoots.
   const t = curve.map(p => p[0]), y = curve.map(p => p[1]);
   const secant = t.slice(1).map((_, i) => (y[i + 1] - y[i]) / (t[i + 1] - t[i]));
@@ -76,7 +93,7 @@ _GLIDE_JS = """
     requestAnimationFrame(frame);
   });
 }
-"""
+""".replace("CURSOR_FACTORY", _CURSOR_JS)
 
 _SNAPSHOT_JS = """
 (maxItems) => {
@@ -160,7 +177,6 @@ class _Tab:
         self.events: list[dict[str, Any]] = []
         self.seq = 0
         self.last_text = ""
-        self.cursor_at: tuple[float, float] | None = None
 
     def add(self, kind: str, **data: Any) -> None:
         self.seq += 1
@@ -211,6 +227,7 @@ class Browser:
                 ],
             )
             self.context = self.browser.new_context(no_viewport=True, accept_downloads=True)
+            self.context.add_init_script(script=_CURSOR_INIT_JS)
             self.context.on("page", self._adopt)
 
         self.worker.run(launch)
@@ -467,12 +484,8 @@ def _glide_to(tab: _Tab, target: Any) -> None:
         if box is None:
             return
         end = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-    # A navigation wipes the overlay, so a start remembered from the previous page is still a fine place to begin.
-    size = tab.page.viewport_size or {"width": 0, "height": 0}
-    start = tab.cursor_at or (size["width"] / 2, size["height"] / 2)
-    tab.page.evaluate(_GLIDE_JS, [list(start), list(end), [list(p) for p in _GLIDE_CURVE]])
+    tab.page.evaluate(_GLIDE_JS, [end, _GLIDE_CURVE])
     tab.page.mouse.move(*end)
-    tab.cursor_at = end
 
 
 def _act(tab: _Tab, args: dict[str, Any], ctx: Any, action: Callable[[], None], what: str,

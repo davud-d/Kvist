@@ -112,6 +112,7 @@ packages:
   - xvfb
   - i3-wm
   - jwm
+  - feh
   - xclip
   # A skill's runner starts under the system python3 -I, so python-xlib (app_screen) has to come from apt.
   - python3-xlib
@@ -159,6 +160,7 @@ runcmd:
   - /opt/kvist/bin/pip install --no-index --find-links /mnt/wheels kvist kvist-runner
   - umount /mnt
   - install -d -o kvist -g kvist /home/kvist/.kvist /var/lib/kvist-runner
+  - runuser -u kvist -- /opt/kvist/bin/kvist --workspace /home/kvist --skill-op install-deps --skill browser --yes
   - install -d /etc/kvist-runner
   - 'echo "PS1=''kvist :-) ''" >> /home/kvist/.bashrc'
   - systemctl enable kvist-runner qemu-guest-agent

@@ -24,6 +24,8 @@ from urllib.parse import urlsplit
 log = logging.getLogger("kvist_runner.screens")
 
 FRAME_INTERVAL_SECONDS = 0.5
+# An idle page still needs a fresh frame for someone who joins (server TTL: 10 s).
+REFRESH_STATIC_SECONDS = 4.0
 # A smaller picture than the 1920 px one Kvist makes for a local window: this one crosses the internet.
 FRAME_WIDTH = 960
 FRAME_QUALITY = 65
@@ -89,14 +91,14 @@ class ScreenRelay:
 
     async def _pump(self, screen_id: str) -> None:
         last = b""
+        sent_at = 0.0
         while time.monotonic() < self._leases.get(screen_id, 0.0):
             url = self._frame_urls.get(screen_id)
             if url is None:
                 return
             frame = await asyncio.to_thread(_fetch, url)
-            if frame and frame != last:
-                last = frame
-                self._send(
+            if frame and (frame != last or time.monotonic() - sent_at >= REFRESH_STATIC_SECONDS):
+                sent = self._send(
                     {
                         "type": "screen_frame",
                         "task_id": self.task_id,
@@ -104,6 +106,9 @@ class ScreenRelay:
                         "jpeg": base64.b64encode(frame).decode("ascii"),
                     }
                 )
+                if sent:
+                    last = frame
+                    sent_at = time.monotonic()
             await asyncio.sleep(FRAME_INTERVAL_SECONDS)
         self._pumps.pop(screen_id, None)
 

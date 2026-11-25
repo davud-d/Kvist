@@ -38,6 +38,12 @@ export function announce(change) {
 
 export const active = () => store.agents.get(store.activeId) ?? null;
 
+function syncScreen() {
+  if (store.sheet && store.sheet.kind !== "screen") return;
+  const agent = active();
+  store.sheet = store.mode === "chat" && agent?.screens.size && !agent.screenDismissed ? { kind: "screen" } : null;
+}
+
 export function addAgent(agent) {
   store.agents.set(agent.id, agent);
   store.order.push(agent.id);
@@ -48,6 +54,7 @@ export function removeAgent(id) {
   store.agents.delete(id);
   store.order = store.order.filter((other) => other !== id);
   if (store.activeId === id) store.activeId = store.order.at(-1) ?? null;
+  syncScreen();
   announce({ kind: "structure" });
   announce({ kind: "active" });
 }
@@ -57,12 +64,14 @@ export function setActive(id) {
   store.activeId = id;
   const agent = store.agents.get(id);
   agent.attention = false;
+  syncScreen();
   announce({ kind: "active" });
 }
 
 export function setMode(mode) {
   if (store.mode === mode) return;
   store.mode = mode;
+  syncScreen();
   announce({ kind: "mode" });
 }
 
@@ -77,6 +86,7 @@ export function dispatch(id, event, options) {
   const agent = store.agents.get(id);
   if (!agent) return;
   reduce(agent, event, options);
+  if (id === store.activeId && (event.type === "screen" || event.type === "cloud_task" || event.type === "remote_state")) syncScreen();
   if (id !== store.activeId && ["final", "input_request", "error"].includes(event.type)) agent.attention = true;
   announce({ kind: "agent", id });
 }
@@ -107,6 +117,7 @@ export function loadPrefs() {
 /** The side sheet shows one thing at a time; the same kind again closes it. */
 export function setSheet(sheet) {
   store.sheet = sheet && store.sheet?.kind === sheet.kind ? null : sheet;
+  if (active()?.screens.size) active().screenDismissed = store.sheet?.kind !== "screen";
   announce({ kind: "sheet" });
 }
 

@@ -62,3 +62,21 @@
   .column { padding: 0 var(--s4); }
   #sheet { left: var(--s3); width: auto; }
 }
+
+/* Keep the conversation and the agent's display visible together, including approval questions. */
+#app.has-screen { --screen-width: min(60vw, calc(100vw - 530px)); }
+#app.has-screen #stage { padding-right: var(--screen-width); }
+#app.has-screen #sheet {
+  inset: 0 0 0 auto;
+  width: var(--screen-width);
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+#app.has-screen .sheet-body { padding: 0; gap: 0; }
+#app.has-screen .screen-bar, #app.has-screen .privacy { padding-inline: var(--s4); }
+@media (max-width: 900px) {
+  #app.has-screen #stage { padding-right: 0; padding-bottom: 40dvh; }
+  #app.has-screen #sheet { inset: auto 0 0; width: 100%; height: 40dvh; border-left: 0; border-top: 1px solid var(--line); }
+}

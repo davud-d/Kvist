@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import eventually
+from conftest import accept_terms, eventually
 from sqlalchemy import select, text
 from websockets.sync.client import connect
 
@@ -65,6 +65,7 @@ def walk_the_funnel(stack, fake_model: str, goal: str) -> int:
     assert http.get("/").status_code == 200
     login = http.get("/auth/github/login?next=/start", follow_redirects=True)
     assert login.url.path == "/start"
+    accept_terms(http)
     eventually(lambda: [m for m in http.get("/api/machines").json() if m["connected"]], timeout=30)
     assert http.post("/api/billing/checkout-opened").json()["ok"]
     assert http.post("/api/billing/dev/skip-checkout").json()["status"] == "trialing"

@@ -4,6 +4,30 @@ import test from "node:test";
 
 import { familyOf, highlightLine } from "../js/highlight.js";
 import { createAgent, reduce } from "../js/reducer.js";
+import { addAgent, dispatch, setActive, setMode, setSheet, store } from "../js/store.js";
+
+test("only the active task opens a preview and a dismissed screen stays closed until its next run", () => {
+  const browser = { type: "screen", screen_id: "browser", state: "running" };
+  for (const id of ["chat", "other"]) addAgent(createAgent(id, "1"));
+  setActive("chat");
+  setMode("chat");
+  dispatch("other", browser);
+  assert.equal(store.sheet, null);
+  setActive("other");
+  assert.equal(store.sheet.kind, "screen");
+  setSheet(null);
+  dispatch("other", browser);
+  assert.equal(store.sheet, null);
+  dispatch("other", { ...browser, state: "closed" });
+  dispatch("other", browser);
+  assert.equal(store.sheet.kind, "screen");
+  setMode("home");
+  assert.equal(store.sheet, null);
+  setMode("chat");
+  assert.equal(store.sheet.kind, "screen");
+  dispatch("other", { type: "cloud_task", task: { status: "done" } });
+  assert.equal(store.sheet, null);
+});
 
 const piece = (line, text) => ({ type: "call_stream", call_id: "w1", tool: "write_file", path: "notes.md", field: "content", line, text, done: false });
 
