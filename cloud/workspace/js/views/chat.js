@@ -16,6 +16,7 @@ import { active, setSheet, store, subscribe } from "../store.js";
 import { makeDialog } from "./dialogs.js";
 import { Folds } from "../folds.js";
 import { makeItem, makeWork, paintItem, paintWork, wakeWork } from "./items.js";
+import { imageGoal, mountAttachments } from "./attachments.js";
 import { attachCommandHint, offeredCommands } from "./commands.js";
 import { makeOrb, orbState, setOrb, syncOrb } from "./orb.js";
 import { mountNotices } from "./notices.js";
@@ -44,6 +45,8 @@ export function mountChat(root) {
   const menus = fieldMenus(input, "0 100%");
   const picks = runPicks(composer, menus);
   foot.append(picks.model, picks.effort, h("span", { class: "spacer" }), send);
+  const photos = mountAttachments({ composer, field: input, foot, onChange: () => { send.disabled = !ready(); } });
+  const ready = () => Boolean(input.value.trim() || photos.images.length);
   onAccount(picks.redraw);
   document.addEventListener("kvist:model-picker", () => {
     if (store.mode === "chat") queueMicrotask(picks.openModel);
@@ -134,7 +137,7 @@ export function mountChat(root) {
     // Enter and Shift+Enter need no words; pausing with Esc is not obvious, so it is said while it applies.
     hint.hidden = hint.hidden || !running;
     fill(hint, running ? h("span", {}, t("composer hint running")) : null);
-    send.disabled = !input.value.trim();
+    send.disabled = !ready();
   }
 
   // What stands where the composer was: the link to a server that is down, a session another frontend
@@ -249,18 +252,20 @@ export function mountChat(root) {
 
   function submit() {
     const agent = active();
-    if (!agent || !input.value.trim()) return;
+    if (!agent || !ready()) return;
     const text = input.value;
+    const images = photos.images;
     input.value = "";
     input.style.height = "";
+    photos.set([]);
     send.disabled = true;
-    history.push(text);
+    if (text.trim()) history.push(text);
     historyAt = history.length;
-    // The words come back if the cloud refuses them (no key, no hours, a bad repository link).
-    sendGoal(agent, text).then((sent) => {
-      if (sent || input.value) return;
+    // The words and the photos come back if the cloud refuses them (no key, no hours, a bad repository link).
+    sendGoal(agent, imageGoal(text, images)).then((sent) => {
+      if (sent || input.value || photos.images.length) return;
       input.value = text;
-      send.disabled = false;
+      photos.set(images);
     });
     toBottom();
   }
@@ -268,7 +273,7 @@ export function mountChat(root) {
   input.addEventListener("input", () => {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
-    send.disabled = !input.value.trim();
+    send.disabled = !ready();
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {

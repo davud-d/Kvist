@@ -27,6 +27,7 @@ export function fill(el, ...children) {
 const ICONS = {
   gear: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  image: '<rect x="4" y="5" width="16" height="14" rx="2.5"/><path d="M4 16l4.5-4.5 3.5 3.5 3-3L20 16"/><path d="M9 9.5h.01"/>',
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16"/>',
   close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',

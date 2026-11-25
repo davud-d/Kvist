@@ -334,12 +334,26 @@ const RU = {
   "composer hint running": "Esc — пауза",
   "other providers": "Другие провайдеры",
   "pick provider": "Выбери из списка",
+  "attach photos": "Добавить фото",
+  "remove photo": "Убрать фото",
+  "photo": "Фото",
+  "images max": "Не больше {n} фото",
+  "image big": "Фото больше 5 МБ",
+  "images big": "Фото больше 20 МБ",
+  "image unreadable": "Не удалось прочитать фото",
 };
 
 
 // Keys that are codes or labels rather than English sentences need their English words.
 const EN = {
   "sec": "s",
+  "attach photos": "Add photos",
+  "remove photo": "Remove photo",
+  "photo": "Photo",
+  "images max": "Up to {n} photos",
+  "image big": "A photo is over 5 MB",
+  "images big": "The photos are over 20 MB",
+  "image unreadable": "Could not read the photo",
   "home title for": "What should {name} take on?",
   "notify done": "Kvist is done",
   "notify failed": "The task stopped with an error",

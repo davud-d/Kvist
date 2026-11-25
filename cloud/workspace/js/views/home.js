@@ -9,6 +9,7 @@ import { account, duration, firstLine, onAccount, projectName } from "../cloud.j
 import { fill, frameThrottle, h, icon } from "../dom.js";
 import { t } from "../i18n.js";
 import { setPref, store, subscribe } from "../store.js";
+import { imageGoal, mountAttachments } from "./attachments.js";
 import { attachCommandHint, offeredCommands } from "./commands.js";
 import { modelFamily } from "../models.js";
 import { mountNotices } from "./notices.js";
@@ -73,6 +74,8 @@ export function mountHome(root) {
   const menus = fieldMenus(input);
   const picks = runPicks(composer, menus);
   foot.append(project, picks.model, picks.effort, h("span", { class: "spacer" }), send);
+  const photos = mountAttachments({ composer, field: input, foot, onChange: () => { send.disabled = !ready(); } });
+  const ready = () => Boolean(input.value.trim() || photos.images.length);
   // Before the field's own keys, so the hint answers Enter and the arrows while it is open.
   // Only what needs no task: the rest of Kvist's commands act on a task's conversation.
   attachCommandHint(input, composer, () => submit(), () =>
@@ -97,26 +100,27 @@ export function mountHome(root) {
 
   const submit = async () => {
     const text = input.value.trim();
-    if (!text) return;
+    const images = photos.images;
+    if (!text && !images.length) return;
     // A command about the account does not start a task.
-    if (await pageCommand(text)) {
+    if (!images.length && await pageCommand(text)) {
       input.value = "";
       send.disabled = true;
       return;
     }
     input.value = "";
-    send.disabled = true;
-    // The words come back if the task could not start (no key, no hours, no project).
-    const sent = await startTask(chosenProject(), text);
-    if (!sent && !input.value) {
+    photos.set([]);
+    // The words and the photos come back if the task could not start (no key, no hours, no project).
+    const sent = await startTask(chosenProject(), imageGoal(text, images));
+    if (!sent && !input.value && !photos.images.length) {
       input.value = text;
-      send.disabled = false;
+      photos.set(images);
     }
   };
   input.addEventListener("input", () => {
     input.style.height = "auto";
     input.style.height = `${Math.min(input.scrollHeight, 280)}px`;
-    send.disabled = !input.value.trim();
+    send.disabled = !ready();
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
