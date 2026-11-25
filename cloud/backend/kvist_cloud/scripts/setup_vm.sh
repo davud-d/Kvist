@@ -123,6 +123,8 @@ packages:
   - libegl-mesa0
   # A program app_screen can open without OpenGL.
   - xterm
+  # Tkinter: the usual way an agent writes a window to show on app_screen; apt brings Tcl/Tk with it.
+  - python3-tk
   # Fonts with Cyrillic and emoji, or pages and windows show boxes.
   - fonts-dejavu-core
   - fonts-liberation
