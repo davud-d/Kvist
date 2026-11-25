@@ -18,7 +18,8 @@ import { imageGoal } from "./attachments.js";
 import { openPopover } from "./popover.js";
 import { clock, titleOf } from "./format.js";
 import { homeView } from "./home.js";
-import { t } from "./i18n.js";
+import { lang, t } from "./i18n.js";
+import { mountHints } from "./hints.js";
 import * as native from "./native.js";
 import { banner, cannotRun, machineState } from "./rules.js";
 import { openSheet, toast } from "./sheet.js";
@@ -47,7 +48,11 @@ export function startShell(root, { go, onAuth }) {
   feedEl.prepend(homeEl);
 
   const chips = h("div", { class: "chips" });
-  const composer = createComposer({ onSend: (text, images) => send(text, images), onStop: () => pause(), chips, onPlus: (anchor) => plusMenu(anchor), onGauge: (anchor) => openDial(anchor) });
+  const hints = (field) => mountHints(field, {
+    account: () => ({ tasks: account.tasks, sub: account.sub, createdAt: account.me?.created_at }),
+    language: () => lang.current,
+  });
+  const composer = createComposer({ onSend: (text, images) => send(text, images), onStop: () => pause(), chips, onPlus: (anchor) => plusMenu(anchor), onGauge: (anchor) => openDial(anchor), hints });
   const bannerEl = h("div", { class: "banner-slot" });
   const dialogEl = h("div", { class: "dialog-slot" });
   const dock = h("footer", { class: "dock" }, bannerEl, dialogEl, composer.node);
@@ -120,6 +125,7 @@ export function startShell(root, { go, onAuth }) {
   function paintDock() {
     const feed = view.feed;
     const state = feed ? working(feed) : "";
+    composer.setStarting(view.kind === "new");
     // "Pause" exists once the agent is running: before that (queued, starting) the server has nothing to pause yet.
     composer.setBusy(feed?.task?.status === "running" || state === "waiting");
     const dialog = feed?.dialogs[0];

@@ -7,7 +7,8 @@ import { homeGroups } from "../attention.js";
 import { openTask, pageCommand, pageCommandWithoutTask, startTask } from "../actions.js";
 import { account, duration, firstLine, onAccount, projectName } from "../cloud.js";
 import { fill, frameThrottle, h, icon } from "../dom.js";
-import { t } from "../i18n.js";
+import { lang, t } from "../i18n.js";
+import { mountHints } from "../hints.js";
 import { setPref, store, subscribe } from "../store.js";
 import { imageGoal, mountAttachments } from "./attachments.js";
 import { attachCommandHint, offeredCommands } from "./commands.js";
@@ -66,6 +67,10 @@ function projectMenu(close) {
 
 export function mountHome(root) {
   const input = h("textarea", { class: "composer-input", rows: "1", spellcheck: "true", placeholder: t("write your task"), "aria-label": t("write your task") });
+  const hints = mountHints(input, {
+    account: () => ({ tasks: account.tasks, sub: account.sub, createdAt: account.me?.created_at }),
+    language: () => lang.current,
+  });
   const send = h("button", { class: "btn primary send", type: "button", title: t("send"), "aria-label": t("send"), disabled: true }, icon("send", 18));
   const project = h("button", { class: "project-pick", type: "button", "aria-haspopup": "menu", title: t("project") });
   const foot = h("div", { class: "composer-foot" });
@@ -134,7 +139,12 @@ export function mountHome(root) {
 
   const redraw = frameThrottle(() => {
     root.hidden = store.mode !== "home";
-    if (root.hidden) return;
+    if (root.hidden) {
+      hints.stop();
+      input.placeholder = t("write your task");
+      return;
+    }
+    hints.start();
     const workspace = chosenProject();
     fill(project, icon("folder", 16), h("span", {}, workspace ? projectName(workspace, account.projects, t("no project")) : t("pick project")), icon("chev", 14));
     paintQuestion(title, line);

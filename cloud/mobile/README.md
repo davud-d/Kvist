@@ -17,6 +17,13 @@ operating system's own payment sheets.
   things to ask it. The composer is docked at the bottom, never floating over the conversation. Sending the first message
   plays one short flight (370 ms, [`js/flight.js`](js/flight.js)): the text folds, flies to its place and unfolds, and the start
   screen's words drift away; nothing blocks touches, and it is off under reduced motion.
+  The empty field speaks ([`js/hints.js`](js/hints.js), the same file as the workspace's): a line is typed out letter by
+  letter, stays (the first one and every line about now for 2–3 minutes, others sometimes only 15–25 s, never three
+  short ones in a row), and is erased in quick bursts before the next. Lines about now come every other time while they
+  hold: the hour, the weekday, dates of the year, the person's tasks, the trial's last day, a year with Kvist, a first
+  visit or a return after a week; three lines to each, each said once a visit. A line that does not fit the field in one
+  row is skipped. A touch or a key in the field stops it with the whole line standing; a hidden page stops it, and coming
+  back types a new line. Under reduced motion lines change whole.
 * **Session** (`/m/s/<id>`): your messages, the agent's answers as flat Markdown, and its work folded into one line per turn
   ("Worked for 2 min · 6 steps") that opens into the steps. A question from the agent (approve a command, confirm, pick) stands
   where the composer was. The round button is *send*, and *pause* while the agent works and the box is empty.

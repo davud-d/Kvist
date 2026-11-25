@@ -286,6 +286,53 @@ scenario("the gauge by the send button sets how hard the model thinks, like the 
   assert.deepEqual(page.problems, []);
 });
 
+scenario("the empty start field types out a line letter by letter, stands still when touched, and is quiet in a session", async (page) => {
+  await signIn(page);
+  await startTrial(page);
+  await addKeyAndProject(page);
+  // Every placeholder the field shows over a few seconds, in order; `back` is the person coming back to the tab.
+  const watch = (ms, back = false) => page.evaluate(([span, returning]) => new Promise((resolve) => {
+    const field = document.querySelector(".composer-input");
+    const texts = [field.placeholder];
+    const times = [performance.now()];
+    const timer = setInterval(() => {
+      if (field.placeholder === texts.at(-1)) return;
+      texts.push(field.placeholder);
+      times.push(performance.now());
+    }, 2);
+    if (returning) document.dispatchEvent(new Event("visibilitychange"));
+    setTimeout(() => (clearInterval(timer), resolve({ texts, times })), span);
+  }), [ms, back]);
+  // The first line was typed while the account was being set up and stays for minutes; back on the tab, a new one comes.
+  const first = (await watch(200)).texts;
+  assert.equal(first.length, 1);
+  assert.ok(!first[0].endsWith("▏") && first[0] !== "A task for Kvist", `a whole line stands: ${first[0]}`);
+  const { texts: typing, times } = await watch(5000, true);
+  const cut = typing.findIndex((text) => text === "");
+  assert.ok(cut > 0, `the old line is erased first: ${JSON.stringify(typing)}`);
+  const lengths = typing.slice(0, cut + 1).map((text) => [...text.replace("▏", "")].length);
+  for (let i = 1; i < lengths.length; i += 1) assert.ok(lengths[i] < lengths[i - 1], "erasing only takes letters away");
+  // Quick inside a burst, a stop between bursts: like Backspace held and let go.
+  const gaps = times.slice(1, cut + 1).map((time, i) => time - times[i]);
+  assert.ok(gaps.filter((gap) => gap < 40).length >= 3 && gaps.filter((gap) => gap >= 55).length >= 2, `erase gaps: ${gaps.map(Math.round)}`);
+  const growing = typing.slice(cut + 1).filter((text) => text.endsWith("▏"));
+  assert.ok(growing.length >= 5, `typed out: ${JSON.stringify(typing)}`);
+  for (let i = 1; i < growing.length; i += 1) assert.equal([...growing[i]].length, [...growing[i - 1]].length + 1, "typed one letter at a time");
+  const line = typing.at(-1);
+  assert.ok(line && !line.endsWith("▏") && line !== first[0], `a new whole line stands: ${line}`);
+  await shot(page, "hint");
+  await page.locator(".composer-input").click();
+  assert.deepEqual((await watch(1500)).texts, [line], "touched, the line stands still and whole");
+  await page.locator(".composer-input").blur();
+  await sendTask(page, "hello");
+  // The address changes as the message leaves; the session's screen comes once it has landed.
+  await page.waitForFunction(() => ["A task for Kvist", "Add to the task…"].includes(document.querySelector(".composer-input").placeholder));
+  const inSession = (await watch(1500)).texts;
+  assert.equal(inSession.length <= 2 && inSession.every((text) => ["A task for Kvist", "Add to the task…"].includes(text)), true,
+    `a session's field says what it does there: ${JSON.stringify(inSession)}`);
+  assert.deepEqual(page.problems, []);
+});
+
 scenario("typing folds the composer to one row and letting go brings back its size; the model chip opens a dropdown", async (page) => {
   await signIn(page);
   await startTrial(page);

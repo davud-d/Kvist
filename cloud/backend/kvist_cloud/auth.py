@@ -269,6 +269,8 @@ def me(request: Request, user: User = Depends(signed_user)) -> dict[str, object]
         "is_owner": is_owner(request.app.state.settings, user),
         "ban": ban_view(user),
         "terms_accepted": user.terms_accepted_at is not None,
+        # The field's rotating hints mark a year with Kvist from it.
+        "created_at": user.created_at.isoformat(),
     }
 
 

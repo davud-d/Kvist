@@ -36,6 +36,7 @@ def test_after_signing_in_the_app_is_handed_a_code_and_the_web_view_trades_it_fo
     assert response.status_code == 302 and response.headers["location"] == "/m/"
     assert SESSION_COOKIE in response.cookies
     assert web_view.get("/api/me").json()["login"] == "dev"
+    assert web_view.get("/api/me").json()["created_at"]
 
 
 def test_a_code_without_its_nonce_is_worth_nothing(client_factory):

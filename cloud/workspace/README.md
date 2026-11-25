@@ -25,6 +25,8 @@ start work, see what is happening, come back to earlier work. There are no stand
 * **Home** (`js/views/home.js`): one question and one field to hand a task over, with the project it goes to and
   the provider and model it runs on inside the field. Under it only what needs a look, in that order: *Waiting for
   you*, *While you were away*, *In progress*, and a few *Recent* tasks. A list with nothing in it is not drawn.
+  The empty field types out rotating lines (`js/hints.js`, a copy of the phone page's file that a test keeps equal; how
+  it speaks is in `cloud/mobile/README.md`). The cursor the page puts in the field does not stop it; a click or a key does.
 * **The model and effort buttons** sit in the home field and under an open task's field (`js/views/run-picks.js`):
   the key and the effort are the account's, and a task takes them from its next message; in a task the menus open
   upwards, and Esc closes the menu rather than pausing the agent.
