@@ -101,9 +101,8 @@ export function startShell(root, { go, onAuth }) {
     composer.showGauge(Boolean(account.key?.set));
     const key = account.key;
     fill(chips,
-      // Only the provider's mark: the row stays one line, and the menu it opens names the model.
-      h("button", { class: "chip small", type: "button", "aria-haspopup": "tree", "aria-label": pickedLabel(), title: pickedLabel(), onclick: (event) => openModelMenu(event.currentTarget) },
-        key?.set ? providerMark(key.provider, key.label, 18) : icon("key", 18)),
+      h("button", { class: "chip small", type: "button", "aria-haspopup": "tree", onclick: (event) => openModelMenu(event.currentTarget) },
+        key?.set ? providerMark(key.provider, key.label, 14) : null, h("span", {}, pickedLabel())),
       null);
   }
 

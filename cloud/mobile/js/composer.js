@@ -60,7 +60,11 @@ export function createComposer({ onSend, onStop, chips, onPlus, onGauge }) {
   });
   paint();
 
-  // The buttons do not take the focus: touching one while typing leaves the keyboard where it is.
+  // Typing is one row, as in the apps this one is read beside: the keyboard already takes half the screen. The buttons
+  // do not take the focus, or touching one would fold the row back and move it from under the finger.
+  const typing = (on) => box.classList.toggle("typing", on);
+  field.addEventListener("focus", () => typing(true));
+  field.addEventListener("blur", () => typing(false));
   for (const button of [plus, gauge, action]) button.addEventListener("pointerdown", (event) => {
     if (document.activeElement === field) event.preventDefault();
   });

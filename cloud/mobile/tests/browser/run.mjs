@@ -275,24 +275,24 @@ scenario("the gauge by the send button sets how hard the model thinks, like the 
   assert.deepEqual(page.problems, []);
 });
 
-scenario("the composer is one compact row, typing or not; the model button opens a dropdown, not a sheet", async (page) => {
+scenario("typing folds the composer to one row and letting go brings back its size; the model chip opens a dropdown", async (page) => {
   await signIn(page);
   await startTrial(page);
   await addKeyAndProject(page);
   const field = page.locator(".composer-input");
   const height = async () => (await page.locator(".composer").boundingBox()).height;
   const resting = await height();
-  assert.ok(resting <= 48, `a compact box: ${resting}`);
+  assert.match(await page.locator(".chip.small").innerText(), /Fake Model/, "the chip names the model");
   await field.focus();
+  await page.locator(".composer.typing").waitFor();
+  assert.ok(await height() <= 48, "a compact row while typing");
   await field.fill("a few words");
-  assert.ok(Math.abs(await height() - resting) < 1, `typing does not change its size: ${resting} -> ${await height()}`);
-  const plus = await page.locator(".composer .plus").boundingBox();
-  const input = await field.boundingBox();
-  assert.ok(Math.abs(plus.y + plus.height / 2 - (input.y + input.height / 2)) < 12, "plus and field share one row");
   await shot(page, "typing");
   await field.fill("");
   await field.blur();
-  assert.ok(Math.abs(await height() - resting) < 1, `letting go of the field does not grow it: ${resting} -> ${await height()}`);
+  await page.locator(".composer.typing").waitFor({ state: "detached" });
+  // An empty box is as tall as it was: a placeholder that wraps on a narrow phone does not make it grow.
+  assert.ok(Math.abs(await height() - resting) < 1, `letting go brings back its size: ${resting} -> ${await height()}`);
   await page.locator(".chip.small").first().click();
   await visible(page, ".model-menu");
   assert.equal(await page.locator(".sheet").count(), 0, "a dropdown, not a bottom sheet");

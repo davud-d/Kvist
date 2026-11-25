@@ -283,22 +283,24 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 
 .dock { position: absolute; z-index: 6; bottom: 0; left: 0; right: 0; margin: 0 auto; max-width: 760px; width: 100%;
   padding: 18px 12px calc(10px + env(safe-area-inset-bottom)); display: grid; gap: 8px; }
-.composer { display: grid; border-radius: 26px; background: rgba(34, 34, 38, .62);
+.composer { display: grid; gap: 6px; padding: 12px 10px 8px 16px; border-radius: 26px; background: rgba(34, 34, 38, .62);
   border: 1px solid rgba(255, 255, 255, .09); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); }
-/* One compact row always, as in the apps this one is read beside: plus, the field, the model, the dial, send. */
-.composer { grid-template-columns: auto 1fr auto auto auto; align-items: end; gap: 0 4px; padding: 4px 5px; border-radius: 23px; }
-.composer .composer-foot { display: contents; }
-.composer .plus { grid-column: 1; grid-row: 2; width: 34px; height: 34px; }
-.composer .composer-input { grid-column: 2; grid-row: 2; padding: 6px 0; }
-.composer .chips { grid-column: 3; grid-row: 2; }
-.composer .gauge-btn { grid-column: 4; grid-row: 2; width: 32px; height: 32px; }
-.composer .round { grid-column: 5; grid-row: 2; width: 34px; height: 34px; }
-.composer .tray { grid-column: 1 / -1; grid-row: 1; }
+.composer.typing { grid-template-columns: auto 1fr auto auto; align-items: end; gap: 0 4px; padding: 4px 5px 4px 5px; border-radius: 23px; }
+.composer.typing .composer-foot { display: contents; }
+.composer.typing .chips { display: none; }
+.composer.typing .plus { grid-column: 1; grid-row: 2; }
+.composer.typing .composer-input { grid-column: 2; grid-row: 2; padding: 6px 0; }
+.composer.typing .plus { width: 34px; height: 34px; }
+.composer.typing .round { width: 34px; height: 34px; }
+.composer.typing .gauge-btn { width: 32px; height: 32px; }
+.composer.typing .gauge-btn { grid-column: 3; grid-row: 2; }
+.composer.typing .round { grid-column: 4; grid-row: 2; }
+.composer.typing .tray { grid-column: 1 / -1; grid-row: 1; }
 .composer:focus-within { border-color: rgba(255, 255, 255, .2); }
 .composer-foot { display: flex; align-items: center; gap: 8px; }
-.chips { display: flex; }
+.chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
-.chip.small { flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; justify-content: center; border-radius: 16px; background: none; border: 0; color: var(--text2); }
+.chip.small { flex: none; min-height: 32px; padding: 0 11px; gap: 6px; font-size: 13px; background: rgba(255, 255, 255, .07); border: 0; color: var(--text2); }
 .chip.small:active { background: rgba(255, 255, 255, .13); }
 .mark-tile { display: inline-grid; place-items: center; width: var(--size, 14px); height: var(--size, 14px); font-size: 11px; font-weight: 700; color: var(--text); }
 .home-wrap { min-height: 100%; display: flex; }
