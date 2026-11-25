@@ -153,6 +153,20 @@ def current_sandbox_context(sandbox_mode: str, network_allowed: bool, workspace_
     return line
 
 
+def cloud_context() -> str:
+    """One line when this run is a Kvist Cloud task, else empty; the cloud runner sets the variable."""
+    if os.environ.get("KVIST_CLOUD_WORKSPACE") != "1":
+        return ""
+    # Without it the model took the cloud machine for the person's own computer and offered to open
+    # files "on their desktop" or to restart "their" editor.
+    return (
+        "you run in Kvist Cloud: the person talks to you from a browser or the phone app, and this "
+        "machine is a server that is not theirs. The workspace is a folder of their cloud task, "
+        "not a folder on their computer; files reach them only through the chat and the workspace page. "
+        "Your model is the one they connected with their own key."
+    )
+
+
 def identity_fact(provider: str, model: str, effort: str) -> str:
     """Who the model is, and which language model runs it, as two separate facts.
 

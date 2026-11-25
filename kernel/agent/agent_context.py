@@ -333,6 +333,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             system_lines.append(f"- scratchpad: {self._state.system_scratchpad}")
         if self._state.system_host:
             system_lines.append(f"- host: {self._state.system_host}")
+        if self._state.system_cloud:
+            system_lines.append(f"- cloud: {self._state.system_cloud}")
         system_block = "\n".join(system_lines) + "\n\n"
         # ── Session history context ─────────────────────────────────
         # Message numbers exist for end_session, which names the message it

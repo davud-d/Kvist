@@ -147,3 +147,12 @@ def test_a_new_session_and_a_switch_empty_the_pad(agent_factory):
     agent.switch_session(agent.current_session)  # same session: nothing to do
     assert pad.path.exists()
     pad.clear()
+
+
+def test_cloud_context_only_in_a_cloud_task(monkeypatch):
+    from kernel.context.system_context import cloud_context
+
+    monkeypatch.delenv("KVIST_CLOUD_WORKSPACE", raising=False)
+    assert cloud_context() == ""
+    monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
+    assert "Kvist Cloud" in cloud_context()

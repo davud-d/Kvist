@@ -118,6 +118,7 @@ class RunState:
     system_scratchpad: str = ""
     system_sandbox: str = ""
     system_host: str = ""
+    system_cloud: str = ""
     user_goal: str = ""
     create_goal: bool = False
     modify_goal: bool = False

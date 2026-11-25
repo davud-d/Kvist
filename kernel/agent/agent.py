@@ -137,6 +137,7 @@ from kernel.context.system_context import (
     current_os_context,
     current_project_context,
     current_workspace_context,
+    cloud_context,
     scratchpad_context,
     current_sandbox_context,
     current_shell_context,
@@ -673,6 +674,7 @@ class LocalAgent:
         )
         chain = ancestor_chain()
         self._state.system_host = describe_host(chain, detect_host(chain))
+        self._state.system_cloud = cloud_context()
 
     def request_cancel(self) -> None:
         """"Stop all": end this turn, its helpers, running calls and every process the task owns.
@@ -1523,6 +1525,11 @@ class LocalAgent:
             else ""
         )
         # The number end_session's tag names; only where the tag is offered.
+        cloud_note = (
+            f"(Runtime fact: {self._state.system_cloud})\n\n"
+            if self._state.system_cloud
+            else ""
+        )
         workspace_note = (
             f"(Runtime fact: workspace = {self._state.system_workspace})\n\n"
             if self._state.system_workspace
@@ -1544,7 +1551,7 @@ class LocalAgent:
             f"({auto_approval_fact(self.auto_approval)})\n\n"
         )
         return (
-            model_note + host_note + workspace_note + message_note + memory_note + self._chat_session_context()
+            model_note + host_note + cloud_note + workspace_note + message_note + memory_note + self._chat_session_context()
             + time_note + _REPLY_END_NOTE + user_goal
         )
 
