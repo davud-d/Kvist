@@ -35,7 +35,7 @@ DECISIONS = {
     "maintenance": "Keep SQLite and add Litestream backups",
 }
 ARGUMENTS = {angle: f"The {angle} argument stands on files nobody else read." for angle in IDS}
-CHOOSER_MARK = "You close a council"
+CHOOSER_MARK = "you close a council"
 
 
 @pytest.fixture(autouse=True)

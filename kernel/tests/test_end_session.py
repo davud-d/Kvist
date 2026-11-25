@@ -279,7 +279,7 @@ def test_the_chat_block_is_the_shared_text_with_the_tag_syntax():
     for line in (shared[0], shared[1], shared[2], shared[5]):
         assert line in chat
     assert "your whole reply is the tag <end_session message=\"N\"/>" in " ".join(chat)
-    assert "A tag with any other text beside it is not read." in " ".join(chat)
+    assert "a tag with any other text beside it is not read." in " ".join(chat)
 
 
 def test_only_the_interactive_transports_turn_it_on(tmp_path):

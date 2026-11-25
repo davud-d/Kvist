@@ -58,8 +58,8 @@ def with_tool_in_prompt(role_prompt: str) -> str:
         count=1,
     )
     block = _PROMPT_FILE.read_text(encoding="utf-8").strip()
-    with_block = _append_to_section(listed, "ALLOWED ACTIONS", block)
-    return with_block.replace("\n\nNo extra keys", f"\n{_SCHEMA_LINE}\n\nNo extra keys", 1)
+    with_block = _append_to_section(listed, "allowed actions", block)
+    return with_block.replace("\n\nno extra keys", f"\n{_SCHEMA_LINE}\n\nno extra keys", 1)
 
 
 class ImageJobs:

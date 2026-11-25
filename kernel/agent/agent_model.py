@@ -408,16 +408,16 @@ def _style_sections(self, role: str) -> tuple[str, str]:
     parts = [prompt]
     if role == "chat":
         working_style = _read_style_prompt(self, "agents")
-        _, _, voice = working_style.partition("== HOW IT SOUNDS ==")
+        _, _, voice = working_style.partition("== how it sounds ==")
         voice = voice.split("\n== ", 1)[0].strip()
         if voice:
             parts.append(
-                "== SELECTED STYLE'S CONVERSATION ACCENT ==\n\n"
-                "This adds the selected working style's emphasis to conversation. "
-                "It shapes explanation, not access or permission to act.\n\n"
+                "== selected style's conversation accent ==\n\n"
+                "this adds the selected working style's emphasis to conversation. "
+                "it shapes explanation, not access or permission to act.\n\n"
                 + voice
             )
-    return "## RESPONSE STYLE\n\n" + common, "\n\n".join(part for part in parts if part)
+    return "## response style\n\n" + common, "\n\n".join(part for part in parts if part)
 
 
 def _style_context(self, role: str) -> str:

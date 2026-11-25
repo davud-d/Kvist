@@ -465,10 +465,10 @@ READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.r
 # (``<skill>__<tool>``, defined by the skill's manifest) becomes skill_call.
 INTERNAL_ACTIONS = frozenset({"skill_call"})
 
-_ALLOWED_ACTIONS_RE = re.compile(r"^== \d+\. ALLOWED ACTIONS ==\s*\n\s*([^\n]+)", re.MULTILINE)
+_ALLOWED_ACTIONS_RE = re.compile(r"^== \d+\. allowed actions ==\s*\n\s*([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 # Sections that describe the text-mode protocol itself; the tools replace them.
-_PROTOCOL_SECTIONS = ("RESPONSE FORMAT", "ARGS SCHEMAS", "EXAMPLES", "SELF-CHECK")
+_PROTOCOL_SECTIONS = ("response format", "args schemas", "examples", "self-check")
 ELIDED_OUTPUT = "[output removed to fit the context window; run the action again if you need it]"
 # Closes the first user message of a native run. Said only in the system
 # prompt, the opening line lost to a gateway's own hidden prompt (Claude via a
@@ -547,7 +547,7 @@ def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:
     """
     match = _ALLOWED_ACTIONS_RE.search(role_prompt)
     if match is None:
-        raise ValueError("role prompt has no ALLOWED ACTIONS section")
+        raise ValueError("role prompt has no allowed actions section")
     names = [name.strip(" .") for name in match.group(1).split(",")]
     return [tool_definition(name) for name in names if name in ACTION_TOOLS]
 
@@ -610,7 +610,7 @@ def native_role_prompt(role_prompt: str, channel_section: str) -> str:
         end = matches[index + 1].start() if index + 1 < len(matches) else len(role_prompt)
         parts.append(role_prompt[position:match.start()])
         title = match.group(1)
-        if title == "RESPONSE FORMAT":
+        if title == "response format":
             parts.append(channel_section.strip() + "\n\n")
         elif not title.startswith(_PROTOCOL_SECTIONS):
             parts.append(role_prompt[match.start():end])

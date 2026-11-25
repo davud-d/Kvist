@@ -42,7 +42,7 @@ def test_the_ladder_has_no_repeats():
 def test_every_ladder_style_is_a_stock_agent_style_with_its_own_prompt_file(slug):
     path = _STYLES_DIR / "agents" / f"{slug}.txt"
     assert path.is_file()
-    assert path.read_text(encoding="utf-8").startswith(f"WORKING STYLE: {slug}\n")
+    assert path.read_text(encoding="utf-8").startswith(f"working style: {slug}\n")
 
     name = style_name(slug)
     assert name in get_style_options()

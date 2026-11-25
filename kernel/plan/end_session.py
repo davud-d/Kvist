@@ -55,11 +55,11 @@ _DECISION_TAIL_RE = re.compile(
 )
 _BARE_DECISION_RE = re.compile(r'<end_session\s+confirm\s*=\s*"(true|false)"\s*/>\Z')
 _FENCE_MARK_RE = re.compile(r"`{3,}[A-Za-z0-9_-]*")
-_ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
+_ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. allowed actions ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _SCHEMA_LINE = (
     'end_session: {"message_id": <int>, "request": true — only when the person asked to close} — the person\'s '
-    'message, see end_session under ALLOWED ACTIONS; '
+    'message, see end_session under allowed actions; '
     'the form {"confirm": true|false, "reason": "<one line>"} only answers END_SESSION REVIEW'
 )
 
@@ -368,7 +368,7 @@ def offer_in_prompt(role_prompt: str, role: str) -> str:
     """The role prompt with the tool offered: the tag for chat, the call for every other role."""
     if role == "chat":
         block = _CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()
-        return f"{role_prompt.rstrip()}\n\n== END SESSION ==\n\n{block}\n"
+        return f"{role_prompt.rstrip()}\n\n== end session ==\n\n{block}\n"
     return with_tool_in_prompt(role_prompt)
 
 
@@ -380,9 +380,9 @@ def with_tool_in_prompt(role_prompt: str) -> str:
         count=1,
     )
     block = _PROMPT_FILE.read_text(encoding="utf-8").strip()
-    with_block = _append_to_section(listed, "ALLOWED ACTIONS", block)
+    with_block = _append_to_section(listed, "allowed actions", block)
     # Every role prompt closes its schema list with the "No extra keys" rule.
-    return with_block.replace("\n\nNo extra keys", f"\n{_SCHEMA_LINE}\n\nNo extra keys", 1)
+    return with_block.replace("\n\nno extra keys", f"\n{_SCHEMA_LINE}\n\nno extra keys", 1)
 
 
 def _append_to_section(prompt: str, title: str, text: str) -> str:

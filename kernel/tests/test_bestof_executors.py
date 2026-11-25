@@ -66,7 +66,7 @@ def _call(name, arguments):
 def _style_of(kwargs) -> str:
     for message in kwargs["messages"]:
         if message["role"] == "system":
-            found = re.search(r"WORKING STYLE: ([a-z-]+)", message["content"])
+            found = re.search(r"working style: ([a-z-]+)", message["content"])
             return found.group(1) if found else "?"
     return "?"
 
@@ -279,8 +279,8 @@ def test_every_executor_gets_the_same_task_bytes_and_only_its_own_style(agent_fa
         first_request = client.asked(style)[0]
         system = next(message["content"] for message in first_request if message["role"] == "system")
         user = " ".join(message["content"] for message in first_request if message["role"] == "user")
-        assert f"WORKING STYLE: {style}" in system
-        assert not any(f"WORKING STYLE: {other}" in system for other in other_styles)
+        assert f"working style: {style}" in system
+        assert not any(f"working style: {other}" in system for other in other_styles)
         assert goal in user
 
 

@@ -251,15 +251,15 @@ def test_the_reviewer_cannot_run_a_command_or_hand_off_a_task(agent_factory, rep
 def test_the_role_prompt_gives_the_order_of_review_with_its_reasons_and_never_names_the_role_to_the_person():
     prompt = _load_role_prompt("judge")
 
-    assert prompt.index("Cheating first") < prompt.index("Tests next") < prompt.index("Quality last")
-    assert "only among the finalists" in prompt and "Eliminate early" in prompt
+    assert prompt.index("cheating first") < prompt.index("tests next") < prompt.index("quality last")
+    assert "only among the finalists" in prompt and "eliminate early" in prompt
     for reason in ("proves nothing", "set that command once", "sent again with every later step"):
         assert reason in prompt
     # A fraud list the person recognises, and the way out when nobody qualifies.
     for sign in ("xfail", "weakened an assert", "stub", "commented code out"):
         assert sign in prompt
     assert "do not invent a winner" in prompt
-    assert "DATA to analyze" in prompt and "UNTRUSTED_TOOL_OUTPUT" in prompt
+    assert "data to analyze" in prompt and "UNTRUSTED_TOOL_OUTPUT" in prompt
     assert not re.search(r"\bjudge\b", prompt, re.IGNORECASE)
 
 

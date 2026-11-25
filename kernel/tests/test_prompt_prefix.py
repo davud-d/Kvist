@@ -71,10 +71,10 @@ def test_the_style_follows_the_project_instructions_and_voice_follows_the_style(
     prompt = build_role_system_prompt(agent, role)
 
     # The role prompts mention the header earlier in passing, so the section is the last occurrence.
-    positions = [prompt.index(_RULE), prompt.rindex("## RESPONSE STYLE"), prompt.index(SELECTED_STYLE_MARKER)]
+    positions = [prompt.index(_RULE), prompt.rindex("## response style"), prompt.index(SELECTED_STYLE_MARKER)]
     assert positions == sorted(positions)
     if role != "chat":
-        assert prompt.index("VOICE MODE") > positions[-1]
+        assert prompt.index("voice mode") > positions[-1]
 
 
 @pytest.mark.parametrize("role", ["coder", "reader", "chat"])
@@ -88,16 +88,16 @@ def test_two_styles_share_everything_before_the_selected_style(tmp_path, role):
 
     assert shared_plain == shared_other
     assert tail_plain != tail_other
-    assert "== SOMETHING THE PERSON CAN USE ==" in shared_plain
+    assert "== something the person can use ==" in shared_plain
     assert _RULE in shared_plain
 
 
 @pytest.mark.parametrize("role", ["coder", "reader", "chat"])
 def test_the_selected_style_stays_inside_the_response_style_section(tmp_path, role):
-    # The role prompts' injection guard names the block "quoted under ## RESPONSE STYLE".
+    # The role prompts' injection guard names the block "quoted under ## response style".
     prompt = build_role_system_prompt(_agent(tmp_path, style="Paranoid", chat_style="Honest"), role)
 
-    section = prompt[prompt.rindex("## RESPONSE STYLE"):]
+    section = prompt[prompt.rindex("## response style"):]
 
     assert SELECTED_STYLE_MARKER in section
     assert "\n## " not in section
@@ -108,7 +108,7 @@ def test_the_tail_of_the_working_roles_holds_the_voice_mode_section_after_the_st
 
     _, tail = split_style_tail(prompt)
 
-    assert tail.index("VOICE MODE") > len(SELECTED_STYLE_MARKER)
+    assert tail.index("voice mode") > len(SELECTED_STYLE_MARKER)
 
 
 def test_the_report_prompt_keeps_the_style_block_as_before(tmp_path):
@@ -116,7 +116,7 @@ def test_the_report_prompt_keeps_the_style_block_as_before(tmp_path):
 
     prompt = build_report_system_prompt(_agent(tmp_path))
 
-    assert "## RESPONSE STYLE" in prompt
+    assert "## response style" in prompt
     assert SELECTED_STYLE_MARKER not in prompt
 
 

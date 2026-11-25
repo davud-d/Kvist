@@ -404,7 +404,7 @@ def test_the_plan_section_is_the_one_the_run_started_with(tmp_path):
 
     first, second = _text_systems(sdk)
     assert first == second
-    assert "PLAN MODE" in first
+    assert "plan mode" in first
 
 
 def test_the_next_run_picks_up_what_changed_in_the_instructions(tmp_path):

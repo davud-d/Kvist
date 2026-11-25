@@ -272,7 +272,7 @@ def test_prompt_cache_key_separates_accounts_and_prefixes(change):
 
 
 def test_prompt_cache_key_ignores_the_style_tail_but_not_the_shared_part(monkeypatch):
-    marker = "### SELECTED STYLE"
+    marker = "### selected style"
     request = {"model": "test", "tools": []}
     key = lambda instructions: transport._prompt_cache_key("account", {**request, "instructions": instructions})
 
@@ -284,7 +284,7 @@ def test_prompt_cache_key_ignores_the_style_tail_but_not_the_shared_part(monkeyp
 def test_runs_that_differ_only_in_style_get_one_key_and_one_session_through_the_client(monkeypatch):
     calls, _ = fake_responses(monkeypatch, [NS(type="response.completed", response=NS(usage=None))])
     for style in ("be terse", "explain everything"):
-        system = f"rules\n\n### SELECTED STYLE\n\n{style}"
+        system = f"rules\n\n### selected style\n\n{style}"
         transport.ChatGPTClient().create(model="test", messages=[{"role": "system", "content": system}])
 
     assert calls[0]["prompt_cache_key"] == calls[1]["prompt_cache_key"]

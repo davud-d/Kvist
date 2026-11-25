@@ -15,17 +15,17 @@ _TOOL_CALL_RE = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL)
 
 def _example_calls(prompt_text: str) -> list[str]:
     """The <tool_call> blocks of the EXAMPLES section (RESPONSE FORMAT shows a template)."""
-    examples = prompt_text[re.search(r"^== \d+\. EXAMPLES ==$", prompt_text, re.MULTILINE).end():]
+    examples = prompt_text[re.search(r"^== \d+\. examples ==$", prompt_text, re.MULTILINE).end():]
     following = re.search(r"^== \d+\. ", examples, re.MULTILINE)
     return _TOOL_CALL_RE.findall(examples[: following.start()] if following else examples)
 
 
 def _reader_allowed_actions(prompt_text: str) -> set[str]:
     match = re.search(
-        r"==\s*\d+(?:\.\d+)?\.\s*ALLOWED ACTIONS\s*==\s*\n+(.+?)\n",
+        r"==\s*\d+(?:\.\d+)?\.\s*allowed actions\s*==\s*\n+(.+?)\n",
         prompt_text,
     )
-    assert match is not None, "ALLOWED ACTIONS section not found in reader prompt"
+    assert match is not None, "allowed actions section not found in reader prompt"
     line = match.group(1).strip().rstrip(".")
     return {item.strip() for item in line.split(",") if item.strip()}
 
@@ -57,7 +57,7 @@ def test_reader_prompt_has_no_write_or_patch_guidance():
 
 def test_reader_prompt_keeps_the_turn_end_untrusted_and_examples():
     reader = _load_role_prompt("reader")
-    assert "A response with no tool call ends your turn" in reader
+    assert "a response with no tool call ends your turn" in reader
     assert "UNTRUSTED" in reader
     examples = _example_calls(reader)
     assert examples

@@ -56,10 +56,10 @@ def test_voice_section_reaches_the_action_roles_and_the_report_only_in_voice_mod
 
     for role in ("coder", "reader", "devops"):
         assert "== VOICE MODE ==" not in build_role_system_prompt(quiet, role)
-        assert "== VOICE MODE ==" in build_role_system_prompt(voice, role)
-        assert "== VOICE MODE ==" in build_role_system_prompt(voice, role, native_tools=True)
+        assert "== voice mode ==" in build_role_system_prompt(voice, role)
+        assert "== voice mode ==" in build_role_system_prompt(voice, role, native_tools=True)
     assert "== VOICE MODE ==" not in build_report_system_prompt(quiet)
-    assert "== VOICE MODE ==" in build_report_system_prompt(voice)
+    assert "== voice mode ==" in build_report_system_prompt(voice)
 
 
 def test_chat_role_is_left_alone_in_voice_mode(agent_factory):

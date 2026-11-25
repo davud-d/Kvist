@@ -232,7 +232,7 @@ def test_the_plan_guidance_is_in_the_system_prompt_only_where_a_plan_can_happen(
     asked = build_role_system_prompt(_agent(tmp_path), "coder")
     headless = build_role_system_prompt(_agent(tmp_path, NullUI()), "coder")
 
-    assert "== PLAN MODE ==" in asked
+    assert "== plan mode ==" in asked
     assert "== PLAN MODE ==" not in headless
 
 

@@ -17,4 +17,4 @@ def test_the_chat_prompt_still_tells_the_model_what_to_say_when_it_cannot_do_the
     text = _CHAT_PROMPT.read_text(encoding="utf-8")
 
     assert "Kvist switches to working mode by itself" in text
-    assert "прочитай файл X" in text
+    assert "прочитай файл x" in text

@@ -7,9 +7,9 @@ first and put the style, the one thing that differs, after this marker.
 """
 from __future__ import annotations
 
-# Third level: the style stays inside the "## RESPONSE STYLE" section, which the role
+# Third level: the style stays inside the "## response style" section, which the role
 # prompts' injection guard refers to by that name.
-SELECTED_STYLE_MARKER = "### SELECTED STYLE"
+SELECTED_STYLE_MARKER = "### selected style"
 
 
 def split_style_tail(system: str) -> tuple[str, str]:

@@ -526,7 +526,7 @@ def test_the_server_sends_a_replacement_as_one_message(fake_caller, tmp_path):
 def test_a_client_that_can_replace_is_not_told_to_never_touch_the_word_before_the_cursor(fake_caller, tmp_path):
     plain = completion.prepare_completion(_edit_request("x = ", "", edits=False), tmp_path)[0]["content"]
     asked = completion.prepare_completion(_edit_request("x = ", ""), tmp_path)[0]["content"]
-    assert "Never rewrite, correct or repeat the word before the cursor" in plain
+    assert "never rewrite, correct or repeat the word before the cursor" in plain
     assert "Never rewrite, correct or repeat the word before the cursor" not in asked
 
 

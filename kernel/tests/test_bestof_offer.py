@@ -568,7 +568,7 @@ def test_the_guidance_is_in_the_system_prompt_where_the_tool_is(repo):
     headless = build_role_system_prompt(make_agent(repo, NullUI()), "coder")
 
     # The action's one line in ALLOWED ACTIONS is in every prompt; the section itself only where the offer can happen.
-    assert "When offer_best_of is among your tools" in asked
+    assert "when offer_best_of is among your tools" in asked
     assert "When offer_best_of is among your tools" not in headless
 
 

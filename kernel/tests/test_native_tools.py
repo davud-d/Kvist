@@ -120,13 +120,13 @@ def test_native_role_prompt_drops_the_json_protocol(role):
     original = agent_model._load_role_prompt(role)
     native = native_role_prompt(original, agent_model._load_native_channel_section())
 
-    assert "RESPONSE CHANNEL: TOOL CALLS" in native
+    assert "response channel: tool calls" in native
     assert "Return only one valid JSON object" not in native
     assert "No chat" not in native
     assert "RESPONSE FORMAT ==" not in native
     assert "EXAMPLES ==" not in native
     assert "ARGS SCHEMAS ==" not in native
-    assert "ALLOWED ACTIONS ==" in native
+    assert "allowed actions ==" in native
     assert "UNTRUSTED" in native  # the rest of the prompt survives
 
 
@@ -323,7 +323,7 @@ def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory)
 
     assert result == "Done reading."
     second_call = agent.client.requests[-1]["messages"]
-    assert second_call[0]["role"] == "system" and "RESPONSE CHANNEL: TOOL CALLS" in second_call[0]["content"]
+    assert second_call[0]["role"] == "system" and "response channel: tool calls" in second_call[0]["content"]
     assert second_call[1]["content"].endswith(OPENING_NOTE)
     assert second_call[2]["tool_calls"][0]["id"] == "c1"
     assert second_call[2]["reasoning_content"] == "think one"

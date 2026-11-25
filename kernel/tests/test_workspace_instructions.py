@@ -199,7 +199,7 @@ def test_writer_roles_are_taught_to_maintain_the_file():
 
     for role in ("coder", "devops"):
         prompt = _load_role_prompt(role)
-        assert "PROJECT INSTRUCTIONS (KVIST.md)" in prompt
+        assert "project instructions (KVIST.md)" in prompt
         assert "replace_in_file" in prompt
 
 
@@ -208,10 +208,10 @@ def test_read_only_and_chat_roles_are_told_they_cannot_write_it():
 
     reader = _load_role_prompt("reader")
     assert "<PROJECT_INSTRUCTIONS>" in reader
-    assert "You write no files" in reader
+    assert "you write no files" in reader
     chat = _load_role_prompt("chat")
     assert CHAT_INSTRUCTIONS_FILE in chat
-    assert "You do not touch files in this mode" in chat
+    assert "you do not touch files in this mode" in chat
 
 
 def test_content_is_quoted_between_delimiters(tmp_path):

@@ -80,7 +80,7 @@ def who_asks(kwargs) -> str:
         if message["role"] == "system":
             if JUDGE_MARK in message["content"]:
                 return "judge"
-            found = re.search(r"WORKING STYLE: ([a-z-]+)", message["content"])
+            found = re.search(r"working style: ([a-z-]+)", message["content"])
             return found.group(1) if found else "?"
     return "?"
 
@@ -404,7 +404,7 @@ def test_the_reviewer_is_told_the_task_the_executors_their_order_of_work_and_the
     first = client.asked("judge")[0]
     system = next(message["content"] for message in first if message["role"] == "system")
     goal = "\n".join(message["content"] for message in first if message["role"] == "user")
-    assert JUDGE_MARK in system and "ALLOWED ACTIONS" in system
+    assert JUDGE_MARK in system and "allowed actions" in system
     assert "Сделай приветствие дружелюбнее" in goal
     assert "- e1: style senior-dev" in goal and "- e2: style minimalist" in goal
     assert "in Russian" in goal
