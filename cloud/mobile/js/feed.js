@@ -86,13 +86,19 @@ function callFor(feed, ev) {
 // The core appends a line ("Kvist closed the task's processes: ...") to an answer that was already streamed
 // as a reply, so the final text is that reply plus a tail. Returns what of the final text is not on screen
 // yet: "" when it is all there, the tail when only a tail is new, null when the answer was never shown.
+// One italic line: the closing words the core appends. A longer tail is a different answer, not a footer.
+const CLOSING_LINE = /^_[^\n]+_$/;
+
 function unshownTail(feed, message) {
   const last = feed.items.findLast((item) => item.kind !== "note");
   if (!last || (last.kind !== "reply" && last.kind !== "final") || last.aside) return null;
   const shown = String(last.text).trim();
   const full = String(message ?? "").trim();
-  if (!shown || !full.startsWith(shown)) return null;
-  return full.slice(shown.length).trim();
+  if (!shown || !full) return null;
+  if (shown.endsWith(full)) return "";
+  if (!full.startsWith(shown)) return null;
+  const tail = full.slice(shown.length).trim();
+  return CLOSING_LINE.test(tail) ? tail : null;
 }
 
 // A tail is a status line, not a second answer: it is written as a note, without its markdown emphasis.

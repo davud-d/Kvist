@@ -1185,7 +1185,22 @@ def _spoken_with_answer(content: str, calls: dict[int, dict[str, str]]) -> str:
     """Words said before the call, then the answer being written."""
     opening = speakable_prefix(content)
     answer = _final_answer_words(calls) if calls else ""
+    if _answer_repeats_opening(opening, answer):
+        return answer
     return f"{opening}\n\n{answer}" if opening and answer else opening or answer
+
+
+# Shorter than this a shared first line is a coincidence ("Done."), not the same answer written twice.
+_REPEAT_MIN_CHARS = 40
+
+
+def _answer_repeats_opening(opening: str, answer: str) -> bool:
+    """The model wrote its answer as the words before the call and again inside the call.
+
+    The person should read it once: the call's text is the answer the session ends with.
+    """
+    first_line = answer.split("\n", 1)[0].strip()
+    return len(first_line) >= _REPEAT_MIN_CHARS and opening.strip().startswith(first_line)
 
 
 def _note_tool_call_progress(self, entry: dict[str, str]) -> None:

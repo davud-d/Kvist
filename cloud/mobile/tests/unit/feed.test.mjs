@@ -126,3 +126,17 @@ test("replayed history does not open calls it can no longer finish", () => {
   const feed = run([{ type: "call_begin", call_id: "x", tool: "read_file", description: "x" }], { replay: true });
   assert.equal(feed.items.length, 0);
 });
+
+test("an answer the model wrote twice shows once; a long different tail is not turned into a note", () => {
+  const said = "tkinter works: Tk 8.6 lives in ~/.local/tk, the app runs on the virtual screen.";
+  const twice = run([
+    { type: "stream_commit", stream_id: "s", text: `${said}\n\nMore.\n\n${said}\n\nMore.` },
+    { type: "final", message: `${said}\n\nMore.`, outcome: "done" },
+  ]);
+  assert.deepEqual(twice.items.map((item) => item.kind), ["reply"]);
+  const other = run([
+    { type: "stream_commit", stream_id: "s", text: "Short opening." },
+    { type: "final", message: "Short opening.\n\nA whole other paragraph of the answer.", outcome: "done" },
+  ]);
+  assert.deepEqual(other.items.map((item) => item.kind), ["reply", "final"]);
+});
