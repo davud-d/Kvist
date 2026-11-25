@@ -22,7 +22,15 @@ test("the history keeps no pixels, so what this page sent is shown from memory, 
   const stored = JSON.stringify({ type: "kvist-image-goal", text: "x", images: [{ name: photo.name, data_url: "" }, { name: "other.jpg", data_url: "" }] });
   const { images } = parseImageGoal(stored);
   assert.equal(images[0].data_url, photo.data_url);
-  assert.equal(images[1].data_url, "", "a photo from another visit stays a label");
+  assert.equal(images[1].data_url, "", "a photo from another device has no picture: the feed draws a plain tile");
+});
+
+test("the small copy is what is remembered, so a reload shows it and the storage stays small", () => {
+  const withThumb = { ...photo, name: "photo-b-2.jpg", thumb: "data:image/jpeg;base64,BB" };
+  imageGoal("y", [withThumb]);
+  const stored = JSON.stringify({ type: "kvist-image-goal", text: "y", images: [{ name: withThumb.name, data_url: "" }] });
+  assert.equal(parseImageGoal(stored).images[0].data_url, withThumb.thumb);
+  assert.ok(!imageGoal("y", [withThumb]).includes("BB"), "the small copy never leaves the browser");
 });
 
 test("a broken envelope is shown as the words it is", () => {

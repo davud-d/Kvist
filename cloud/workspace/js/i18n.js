@@ -341,6 +341,7 @@ const RU = {
   "image big": "Фото больше 5 МБ",
   "images big": "Фото больше 20 МБ",
   "image unreadable": "Не удалось прочитать фото",
+  "drop photos": "Отпусти — фото прикрепятся",
 };
 
 
@@ -354,6 +355,7 @@ const EN = {
   "image big": "A photo is over 5 MB",
   "images big": "The photos are over 20 MB",
   "image unreadable": "Could not read the photo",
+  "drop photos": "Drop the photos to add them",
   "home title for": "What should {name} take on?",
   "notify done": "Kvist is done",
   "notify failed": "The task stopped with an error",

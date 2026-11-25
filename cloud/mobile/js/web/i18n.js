@@ -4,8 +4,8 @@
 import { lang } from "../i18n.js";
 
 const WORDS = {
-  en: { thinking: "Thinking", "thought for": "Thought for", sec: "s", "working now": "Working", "work done": "Done", "task plan": "Plan", paused: "paused" },
-  ru: { thinking: "Думаю", "thought for": "Думала", sec: "с", "working now": "Работает", "work done": "Сделано", "task plan": "План", paused: "пауза" },
+  en: { thinking: "Thinking", "thought for": "Thought for", sec: "s", "working now": "Working", "work done": "Done", "task plan": "Plan", paused: "paused", photo: "Photo" },
+  ru: { thinking: "Думаю", "thought for": "Думала", sec: "с", "working now": "Работает", "work done": "Сделано", "task plan": "План", paused: "пауза", photo: "Фото" },
 };
 
 export function t(key) {

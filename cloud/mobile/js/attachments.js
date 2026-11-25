@@ -1,5 +1,5 @@
-// Pictures for the next message: taken with the camera, picked from the library, pasted, or dropped on the field (an iPad
-// or a tablet takes them from another app). They show as thumbnails inside the field, with a cross, never as text.
+// Pictures for the next message: taken with the camera, picked from the library, pasted, or dropped anywhere on the page
+// (a tablet in split screen, a desktop browser, another app). They show as thumbnails inside the field, with a cross, never as text.
 // Ported from the web workspace (cloud/workspace/js/views/attachments.js): the same limits and the same envelope.
 
 import { fill, h, icon } from "./dom.js";
@@ -15,19 +15,14 @@ const KINDS = /^image\/(png|jpe?g|webp|gif|heic|heif|bmp)$/;
 
 const SIDE = 2048;
 const QUALITY = 0.85;
+const THUMB_SIDE = 480;
 let counter = 0;
 
-/**
- * Every photo is drawn again in the browser as a JPEG of at most 2048 px on its long side: the camera's turn is applied to
- * the pixels (so no EXIF is needed), HEIC and the rest become JPEG, transparency becomes white, and no metadata survives.
- * The server does not trust this (it rewrites whatever arrives); this makes the upload small and the picture right-side up.
- */
-async function shrink(file) {
-  let bitmap;
+async function decode(file) {
   try {
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
-    bitmap = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
@@ -38,9 +33,12 @@ async function shrink(file) {
       img.src = url;
     });
   }
+}
+
+function draw(bitmap, side) {
   const width = bitmap.naturalWidth ?? bitmap.width;
   const height = bitmap.naturalHeight ?? bitmap.height;
-  const scale = Math.min(1, SIDE / Math.max(width, height));
+  const scale = Math.min(1, side / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
@@ -48,8 +46,21 @@ async function shrink(file) {
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/**
+ * Every photo is drawn again in the browser as a JPEG of at most 2048 px on its long side: the camera's turn is applied to
+ * the pixels (so no EXIF is needed), HEIC and the rest become JPEG, transparency becomes white, and no metadata survives.
+ * The server does not trust this (it rewrites whatever arrives); this makes the upload small and the picture right-side up.
+ * A small copy is made at the same time: the feed shows it again after a reload (envelope.js).
+ */
+async function shrink(file) {
+  const bitmap = await decode(file);
+  const full = draw(bitmap, SIDE);
+  const thumb = draw(bitmap, THUMB_SIDE).toDataURL("image/jpeg", 0.7);
   bitmap.close?.();
-  const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("encode"))), "image/jpeg", QUALITY));
+  const blob = await new Promise((resolve, reject) => full.toBlob((b) => (b ? resolve(b) : reject(new Error("encode"))), "image/jpeg", QUALITY));
   const data_url = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("read"));
@@ -57,10 +68,51 @@ async function shrink(file) {
     reader.readAsDataURL(blob);
   });
   // A name of our own: no two photos of a visit share one, so what was sent can be matched to what comes back.
-  return { name: `photo-${Date.now().toString(36)}-${++counter}.jpg`, data_url, size: blob.size };
+  return { name: `photo-${Date.now().toString(36)}-${++counter}.jpg`, data_url, thumb, size: blob.size };
 }
 
-/** Mounts the tray and the hidden pickers into `box`; `field` takes pastes, `box` takes drops. */
+const hasFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes("Files");
+
+/**
+ * A photo dragged from another app (split screen on a tablet, a desktop browser) may be let go anywhere on the page, as
+ * in the chat apps people know: while it is over the page, the whole page says it will take it. The Android app gets a
+ * drop itself (a WebView does not pass another app's files to the page) and hands it over through `window.kvistDrop`.
+ */
+function catchDrops(box, add) {
+  let depth = 0;
+  const show = (on) => {
+    document.body.dataset.drop = t("drop photos");
+    document.body.classList.toggle("dropping", on);
+  };
+  document.addEventListener("dragenter", (event) => {
+    if (!hasFiles(event)) return;
+    depth += 1;
+    show(true);
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!hasFiles(event)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) show(false);
+  });
+  document.addEventListener("dragover", (event) => {
+    if (hasFiles(event)) event.preventDefault();
+  });
+  document.addEventListener("drop", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    depth = 0;
+    show(false);
+    // The field is not there while a question or a closed session takes its place: a photo then has nowhere to go.
+    if (box.isConnected && box.offsetParent !== null) add(event.dataTransfer.files);
+  });
+  window.kvistDragging = (on) => show(Boolean(on));
+  window.kvistDrop = (items) => {
+    show(false);
+    add(items.map(({ name, type, data }) => new File([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], name, { type })));
+  };
+}
+
+/** Mounts the tray and the hidden pickers into `box`; `field` takes pastes, the whole page takes drops. */
 export function mountAttachments({ box, field, onChange }) {
   let images = [];
   const tray = h("div", { class: "tray", hidden: true });
@@ -110,17 +162,7 @@ export function mountAttachments({ box, field, onChange }) {
     event.preventDefault();
     add(files);
   });
-  box.addEventListener("dragover", (event) => {
-    if ([...(event.dataTransfer?.types ?? [])].includes("Files")) {
-      event.preventDefault();
-      box.classList.add("drop");
-    }
-  });
-  for (const type of ["dragleave", "drop"]) box.addEventListener(type, () => box.classList.remove("drop"));
-  box.addEventListener("drop", (event) => {
-    event.preventDefault();
-    add(event.dataTransfer.files);
-  });
+  catchDrops(box, add);
 
   return {
     get images() {

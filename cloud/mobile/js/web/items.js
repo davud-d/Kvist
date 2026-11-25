@@ -64,7 +64,10 @@ function markdown(text, live) {
 }
 
 function paintUser(el, item) {
-  const pictures = item.images?.length ? h("div", { class: "user-images" }, item.images.map((i) => (i.data_url ? h("img", { class: "user-image", src: i.data_url, alt: i.name }) : h("span", { class: "chip" }, i.name)))) : null;
+  // A photo sent from another device has no picture here (the server keeps only names): a plain tile stands in its place.
+  const pictures = item.images?.length ? h("div", { class: "user-images" }, item.images.map((i) => (i.data_url
+    ? h("img", { class: "user-image", src: i.data_url, alt: t("photo") })
+    : h("div", { class: "user-image missing", role: "img", "aria-label": t("photo") }, icon("image", 22))))) : null;
   fill(el, pictures, item.text ? h("div", { class: "user-text" }, item.text) : null);
 }
 

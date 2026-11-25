@@ -27,7 +27,11 @@
 .item-user { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .user-text { padding: 10px 16px; background: var(--surface-2); border-radius: 18px 18px 6px 18px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .user-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* One photo keeps its shape; several stand as equal square tiles, so a wide one does not squeeze the next. */
+.user-images > .user-image { flex: none; }
+.user-images > .user-image:not(:only-child) { width: 120px; height: 120px; }
 .user-image { max-width: 240px; max-height: 160px; object-fit: cover; border-radius: var(--r-md); }
+.user-image.missing { width: 96px; height: 96px; display: grid; place-items: center; background: var(--s2); color: var(--text3); }
 .item-reply.aside { color: var(--dim); }
 .item-final .chip { display: inline-block; margin-top: 10px; font-size: var(--t-sm); color: var(--dim); }
 .item-plan { padding: 16px 24px; background: var(--surface-2); border-radius: var(--r-md); }

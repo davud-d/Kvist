@@ -12,7 +12,7 @@ const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const SIDE = 2048;
 const QUALITY = 0.85;
 // What the feed shows of a sent photo after a reload: the server keeps only names, so a small copy stays in this browser.
-const THUMB_SIDE = 320;
+const THUMB_SIDE = 480;
 const MEMORY_KEY = "kvist.sent-photos";
 const MEMORY_SIZE = 60;
 let counter = 0;
@@ -109,7 +109,44 @@ export function parseImageGoal(text) {
   }
 }
 
-/** The tray goes inside `composer` above the field, "+" at the start of `foot`; `field` takes pastes, `composer` drops. */
+const hasFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes("Files");
+// The home page and a task each have a field; a photo let go anywhere goes to the one on screen.
+const fields = new Set();
+let depth = 0;
+
+function showDrop(on) {
+  document.body.dataset.drop = t("drop photos");
+  document.body.classList.toggle("dropping", on);
+}
+
+/** A photo dragged from another window may be let go anywhere on the page, as in the chat apps people know. */
+function catchDrops(composer, add) {
+  fields.add({ composer, add });
+  if (fields.size > 1) return;
+  document.addEventListener("dragenter", (event) => {
+    if (!hasFiles(event)) return;
+    depth += 1;
+    showDrop(true);
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!hasFiles(event)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) showDrop(false);
+  });
+  document.addEventListener("dragover", (event) => {
+    if (hasFiles(event)) event.preventDefault();
+  });
+  document.addEventListener("drop", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    depth = 0;
+    showDrop(false);
+    const shown = [...fields].find((target) => target.composer.isConnected && target.composer.offsetParent !== null);
+    shown?.add(event.dataTransfer.files);
+  });
+}
+
+/** The tray goes inside `composer` above the field, "+" at the start of `foot`; `field` takes pastes, the whole page drops. */
 export function mountAttachments({ composer, field, foot, onChange }) {
   let images = [];
   const tray = h("div", { class: "attach-tray", hidden: true });
@@ -156,17 +193,7 @@ export function mountAttachments({ composer, field, foot, onChange }) {
     event.preventDefault();
     add(files);
   });
-  composer.addEventListener("dragover", (event) => {
-    if (![...(event.dataTransfer?.types ?? [])].includes("Files")) return;
-    event.preventDefault();
-    composer.classList.add("drop");
-  });
-  for (const type of ["dragleave", "drop"]) composer.addEventListener(type, () => composer.classList.remove("drop"));
-  composer.addEventListener("drop", (event) => {
-    if (!event.dataTransfer?.files.length) return;
-    event.preventDefault();
-    add(event.dataTransfer.files);
-  });
+  catchDrops(composer, add);
 
   return {
     get images() {

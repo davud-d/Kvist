@@ -32,7 +32,8 @@
 .thumb-remove { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgb(0 0 0 / 0.65); color: #fff; cursor: pointer; opacity: 0; transition: opacity var(--d-hover) ease; }
 .attach-tray .thumb:hover .thumb-remove, .thumb-remove:focus-visible { opacity: 1; }
 .attach-btn { width: 34px; height: 34px; min-height: 34px; padding: 0; border-radius: 50%; justify-content: center; }
-.composer.drop { border-color: var(--accent); border-style: dashed; }
+/* A photo dragged over the page: the whole page says it will take it, wherever it is let go. */
+body.dropping::after { content: attr(data-drop); position: fixed; inset: 12px; z-index: 1000; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 20px; background: color-mix(in srgb, var(--surface) 85%, transparent); color: var(--text); font-size: 18px; font-weight: 600; pointer-events: none; }
 .model-pick .provider-mark { width: 20px; height: 20px; }
 
 /* The model menu: a search, then providers as parents with their models hanging under them. */
@@ -103,6 +104,9 @@
 .item-user { align-self: flex-end; max-width: 82%; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .user-text { padding: 10px 16px; background: var(--surface-2); border-radius: 18px 18px 6px 18px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .user-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* One photo keeps its shape; several stand as equal square tiles, so a wide one does not squeeze the next. */
+.user-images > .user-image { flex: none; }
+.user-images > .user-image:not(:only-child) { width: 120px; height: 120px; }
 .user-image { max-width: 240px; max-height: 160px; object-fit: cover; border-radius: var(--r-md); }
 .user-image.missing { width: 96px; height: 96px; display: grid; place-items: center; background: var(--surface-2); color: var(--faint); }
 .item-reply.aside { color: var(--dim); }
