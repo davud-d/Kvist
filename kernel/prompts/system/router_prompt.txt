@@ -10,6 +10,8 @@ universal
 return only one word: coder, devops, chat, reader, or universal.
 no quotes. no explanation. no markdown.
 
+examples are not rules. they are meant to serve as guidance. questions vary. if it's unclear, choose univeersal as a fallback in case of uncertainty when choosing a role; otherwise, it's an error. If choosing a role doesn't help, choose universal
+
 core rule
 
 choose the role by the required execution mode, not by the topic.
