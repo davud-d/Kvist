@@ -1,6 +1,7 @@
 package site.kvist.cloud
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -8,10 +9,14 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
+import android.view.DragEvent
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -23,7 +28,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.JavaScriptReplyProxy
@@ -32,10 +39,13 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.IOException
 
 /**
  * One WebView with Kvist Cloud's phone page in it, and the operating system's own things the page cannot do:
- * the Google Pay sheet, links in the system browser, the clipboard, a tap's vibration.
+ * the Google Pay sheet, links in the system browser, the clipboard, a tap's vibration, the photo picker and the camera
+ * behind the page's file inputs, and photos dragged onto the app from another one.
  *
  * The page reaches this class only through a message channel that exists for the cloud's own origin (Bridge.START_SCRIPT
  * makes it look like `window.KvistHost`); GitHub's sign-in page and anything else loaded here get nothing.
@@ -49,6 +59,12 @@ class MainActivity : ComponentActivity() {
     private var failed = false
     // The nonce of the sign-in in the browser right now: only this app knows it, and the cloud wants it back with the code.
     private var signInNonce: String? = null
+    // The page's file input waiting for the picker or the camera, and where the camera writes its photo.
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var cameraUri: Uri? = null
+    private val chooser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        deliverPicked(result.resultCode, result.data)
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,6 +83,8 @@ class MainActivity : ComponentActivity() {
         }
         webView.setBackgroundColor(getColor(R.color.kvist_bg))
         webView.webViewClient = client()
+        webView.webChromeClient = chromeClient()
+        webView.setOnDragListener { _, event -> onDrag(event) }
         installBridge()
 
         offline = offlineView()
@@ -194,6 +212,97 @@ class MainActivity : ComponentActivity() {
     private fun share(text: String) {
         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
         startActivity(Intent.createChooser(send, getString(R.string.share)))
+    }
+
+    // ---- photos: the page's file inputs, and drops from other apps ----------------------------------------
+
+    /** A WebView ignores `<input type=file>` unless the app opens a picker: the gallery, or the camera for `capture`. */
+    private fun chromeClient() = object : WebChromeClient() {
+        override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+            fileCallback?.onReceiveValue(null)
+            fileCallback = callback
+            val intent = if (params.isCaptureEnabled) {
+                cameraIntent()
+            } else {
+                params.createIntent().putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.mode == FileChooserParams.MODE_OPEN_MULTIPLE)
+            }
+            try {
+                chooser.launch(intent)
+            } catch (error: ActivityNotFoundException) {
+                deliverPicked(Activity.RESULT_CANCELED, null)
+            }
+            return true
+        }
+    }
+
+    private fun cameraIntent(): Intent {
+        // One photo at a time: whatever an earlier capture left behind goes first.
+        val folder = File(cacheDir, "camera").apply { deleteRecursively(); mkdirs() }
+        val uri = FileProvider.getUriForFile(this, "$packageName.photos", File(folder, "photo-${System.currentTimeMillis()}.jpg"))
+        cameraUri = uri
+        return Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+            .putExtra(MediaStore.EXTRA_OUTPUT, uri)
+            .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    private fun deliverPicked(resultCode: Int, data: Intent?) {
+        val callback = fileCallback ?: return
+        fileCallback = null
+        val camera = cameraUri
+        cameraUri = null
+        if (resultCode != Activity.RESULT_OK) {
+            callback.onReceiveValue(null)
+            return
+        }
+        val clip = data?.clipData
+        val picked = when {
+            camera != null -> arrayOf(camera)
+            clip != null -> Array(clip.itemCount) { clip.getItemAt(it).uri }
+            else -> data?.data?.let { arrayOf(it) }
+        }
+        callback.onReceiveValue(picked)
+    }
+
+    private fun onDrag(event: DragEvent): Boolean {
+        when (event.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                val description = event.clipDescription ?: return false
+                // false: a drag of text or a link is left to the WebView itself.
+                return Photos.takesDrag((0 until description.mimeTypeCount).map(description::getMimeType))
+            }
+            DragEvent.ACTION_DRAG_ENTERED -> webView.evaluateJavascript(Photos.draggingScript(true), null)
+            DragEvent.ACTION_DRAG_EXITED, DragEvent.ACTION_DRAG_ENDED -> webView.evaluateJavascript(Photos.draggingScript(false), null)
+            DragEvent.ACTION_DROP -> readDrop(event)
+        }
+        return true
+    }
+
+    /** Another app's photos are readable only while the permission this drop grants is held: read them, then let go. */
+    private fun readDrop(event: DragEvent) {
+        val clip = event.clipData ?: return
+        val permissions = requestDragAndDropPermissions(event)
+        val uris = (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+        Thread {
+            val photos = uris.mapNotNull { readPhoto(it) }
+            runOnUiThread {
+                permissions?.release()
+                if (photos.isNotEmpty()) webView.evaluateJavascript(Photos.dropScript(photos), null)
+            }
+        }.start()
+    }
+
+    private fun readPhoto(uri: Uri): Photos.Dropped? {
+        val type = contentResolver.getType(uri)
+        if (!Photos.isImage(type)) return null
+        return try {
+            val bytes = contentResolver.openInputStream(uri)?.use { Photos.readCapped(it) } ?: return null
+            Photos.Dropped("photo", type!!, bytes)
+        } catch (error: IOException) {
+            null
+        } catch (error: SecurityException) {
+            // The other app took its permission back: that photo is skipped, the rest still arrive.
+            null
+        }
     }
 
     // ---- the page and its failures ----------------------------------------------------------------------

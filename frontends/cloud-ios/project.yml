@@ -40,6 +40,8 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         KvistCloudURL: $(KVIST_CLOUD_URL)
         UIUserInterfaceStyle: Dark
+        # The page's "Camera" (<input capture>): without this the web view stops the app instead of opening the camera.
+        NSCameraUsageDescription: Take a photo to send with a message.
         UIViewControllerBasedStatusBarAppearance: true
         UILaunchScreen:
           UIColorName: LaunchBackground

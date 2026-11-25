@@ -17,6 +17,17 @@
             android:name="com.google.android.gms.wallet.api.enabled"
             android:value="true" />
 
+        <!-- Where the camera writes a photo the page asked for (<input capture>); only for the camera app it hands it to. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.photos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/photo_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"

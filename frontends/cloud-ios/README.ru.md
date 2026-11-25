@@ -3,7 +3,9 @@
 *(English version: [README.md](README.md))*
 
 Один `WKWebView` со страницей облака для телефона ([`cloud/mobile`](../../cloud/mobile)) и то, чего страница сама не умеет: окно
-**Apple Pay** (`PKPaymentAuthorizationController` из PassKit), ссылки в Safari, буфер обмена, вибрация. Kvist на устройстве не
+**Apple Pay** (`PKPaymentAuthorizationController` из PassKit), ссылки в Safari, буфер обмена, вибрация. Фото идут через саму страницу: веб-вью открывает
+галерею и камеру для её «+» (камере нужен `NSCameraUsageDescription` в `project.yml`), а фото, перетащенное из другого приложения
+(Split View на iPad, между приложениями на iPhone), WebKit отдаёт странице как обычное перетаскивание. Kvist на устройстве не
 работает; это окно в облако.
 
 ```bash

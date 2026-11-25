@@ -1,1 +1,2 @@
 "CFBundleDisplayName" = "Kvist Cloud";
+"NSCameraUsageDescription" = "Чтобы сфотографировать и отправить снимок в сообщении.";

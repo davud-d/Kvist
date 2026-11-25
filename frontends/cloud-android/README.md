@@ -3,8 +3,9 @@
 *(Русская версия: [README.ru.md](README.ru.md))*
 
 One WebView with the cloud's phone page ([`cloud/mobile`](../../cloud/mobile)) and the things a page cannot do: the **Google Pay**
-sheet (Google's `PaymentsClient`), links in the system browser, the clipboard, a tap's vibration, the back key. No agent runs on
-the phone; it is a window onto the cloud.
+sheet (Google's `PaymentsClient`), links in the system browser, the clipboard, a tap's vibration, the back key, the photo picker and the camera behind the page's "+", and photos dragged onto the
+app from another one (a WebView does not hand another app's files to the page, so the app reads them and passes them to
+`window.kvistDrop`). No agent runs on the phone; it is a window onto the cloud.
 
 ```bash
 cd frontends/cloud-android                      # JDK 21 and ANDROID_HOME with platform 36

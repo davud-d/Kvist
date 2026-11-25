@@ -3,8 +3,10 @@
 *(Русская версия: [README.ru.md](README.ru.md))*
 
 One `WKWebView` with the cloud's phone page ([`cloud/mobile`](../../cloud/mobile)) and the things a page cannot do: the **Apple Pay**
-sheet (PassKit's `PKPaymentAuthorizationController`), links in Safari, the clipboard, haptics. No agent runs on the device; it is a
-window onto the cloud.
+sheet (PassKit's `PKPaymentAuthorizationController`), links in Safari, the clipboard, haptics. Photos come through the page itself: the web view opens the
+library and the camera for its "+" (the camera needs `NSCameraUsageDescription`, in `project.yml`), and WebKit hands a photo dragged
+from another app (iPad split view, iPhone between apps) to the page as an ordinary drop. No agent runs on the device; it is a window
+onto the cloud.
 
 ```bash
 cd frontends/cloud-ios
