@@ -3,7 +3,7 @@
 *(English version: [README.md](README.md))*
 
 Один `WKWebView` со страницей облака для телефона ([`cloud/mobile`](../../cloud/mobile)) и то, чего страница сама не умеет: окно
-**Apple Pay** (`PKPaymentAuthorizationController` из PassKit), ссылки в Safari, буфер обмена, вибрация. Агент на устройстве не
+**Apple Pay** (`PKPaymentAuthorizationController` из PassKit), ссылки в Safari, буфер обмена, вибрация. Kvist на устройстве не
 работает; это окно в облако.
 
 ```bash
