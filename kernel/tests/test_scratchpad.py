@@ -156,3 +156,12 @@ def test_cloud_context_only_in_a_cloud_task(monkeypatch):
     assert cloud_context() == ""
     monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
     assert "Kvist Cloud" in cloud_context()
+
+
+def test_cloud_clock_is_marked_as_the_servers(monkeypatch):
+    from kernel.context.system_context import current_time_context
+
+    monkeypatch.delenv("KVIST_CLOUD_WORKSPACE", raising=False)
+    assert "Netherlands" not in current_time_context()["current_time"]
+    monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
+    assert "Netherlands" in current_time_context()["current_time"]

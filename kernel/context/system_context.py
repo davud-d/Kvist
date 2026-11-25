@@ -54,11 +54,14 @@ def current_time_context():
     """Returns the current time as 'YYYY-MM-DD Weekday HH:MM:SS Zone (UTC+hh:mm)'."""
     local = datetime.now().astimezone()
     offset = local.strftime("%z")
-    return {
-        "current_time": (
-            f"{local:%Y-%m-%d %A %H:%M:%S} {_timezone_name(local)} (UTC{offset[:3]}:{offset[3:]})"
-        ),
-    }
+    text = f"{local:%Y-%m-%d %A %H:%M:%S} {_timezone_name(local)} (UTC{offset[:3]}:{offset[3:]})"
+    if os.environ.get("KVIST_CLOUD_WORKSPACE") == "1":
+        # Without it a greeting at "night" was wished to a person for whom it was afternoon.
+        text += (
+            "; this is the clock of the cloud server in the Netherlands, not of the person: "
+            "their own time zone is unknown, so do not greet or schedule by this hour; ask when it matters"
+        )
+    return {"current_time": text}
 
 
 def current_os_context():
