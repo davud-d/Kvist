@@ -36,6 +36,7 @@ html, body {
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  overflow-x: hidden;
   touch-action: manipulation;
 }
 
@@ -126,55 +127,6 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .col { max-width: 720px; margin: 0 auto; padding: 16px 16px 28px; display: flex; flex-direction: column; gap: 18px; }
 .jump { position: absolute; right: 16px; bottom: calc(var(--dock-h, 96px) + 8px); width: 40px; height: 40px; border-radius: 50%; background: var(--s3); border: 1px solid var(--line); display: grid; place-items: center; z-index: 5; }
 
-.msg.user { display: flex; justify-content: flex-end; }
-.bubble { max-width: 86%; padding: 10px 14px; border-radius: 18px 18px 6px 18px; background: var(--s2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
-.msg.assistant { user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
-.msg.assistant.live .md > :last-child::after { content: ""; display: inline-block; width: 7px; height: 16px; margin-left: 3px; vertical-align: -2px; background: var(--text2); }
-@media (prefers-reduced-motion: no-preference) { .msg.assistant.live .md > :last-child::after { animation: caret 1s steps(2) infinite; } @keyframes caret { 50% { opacity: 0; } } }
-.msg-actions { display: flex; gap: 2px; margin: 4px 0 0 -8px; }
-.msg.error { display: flex; gap: 10px; padding: 12px 14px; border: 1px solid #55302c; background: #1a1210; border-radius: var(--r-m); color: #f0b8b1; font-size: 15px; }
-.msg.error svg { flex: none; margin-top: 2px; color: var(--bad); }
-.note { color: var(--text3); font-size: 13px; text-align: center; }
-.plan { border: 1px solid var(--line); border-radius: var(--r-m); padding: 12px 14px; background: var(--s1); }
-.plan-label { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
-
-/* Markdown of the agent's answers */
-.md > * + * { margin-top: 12px; }
-.md p, .md li { line-height: 1.6; }
-.md ul, .md ol { padding-left: 22px; margin-bottom: 0; }
-.md li + li { margin-top: 4px; }
-.md h3, .md h4, .md h5, .md h6 { font-size: 17px; font-weight: 600; line-height: 1.35; margin-top: 18px; }
-.md blockquote { margin-left: 0; padding-left: 12px; border-left: 2px solid var(--line); color: var(--text2); }
-.md hr { border: 0; border-top: 1px solid var(--line); }
-.md a { text-decoration-color: var(--text3); }
-.md code { font-size: .88em; background: var(--s2); padding: 1px 5px; border-radius: 6px; }
-.md .code { margin: 0; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--s1); overflow: hidden; }
-.md .code figcaption { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 4px 14px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--text2); font-family: var(--mono); }
-.md .code-copy { padding: 6px 10px; border-radius: 8px; font-size: 12px; color: var(--text2); font-family: var(--font); }
-.md .code-copy:active { background: var(--s2); }
-.md .code pre { margin: 0; padding: 12px 14px; overflow-x: auto; font-size: 13px; line-height: 1.55; -webkit-overflow-scrolling: touch; }
-.md .code code { background: none; padding: 0; font-size: inherit; }
-
-/* The agent's work: one line that opens into the steps */
-.work { color: var(--text2); font-size: 14px; }
-.work-head { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 0; }
-.work-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.work.live .work-title { color: var(--text); }
-.work-mark { display: grid; place-items: center; width: 8px; color: var(--text3); }
-.work-files { color: var(--text3); font-size: 12px; }
-.clock { font-family: var(--mono); font-size: 12px; color: var(--text3); font-variant-numeric: tabular-nums; }
-.chev { display: grid; place-items: center; color: var(--text3); }
-.chev.up svg { transform: rotate(180deg); }
-.calls { list-style: none; margin: 4px 0 0 3px; padding: 0 0 0 14px; border-left: 1px solid var(--line); display: grid; gap: 2px; }
-.call-head { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 2px 0; }
-.call-kind { color: var(--text3); display: grid; place-items: center; }
-.call-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
-.call-mark.ok { color: var(--ok); }
-.call-mark.fail { color: var(--bad); }
-.delta { font-family: var(--mono); font-size: 12px; color: var(--text3); }
-.call-out { margin: 2px 0 8px; padding: 10px 12px; max-height: 240px; overflow: auto; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-s); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
-.thought-text { margin: 2px 0 8px; padding: 0 0 0 4px; font-size: 13px; line-height: 1.55; color: var(--text2); white-space: pre-wrap; }
-
 /* -- home ----------------------------------------------------------------------------------------------------------------- */
 
 .home { max-width: 560px; margin: 0 auto; padding: 36px 20px 24px; display: grid; gap: 16px; }
@@ -214,7 +166,7 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .status-line span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .composer-input { flex: 1; min-width: 0; max-height: 160px; padding: 7px 0; border: 0; outline: 0; background: none; resize: none; font-size: 16px; line-height: 1.4; color: var(--text); }
-.composer-input::placeholder { color: var(--text3); }
+.composer-input::placeholder { color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .dialog { display: grid; gap: 12px; padding: 14px; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-l); max-height: 62dvh; overflow-y: auto; }
 .dialog.warn { border-color: #4b3d1f; }
@@ -305,7 +257,7 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 /* -- the glass layout: the conversation runs under the bar and the dock, which blur it ------------------------------------ */
 
 #screen { position: relative; }
-.feed { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+.feed { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   padding-top: calc(var(--bar-h) + env(safe-area-inset-top)); padding-bottom: var(--dock-h, 110px); scroll-padding-bottom: 24px; }
 
 .bar { position: absolute; z-index: 6; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
@@ -331,24 +283,22 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 
 .dock { position: absolute; z-index: 6; bottom: 0; left: 0; right: 0; margin: 0 auto; max-width: 760px; width: 100%;
   padding: 18px 12px calc(10px + env(safe-area-inset-bottom)); display: grid; gap: 8px; }
-.composer { display: grid; gap: 6px; padding: 12px 10px 8px 16px; border-radius: 26px; background: rgba(34, 34, 38, .62);
+.composer { display: grid; border-radius: 26px; background: rgba(34, 34, 38, .62);
   border: 1px solid rgba(255, 255, 255, .09); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); }
-.composer.typing { grid-template-columns: auto 1fr auto auto; align-items: end; gap: 0 4px; padding: 4px 5px 4px 5px; border-radius: 23px; }
-.composer.typing .composer-foot { display: contents; }
-.composer.typing .chips { display: none; }
-.composer.typing .plus { grid-column: 1; grid-row: 2; }
-.composer.typing .composer-input { grid-column: 2; grid-row: 2; padding: 6px 0; }
-.composer.typing .plus { width: 34px; height: 34px; }
-.composer.typing .round { width: 34px; height: 34px; }
-.composer.typing .gauge-btn { width: 32px; height: 32px; }
-.composer.typing .gauge-btn { grid-column: 3; grid-row: 2; }
-.composer.typing .round { grid-column: 4; grid-row: 2; }
-.composer.typing .tray { grid-column: 1 / -1; grid-row: 1; }
+/* One compact row always, as in the apps this one is read beside: plus, the field, the model, the dial, send. */
+.composer { grid-template-columns: auto 1fr auto auto auto; align-items: end; gap: 0 4px; padding: 4px 5px; border-radius: 23px; }
+.composer .composer-foot { display: contents; }
+.composer .plus { grid-column: 1; grid-row: 2; width: 34px; height: 34px; }
+.composer .composer-input { grid-column: 2; grid-row: 2; padding: 6px 0; }
+.composer .chips { grid-column: 3; grid-row: 2; }
+.composer .gauge-btn { grid-column: 4; grid-row: 2; width: 32px; height: 32px; }
+.composer .round { grid-column: 5; grid-row: 2; width: 34px; height: 34px; }
+.composer .tray { grid-column: 1 / -1; grid-row: 1; }
 .composer:focus-within { border-color: rgba(255, 255, 255, .2); }
 .composer-foot { display: flex; align-items: center; gap: 8px; }
-.chips { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.chips { display: flex; }
 .chips::-webkit-scrollbar { display: none; }
-.chip.small { flex: none; min-height: 32px; padding: 0 11px; gap: 6px; font-size: 13px; background: rgba(255, 255, 255, .07); border: 0; color: var(--text2); }
+.chip.small { flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; justify-content: center; border-radius: 16px; background: none; border: 0; color: var(--text2); }
 .chip.small:active { background: rgba(255, 255, 255, .13); }
 .mark-tile { display: inline-grid; place-items: center; width: var(--size, 14px); height: var(--size, 14px); font-size: 11px; font-weight: 700; color: var(--text); }
 .home-wrap { min-height: 100%; display: flex; }
@@ -380,11 +330,6 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .pop-label { flex: 1; text-align: left; }
 .pop-detail { color: var(--text2); font-size: 14px; }
 
-.pics { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
-.pic { width: 96px; height: 96px; border-radius: 12px; object-fit: cover; background: var(--s3); }
-.pic.gone { display: grid; place-items: center; color: var(--text3); }
-.bubble:has(.pics) { padding: 6px; }
-.bubble:has(.pics) > div:last-child:not(.pics) { padding: 2px 8px 4px; }
 
 .title-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 8px 10px; border-radius: 14px; font-size: 16px; font-weight: 600; }
 .title-btn:active { background: rgba(255, 255, 255, .08); }

@@ -14,6 +14,7 @@ The goal text picks the script:
   bg N         starts a background job that runs N seconds after the answer
   say          answers with how many earlier messages of this conversation it remembers (sessions are files)
   screen N     opens a virtual desktop (a loopback viewer behind a secret token, like Kvist's own) for N seconds
+  steps        thinks, reads two files and writes one, then streams its answer word by word
 Never calls a model, never touches the network.
 """
 from __future__ import annotations
@@ -159,6 +160,32 @@ def finish(text: str = "Done: wrote hello.txt.") -> None:
     emit({"type": "turn_end"})
 
 
+def stream_steps(workspace: Path) -> None:
+    """A turn the way a real model shows it: a thought, a run of calls, then the answer arriving in pieces."""
+    emit({"type": "reasoning_start", "stream_id": "t1"})
+    for piece in ("Two files to read, ", "then one to write."):
+        emit({"type": "reasoning_chunk", "stream_id": "t1", "text": piece, "append": True})
+        time.sleep(0.05)
+    emit({"type": "reasoning_commit", "stream_id": "t1", "text": "Two files to read, then one to write.",
+          "duration_seconds": 1.2})
+    for step, path in ((1, "README.md"), (2, "setup.py")):
+        emit({"type": "step", "step": step, "action_type": "read_file", "action_args": {"path": path},
+              "action_description": f"reads {path}", "call_id": f"c{step}", "batch_id": "b1", "user_message": "",
+              "thought": "", "plan_step": "working", "reasoning_seconds": 0})
+        emit({"type": "action_result", "step": step, "action_type": "read_file", "ok": True, "summary": "12 lines",
+              "output": "", "exit_code": None, "path": path, "call_id": f"c{step}", "batch_id": "b1"})
+    write_result(workspace, 3)
+    answer = ""
+    for word in "I read both files and wrote hello.txt with one line.".split(" "):
+        piece = f" {word}" if answer else word
+        answer += piece
+        emit({"type": "stream_chunk", "stream_id": "s1", "text": piece, "append": True})
+        if work(0.15):
+            return
+    emit({"type": "stream_commit", "stream_id": "s1", "text": answer})
+    finish(answer)
+
+
 def run_turn(goal: str, workspace: Path) -> None:
     words = goal.split()
     script = words[0] if words else "quick"
@@ -221,6 +248,9 @@ def run_turn(goal: str, workspace: Path) -> None:
         viewer.shutdown()
         if stopped:
             return
+    if script == "steps":
+        stream_steps(workspace)
+        return
     if script == "bg":
         emit({"type": "job_started", "job_id": "job_1", "command": ["sleep", words[1] if len(words) > 1 else "2"],
               "purpose": "dev server", "call_id": "c9"})

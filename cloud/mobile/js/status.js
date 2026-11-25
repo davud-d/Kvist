@@ -25,22 +25,36 @@ export function createStatus() {
   const node = h("div", { class: "tail orb-scope" });
   const orb = makeOrb();
   const row = h("div", { class: "tail-status" });
+  const orbRow = h("div", { class: "orb-row" });
   let feedRef = null;
   let shownWait = 0;
   let shownAt = Date.now();
   let label = "";
+
+  // The orb stands at the end of the words while the model speaks (as in the web: no caret), on its own line otherwise.
+  const deepestLast = (el) => (el.lastElementChild && /^(UL|OL|LI|P)$/.test(el.lastElementChild.tagName) ? deepestLast(el.lastElementChild) : el);
+  function place(state) {
+    const items = node.parentElement ? [...node.parentElement.children].filter((el) => el.classList.contains("item")) : [];
+    const last = items.at(-1);
+    const words = state === "speak" && last?.classList.contains("item-reply") ? last.querySelector(".md") : null;
+    const host = words ? deepestLast(words) : orbRow;
+    if (orb.parentNode !== host || host.lastChild !== orb) host.append(orb);
+    orbRow.hidden = Boolean(words);
+  }
 
   function paint() {
     const state = feedRef ? orbStateFor(feedRef) : null;
     if (!state) {
       shownWait = 0;
       label = "";
+      orb.remove();
       node.replaceChildren();
       orb.dataset.state = "";
       return;
     }
-    if (!node.firstChild) node.append(h("div", { class: "orb-row" }, orb), row);
+    if (!node.firstChild) node.append(orbRow, row);
     setOrb(orb, state);
+    place(state);
     const now = Date.now();
     const activity = feedActivity(feedRef);
     // The wait that warms the colour counts only while the model is silent: a running command is not the model's delay.
@@ -64,6 +78,11 @@ export function createStatus() {
     update(feed) {
       feedRef = feed;
       paint();
+    },
+    /** After the conversation was redrawn: a repainted reply has lost the orb from the end of its words. */
+    place() {
+      const state = feedRef ? orbStateFor(feedRef) : null;
+      if (state) place(state);
     },
   };
 }

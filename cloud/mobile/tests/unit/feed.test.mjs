@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { actionKind, createFeed, reduce, tally, working } from "../../js/feed.js";
+import { createFeed, feedActivity, reduce, working } from "../../js/feed.js";
+import { feedBlocks, workSummary } from "../../js/web/feed.js";
 
 const run = (events, options) => {
   const feed = createFeed();
@@ -8,21 +9,38 @@ const run = (events, options) => {
   return feed;
 };
 
-test("steps between two messages become one work item", () => {
+const call = (step, type, label) => [
+  { type: "step", step, call_id: `c${step}`, action_type: type, action_description: label, action_args: { path: "a.py" } },
+  { type: "action_result", call_id: `c${step}`, ok: true, summary: "ok", path: type === "write_file" ? "a.py" : undefined, lines_added: type === "write_file" ? 3 : undefined },
+];
+
+test("as on the web: a thought stands on its own, the calls after it are one block, the answer after that", () => {
   const feed = run([
     { type: "user", text: "fix it" },
-    { type: "step", step: 1, call_id: "a", action_type: "read_file", action_description: "Read a.py" },
-    { type: "action_result", call_id: "a", ok: true, summary: "12 lines" },
-    { type: "step", step: 2, call_id: "b", action_type: "write_file", action_description: "Write a.py" },
-    { type: "action_result", call_id: "b", ok: true, path: "a.py", lines_added: 3, lines_removed: 1 },
+    { type: "reasoning_chunk", stream_id: "t", text: "Read first.", append: true },
+    { type: "reasoning_commit", stream_id: "t", duration_seconds: 2 },
+    ...call(1, "read_file", "Read a.py"),
+    ...call(2, "write_file", "Write a.py"),
     { type: "stream_chunk", stream_id: "s", text: "Done", append: true },
     { type: "stream_commit", stream_id: "s", text: "Done." },
   ]);
-  assert.deepEqual(feed.items.map((i) => i.kind), ["user", "work", "reply"]);
-  const work = feed.items[1];
-  assert.equal(work.live, false);
-  assert.deepEqual(tally(work), { total: 2, done: 2, failed: 0, running: null, files: 1 });
-  assert.equal(feed.items[2].text, "Done.");
+  assert.deepEqual(feed.items.map((i) => i.kind), ["user", "thought", "call", "call", "reply"]);
+  const blocks = feedBlocks(feed.items);
+  assert.deepEqual(blocks.map((b) => b.kind), ["user", "thought", "work", "reply"]);
+  const summary = workSummary(blocks[2].items);
+  assert.equal(summary.actions, 2);
+  assert.deepEqual(summary.files, ["a.py"]);
+  assert.equal(summary.running, false);
+});
+
+test("a thought between calls splits them into two blocks", () => {
+  const feed = run([
+    ...call(1, "read_file", "a"),
+    { type: "reasoning_chunk", stream_id: "t", text: "Hm.", append: true },
+    { type: "reasoning_commit", stream_id: "t" },
+    ...call(2, "read_file", "b"),
+  ]);
+  assert.deepEqual(feedBlocks(feed.items).map((b) => b.kind), ["work", "thought", "work"]);
 });
 
 test("a streaming reply grows in place and keeps its item", () => {
@@ -41,7 +59,7 @@ test("a final answer that repeats the last reply is shown once", () => {
     { type: "stream_commit", stream_id: "s", text: "All done." },
     { type: "final", message: "All done.", outcome: "done" },
   ]);
-  assert.equal(feed.items.filter((i) => i.kind === "reply").length, 1);
+  assert.equal(feed.items.length, 1);
 });
 
 test("the end of a turn stops what was still running", () => {
@@ -49,18 +67,16 @@ test("the end of a turn stops what was still running", () => {
     { type: "step", step: 1, call_id: "a", action_type: "run_command", action_description: "npm test" },
     { type: "turn_end" },
   ]);
-  const [call] = feed.items[0].calls;
-  assert.equal(call.phase, "fail");
-  assert.equal(feed.items[0].live, false);
+  assert.equal(feed.items[0].phase, "fail");
 });
 
-test("terminal actions are not steps and the runner's own commands are not news", () => {
+test("terminal actions are not calls and the runner's own commands are not news", () => {
   const feed = run([
     { type: "step", step: 1, action_type: "final_answer" },
     { type: "command_result", name: "session", message: "switched" },
-    { type: "command_result", name: "memory", message: "forgot it" },
+    { type: "command_result", name: "memory", ok: true, message: "forgot it" },
   ]);
-  assert.deepEqual(feed.items.map((i) => i.kind), ["note"]);
+  assert.deepEqual(feed.items.map((i) => i.kind), ["reply"]);
 });
 
 test("a question stays open until answered, closed, or the state moves on", () => {
@@ -87,15 +103,17 @@ test("the server's task status decides whether it is working", () => {
   assert.equal(working(feed), "");
 });
 
+test("what the orb shows: the running call, or that the words are being written", () => {
+  const feed = run([{ type: "user", text: "go" }, { type: "step", step: 1, call_id: "a", action_type: "read_file", action_description: "a" }]);
+  feed.task = { status: "running" };
+  assert.equal(feedActivity(feed).running.actionType, "read_file");
+  reduce(feed, { type: "action_result", call_id: "a", ok: true });
+  reduce(feed, { type: "stream_chunk", stream_id: "s", text: "Hi", append: true });
+  assert.equal(feedActivity(feed).running, null);
+  assert.equal(feedActivity(feed).speaking, true);
+});
+
 test("replayed history does not open calls it can no longer finish", () => {
   const feed = run([{ type: "call_begin", call_id: "x", tool: "read_file", description: "x" }], { replay: true });
   assert.equal(feed.items.length, 0);
-});
-
-test("action kinds", () => {
-  assert.equal(actionKind("run_command"), "terminal");
-  assert.equal(actionKind("replace_in_file"), "edit");
-  assert.equal(actionKind("read_file"), "file");
-  assert.equal(actionKind("web_fetch"), "globe");
-  assert.equal(actionKind("whatever"), "step");
 });

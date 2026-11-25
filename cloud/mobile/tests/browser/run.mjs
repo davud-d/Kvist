@@ -187,17 +187,17 @@ scenario("first run: sign in, terms, trial, key, project, first task", async (pa
   await shot(page, "home-ready");
   await sendTask(page, "quick");
   await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 30000 });
-  assert.match(await page.locator(".work-title").first().innerText(), /Worked for .* · 1 step$/);
-  await page.locator(".work-head").first().click();
-  await visible(page, ".call-label");
-  assert.equal(await page.locator(".call-label").first().innerText(), "writes hello.txt");
+  // One call stands on its own, with no group head, as on the web.
+  await visible(page, ".item-call .call-label");
+  assert.equal(await page.locator(".item-call .call-label").first().innerText(), "writes hello.txt");
+  assert.equal(await page.locator(".work-head").first().isVisible(), false);
   await shot(page, "chat");
   assert.equal((await page.locator(".bar-title .t1").innerText()).trim(), "demo", "the bar says only the project");
   assert.equal(await page.locator(".glass-pill").isVisible(), true, "a session has its new-session and more buttons");
   // The address is the session: a reload comes back to it with its history.
   await page.reload();
   await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 15000 });
-  assert.ok(await page.locator(".msg.user").count() === 1);
+  assert.ok(await page.locator(".item-user").count() === 1);
   // The drawer lists it and the hours left show at its foot.
   await page.getByLabel("Sessions").first().click();
   await visible(page, ".session.on");
@@ -242,7 +242,7 @@ scenario("a photo is shrunk in the browser, sent with the task, and shown in the
   await page.locator(".composer-input").fill("what is this");
   await page.locator(".composer .round").click();
   await page.waitForURL(/\/m\/s\//);
-  await visible(page, ".bubble .pic");
+  await visible(page, ".item-user .user-image");
   const goal = JSON.parse(JSON.parse(sentBodies[0]).goal);
   assert.equal(goal.type, "kvist-image-goal");
   assert.match(goal.images[0].data_url, /^data:image\/jpeg;base64,/);
@@ -250,7 +250,7 @@ scenario("a photo is shrunk in the browser, sent with the task, and shown in the
   const bytes = Buffer.from(goal.images[0].data_url.split(",")[1], "base64");
   assert.ok(bytes.length < 300_000, `a small JPEG, not ${bytes.length} bytes`);
   assert.equal(bytes[0], 0xff);
-  assert.match(await page.locator(".bubble").first().innerText(), /what is this/);
+  assert.match(await page.locator(".item-user").first().innerText(), /what is this/);
   await page.getByText("Done: wrote hello.txt.").waitFor({ timeout: 30000 });
   assert.deepEqual(page.problems, []);
 });
@@ -275,26 +275,51 @@ scenario("the gauge by the send button sets how hard the model thinks, like the 
   assert.deepEqual(page.problems, []);
 });
 
-scenario("typing folds the composer to one row; the model chip opens a dropdown, not a sheet", async (page) => {
+scenario("the composer is one compact row, typing or not; the model button opens a dropdown, not a sheet", async (page) => {
   await signIn(page);
   await startTrial(page);
   await addKeyAndProject(page);
   const field = page.locator(".composer-input");
+  const height = async () => (await page.locator(".composer").boundingBox()).height;
+  const resting = await height();
+  assert.ok(resting <= 48, `a compact box: ${resting}`);
   await field.focus();
-  await page.locator(".composer.typing").waitFor();
-  assert.equal(await page.locator(".composer .chips").isVisible(), false, "the chips give way while typing");
+  await field.fill("a few words");
+  assert.ok(Math.abs(await height() - resting) < 1, `typing does not change its size: ${resting} -> ${await height()}`);
   const plus = await page.locator(".composer .plus").boundingBox();
   const input = await field.boundingBox();
   assert.ok(Math.abs(plus.y + plus.height / 2 - (input.y + input.height / 2)) < 12, "plus and field share one row");
   await shot(page, "typing");
-  const measured = await page.evaluate(() => [...document.querySelectorAll(".composer, .composer-input, .round, .tray, .composer-foot")].map((e) => `${e.className}:${e.getBoundingClientRect().height}`));
-  assert.ok((await page.locator(".composer").boundingBox()).height <= 48, `a compact box while typing: ${measured}`);
+  await field.fill("");
   await field.blur();
-  await page.locator(".composer.typing").waitFor({ state: "detached" });
+  assert.ok(Math.abs(await height() - resting) < 1, `letting go of the field does not grow it: ${resting} -> ${await height()}`);
   await page.locator(".chip.small").first().click();
   await visible(page, ".model-menu");
   assert.equal(await page.locator(".sheet").count(), 0, "a dropdown, not a bottom sheet");
   await shot(page, "model-menu");
+  assert.deepEqual(page.problems, []);
+});
+
+scenario("the conversation is the web's: a thought on its own, a run of calls in a group that folds, the orb at the end of the words", async (page) => {
+  await signIn(page);
+  await startTrial(page);
+  await addKeyAndProject(page);
+  await sendTask(page, "steps");
+  await visible(page, ".item-thought");
+  await visible(page, ".item-work .work-head");
+  // While the answer is being written the orb stands at the end of its words, and there is no caret.
+  await page.locator(".item-reply .md .orb").waitFor({ timeout: 15000 });
+  await shot(page, "streaming");
+  assert.equal(await page.locator(".item-thought .item-call, .item-work .item-thought").count(), 0, "the thought is not inside the calls");
+  assert.equal(await page.locator(".item-work .item-call").count(), 3);
+  await page.locator(".item-final, .item-reply:not(.live)").last().waitFor({ timeout: 15000 });
+  // Two seconds after the turn ends the group folds into its head line.
+  await page.waitForFunction(() => document.querySelector(".item-work .work-body")?.hidden === true, null, { timeout: 8000 });
+  await shot(page, "folded");
+  await page.locator(".item-work .work-head").click();
+  await page.waitForFunction(() => document.querySelector(".item-work .work-body")?.hidden === false);
+  // Nothing on the page is wider than the screen: it scrolls up and down only.
+  assert.equal(await page.evaluate(() => document.querySelector(".feed").scrollWidth <= document.querySelector(".feed").clientWidth), true);
   assert.deepEqual(page.problems, []);
 });
 
@@ -414,9 +439,9 @@ scenario("Russian: every word is Russian and nothing is left unfilled", async (p
   await page.locator(".drawer-account").click();
   await page.getByText("RU", { exact: true }).click();
   // The page reloads itself in the new language; WebKit is slower to get there than Chromium.
-  await page.getByText("Поставь агенту задачу").waitFor({ timeout: 15000 });
+  await page.getByText("Дай Kvist задачу").waitFor({ timeout: 15000 });
   const text = await page.locator("body").innerText();
-  assert.match(text, /Поставь агенту задачу/);
+  assert.match(text, /Дай Kvist задачу/);
   assert.doesNotMatch(text, /undefined|\{\w+\}|\[object/);
   await shot(page, "home-ru");
 });

@@ -33,7 +33,8 @@ test("no phrase is empty and no Russian phrase is a leftover English one", () =>
 
 test("every phrase the page asks for exists", () => {
   const missing = [];
-  for (const file of files(JS)) {
+  // The files vendored from the web workspace (js/web/) carry the web's own words (js/web/i18n.js).
+  for (const file of files(JS).filter((path) => !path.includes("/web/"))) {
     const source = readFileSync(file, "utf8");
     for (const [, key] of source.matchAll(/\bt\("([^"]+)"/g)) if (!(key in en)) missing.push(`${file.replace(JS, "")}: ${key}`);
     // Keys built from a stem and a value: every value the page can produce must exist.

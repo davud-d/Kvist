@@ -41,7 +41,7 @@ export function startShell(root, { go, onAuth }) {
   const feedEl = h("main", { class: "feed", id: "feed" });
   const jump = h("button", { class: "jump hidden", type: "button", aria: { label: t("latest") } }, icon("arrow-down", 18));
   const status = createStatus();
-  const chat = createChat(feedEl, jump, status.node);
+  const chat = createChat(feedEl, jump, status.node, () => status.place());
   const homeEl = h("div", { class: "home-wrap" });
   feedEl.prepend(homeEl);
 
@@ -101,8 +101,9 @@ export function startShell(root, { go, onAuth }) {
     composer.showGauge(Boolean(account.key?.set));
     const key = account.key;
     fill(chips,
-      h("button", { class: "chip small", type: "button", "aria-haspopup": "tree", onclick: (event) => openModelMenu(event.currentTarget) },
-        key?.set ? providerMark(key.provider, key.label, 14) : null, h("span", {}, pickedLabel())),
+      // Only the provider's mark: the row stays one line, and the menu it opens names the model.
+      h("button", { class: "chip small", type: "button", "aria-haspopup": "tree", "aria-label": pickedLabel(), title: pickedLabel(), onclick: (event) => openModelMenu(event.currentTarget) },
+        key?.set ? providerMark(key.provider, key.label, 18) : icon("key", 18)),
       null);
   }
 

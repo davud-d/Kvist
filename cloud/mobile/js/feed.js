@@ -1,16 +1,18 @@
 // What the agent says (the core's events, relayed unchanged by the cloud) folded into a conversation to show.
 // Pure data in, data out: no DOM, so the same function draws a live turn and a history loaded from the server.
 //
-// The feed is a list of items; each has an id that never changes and a rev that rises whenever it changes, so the
-// view redraws only what moved. Everything the agent does between two things the person reads (a reply, their own
-// message) is gathered into one "work" item, a collapsed ledger of steps, instead of a long run of cards.
+// The items are the web workspace's (cloud/workspace/js/reducer.js), one per thing said, thought or done: user, reply,
+// final, thought, call, plan, error, note. The view groups them the way the web does (js/web/feed.js feedBlocks):
+// a thought stands on its own, a run of calls is one block that folds. Each item has an id that never changes and a
+// rev that rises whenever it changes, so the view redraws only what moved.
 
 import { parseImageGoal } from "./envelope.js";
 
-const TERMINAL = new Set(["final_answer", "report_to_user", "refuse"]);
-const WRITES = new Set(["write_file", "append_file", "replace_in_file"]);
-// Commands the cloud's runner sends to keep a task in its conversation (runner/kvist_runner/task.py).
+// The answer itself is the last action of a response; the core sends no result for it, so it is no card.
+const TERMINAL_ACTIONS = new Set(["final_answer", "report_to_user", "refuse"]);
+// What shows the model is alive: the wait that warms the status line's colour starts over.
 const LIFE = new Set(["stream_chunk", "reasoning_chunk", "step", "action_result", "status"]);
+// Commands the cloud's runner sends to keep a task in its conversation (runner/kvist_runner/task.py).
 const RUNNER_COMMANDS = new Set(["new", "session", "resume"]);
 
 export function createFeed() {
@@ -42,28 +44,16 @@ function touch(feed, item) {
   feed.rev++;
 }
 
-/** The work item the next step belongs to: the last item when it is one, else a new one. */
-function work(feed) {
-  const last = feed.items.at(-1);
-  if (last?.kind === "work") return last;
-  return push(feed, { kind: "work", calls: [], thoughts: [], live: true, startedAt: Date.now() });
-}
-
-function closeWork(feed) {
-  for (const item of feed.items) {
-    if (item.kind === "work" && item.live) {
-      item.live = false;
-      item.endedAt ??= Date.now();
-      touch(feed, item);
-    }
-  }
+// The model's words belong above the card they introduce, which a stream may have opened already.
+function placeBefore(feed, item, anchor) {
+  feed.items.splice(feed.items.indexOf(item), 1);
+  feed.items.splice(feed.items.indexOf(anchor), 0, item);
 }
 
 function reply(feed, streamId) {
   const key = `r:${streamId}`;
   let item = feed.streams.get(key);
   if (!item) {
-    closeWork(feed);
     item = push(feed, { kind: "reply", text: "", live: true });
     feed.streams.set(key, item);
   }
@@ -74,46 +64,52 @@ function thought(feed, streamId) {
   const key = `t:${streamId}`;
   let item = feed.streams.get(key);
   if (!item) {
-    item = { text: "", seconds: 0, live: true };
-    const group = work(feed);
-    group.thoughts.push(item);
+    item = push(feed, { kind: "thought", text: "", seconds: 0, live: true });
     feed.streams.set(key, item);
-    touch(feed, group);
   }
   return item;
 }
 
-function settle(feed) {
-  for (const item of feed.streams.values()) item.live = false;
+function settleStreams(feed) {
+  for (const item of feed.streams.values()) {
+    item.live = false;
+    touch(feed, item);
+  }
   feed.streams.clear();
-  feed.rev++;
-  for (const item of feed.items) if (item.kind === "reply" && item.live) touch(feed, item), (item.live = false);
 }
 
-const callFor = (feed, ev) =>
-  (ev.call_id && feed.calls.get(ev.call_id)) || [...feed.calls.values()].reverse().find((c) => c.step === ev.step && c.phase === "run");
-
-function openCall(feed, fields) {
-  const call = { phase: "run", summary: "", output: "", step: 0, ...fields };
-  work(feed).calls.push(call);
-  feed.calls.set(call.callId, call);
-  touch(feed, feed.items.at(-1));
-  return call;
+function callFor(feed, ev) {
+  if (ev.call_id && feed.calls.has(ev.call_id)) return feed.calls.get(ev.call_id);
+  return [...feed.calls.values()].reverse().find((call) => call.step === ev.step && call.phase === "run");
 }
 
-const sameAsLast = (feed, text) => {
-  const last = [...feed.items].reverse().find((item) => item.kind === "reply" || item.kind === "final");
-  return last && String(last.text).trim() === String(text).trim();
-};
+function repeatsLastReply(feed, message) {
+  const last = feed.items.findLast((item) => item.kind !== "note");
+  return (last?.kind === "reply" || last?.kind === "final") && !last.aside && String(last.text).trim() === String(message ?? "").trim();
+}
+
+const lineCount = (text) => (text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0);
+
+// call_stream carries the new words of a call's text while the model is still writing it; `line` is the line
+// they begin on, so a piece that does not follow on is dropped.
+function feedStream(call, ev) {
+  const current = call.stream[ev.field] ?? "";
+  const have = ev.line === 0 && current.includes("\n") ? "" : current;
+  if (ev.line !== have.split("\n").length - 1) return;
+  call.stream[ev.field] = have + ev.text;
+  const replacing = call.actionType === "replace_in_file";
+  call.added = lineCount(call.stream[replacing ? "new_text" : "content"]);
+  call.removed = replacing ? lineCount(call.stream.old_text) : 0;
+}
+
+const newCall = (fields) => ({ kind: "call", step: 0, phase: "run", summary: "", output: "", ...fields });
 
 /** Folds one core event into the feed. `replay` marks events loaded from history rather than live ones. */
 export function reduce(feed, ev, { replay = false } = {}) {
-  // The model showed life: the wait that warms the status line's colour starts over.
   if (!replay && LIFE.has(ev.type)) feed.lastLife = Date.now();
   switch (ev.type) {
     case "user":
       if (!ev.text) return;
-      closeWork(feed);
       if (!replay) feed.turnStartedAt = feed.lastLife = Date.now();
       push(feed, { kind: "user", ...parseImageGoal(ev.text) });
       return;
@@ -127,49 +123,60 @@ export function reduce(feed, ev, { replay = false } = {}) {
       feed.rev++;
       return;
     case "step": {
-      settle(feed);
-      if (ev.user_message) {
-        closeWork(feed);
-        push(feed, { kind: "reply", text: ev.user_message, live: false });
-      }
+      settleStreams(feed);
       const known = feed.calls.get(ev.call_id || `step-${ev.step}`);
+      // Only a card that call_begin or call_stream opened and no step has confirmed; an id that comes round again is a new call.
       const early = known && known.step === 0 && known.phase === "run" ? known : undefined;
+      if (ev.user_message) {
+        const words = push(feed, { kind: "reply", text: ev.user_message, live: false, aside: true });
+        if (early) placeBefore(feed, words, early);
+      }
       if (early) {
-        Object.assign(early, { step: ev.step, actionType: ev.action_type, label: ev.action_description || ev.action_type });
-        feed.rev++;
+        Object.assign(early, { step: ev.step, actionType: ev.action_type, label: ev.action_description || ev.action_type, args: ev.action_args ?? {} });
+        touch(feed, early);
         return;
       }
-      if (TERMINAL.has(ev.action_type)) return;
-      openCall(feed, {
+      if (TERMINAL_ACTIONS.has(ev.action_type)) return;
+      const call = push(feed, newCall({
         callId: ev.call_id || `step-${ev.step}`, step: ev.step, actionType: ev.action_type,
         label: ev.action_description || ev.action_type, args: ev.action_args ?? {},
-      });
+      }));
+      feed.calls.set(call.callId, call);
       return;
     }
-    case "call_begin":
-      if (replay || feed.calls.has(ev.call_id) || TERMINAL.has(ev.tool)) return;
-      openCall(feed, { callId: ev.call_id, actionType: ev.tool, label: ev.description || ev.path || ev.tool, args: { path: ev.path } });
+    case "call_begin": {
+      if (replay || feed.calls.has(ev.call_id) || TERMINAL_ACTIONS.has(ev.tool)) return;
+      const call = push(feed, newCall({ callId: ev.call_id, actionType: ev.tool, label: ev.description || ev.path || ev.tool, args: { path: ev.path } }));
+      feed.calls.set(ev.call_id, call);
       return;
+    }
+    case "call_stream": {
+      let call = feed.calls.get(ev.call_id);
+      if (!call) {
+        call = push(feed, newCall({ callId: ev.call_id, actionType: ev.tool, label: ev.path || ev.tool, args: { path: ev.path }, stream: {} }));
+        feed.calls.set(ev.call_id, call);
+      }
+      if (!call.stream || call.phase !== "run") return;
+      feedStream(call, ev);
+      touch(feed, call);
+      return;
+    }
     case "action_result": {
       const call = callFor(feed, ev);
       if (!call) return;
       Object.assign(call, {
         phase: ev.ok ? "ok" : "fail", summary: ev.summary ?? "", output: ev.output ?? call.output,
         exitCode: ev.exit_code ?? null, path: ev.path ?? call.args?.path ?? null,
-        added: ev.lines_added ?? null, removed: ev.lines_removed ?? null,
+        added: ev.lines_added ?? null, removed: ev.lines_removed ?? null, patch: ev.patch ?? null,
       });
-      call.wrote = Boolean(ev.ok && WRITES.has(call.actionType));
-      feed.rev++;
-      const group = feed.items.findLast((item) => item.kind === "work");
-      if (group) touch(feed, group);
+      touch(feed, call);
       return;
     }
     case "action_output": {
       const call = callFor(feed, ev);
-      if (call) {
-        call.output = ev.output;
-        feed.rev++;
-      }
+      if (!call) return;
+      call.output = ev.output;
+      touch(feed, call);
       return;
     }
     case "stream_start":
@@ -198,7 +205,7 @@ export function reduce(feed, ev, { replay = false } = {}) {
     case "reasoning_chunk": {
       const item = thought(feed, ev.stream_id);
       item.text = ev.append === true ? item.text + ev.text : ev.text;
-      feed.rev++;
+      touch(feed, item);
       return;
     }
     case "reasoning_commit": {
@@ -208,36 +215,32 @@ export function reduce(feed, ev, { replay = false } = {}) {
       item.seconds = ev.duration_seconds ?? 0;
       item.live = false;
       feed.streams.delete(`t:${ev.stream_id}`);
-      feed.rev++;
+      touch(feed, item);
       return;
     }
     case "message":
-      closeWork(feed);
-      push(feed, ev.source === "notice" ? { kind: "note", text: ev.markdown } : { kind: "reply", text: ev.markdown, live: false });
+      push(feed, ev.source === "notice" ? { kind: "note", text: ev.markdown, tone: "muted" } : { kind: "reply", text: ev.markdown, live: false });
       return;
     case "plan":
-      closeWork(feed);
       push(feed, { kind: "plan", text: ev.markdown });
       return;
     case "final":
-      settle(feed);
-      closeWork(feed);
+      settleStreams(feed);
       feed.dialogs = [];
-      if (sameAsLast(feed, ev.message)) return;
-      push(feed, { kind: "reply", text: ev.message, live: false, outcome: ev.outcome ?? "done" });
+      if (repeatsLastReply(feed, ev.message)) return;
+      push(feed, { kind: "final", text: ev.message, outcome: ev.outcome ?? "done", paused: ev.paused === true });
       return;
     case "error":
-      closeWork(feed);
       push(feed, { kind: "error", text: ev.message });
       return;
     case "turn_end":
-      settle(feed);
-      closeWork(feed);
+      settleStreams(feed);
       feed.dialogs = [];
       for (const call of feed.calls.values()) {
         if (call.phase !== "run") continue;
         call.phase = "fail";
         call.summary ||= "stopped";
+        touch(feed, call);
       }
       feed.calls.clear();
       feed.status = { text: "", step: 0 };
@@ -255,11 +258,9 @@ export function reduce(feed, ev, { replay = false } = {}) {
       return;
     case "command_result":
       // What the runner says about switching sessions is plumbing, not news.
-      if (RUNNER_COMMANDS.has(ev.name)) return;
-      if (ev.message || ev.text) {
-        closeWork(feed);
-        push(feed, { kind: "note", text: String(ev.message ?? ev.text) });
-      }
+      if (RUNNER_COMMANDS.has(ev.name) || !(ev.message || ev.text)) return;
+      if (ev.ok === false) push(feed, { kind: "note", text: String(ev.message ?? ev.text), tone: "error" });
+      else push(feed, { kind: "reply", text: String(ev.message ?? ev.text), live: false, aside: true });
       return;
     default:
   }
@@ -281,33 +282,13 @@ export function feedActivity(feed) {
   if (!["running", "starting", "queued"].includes(feed.task?.status)) return null;
   const turn = feed.items.findLastIndex((item) => item.kind === "user");
   const mine = feed.items.slice(turn + 1);
-  const group = mine.findLast((item) => item.kind === "work");
   const last = feed.items.at(-1);
-  const startedAt = (mine.find((item) => item.kind === "work")?.startedAt) ?? feed.turnStartedAt ?? (feed.turnStartedAt = Date.now());
+  const startedAt = feed.turnStartedAt ?? (feed.turnStartedAt = Date.now());
   return {
-    running: group?.calls.find((call) => call.phase === "run") ?? null,
-    speaking: last?.kind === "reply" && last.live,
+    running: mine.findLast((item) => item.kind === "call" && item.phase === "run") ?? null,
+    speaking: last?.kind === "reply" && last.live === true,
     silentSince: feed.lastLife ?? startedAt,
     startedAt,
     request: feed.items.findLast((item) => item.kind === "user")?.text ?? "",
   };
-}
-
-/** The steps of a work item as the ledger counts them. */
-export function tally(group) {
-  const done = group.calls.filter((c) => c.phase === "ok").length;
-  const failed = group.calls.filter((c) => c.phase === "fail").length;
-  const running = group.calls.find((c) => c.phase === "run") ?? null;
-  const files = new Set(group.calls.filter((c) => c.wrote && c.path).map((c) => c.path));
-  return { total: group.calls.length, done, failed, running, files: files.size };
-}
-
-/** The glyph family for an action: what kind of thing it touched. */
-export function actionKind(type) {
-  if (/^(run_|shell|command|exec)/.test(type ?? "") || type === "run_command") return "terminal";
-  if (/(write|append|replace|edit|patch)/.test(type ?? "")) return "edit";
-  if (/(read|list|glob|open_file|view)/.test(type ?? "")) return "file";
-  if (/(search|grep|find)/.test(type ?? "")) return "search";
-  if (/(web|fetch|http|browser|url)/.test(type ?? "")) return "globe";
-  return "step";
 }

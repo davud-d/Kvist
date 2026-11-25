@@ -25,6 +25,11 @@ export function createComposer({ onSend, onStop, chips, onPlus, onGauge }) {
   let locked = false;
 
   const grow = () => {
+    // Empty, it is one line whatever the placeholder says: a long hint must not make the box taller.
+    if (!field.value) {
+      field.style.height = "";
+      return;
+    }
     field.style.height = "auto";
     field.style.height = `${Math.min(field.scrollHeight, MAX_ROWS_PX)}px`;
   };
@@ -55,11 +60,7 @@ export function createComposer({ onSend, onStop, chips, onPlus, onGauge }) {
   });
   paint();
 
-  // Typing is one row, as in the apps this one is read beside: the keyboard already takes half the screen. The buttons
-  // do not take the focus, or touching one would fold the row back and move it from under the finger.
-  const typing = (on) => box.classList.toggle("typing", on);
-  field.addEventListener("focus", () => typing(true));
-  field.addEventListener("blur", () => typing(false));
+  // The buttons do not take the focus: touching one while typing leaves the keyboard where it is.
   for (const button of [plus, gauge, action]) button.addEventListener("pointerdown", (event) => {
     if (document.activeElement === field) event.preventDefault();
   });
