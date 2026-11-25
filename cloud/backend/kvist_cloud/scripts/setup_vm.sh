@@ -160,7 +160,11 @@ runcmd:
   - /opt/kvist/bin/pip install --no-index --find-links /mnt/wheels kvist kvist-runner
   - umount /mnt
   - install -d -o kvist -g kvist /home/kvist/.kvist /var/lib/kvist-runner
+  # Every bundled skill with Python pins gets its environment now: one left out shows up as "unavailable" in the
+  # customer's VM (a test keeps this list equal to the manifests).
   - runuser -u kvist -- /opt/kvist/bin/kvist --workspace /home/kvist --skill-op install-deps --skill browser --yes
+  - runuser -u kvist -- /opt/kvist/bin/kvist --workspace /home/kvist --skill-op install-deps --skill code_nav --yes
+  - runuser -u kvist -- /opt/kvist/bin/kvist --workspace /home/kvist --skill-op install-deps --skill documents --yes
   - install -d /etc/kvist-runner
   - 'echo "PS1=''kvist :-) ''" >> /home/kvist/.bashrc'
   - systemctl enable kvist-runner qemu-guest-agent
