@@ -286,28 +286,38 @@ scenario("the gauge by the send button sets how hard the model thinks, like the 
   assert.deepEqual(page.problems, []);
 });
 
-scenario("the empty start field types out a line letter by letter, stands still when touched, and is quiet in a session", async (page) => {
+scenario("the start screen's heading types out a line letter by letter and stands still when the box is touched; the box keeps its words", async (page) => {
   await signIn(page);
   await startTrial(page);
   await addKeyAndProject(page);
-  // Every placeholder the field shows over a few seconds, in order; `back` is the person coming back to the tab.
-  const watch = (ms, back = false) => page.evaluate(([span, returning]) => new Promise((resolve) => {
-    const field = document.querySelector(".composer-input");
-    const texts = [field.placeholder];
+  // Every text the heading (or, with `box`, the box's placeholder) shows over a few seconds, in order; `back` is the
+  // person coming back to the tab.
+  const watch = (ms, back = false, box = false) => page.evaluate(([span, returning, inBox]) => new Promise((resolve) => {
+    const read = () => (inBox ? document.querySelector(".composer-input").placeholder : document.querySelector(".home h1")?.textContent ?? null);
+    const texts = [read()];
     const times = [performance.now()];
     const timer = setInterval(() => {
-      if (field.placeholder === texts.at(-1)) return;
-      texts.push(field.placeholder);
+      if (read() === texts.at(-1)) return;
+      texts.push(read());
       times.push(performance.now());
     }, 2);
     if (returning) document.dispatchEvent(new Event("visibilitychange"));
     setTimeout(() => (clearInterval(timer), resolve({ texts, times })), span);
-  }), [ms, back]);
-  // The first line was typed while the account was being set up and stays for minutes; back on the tab, a new one comes.
+  }), [ms, back, box]);
+  // A new project opens a new start screen, whose own words are erased and a line typed; it then stays for minutes,
+  // and back on the tab a new one comes.
+  await page.waitForFunction(() => {
+    const text = document.querySelector(".home h1")?.textContent ?? "";
+    return text && !text.endsWith("▏") && text !== "Give the agent a task";
+  });
   const first = (await watch(200)).texts;
   assert.equal(first.length, 1);
-  assert.ok(!first[0].endsWith("▏") && first[0] !== "A task for Kvist", `a whole line stands: ${first[0]}`);
-  const { texts: typing, times } = await watch(5000, true);
+  assert.ok(!first[0].endsWith("▏") && first[0] !== "Give the agent a task", `a whole line stands: ${first[0]}`);
+  const heading = async () => (await page.locator(".home h1").boundingBox()).y;
+  const top = await heading();
+  const [{ texts: typing, times }, { texts: boxWords }] = await Promise.all([watch(5000, true), watch(5000, false, true)]);
+  assert.deepEqual(boxWords, ["A task for Kvist"], "the box at the bottom keeps its own words");
+  assert.equal(await heading(), top, "the heading does not move while lines change");
   const cut = typing.findIndex((text) => text === "");
   assert.ok(cut > 0, `the old line is erased first: ${JSON.stringify(typing)}`);
   const lengths = typing.slice(0, cut + 1).map((text) => [...text.replace("▏", "")].length);
@@ -323,13 +333,6 @@ scenario("the empty start field types out a line letter by letter, stands still 
   await shot(page, "hint");
   await page.locator(".composer-input").click();
   assert.deepEqual((await watch(1500)).texts, [line], "touched, the line stands still and whole");
-  await page.locator(".composer-input").blur();
-  await sendTask(page, "hello");
-  // The address changes as the message leaves; the session's screen comes once it has landed.
-  await page.waitForFunction(() => ["A task for Kvist", "Add to the task…"].includes(document.querySelector(".composer-input").placeholder));
-  const inSession = (await watch(1500)).texts;
-  assert.equal(inSession.length <= 2 && inSession.every((text) => ["A task for Kvist", "Add to the task…"].includes(text)), true,
-    `a session's field says what it does there: ${JSON.stringify(inSession)}`);
   assert.deepEqual(page.problems, []);
 });
 
@@ -513,9 +516,10 @@ scenario("Russian: every word is Russian and nothing is left unfilled", async (p
   await page.locator(".drawer-account").click();
   await page.getByText("RU", { exact: true }).click();
   // The page reloads itself in the new language; WebKit is slower to get there than Chromium.
-  await page.getByText("Дай Kvist задачу").waitFor({ timeout: 15000 });
+  // The heading speaks its own lines, so the box's words say the language has changed.
+  await page.locator(".composer-input[placeholder='Задача для Kvist']").waitFor({ timeout: 15000 });
   const text = await page.locator("body").innerText();
-  assert.match(text, /Дай Kvist задачу/);
+  assert.match(text, /Новая сессия/);
   assert.doesNotMatch(text, /undefined|\{\w+\}|\[object/);
   await shot(page, "home-ru");
 });

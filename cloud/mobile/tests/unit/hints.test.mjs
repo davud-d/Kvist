@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { CONDITIONS, GENERAL, createPicker, eraseBursts, typingDelays } from "../../js/hints.js";
+import { CONDITIONS, GENERAL, createPicker, eraseBursts, rowsFor, typingDelays } from "../../js/hints.js";
 
 // A fixed sequence instead of Math.random, so a test sees the same order every run.
 function seeded(seed = 7) {
@@ -114,6 +114,17 @@ test("a line that does not fit the field is skipped", () => {
   assert.ok(picks.every(short));
   // The Monday condition still speaks with the one line of it that fits.
   assert.ok(picks.some((line) => line.ru === "Новая неделя, новые задачи"));
+});
+
+test("rows are counted the way a heading wraps: at spaces, a long word on a row of its own", () => {
+  const measure = (text) => text.length * 10;
+  assert.equal(rowsFor("Kvist", 100, measure), 1);
+  assert.equal(rowsFor("один два три", 120, measure), 1);
+  assert.equal(rowsFor("один два три", 110, measure), 2);
+  assert.equal(rowsFor("один два три четыре", 100, measure), 2);
+  assert.equal(rowsFor("один два три четыре", 90, measure), 3);
+  assert.equal(rowsFor("один два три четыре", 60, measure), 4);
+  assert.equal(rowsFor("сверхдлинноеслово", 50, measure), 1, "a word wider than the room still takes one row");
 });
 
 test("typing slows after punctuation; erasing goes in bursts of two to four letters", () => {

@@ -1,5 +1,5 @@
-// The empty task field's placeholder speaks: a line is typed out, stays, is erased in quick bursts, and another one
-// follows. Some lines stay for minutes and some only seconds, so the field looks alive without flickering.
+// The start screen speaks (the field's placeholder on the workspace, the heading above the field on the phone): a
+// line is typed out, stays, is erased in quick bursts, and another one follows. Some lines stay for minutes and some only seconds, so the field looks alive without flickering.
 // A line about now (the hour, the day, the date, the person's tasks) comes up every other time while it holds,
 // three lines to each, so the same thing is never said twice in a visit and nothing reads as one canned sentence.
 //
@@ -278,12 +278,38 @@ function readVisit(now) {
   return stored ? { firstVisit: false, awayDays: (now - stored) / DAY_MS } : { firstVisit: true, awayDays: 0 };
 }
 
+/** How many rows `text` takes when wrapped at spaces into `room` pixels; `measure` gives a string's width. */
+export function rowsFor(text, room, measure) {
+  let rows = 1;
+  let current = "";
+  for (const word of text.split(" ")) {
+    const next = current ? `${current} ${word}` : word;
+    if (!current || measure(next) <= room) {
+      current = next;
+      continue;
+    }
+    rows += 1;
+    current = word;
+  }
+  return rows;
+}
+
+const ON_PLACEHOLDER = { target: null, prop: "placeholder", rows: 1 };
+
 /**
- * Makes the empty field's placeholder speak. `account()` gives {tasks, sub, createdAt}; `language()` "en" or "ru".
- * Returns {start, stop}: the page starts it while the field is the one that starts a task, and stops it otherwise
- * (then it puts its own placeholder back).
+ * Makes the start screen speak. The lines go to `target()`'s `prop`: the field's own placeholder by default, or the
+ * heading above it (the phone page), which may wrap to `rows` rows. `field` is the box the person types in: touching
+ * it or typing stops the lines. `account()` gives {tasks, sub, createdAt}; `language()` "en" or "ru".
+ * Returns {start, stop}: the page starts it on the start screen and stops it elsewhere (then it writes its own text back).
  */
-export function mountHints(field, { account, language }) {
+export function mountHints(field, { account, language, ...where }) {
+  const { target, prop, rows } = { ...ON_PLACEHOLDER, ...where };
+  const surface = () => (target ? target() : field);
+  const write = (text) => {
+    const node = surface();
+    if (node) node[prop] = text;
+  };
+  const read = () => surface()?.[prop] ?? "";
   const opened = new Date();
   // A finger rather than a mouse: a phone or a tablet, whichever of the two pages is open on it.
   const phone = matchMedia("(pointer: coarse)").matches;
@@ -296,7 +322,7 @@ export function mountHints(field, { account, language }) {
   let run = 0;
   // The whole line on screen, even while it is still being typed or erased: a pause shows it complete.
   let shown = "";
-  let fallback = field.placeholder;
+  let fallback = "";
 
   const facts = () => {
     const now = new Date();
@@ -305,15 +331,19 @@ export function mountHints(field, { account, language }) {
   };
   const show = (text) => {
     shown = text;
-    field.placeholder = text;
+    write(text);
   };
   const ruler = document.createElement("canvas").getContext("2d");
   const fits = (candidate) => {
-    const style = getComputedStyle(field);
-    const room = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const node = surface();
+    if (!node) return true;
+    const style = getComputedStyle(node);
+    const room = node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
     // From its parts: Firefox leaves the `font` shorthand of a computed style empty.
     ruler.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    return room <= 0 || ruler.measureText(`${candidate[language()] ?? candidate.en}${CARET}`).width <= room;
+    ruler.letterSpacing = style.letterSpacing;
+    const measure = (text) => ruler.measureText(text).width;
+    return room <= 0 || rowsFor(`${candidate[language()] ?? candidate.en}${CARET}`, room, measure) <= rows;
   };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // The person's own touch or key, not the focus: the page puts the cursor in the field by itself on a desktop.
@@ -328,7 +358,7 @@ export function mountHints(field, { account, language }) {
     for (let index = 0; index < chars.length; index += 1) {
       await wait(delays[index]);
       if (mine !== run) return undefined;
-      field.placeholder = chars.slice(0, index + 1).join("") + (index < chars.length - 1 ? CARET : "");
+      write(chars.slice(0, index + 1).join("") + (index < chars.length - 1 ? CARET : ""));
     }
     return show(text);
   }
@@ -341,7 +371,7 @@ export function mountHints(field, { account, language }) {
         await wait(ERASE_CHAR_MS);
         if (mine !== run) return undefined;
         chars.pop();
-        field.placeholder = chars.length ? chars.join("") + CARET : "";
+        write(chars.length ? chars.join("") + CARET : "");
       }
       await wait(burst.gap);
       if (mine !== run) return undefined;
@@ -372,7 +402,7 @@ export function mountHints(field, { account, language }) {
   // Looking at the field or typing in it, the person reads the whole line, standing still.
   const freeze = () => {
     run += 1;
-    if (running) field.placeholder = shown || fallback;
+    if (running) write(shown || fallback);
   };
   const resume = (hold) => {
     if (running && !quiet()) speak(hold);
@@ -401,7 +431,9 @@ export function mountHints(field, { account, language }) {
     start() {
       if (running) return;
       running = true;
-      fallback = field.placeholder;
+      // The page's own words are erased like any line before the first one is typed.
+      fallback = read();
+      shown = fallback;
       if (quiet()) return;
       speak(0);
     },

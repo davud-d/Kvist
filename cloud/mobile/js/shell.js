@@ -51,6 +51,10 @@ export function startShell(root, { go, onAuth }) {
   const hints = (field) => mountHints(field, {
     account: () => ({ tasks: account.tasks, sub: account.sub, createdAt: account.me?.created_at }),
     language: () => lang.current,
+    // In the middle of the screen, where the question stands, not in the box at the bottom.
+    target: () => homeEl.querySelector(".home h1"),
+    prop: "textContent",
+    rows: 2,
   });
   const composer = createComposer({ onSend: (text, images) => send(text, images), onStop: () => pause(), chips, onPlus: (anchor) => plusMenu(anchor), onGauge: (anchor) => openDial(anchor), hints });
   const bannerEl = h("div", { class: "banner-slot" });
@@ -165,6 +169,8 @@ export function startShell(root, { go, onAuth }) {
     drawer.setCurrent("");
     homeEl.hidden = false;
     chat.column.hidden = true;
+    // A new heading: the lines start over on it, from its own words.
+    composer.setStarting(false);
     homeEl.replaceChildren(homeView());
     paint();
   }

@@ -26,11 +26,11 @@ export function createComposer({ onSend, onStop, chips, onPlus, onGauge, hints }
   let locked = false;
   let starting = false;
 
-  // Only the field that starts a new session speaks; in a session it says what it does there.
+  // The start screen's heading speaks while this box starts a new session; typing here quiets it.
   const placeholder = () => {
-    if (starting && !busy) return speaking.start();
-    speaking.stop();
     field.placeholder = busy ? t("composer busy") : t("composer placeholder");
+    if (starting && !busy) speaking.start();
+    else speaking.stop();
   };
 
   const grow = () => {

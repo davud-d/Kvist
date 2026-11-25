@@ -314,6 +314,10 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .home-wrap { min-height: 100%; display: flex; }
 .home { margin: auto; padding: 24px 20px 120px; text-align: center; }
 .home h1 { font-size: 26px; line-height: 1.2; letter-spacing: -.02em; font-weight: 600; }
+/* The heading's lines are typed out (js/hints.js) and wrap to two rows at most: the room for both is kept, and the
+   width is the screen's, so a short line or an empty moment between two lines moves nothing. */
+.home { width: 100%; }
+.home h1 { min-height: 2.4em; display: flex; align-items: center; justify-content: center; }
 .status-line { display: none; }
 
 /* Motion that moves only transforms and opacity runs on the compositor, at whatever rate the screen has. */
