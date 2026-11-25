@@ -88,3 +88,10 @@ test("a thought read back from the history keeps its words and can be opened aga
   assert.equal(thought.text, "The person says hi.");
   assert.equal(thought.seconds, 4);
 });
+
+test("an answer already shown is not drawn again when the core adds its closing line", () => {
+  const agent = createAgent("dup", "1");
+  reduce(agent, { type: "stream_commit", stream_id: "s", text: "All done." });
+  reduce(agent, { type: "final", message: "All done.\n\n_Kvist closed the task's processes: skill app_screen._", outcome: "done" });
+  assert.deepEqual(agent.items.map((item) => item.kind), ["reply", "note"]);
+});

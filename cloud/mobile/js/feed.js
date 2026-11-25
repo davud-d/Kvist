@@ -83,10 +83,20 @@ function callFor(feed, ev) {
   return [...feed.calls.values()].reverse().find((call) => call.step === ev.step && call.phase === "run");
 }
 
-function repeatsLastReply(feed, message) {
+// The core appends a line ("Kvist closed the task's processes: ...") to an answer that was already streamed
+// as a reply, so the final text is that reply plus a tail. Returns what of the final text is not on screen
+// yet: "" when it is all there, the tail when only a tail is new, null when the answer was never shown.
+function unshownTail(feed, message) {
   const last = feed.items.findLast((item) => item.kind !== "note");
-  return (last?.kind === "reply" || last?.kind === "final") && !last.aside && String(last.text).trim() === String(message ?? "").trim();
+  if (!last || (last.kind !== "reply" && last.kind !== "final") || last.aside) return null;
+  const shown = String(last.text).trim();
+  const full = String(message ?? "").trim();
+  if (!shown || !full.startsWith(shown)) return null;
+  return full.slice(shown.length).trim();
 }
+
+// A tail is a status line, not a second answer: it is written as a note, without its markdown emphasis.
+const asNote = (tail) => tail.replace(/^_+|_+$/g, "");
 
 const lineCount = (text) => (text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0);
 
@@ -227,7 +237,11 @@ export function reduce(feed, ev, { replay = false } = {}) {
     case "final":
       settleStreams(feed);
       feed.dialogs = [];
-      if (repeatsLastReply(feed, ev.message)) return;
+      const tail = unshownTail(feed, ev.message);
+      if (tail !== null) {
+        if (tail) push(feed, { kind: "note", text: asNote(tail), tone: "muted" });
+        return;
+      }
       push(feed, { kind: "final", text: ev.message, outcome: ev.outcome ?? "done", paused: ev.paused === true });
       return;
     case "error":

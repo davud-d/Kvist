@@ -62,6 +62,15 @@ test("a final answer that repeats the last reply is shown once", () => {
   assert.equal(feed.items.length, 1);
 });
 
+test("an answer already shown is not drawn again when the core adds its closing line", () => {
+  const feed = run([
+    { type: "stream_commit", stream_id: "s", text: "All done." },
+    { type: "final", message: "All done.\n\n_Kvist closed the task's processes: skill app_screen._", outcome: "done" },
+  ]);
+  assert.deepEqual(feed.items.map((item) => item.kind), ["reply", "note"]);
+  assert.equal(feed.items[1].text, "Kvist closed the task's processes: skill app_screen.");
+});
+
 test("the end of a turn stops what was still running", () => {
   const feed = run([
     { type: "step", step: 1, call_id: "a", action_type: "run_command", action_description: "npm test" },

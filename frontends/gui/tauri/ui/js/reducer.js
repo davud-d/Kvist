@@ -133,10 +133,20 @@ function callFor(agent, ev) {
   return [...agent.calls.values()].reverse().find((call) => call.step === ev.step && call.phase === "run");
 }
 
-function repeatsLastReply(agent, message) {
+// The core appends a line ("Kvist closed the task's processes: ...") to an answer that was already streamed
+// as a reply, so the final text is that reply plus a tail. Returns what of the final text is not on screen
+// yet: "" when it is all there, the tail when only a tail is new, null when the answer was never shown.
+function unshownTail(agent, message) {
   const last = agent.items.findLast((item) => item.kind !== "note");
-  return last?.kind === "reply" && !last.aside && last.text.trim() === String(message ?? "").trim();
+  if (!last || last.kind !== "reply" || last.aside) return null;
+  const shown = String(last.text).trim();
+  const full = String(message ?? "").trim();
+  if (!shown || !full.startsWith(shown)) return null;
+  return full.slice(shown.length).trim();
 }
+
+// A tail is a status line, not a second answer: it is written as a note, without its markdown emphasis.
+const asNote = (tail) => tail.replace(/^_+|_+$/g, "");
 
 // The answer itself is the last action of a response; the core sends no result for it, so it is no card.
 const TERMINAL_ACTIONS = new Set(["final_answer", "report_to_user", "refuse"]);
@@ -365,7 +375,11 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "final":
       settleStreams(agent);
-      if (repeatsLastReply(agent, ev.message)) return;
+      const tail = unshownTail(agent, ev.message);
+      if (tail !== null) {
+        if (tail) addNote(agent, asNote(tail));
+        return;
+      }
       if (ev.closed) push(agent, { kind: "reply", text: ev.message, live: false });
       else push(agent, { kind: "final", text: ev.message, outcome: ev.outcome ?? "done", paused: ev.paused === true });
       if (ev.paused && !replay) agent.state = "paused";
