@@ -9,6 +9,7 @@ import { dialogFor } from "./dialogs.js";
 import { fill, h, icon } from "./dom.js";
 import { createDrawer } from "./drawer.js";
 import { createFeed, working } from "./feed.js";
+import { flyHomeAway, flyMessage } from "./flight.js";
 import { createStatus } from "./status.js";
 import { providerMark } from "./mark.js";
 import { openModelMenu, pickedLabel } from "./modelmenu.js";
@@ -228,11 +229,17 @@ export function startShell(root, { go, onAuth }) {
     try {
       if (view.kind === "new") {
         const body = { goal: text, ...(view.projectId ? { project_id: Number(view.projectId) } : {}) };
+        // What the letter and the start screen's words leave from, measured before the page changes under them.
+        const leftFrom = composer.fieldBox();
+        const homeWords = homeEl.firstElementChild;
+        const homeBox = homeWords?.getBoundingClientRect();
         const task = await post("/api/tasks", body);
         composer.clear();
         const feed = createFeed();
         history.replaceState(null, "", `/m/s/${task.public_id}`);
         attach(task, feed);
+        flyHomeAway(homeWords, homeBox);
+        flyMessage({ text: rawText, from: leftFrom, column: chat.column });
         refresh("tasks", "machines");
         return;
       }

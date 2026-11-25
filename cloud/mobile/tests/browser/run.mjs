@@ -349,6 +349,22 @@ scenario("the agent asks, the person answers", async (page) => {
   assert.deepEqual(page.problems, []);
 });
 
+scenario("the first message flies from the box to its place and the real one shows after it lands", async (page) => {
+  await signIn(page);
+  await startTrial(page);
+  await addKeyAndProject(page);
+  await page.locator(".composer-input").fill("a letter");
+  await page.locator(".composer .round").click();
+  await page.waitForSelector(".user-text.flight", { state: "attached" });
+  // The ghost takes no touches, and the real message waits hidden under it.
+  assert.equal(await page.locator(".user-text.flight").evaluate((el) => getComputedStyle(el).pointerEvents), "none");
+  await page.waitForSelector(".user-text.flight", { state: "detached" });
+  assert.equal(await page.locator(".col.flying").count(), 0);
+  assert.match(await page.locator(".item-user .user-text").first().innerText(), /a letter/);
+  assert.equal(await page.locator(".item-user").first().evaluate((el) => getComputedStyle(el).visibility), "visible");
+  assert.deepEqual(page.problems, []);
+});
+
 scenario("the round button is send, then pause while it works", async (page) => {
   await signIn(page);
   await startTrial(page);

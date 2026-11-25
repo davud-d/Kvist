@@ -14,7 +14,9 @@ operating system's own payment sheets.
 ## Screens
 
 * **Start** (`/m/`): what the agent is for, the project it will work in, what is still to set up (plan, model key, project) or four
-  things to ask it. The composer is docked at the bottom, never floating over the conversation.
+  things to ask it. The composer is docked at the bottom, never floating over the conversation. Sending the first message
+  plays one short flight (370 ms, [`js/flight.js`](js/flight.js)): the text folds, flies to its place and unfolds, and the start
+  screen's words drift away; nothing blocks touches, and it is off under reduced motion.
 * **Session** (`/m/s/<id>`): your messages, the agent's answers as flat Markdown, and its work folded into one line per turn
   ("Worked for 2 min · 6 steps") that opens into the steps. A question from the agent (approve a command, confirm, pick) stands
   where the composer was. The round button is *send*, and *pause* while the agent works and the box is empty.

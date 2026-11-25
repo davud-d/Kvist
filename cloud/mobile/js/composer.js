@@ -99,6 +99,8 @@ export function createComposer({ onSend, onStop, chips, onPlus, onGauge }) {
       paint();
       field.focus();
     },
+    /** Where the typed words stand: the first message leaves from here (js/flight.js). */
+    fieldBox: () => field.getBoundingClientRect(),
     focus: () => field.focus(),
     get value() {
       return field.value;

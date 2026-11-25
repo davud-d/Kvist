@@ -138,3 +138,9 @@
 .col .counts b { display: inline; width: auto; height: auto; border-radius: 0; }
 .col .counts .plus { color: var(--ok); }
 .col .counts .minus { color: var(--bad); }
+
+/* The letter in flight (js/flight.js): a copy of the first message, over the page and out of reach of touches. The real
+   message is already in the feed under it and stays hidden until the copy has landed. */
+.user-text.flight { position: fixed; z-index: 20; margin: 0; width: fit-content; pointer-events: none; will-change: transform;
+  background: var(--s2); color: var(--text); line-height: 1.5; font-size: 16px; overflow-wrap: anywhere; }
+.col.flying > .item-user { visibility: hidden; }
