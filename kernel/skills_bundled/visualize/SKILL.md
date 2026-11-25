@@ -27,7 +27,8 @@ and examples. Read `references/design.md` when choosing the visual story.
 
 The result is a self-contained HTML file with no network requests or server.
 It remains usable after the task ends. Opening defaults to true and uses the
-system default browser on Linux, macOS and Windows. A remote/headless machine
+agent’s isolated browser in Kvist Cloud, where the person watches beside the chat. On a local
+computer it uses the system default browser on Linux, macOS and Windows. A remote/headless machine
 may have no graphical browser; the tool reports that rather than pretending.
 Normal skill grants, read-only roles and planning restrictions still apply.
 

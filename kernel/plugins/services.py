@@ -1325,14 +1325,18 @@ class CoreServices:
             raise ServiceError("denied", "visualize was not granted host.open")
         if should_open:
             self._count_host_open(call)
+        html = render_page(page).encode("utf-8")
         artifact = self.artifacts.save_bytes(
-            render_page(page).encode("utf-8"), name="visualization.html", kind="visualization",
+            html, name="visualization.html", kind="visualization",
             caption=page["title"], origin=self._origin(call),
         )
         result = {"valid": True, "artifact": artifact.public(), "opened": False}
         if should_open:
             try:
-                host_actions.open_visualization(Path(artifact.path))
+                if os.environ.get("KVIST_CLOUD_WORKSPACE") == "1":
+                    self._manager.show_visualization(artifact.id, html)
+                else:
+                    host_actions.open_visualization(Path(artifact.path))
                 result["opened"] = True
             except ServiceError as error:
                 result["open_error"] = error.message
@@ -1514,6 +1518,18 @@ def _open_inbox(root: Path) -> int:
         return os.open(_EXCHANGE_IN, _directory_flags(), dir_fd=parent)
     finally:
         os.close(parent)
+
+
+def stage_visualization(exchange: Path, artifact_id: str, html: bytes) -> None:
+    """Hand the browser the bytes just rendered, even if the saved workspace file changes."""
+    inbox = _open_inbox(exchange)
+    try:
+        fd = os.open(f"{artifact_id}.html", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=inbox)
+        with os.fdopen(fd, "wb") as writer:
+            writer.write(html)
+    finally:
+        os.close(inbox)
 
 
 def _open_exchange_file(root: Path, parts: tuple[str, ...]) -> int:

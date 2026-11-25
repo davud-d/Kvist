@@ -111,7 +111,7 @@ start work, see what is happening, come back to earlier work. There are no stand
 
 ## The agent's screen is private
 
-The **Screen** sheet shows the agent's browser and desktop. What the agent does there is as private as its files:
+The **Screen** sheet shows the agent's browser, desktop and pages created by the **Visual explanations** skill. A visualization opens in its own tab on the agent's screen. What the agent does there is as private as its files:
 the machine's address and token never leave it, pictures are pulled only while this sheet is open, they are kept in
 memory only, and the server hands them to the signed-in owner of the task and nobody else (another account, an
 admin and a signed-out visitor all get "not found"). Details and tests: `cloud/docs/ARCHITECTURE.md`,

@@ -1,6 +1,6 @@
 {
   "app_screen": {"version": "0.1.4", "digest": "sha256:1c53e147bd249f287b83e06a3519d8448220ebcdc84a14f0ec0714b044f62b89"},
-  "browser": {"version": "0.2.8", "digest": "sha256:37547debcfb90273c3300b06bd8f22a4cc425b05ad0d4e49b26184b442f9b0b8"},
+  "browser": {"version": "0.2.9", "digest": "sha256:de51166289a5379f77cd29697066c37882f0769409b9ef8c986d5a06ea79a1fb"},
   "code_nav": {"version": "0.1.0", "digest": "sha256:5d118c6ebcf101d0b4930ca41d73d967e77b436f8972777331f16f032b823ce6"},
   "debugging": {"version": "0.1.0", "digest": "sha256:3a7fcac2c719895558fdd6060c3cb477e6893010aaa11b5cb5e7db285217d4d3"},
   "design": {"version": "0.2.0", "digest": "sha256:f3b94c916673aba9738d6c4a98753b39b0b2951272d4557b5f25c84afd28825a"},
@@ -14,6 +14,6 @@
   "static_checks": {"version": "0.1.0", "digest": "sha256:f87caff902a36e93bd1bbf7b4e47455bd4a0deda80e89224f2b4878397f91b73"},
   "telegram": {"version": "0.3.1", "digest": "sha256:c13d3ef0d2bd24b689fdad91dc51fdf079e18f53236c0cd2dc230294e0da0f3a"},
   "test_runner": {"version": "0.1.0", "digest": "sha256:2dfdc712ed0694fb35f11f1cf1d5bc9e7d1c289a62552fc76ec2a6818149a03f"},
-  "visualize": {"version": "0.1.0", "digest": "sha256:489f70f372ff57ec1a8920f50bc71c2c0e725087ad054f1efebdd90b2886f140"},
+  "visualize": {"version": "0.1.1", "digest": "sha256:667c906dac7c1c9bc811fedc1774fca52db7c01099dad99fb0fda4b4b37cbe9d"},
   "website": {"version": "0.1.0", "digest": "sha256:96362129daf190f5588ba705a624aa1c023ffaddca506e9c97657b576b3deb10"}
 }

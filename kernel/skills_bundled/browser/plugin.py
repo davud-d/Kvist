@@ -15,6 +15,7 @@ from __future__ import annotations
 import http.server
 import os
 import queue
+import re
 import shutil
 import threading
 import time
@@ -300,10 +301,7 @@ BROWSER = Browser()
 
 
 def describe() -> dict[str, Any]:
-    return {"tools": ["open_page", "open_workspace_page", "snapshot", "click", "type", "select", "press",
-                      "scroll", "wait_for", "screenshot", "emulate", "check_page", "console", "network", "tabs",
-                      "upload",
-                      "close_browser"]}
+    return {"tools": list(_TOOLS)}
 
 
 def execute(tool_name: str, arguments: dict[str, Any], context: Any) -> Any:
@@ -374,6 +372,19 @@ def _open_workspace_page(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     if truncated:
         result["note"] = "the folder listing was truncated; deeper files were not copied"
     return result
+
+
+def _open_visualization(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    artifact_id = args["artifact_id"]
+    if not re.fullmatch(r"art_[0-9a-f]{12}", artifact_id):
+        raise ValueError("invalid visualization id")
+    path = Path("/kvist/exchange/in") / f"{artifact_id}.html"
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("this visualization is not on the browser's screen")
+    tab = BROWSER.new_tab()
+    _navigate(tab, path.as_uri(), "load")
+    BROWSER.worker.run(tab.page.bring_to_front)
+    return {"tab": tab.id, "title": BROWSER.worker.run(tab.page.title)}
 
 
 def _sync_folder(ctx: Any, folder: str) -> tuple[int, list[str], bool]:
@@ -835,6 +846,7 @@ def _describe_target(args: dict[str, Any]) -> str:
 _TOOLS: dict[str, Callable[[dict[str, Any], Any], Any]] = {
     "open_page": _open_page,
     "open_workspace_page": _open_workspace_page,
+    "open_visualization": _open_visualization,
     "snapshot": _snapshot_tool,
     "click": _click,
     "type": _type,

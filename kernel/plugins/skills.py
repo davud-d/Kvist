@@ -36,7 +36,7 @@ from kernel.plugins.mcp import AttachedServer, McpClient, McpError, ServerConfig
 from kernel.plugins.registry import CatalogEntry, RegistryError, SkillRegistry, reference_path
 from kernel.plugins.schema import validate
 from kernel.plugins.screen import ScreenViewer
-from kernel.plugins.services import AttachedSkill, CoreServices, SkillCall
+from kernel.plugins.services import AttachedSkill, CoreServices, SkillCall, stage_visualization
 from kernel.sandbox.auto_approval import refusal_note
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text
 from kernel.plugins.resources import CleanupReport, Owner
@@ -443,6 +443,23 @@ class SkillManager:
         data = {"skill": skill.id, "version": skill.version, "tool": tool.name, "status": "success",
                 "result": value, "untrusted": True}
         return {"ok": True, "action_type": "skill_call", "data": data}
+
+    def show_visualization(self, artifact_id: str, html: bytes) -> None:
+        try:
+            self.attach("browser", by="visualize")
+            browser = self.attached["browser"]
+            if browser.manifest.tool("open_visualization") is None:
+                raise ServiceError("unavailable", "the installed browser skill cannot preview visualizations")
+            host = self._ensure_host(browser)
+            assert host.exchange_dir is not None
+            stage_visualization(host.exchange_dir, artifact_id, html)
+            reply = self.call("browser", "open_visualization", {"artifact_id": artifact_id}, "")
+        except (SkillUseError, RunnerStartError, OSError) as error:
+            raise ServiceError("unavailable", str(error)) from None
+        if not reply["ok"]:
+            raise ServiceError("unavailable", reply["error"])
+        if reply["data"]["status"] != "success":
+            raise ServiceError("unavailable", "the browser was interrupted before it finished opening the page")
 
     def _ensure_host(self, skill: AttachedSkill) -> RunnerHost:
         if skill.host is not None and skill.host.alive:

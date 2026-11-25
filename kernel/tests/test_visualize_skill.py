@@ -6,6 +6,7 @@ import base64
 import copy
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -144,6 +145,37 @@ def test_invalid_input_and_validation_create_no_artifacts_or_browser(visual_agen
     result = call(visual_agent, page={'title': 'Broken', 'sections': []})['data']['result']
     assert not result['valid'] and not result['opened'] and opened == []
     assert visual_agent.skills.services.artifacts.list() == []
+
+
+def test_cloud_preserves_artifact_if_browser_is_unavailable(visual_agent, monkeypatch):
+    monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
+    result = call(visual_agent)["data"]["result"]
+    assert not result["opened"] and "browser" in result["open_error"]
+    assert Path(result["artifact"]["path"]).is_file()
+    saved = call(visual_agent, page=example(), open_browser=False)["data"]["result"]
+    assert not saved["opened"] and "open_error" not in saved
+
+
+@pytest.mark.slow
+def test_cloud_opens_visualization_on_the_real_browser_screen(visual_agent, monkeypatch):
+    config = os.environ.get("KVIST_TEST_SKILL_CONFIG")
+    if not config:
+        pytest.skip("requires the browser skill environment")
+    manager = visual_agent.skills
+    registry = manager.registry
+    installed = registry.install(ROOT.parent / "browser", origin="bundled")
+    registry.activate(installed.skill_id, installed.version, installed.digest)
+    (registry.root / "browser/env").symlink_to(Path(config) / "plugins/skill/browser/env", target_is_directory=True)
+    grant_all(manager.grants, registry, "browser", visual_agent.executor.workspace)
+    monkeypatch.setenv("KVIST_CLOUD_WORKSPACE", "1")
+    try:
+        shown = call(visual_agent)["data"]["result"]
+        assert shown["opened"], shown
+        snapshot = manager.call("browser", "snapshot", {}, "verify")["data"]["result"]
+        assert snapshot["title"] == example()["title"]
+        assert manager.attached["browser"].host.screen.state == "running"
+    finally:
+        manager.finish_task("test_end")
 
 
 def test_browser_failure_keeps_the_file_and_reports_failure(visual_agent, monkeypatch):
