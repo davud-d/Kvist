@@ -6,8 +6,16 @@ export function watchViewport() {
   const root = document.documentElement;
   const viewport = window.visualViewport;
   if (!viewport) return;
+  // The tallest the page has been is its height without a keyboard; well below it, a keyboard is open.
+  let tallest = 0;
+  let width = 0;
   const apply = () => {
+    // A turned phone is another page: what was the tallest no longer says anything.
+    if (viewport.width !== width) [width, tallest] = [viewport.width, 0];
+    tallest = Math.max(tallest, viewport.height);
     root.style.setProperty("--app-h", `${Math.round(viewport.height)}px`);
+    // Over the keyboard the home indicator's strip is hidden, so the dock does not keep room for it.
+    root.classList.toggle("keyboard", viewport.height < tallest - 150);
     // iOS scrolls the whole page up when the keyboard opens; the layout already follows the viewport.
     if (viewport.offsetTop) window.scrollTo(0, 0);
   };

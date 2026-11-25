@@ -85,6 +85,7 @@ export function startShell(root, { go, onAuth }) {
     title.textContent = account.projects.find((p) => String(p.id) === String(projectId))?.name || t("no project");
     // The dot on the menu: another session is waiting for an answer.
     pill.hidden = view.kind !== "session";
+    bar.classList.toggle("with-pill", !pill.hidden);
     menuDot.hidden = !account.tasks.some((item) => item.status === "waiting_for_user" && item.public_id !== view.publicId);
   }
 

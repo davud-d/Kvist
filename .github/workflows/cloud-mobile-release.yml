@@ -75,7 +75,9 @@ jobs:
 
   ios:
     name: iPhone and iPad .ipa
-    runs-on: macos-15
+    # Xcode 26 (the iOS 26 SDK): built with an older SDK, iOS runs the app in its compatibility look, with the old
+    # keyboard and bars instead of the system's glass.
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - name: Check out repository

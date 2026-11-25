@@ -165,7 +165,7 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .status-line:empty { display: none; }
 .status-line span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.composer-input { flex: 1; min-width: 0; max-height: 160px; padding: 7px 0; border: 0; outline: 0; background: none; resize: none; font-size: 16px; line-height: 1.4; color: var(--text); }
+.composer-input { caret-color: #fff; flex: 1; min-width: 0; max-height: 160px; padding: 7px 0; border: 0; outline: 0; background: none; resize: none; font-size: 16px; line-height: 1.4; color: var(--text); }
 .composer-input::placeholder { color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .dialog { display: grid; gap: 12px; padding: 14px; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-l); max-height: 62dvh; overflow-y: auto; }
@@ -263,6 +263,14 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .bar { position: absolute; z-index: 6; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
   height: calc(var(--bar-h) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0; pointer-events: none; }
 .bar > * { pointer-events: auto; }
+/* The title stands in the middle of the screen whatever is beside it: the side columns are equal, so the pen and dots
+   appearing on the right do not push it left; a long name shortens instead. */
+.bar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.bar > .glass-btn { justify-self: start; }
+.bar > .glass-pill { justify-self: end; grid-column: 3; }
+.bar > .bar-title { grid-column: 2; max-width: calc(100vw - 2 * (40px + 20px)); }
+.bar.with-pill > .bar-title { max-width: calc(100vw - 2 * (92px + 20px)); }
+.keyboard .dock { padding-bottom: 8px; }
 /* The blurred strip fades out downwards, so there is no edge where the conversation passes under the bar. */
 .bar::before, .dock::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
   -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); }
@@ -337,7 +345,7 @@ body.dropping::after { content: attr(data-drop); position: fixed; inset: 10px; z
 .title-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 8px 10px; border-radius: 14px; font-size: 16px; font-weight: 600; }
 .title-btn:active { background: rgba(255, 255, 255, .08); }
 .title-btn svg { flex: none; color: var(--text2); }
-.popover.below { transform-origin: 50% 0; min-width: 280px; max-height: 60dvh; overflow-y: auto; }
+.popover.below { transform-origin: 50% 0; min-width: 280px; max-width: calc(100vw - 24px); max-height: 60dvh; overflow-y: auto; }
 .pop-rule { margin: 6px 12px; border: 0; border-top: 1px solid rgba(255, 255, 255, .1); }
 .pop-item.on .pop-label { font-weight: 600; }
 .pop-check { color: var(--text); display: grid; place-items: center; }

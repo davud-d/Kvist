@@ -193,6 +193,17 @@ scenario("first run: sign in, terms, trial, key, project, first task", async (pa
   assert.equal(await page.locator(".work-head").first().isVisible(), false);
   await shot(page, "chat");
   assert.equal((await page.locator(".bar-title .t1").innerText()).trim(), "demo", "the bar says only the project");
+  // The title stands in the middle of the screen with the pen and dots beside it, and its menu opens centred under it.
+  const width = page.viewportSize().width;
+  const title = await page.locator(".title-btn").boundingBox();
+  assert.ok(Math.abs(title.x + title.width / 2 - width / 2) < 2, `title centred: ${title.x + title.width / 2} of ${width}`);
+  await page.locator(".title-btn").click();
+  await visible(page, ".popover.below.in");
+  await page.waitForTimeout(250);
+  const menu = await page.locator(".popover.below").boundingBox();
+  assert.ok(Math.abs(menu.x + menu.width / 2 - width / 2) < 2, `menu centred: ${menu.x + menu.width / 2} of ${width}`);
+  await shot(page, "project-menu");
+  await page.locator(".pop-scrim").click();
   assert.equal(await page.locator(".glass-pill").isVisible(), true, "a session has its new-session and more buttons");
   // The address is the session: a reload comes back to it with its history.
   await page.reload();
