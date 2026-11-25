@@ -290,6 +290,60 @@ ensure_golden() {
     prune_golden
 }
 
+# --- existing VMs ------------------------------------------------------------------------------------------
+# A customer's disk is a layer over the golden image it was made from, so a better recipe only reaches new VMs. `sync`
+# brings the running ones up to the recipe: the same packages and skill environments, installed through the guest agent
+# (root inside the guest, nothing of the customer's own files read). A stopped VM waits for the next deploy.
+guest_exec() { # guest_exec <domain> <shell command>: runs it as root in the guest, returns its exit code
+    local domain="$1" request pid status
+    request="$(python3 -I -c 'import json, sys
+print(json.dumps({"execute": "guest-exec", "arguments": {"path": "/bin/bash", "arg": ["-c", sys.argv[1]], "capture-output": True}}))' "$2")"
+    pid="$(virsh qemu-agent-command "$domain" "$request" | python3 -I -c 'import json, sys; print(json.load(sys.stdin)["return"]["pid"])')"
+    while true; do
+        status="$(virsh qemu-agent-command "$domain" "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}")"
+        if python3 -I -c 'import json, sys; sys.exit(0 if json.loads(sys.argv[1])["return"]["exited"] else 1)' "$status"; then break; fi
+        sleep 3
+    done
+    # The last lines of apt's own output are all a failure needs; nothing else of the guest is printed.
+    python3 -I -c 'import base64, json, sys
+result = json.loads(sys.argv[1])["return"]
+text = base64.b64decode(result.get("out-data", "")).decode(errors="replace")
+code = result.get("exitcode", 1)
+if code != 0:
+    print("\n".join(text.strip().splitlines()[-5:]), file=sys.stderr)
+sys.exit(code)' "$status"
+}
+
+sync_vms() {
+    local packages installs domain failed=0 only="${1:-}"
+    packages="$(golden_user_data | sed -n '/^packages:/,/^write_files:/p' | sed -n 's/^  - \([a-z0-9][a-z0-9.+-]*\)$/\1/p' | grep -v '^qemu-guest-agent$' | tr '\n' ' ')"
+    # One command per skill, each allowed to fail alone.
+    installs="$(golden_user_data | sed -n 's/^  - \(runuser -u kvist -- .* install-deps .*\)$/\1 || true;/p' | tr '\n' ' ')"
+    [ -n "$packages" ] || { echo "No packages found in the recipe" >&2; exit 1; }
+    for domain in $(virsh list --all --name | grep -E '^kvist-[0-9]+$' || true); do
+        [ -z "$only" ] || [ "$domain" = "kvist-$only" ] || continue
+        if [ "$(virsh domstate "$domain")" != running ]; then
+            echo "$domain: stopped, skipped (the next deploy brings it up to date)"
+            continue
+        fi
+        echo "$domain: installing packages and skill environments"
+        # A skill environment of an older Kvist inside the guest may lack a skill the recipe names: that skill is skipped.
+        if guest_exec "$domain" "exec 2>&1; export DEBIAN_FRONTEND=noninteractive; apt-get -o DPkg::Lock::Timeout=300 update -qq && apt-get -o DPkg::Lock::Timeout=300 install -y -qq --no-install-recommends $packages && { $installs true; }"; then
+            echo "$domain: ok"
+        else
+            echo "$domain: FAILED" >&2
+            failed=1
+        fi
+    done
+    return "$failed"
+}
+
+if [ "${1:-}" = sync ]; then
+    [ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }
+    sync_vms "${2:-}"
+    exit $?
+fi
+
 # --- the golden mode: run by a deploy, as root -------------------------------------------------------------
 if [ "${1:-}" = golden ]; then
     [ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }

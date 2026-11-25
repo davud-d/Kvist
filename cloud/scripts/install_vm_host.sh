@@ -57,4 +57,6 @@ systemctl enable --now kvist-vm.socket >/dev/null 2>&1
 # The guest image every customer's VM starts from: built only when the recipe or the wheels changed (a few
 # minutes then), so a customer's first boot takes seconds and not the minutes of installing packages.
 "$LIB/setup_vm.sh" golden
+# Running VMs were made from an older image; bring them up to the same recipe (a stopped one waits for the next deploy).
+"$LIB/setup_vm.sh" sync
 echo "ok: VM host ready (socket /run/kvist-vm.sock, isolation rules loaded)"
