@@ -41,7 +41,7 @@ def test_git_context_of_a_clean_repo_has_only_commits(tmp_path):
     header, details = SafeExecutor(tmp_path).git_context()
 
     assert header == "main (clean)"
-    assert "Changed files" not in details
+    assert "changed files" not in details
     assert "only commit" in details
 
 
@@ -52,7 +52,7 @@ def test_git_context_without_commits_does_not_fail(tmp_path):
     header, details = SafeExecutor(tmp_path).git_context()
 
     assert "main" in header
-    assert "Recent commits" not in details
+    assert "recent commits" not in details
 
 
 def test_git_context_caps_the_changed_files(tmp_path):

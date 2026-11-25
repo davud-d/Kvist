@@ -479,4 +479,4 @@ def test_the_static_part_of_the_runtime_prompt_is_the_same_on_every_step_of_a_ru
     common = len(first) - len(first.lstrip())
     while common < min(len(first), len(second)) and first[common] == second[common]:
         common += 1
-    assert first[:common].endswith("fix the failing test\n\nStep: ")
+    assert first[:common].endswith("fix the failing test\n\nstep: ")

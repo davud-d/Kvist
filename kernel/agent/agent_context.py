@@ -20,45 +20,45 @@ from kernel.context.system_context import current_time_context, identity_fact
 #   2 = medium   (trimmed if needed, keep at least 30%)
 #   3 = low      (dropped first when over budget)
 
-SESSION_HISTORY_HEADER = "Session history (earlier turns, newest first):"
+SESSION_HISTORY_HEADER = "session history (earlier turns, newest first):"
 
 SECTION_PRIORITIES: dict[str, int] = {
-    "System environment:": 0,
+    "system environment:": 0,
     # Without its own header the history folded into "System environment:" and
     # was never trimmed at all.
     SESSION_HISTORY_HEADER: 1,
-    "Step:": 0,
-    "Task language:": 0,
-    "User task:": 0,
-    "Plan mode:": 0,
-    "Approved plan:": 0,
-    "Allowed next actions now:": 0,
-    "Known dependency versions:": 3,
-    "USER-FACING LANGUAGE:": 0,
-    "Local time:": 0,
-    "Short external facts:": 3,
-    "Read files:": 2,
-    "Changed files:": 2,
+    "step:": 0,
+    "task language:": 0,
+    "user task:": 0,
+    "plan mode:": 0,
+    "approved plan:": 0,
+    "allowed next actions now:": 0,
+    "known dependency versions:": 3,
+    "user-facing language:": 0,
+    "local time:": 0,
+    "short external facts:": 3,
+    "read files:": 2,
+    "changed files:": 2,
     # These two must match what build_runtime_prompt renders verbatim, or the
     # trimmer never sees them as sections and silently folds them into the
     # section above at that section's priority.
-    "Recent useful observations:": 2,
-    "Recent action results:": 1,
+    "recent useful observations:": 2,
+    "recent action results:": 1,
     # File contents and command output live here. Dropping them first is what
     # forced the model to re-read files it had already been given; everything
     # else in the prompt is a summary of this, so this is what survives.
-    "Detailed recent action data:": 1,
-    "Repeated errors:": 1,
-    "Additional instruction:": 0,
-    "Background jobs:": 0,
-    "Step summaries:": 1,
-    "Final answer style:": 0,
-    "Installed skills:": 2,
+    "detailed recent action data:": 1,
+    "repeated errors:": 1,
+    "additional instruction:": 0,
+    "background jobs:": 0,
+    "step summaries:": 1,
+    "final answer style:": 0,
+    "installed skills:": 2,
     # The instructions of an attached skill are how its tools are used: they
     # outlive the catalog and the observations when the prompt is trimmed.
-    "Attached skills:": 1,
-    "Workspace memory:": 2,
-    "Helpers:": 0,
+    "attached skills:": 1,
+    "workspace memory:": 2,
+    "helpers:": 0,
 }
 
 # Build a regex that matches any known section header at the start of a line.
@@ -110,19 +110,19 @@ def estimate_section_tokens(text: str, chars_per_token: int = 4) -> int:
 
 _RUNTIME_TEXT = {
     "en": {
-        "step": "Step",
-        "user_task": "User task",
-        "allowed_next_actions": "Allowed next actions now",
-        "dependency_versions": "Known dependency versions",
-        "web_facts": "Short external facts",
-        "read_files": "Read files",
-        "changed_files": "Changed files",
-        "recent_observations": "Recent useful observations",
-        "recent_results": "Recent action results",
-        "recent_details": "Detailed recent action data",
-        "repeated_errors": "Repeated errors",
-        "step_summaries": "Step summaries",
-        "additional_instruction": "Additional instruction",
+        "step": "step",
+        "user_task": "user task",
+        "allowed_next_actions": "allowed next actions now",
+        "dependency_versions": "known dependency versions",
+        "web_facts": "short external facts",
+        "read_files": "read files",
+        "changed_files": "changed files",
+        "recent_observations": "recent useful observations",
+        "recent_results": "recent action results",
+        "recent_details": "detailed recent action data",
+        "repeated_errors": "repeated errors",
+        "step_summaries": "step summaries",
+        "additional_instruction": "additional instruction",
         "none": "none",
         "truth_instruction": (
             "Use detailed data as the source of truth. Choose the next action so it moves "
@@ -156,13 +156,13 @@ def _plan_mode_block(state: Any) -> str:
     """What plan mode currently means for the run, or nothing outside it."""
     if state.plan_phase == PLAN_PLANNING:
         return (
-            "Plan mode:\n"
+            "plan mode:\n"
             "The person asked for a plan before any change. Files stay read-only until "
             "your plan is accepted: explore with read-only calls, then call propose_plan.\n\n"
         )
     if state.plan_phase == PLAN_APPROVED and state.approved_plan:
         return (
-            f"Approved plan:\n{state.approved_plan}\n\n"
+            f"approved plan:\n{state.approved_plan}\n\n"
             "The person accepted this plan. Carry it out; when the facts show a step "
             "cannot work, say so in your text and adjust instead of following it blindly.\n\n"
         )
@@ -289,16 +289,16 @@ def _indent_turn_text(text: str) -> str:
 def auto_approval_fact(enabled: bool) -> str:
     """One runtime line: an earlier denial in the chat says nothing about the mode now."""
     if enabled:
-        return "Runtime fact: auto mode is ON (a second model answers approval questions)."
+        return "runtime fact: auto mode is ON (a second model answers approval questions)."
     return (
-        "Runtime fact: auto mode is OFF (the person answers approval questions); "
+        "runtime fact: auto mode is OFF (the person answers approval questions); "
         "an earlier auto-mode denial in this chat no longer applies."
     )
 
 
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     if self._state.task_updates:
-        user_goal += "\n\nUser follow-ups for this active task (in order; later instructions take precedence):\n"
+        user_goal += "\n\nuser follow-ups for this active task (in order; later instructions take precedence):\n"
         user_goal += "\n\n".join(self._state.task_updates)
     text = _RUNTIME_TEXT["en"]
     response_language = (
@@ -313,26 +313,26 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         dependency_versions = self._format_dependency_versions_for_prompt("en")
         current_time = current_time_context()["current_time"]
         system_lines = [
-            "System environment:",
-            f"- OS: {self._state.system_os}",
-            f"- Shell: {self._state.system_shell}",
-            f"- Sandbox: {self._state.system_sandbox}",
+            "system environment:",
+            f"- os: {self._state.system_os}",
+            f"- shell: {self._state.system_shell}",
+            f"- sandbox: {self._state.system_sandbox}",
         ]
         # Optional facts only appear when actually detected, so an unrelated
         # workspace (no git repo, unrecognised project type) doesn't pay for
         # lines it has no use for.
         if self._state.system_project:
-            system_lines.append(f"- Project: {self._state.system_project}")
+            system_lines.append(f"- project: {self._state.system_project}")
         if self._state.system_git:
-            system_lines.append(f"- Git: {self._state.system_git}")
+            system_lines.append(f"- git: {self._state.system_git}")
         if self._state.system_git_details:
             system_lines.append(_untrusted_git_details(self._state.system_git_details))
         if self._state.system_workspace:
-            system_lines.append(f"- Workspace: {self._state.system_workspace}")
+            system_lines.append(f"- workspace: {self._state.system_workspace}")
         if self._state.system_scratchpad:
-            system_lines.append(f"- Scratchpad: {self._state.system_scratchpad}")
+            system_lines.append(f"- scratchpad: {self._state.system_scratchpad}")
         if self._state.system_host:
-            system_lines.append(f"- Host: {self._state.system_host}")
+            system_lines.append(f"- host: {self._state.system_host}")
         system_block = "\n".join(system_lines) + "\n\n"
         # ── Session history context ─────────────────────────────────
         # Message numbers exist for end_session, which names the message it
@@ -353,7 +353,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             f"{text['user_task']}:\n{message_line}{user_goal}\n\n"
         )
         language_block = (
-            "USER-FACING LANGUAGE:\n"
+            "user-facing language:\n"
             "- Tool names, argument keys, and tool schemas are always English.\n"
             "- The text of every response (your words to the person, the final answer), run_shell's purpose, and plain chat replies must be in the language of the person's request.\n"
             "- The final answer and plain chat replies may use simple Markdown: backticks for file paths/commands, short bullet lists for multi-item reports, fenced code blocks for file contents. Do not over-format trivial answers.\n"
@@ -367,7 +367,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             f"{text['truth_instruction']}\n\n"
             # Last on purpose: a clock in the opening lines would change the
             # prompt cache prefix on every run.
-            f"Local time: {current_time}\n"
+            f"local time: {current_time}\n"
         )
         self._state.cached_static_prompt = cached_prefix
         self._state.cached_static_suffix = cached_suffix
@@ -399,7 +399,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     rolling_summary_lines: list[str] = []
     for step_num in sorted(self._state.rolling_summaries.keys())[-6:]:
         rolling_summary_lines.append(
-            f"- Step {step_num}: {self._state.rolling_summaries[step_num]}"
+            f"- step {step_num}: {self._state.rolling_summaries[step_num]}"
         )
     rolling_summaries_text = "\n".join(rolling_summary_lines) if rolling_summary_lines else text["none"]
 
@@ -427,8 +427,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         self._state.selected_action_model or self.config.fast_model,
         self.config.reasoning_effort,
     )
-    environment_header = "System environment:\n"
-    prefix = f"{environment_header}- Identity: {identity}\n{cached_prefix[len(environment_header):]}"
+    environment_header = "system environment:\n"
+    prefix = f"{environment_header}- identity: {identity}\n{cached_prefix[len(environment_header):]}"
     # Next to the clock, outside the cache: the person can flip auto mode between turns.
     return prefix + dynamic + cached_suffix + f"{auto_approval_fact(self.auto_approval)}\n"
 
@@ -441,18 +441,18 @@ def _extensions_block(self, language: str) -> str:
     catalog = self.skills.prompt_section(language)
     if catalog:
         parts.append(
-            "Installed skills: (attach one with skills {\"op\": \"attach\", \"skill\": \"<id>\"} only when the "
+            "installed skills: (attach one with skills {\"op\": \"attach\", \"skill\": \"<id>\"} only when the "
             "task needs what it adds and the built-in tools do not suffice)\n" + catalog
         )
     if self.skills.attached and not self._state.native_tools:
-        parts.append("Attached skills:\n" + self.skills.attached_instructions())
+        parts.append("attached skills:\n" + self.skills.attached_instructions())
     memory = memory_prompt_section(self, " ".join([self._state.user_goal, *self._state.task_updates]))
     if memory:
-        parts.append("Workspace memory:\n" + memory)
+        parts.append("workspace memory:\n" + memory)
     helpers = getattr(self, "helpers", None)
     helper_note = helpers.prompt_section() if helpers is not None else ""
     if helper_note:
-        parts.append("Helpers:\n" + helper_note)
+        parts.append("helpers:\n" + helper_note)
     return "".join(f"{part}\n\n" for part in parts)
 
 

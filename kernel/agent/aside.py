@@ -142,15 +142,15 @@ class Aside:
         steps = "\n".join(recent_steps(agent)) or "(no steps yet)"
         spoken = "\n".join(f"- {line}" for line in self._said) or "(nothing yet)"
         return (
-            f"Language of the request: {state.response_language or 'en'}\n\n"
-            f"The person's request:\n{_material_text(request)}\n\n"
+            f"language of the request: {state.response_language or 'en'}\n\n"
+            f"the person's request:\n{_material_text(request)}\n\n"
             '<UNTRUSTED_TOOL_OUTPUT source="aside_material">\n'
             f"{_material_text(instructions) or '(the project has no instructions)'}\n\n"
-            f"Steps of this turn so far:\n{_material_text(steps)}\n\n"
-            f"Earlier turns of this session:\n{_material_text(earlier_turns(agent)) or '(none)'}\n\n"
-            f"Calls since you last spoke:\n{_material_text(self._rendered_calls())}\n"
+            f"steps of this turn so far:\n{_material_text(steps)}\n\n"
+            f"earlier turns of this session:\n{_material_text(earlier_turns(agent)) or '(none)'}\n\n"
+            f"calls since you last spoke:\n{_material_text(self._rendered_calls())}\n"
             "</UNTRUSTED_TOOL_OUTPUT>\n\n"
-            f"What you already said:\n{spoken}"
+            f"what you already said:\n{spoken}"
         )
 
     def _rendered_calls(self) -> str:

@@ -267,7 +267,7 @@ def test_runtime_prompt_names_the_host(agent_factory, monkeypatch):
 
     prompt = agent._build_runtime_prompt("goal", 1)
 
-    assert "- Host: VS Code; Kvist runs inside: python3 (4121)" in prompt
+    assert "- host: VS Code; Kvist runs inside: python3 (4121)" in prompt
 
 
 def test_environment_facts_fill_the_host_line(agent_factory, monkeypatch):

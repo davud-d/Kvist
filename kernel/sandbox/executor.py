@@ -2264,13 +2264,13 @@ class SafeExecutor:
         parts: list[str] = []
         if changed:
             shown = changed[:_GIT_CONTEXT_FILES]
-            parts.append("Changed files:")
+            parts.append("changed files:")
             parts.extend(f"  {_cut_line(line)}" for line in shown)
             if len(changed) > len(shown):
                 parts.append(f"  … and {len(changed) - len(shown)} more")
         commits = self._recent_commit_subjects()
         if commits:
-            parts.append("Recent commits:")
+            parts.append("recent commits:")
             parts.extend(f"  {_cut_line(line)}" for line in commits)
         return self._sanitize_internal_paths_in_text("\n".join(parts))
 

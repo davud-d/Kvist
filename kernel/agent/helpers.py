@@ -322,7 +322,7 @@ class HelperManager:
                  "at": time.time()}
         helper.messages.append(entry)
         if helper.state == PAUSED:
-            self._resume(helper, f"Message from the main agent: {text}")
+            self._resume(helper, f"message from the main agent: {text}")
         else:
             helper.inbox.append(entry)
         return {"agent_id": agent_id, "message_id": entry["id"], "state": entry["state"]}
@@ -367,7 +367,7 @@ class HelperManager:
         while helper.inbox:
             entry = helper.inbox.popleft()
             entry["state"] = "received"
-            texts.append(f"Message from the main agent: {entry['text']}")
+            texts.append(f"message from the main agent: {entry['text']}")
         self._mark_applied(helper)
         return texts
 
@@ -525,7 +525,7 @@ def _main_cannot_write(main: Any) -> bool:
 def _helper_goal(task: str, context: str, attachments: list[str], *, read_only: bool) -> str:
     parts = [task.strip()]
     if context.strip():
-        parts.append(f"Context from the main agent:\n{context.strip()}")
+        parts.append(f"context from the main agent:\n{context.strip()}")
     if attachments:
         parts.append("Attachments mentioned by the main agent (ids only; you cannot open them): "
                      + ", ".join(attachments))

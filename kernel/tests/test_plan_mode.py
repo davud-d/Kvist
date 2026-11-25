@@ -246,8 +246,8 @@ def test_the_runtime_prompt_states_the_phase(tmp_path):
     agent._state.approved_plan = _PLAN
     approved = agent._build_runtime_prompt("add retries", 2)
 
-    assert "Plan mode:" in planning and "Approved plan:" not in planning
-    assert f"Approved plan:\n{_PLAN}" in approved and "Plan mode:" not in approved
+    assert "plan mode:" in planning and "approved plan:" not in planning
+    assert f"approved plan:\n{_PLAN}" in approved and "plan mode:" not in approved
 
 
 def test_a_declined_plan_is_a_fact_in_the_next_turns_history():
@@ -309,9 +309,9 @@ def test_a_run_writes_nothing_until_the_plan_is_accepted(tmp_path, monkeypatch):
 
     assert (tmp_path / "hello.py").read_text() == "print('hello')\n"
     assert ui.plans == [_PLAN]
-    assert "Plan mode" in prompts[1]
+    assert "plan mode" in prompts[1]
     assert "files stay read-only" in prompts[2].lower() or "read-only" in prompts[2].lower()
-    assert f"Approved plan:\n{_PLAN}" in prompts[3]
+    assert f"approved plan:\n{_PLAN}" in prompts[3]
     assert result == "Created hello.py."
     assert agent._session_history[-1]["plan_outcome"] == "approved"
 
@@ -423,7 +423,7 @@ def test_json_plan_tools_update_then_cancel_and_release_the_task(tmp_path, monke
         responses = [json.dumps(value) for value in objects]
     agent, result, prompts = _run(tmp_path, monkeypatch, PlanUI(), responses, goal="Cancel this task")
 
-    assert "Approved plan:\nNew implementation approach" in prompts[1]
+    assert "approved plan:\nNew implementation approach" in prompts[1]
     assert result == "Task cancelled. The person asked to cancel"
     assert agent._state.task_cancelled
     assert agent._peek_checkpoint() is None

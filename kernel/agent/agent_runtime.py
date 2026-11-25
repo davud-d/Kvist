@@ -683,7 +683,7 @@ def _collect_helper_note(self) -> None:
         return
     text = self.helpers.take_notices()
     if text:
-        self._state.job_note = f"{self._state.job_note}\nHelpers:\n{text}".strip()
+        self._state.job_note = f"{self._state.job_note}\nhelpers:\n{text}".strip()
 
 
 def _collect_image_note(self) -> None:

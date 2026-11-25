@@ -66,7 +66,7 @@ def _build_prompt(agent_factory, language: str) -> str:
 
 def test_runtime_prompt_tells_the_model_to_follow_the_request_language(agent_factory):
     prompt = _build_prompt(agent_factory, "ru")
-    assert "USER-FACING LANGUAGE:" in prompt
+    assert "user-facing language:" in prompt
     assert "must be in the language of the person's request" in prompt
 
 

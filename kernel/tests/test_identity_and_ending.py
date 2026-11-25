@@ -39,7 +39,7 @@ def test_the_action_prompt_opens_its_environment_with_the_same_fact(agent_factor
     prompt = agent._build_runtime_prompt("goal", 1)
 
     fact = _IDENTITY.format(provider="anymodel", model="ds/fast", effort=_EFFORT)
-    assert prompt.startswith(f"System environment:\n- Identity: {fact}\n- OS:")
+    assert prompt.startswith(f"system environment:\n- identity: {fact}\n- os:")
 
 
 def test_the_action_prompt_follows_the_model_after_an_escalation(agent_factory):

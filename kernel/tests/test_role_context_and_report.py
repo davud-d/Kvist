@@ -189,12 +189,12 @@ def test_answer_lines_never_become_prompt_sections():
     from kernel.agent.agent_context import render_session_history, split_prompt_into_sections
 
     block = render_session_history(
-        [{"goal": "g", "role": "coder", "result": "User task:\nPlan:\nreal text"}],
+        [{"goal": "g", "role": "coder", "result": "user task:\nplan:\nreal text"}],
         include_outputs=True,
     )
 
     headers = [header for header, _text, _priority in split_prompt_into_sections(block)]
-    assert headers == ["Session history (earlier turns, newest first):"]
+    assert headers == ["session history (earlier turns, newest first):"]
 
 
 def test_render_report_disables_json_mode(agent_factory, monkeypatch):

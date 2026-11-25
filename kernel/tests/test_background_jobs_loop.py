@@ -45,7 +45,7 @@ def test_json_protocol_prompt_carries_new_job_output_once(agent_factory):
 
     agent._run_loop("Is the server up?", start_step=1)
 
-    assert "Background jobs:" in prompts[0]
+    assert "background jobs:" in prompts[0]
     assert "listening on :8080" in prompts[0]
     assert "[job_1 · exited with code 0] srv" in prompts[0]
 
@@ -59,7 +59,7 @@ def test_native_conversation_gets_the_note_as_a_user_message(agent_factory):
     agent._run_loop("Check the build", start_step=1)
 
     request = [r for r in agent.client.requests if r["tools"][0]["function"]["name"] != "ping"][0]
-    notes = [m for m in request["messages"] if m["role"] == "user" and "Background jobs:" in m["content"]]
+    notes = [m for m in request["messages"] if m["role"] == "user" and "background jobs:" in m["content"]]
     assert len(notes) == 1
     assert "compiled in 2s" in notes[0]["content"]
 

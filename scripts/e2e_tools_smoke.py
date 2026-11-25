@@ -158,8 +158,8 @@ class FakeProvider:
     def _scratch_named_in(messages: list[dict]) -> str:
         for item in messages:
             content = item.get("content")
-            if isinstance(content, str) and "- Scratchpad: " in content:
-                return content.split("- Scratchpad: ", 1)[1].split(" (500 MB", 1)[0]
+            if isinstance(content, str) and "- scratchpad: " in content:
+                return content.split("- scratchpad: ", 1)[1].split(" (500 MB", 1)[0]
         return ""
 
     def _filled(self, call: dict) -> dict:

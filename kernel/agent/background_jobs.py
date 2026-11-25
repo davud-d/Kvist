@@ -316,7 +316,7 @@ class BackgroundJobs:
                     ids.append(job.job_id)
         if not parts:
             return "", []
-        return "Background jobs:\n" + "\n".join(parts), ids
+        return "background jobs:\n" + "\n".join(parts), ids
 
 
 def describe(job: BackgroundJob) -> str:
