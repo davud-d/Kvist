@@ -1,19 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Kvist mark (branding/icon.svg): a prompt and a cursor, on the 108dp adaptive-icon canvas (safe zone: the middle 66dp). -->
+<!-- The Kvist mark (branding/icon.svg): a prompt and a cursor, on the 108dp adaptive-icon canvas. A launcher shows only
+     the middle 72dp, so the mark is scaled to take the same share of what is seen as on the iPhone icon (about 54%). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:pathData="M31.6,31.6 L56.1,54 L31.6,76.4"
-        android:strokeColor="#43D3FF"
-        android:strokeWidth="9.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
-    <path
-        android:pathData="M64.8,74.5 L80.8,74.5"
-        android:strokeColor="#43D3FF"
-        android:strokeWidth="8.9"
-        android:strokeLineCap="round" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.665"
+        android:scaleY="0.665">
+        <path
+            android:pathData="M31.6,31.6 L56.1,54 L31.6,76.4"
+            android:strokeColor="#43D3FF"
+            android:strokeWidth="9.7"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M64.8,74.5 L80.8,74.5"
+            android:strokeColor="#43D3FF"
+            android:strokeWidth="8.9"
+            android:strokeLineCap="round" />
+    </group>
 </vector>
