@@ -376,6 +376,16 @@ class AdminAction(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class SearchUse(Base):
+    """One web search made with the cloud's shared key; the rows inside the windows are the account's quota."""
+
+    __tablename__ = "search_uses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
 @event.listens_for(LedgerEntry, "before_update")
 def _refuse_ledger_update(_mapper, _connection, _target) -> None:
     raise LedgerAppendOnlyError("ledger_entries is append-only: write a refund row instead")

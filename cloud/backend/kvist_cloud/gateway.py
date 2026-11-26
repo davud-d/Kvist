@@ -15,7 +15,7 @@ from fastapi import APIRouter, FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import chatgpt, commands, exports, ledger, limits, plans, projects, screens, tasks, updates
+from . import chatgpt, commands, exports, ledger, limits, plans, projects, screens, search, tasks, updates
 from .chatgpt import ChatGPTError
 from .db import lock_account, session_scope, utcnow
 from .keys import has_model_access, kvist_environment
@@ -118,7 +118,7 @@ def start_message(app: FastAPI, db: Session, task: Task, chatgpt_access: dict | 
         "repo_url": task.repo_url,
         "github_token": app.state.vault.decrypt(user.github_token_enc) if user.github_token_enc else "",
         "resume": task.resume_requested,
-        "env": kvist_environment(user, key, headers),
+        "env": {**kvist_environment(user, key, headers), **search.task_environment(settings, task.machine_id)},
         **({"chatgpt": chatgpt_access} if chatgpt_access is not None else {}),
         "limits": {
             "command_seconds": plan.command_minutes * 60,

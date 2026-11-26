@@ -685,6 +685,9 @@ class WebSearchSettings:
     exa_api_key: str = ""
     gemini_api_key: str = ""
     searxng_base_url: str = ""
+    # Set by Kvist Cloud on its machines: the cloud's shared search, with a per-account quota (cloud search.py).
+    cloud_search_url: str = ""
+    cloud_search_token: str = ""
 
 
 def get_web_search_settings(config_path: Path | None = None) -> WebSearchSettings:
@@ -700,6 +703,8 @@ def get_web_search_settings(config_path: Path | None = None) -> WebSearchSetting
         exa_api_key=_resolve_secret(payload, EXA_API_KEY_KEY) or "",
         gemini_api_key=_resolve_secret(payload, GEMINI_SEARCH_API_KEY_KEY) or "",
         searxng_base_url=(_resolve_secret(payload, SEARXNG_BASE_URL_KEY) or "").rstrip("/"),
+        cloud_search_url=os.getenv("KVIST_CLOUD_SEARCH_URL", "").strip(),
+        cloud_search_token=os.getenv("KVIST_CLOUD_SEARCH_API_KEY", "").strip(),
     )
 
 

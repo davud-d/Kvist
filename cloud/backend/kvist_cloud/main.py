@@ -32,6 +32,7 @@ from . import (
     projects,
     review,
     screens,
+    search,
     tasks,
     updates,
     wallet,
@@ -156,6 +157,7 @@ def create_app(
     app.include_router(admin.router)
     app.include_router(notifications.router)
     app.include_router(exports.router)
+    app.include_router(search.router)
     web.install(app)
     app.include_router(web.router)
     return app

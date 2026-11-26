@@ -147,6 +147,7 @@ FIELDS = [
     ("POST", "/api/freedompay/checkout", {"plan": "start"}, "plan"),
     ("POST", "/api/chatgpt/start", {"next": "/onboarding"}, "next"),
     ("POST", "/api/chatgpt/finish", {"callback": "http://127.0.0.1:38457/auth/callback?code=a&state=b"}, "callback"),
+    *[("POST", "/gateway/search", {"query": "kvist"}, k) for k in ("query", "top_k", "freshness")],
 ]
 
 

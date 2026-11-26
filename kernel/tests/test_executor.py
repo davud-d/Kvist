@@ -1275,6 +1275,56 @@ def test_exa_search_sends_the_key_and_joins_highlights(tmp_path, monkeypatch):
     assert results == [{"title": "T", "url": "https://example.org/", "snippet": "a b"}]
 
 
+def _cloud_search_env(monkeypatch):
+    monkeypatch.setenv("KVIST_CLOUD_SEARCH_URL", "https://cloud.example/gateway/search")
+    monkeypatch.setenv("KVIST_CLOUD_SEARCH_API_KEY", "7.signature")
+    for name in ("EXA_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_cloud_search_is_used_only_without_a_key_of_ones_own(tmp_path, monkeypatch):
+    _cloud_search_env(monkeypatch)
+    executor = _executor_with_search_keys(tmp_path, monkeypatch)
+    asked = []
+
+    def fake_search(provider, query, top_k, freshness):
+        asked.append(provider)
+        return [{"title": "T", "url": "https://example.org/", "snippet": ""}]
+
+    monkeypatch.setattr(executor, "_search_with_provider", fake_search)
+    assert executor._web_search("anything").data["provider"] == "kvist"
+
+    own = _executor_with_search_keys(tmp_path, monkeypatch, exa_api_key="exa-key")
+    monkeypatch.setattr(own, "_search_with_provider", fake_search)
+    assert own._web_search("anything").data["provider"] == "exa"
+    assert asked == ["kvist", "exa"]
+
+
+def test_cloud_search_sends_the_token_and_explains_a_used_up_quota(tmp_path, monkeypatch):
+    _cloud_search_env(monkeypatch)
+    executor = _executor_with_search_keys(tmp_path, monkeypatch)
+    sent = {}
+
+    def fake_request(url, method, headers, timeout, body=None):
+        sent.update(url=url, headers=headers, body=json.loads(body))
+        return {"results": [{"title": "T", "url": "https://example.org/", "snippet": "s"}], "remaining": {}}
+
+    monkeypatch.setattr(executor, "_http_json_request", fake_request)
+    results = executor._search_kvist_cloud("query", top_k=3, freshness="week")
+
+    assert sent["url"] == "https://cloud.example/gateway/search"
+    assert sent["headers"]["Authorization"] == "Bearer 7.signature"
+    assert sent["body"] == {"query": "query", "top_k": 3, "freshness": "week"}
+    assert results == [{"title": "T", "url": "https://example.org/", "snippet": "s"}]
+
+    def refused(url, method, headers, timeout, body=None):
+        raise ExecutorError(f"HTTP 429 when requesting {url}")
+
+    monkeypatch.setattr(executor, "_http_json_request", refused)
+    with pytest.raises(ExecutorError, match="/web-search-provider"):
+        executor._search_kvist_cloud("query", top_k=3, freshness="any")
+
+
 def test_gemini_search_maps_grounding_chunks_to_results(tmp_path, monkeypatch):
     executor = _executor_with_search_keys(tmp_path, monkeypatch, gemini_search_api_key="g-key")
     sent = {}

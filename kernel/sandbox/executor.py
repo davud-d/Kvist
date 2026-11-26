@@ -2759,7 +2759,8 @@ class SafeExecutor:
         )
 
     def _provider_order(self) -> list[str]:
-        chain = ["searxng", "tavily", "brave", "exa", "gemini"]
+        # The cloud's shared search comes last: a key of the person's own never spends its quota.
+        chain = ["searxng", "tavily", "brave", "exa", "gemini", "kvist"]
         selected = self._web_settings.provider
         if selected in chain:
             return [selected] + [item for item in chain if item != selected]
@@ -2777,6 +2778,8 @@ class SafeExecutor:
             return bool(self._web_settings.exa_api_key)
         if provider == "gemini":
             return bool(self._web_settings.gemini_api_key)
+        if provider == "kvist":
+            return bool(self._web_settings.cloud_search_url and self._web_settings.cloud_search_token)
         return False
 
     def _search_with_provider(
@@ -2796,7 +2799,36 @@ class SafeExecutor:
             return self._search_exa(query=query, top_k=top_k, freshness=freshness)
         if provider == "gemini":
             return self._search_gemini(query=query, top_k=top_k)
+        if provider == "kvist":
+            return self._search_kvist_cloud(query=query, top_k=top_k, freshness=freshness)
         raise ExecutorError(f"Unknown search provider: {provider}")
+
+    def _search_kvist_cloud(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
+        try:
+            response = self._http_json_request(
+                url=self._web_settings.cloud_search_url,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {self._web_settings.cloud_search_token}",
+                },
+                timeout=self.web_timeout,
+                body=json.dumps(
+                    {"query": query, "top_k": top_k, "freshness": freshness}, ensure_ascii=False
+                ).encode("utf-8"),
+            )
+        except ExecutorError as error:
+            if not str(error).startswith("HTTP 429"):
+                raise
+            raise ExecutorError(
+                "the shared Kvist Cloud search quota is used up (25 searches a day, 190 a week per account). "
+                "A key of the user's own (Exa, Tavily, Brave, ...) set with /web-search-provider has no such limit."
+            ) from error
+        raw_results = response.get("results")
+        if not isinstance(raw_results, list):
+            raise ExecutorError("Kvist Cloud search returned an invalid result format")
+        return [item for item in raw_results if isinstance(item, dict)]
 
     def _search_searxng(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
         if not self._web_settings.searxng_base_url:
