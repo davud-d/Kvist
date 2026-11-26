@@ -67,7 +67,7 @@ frontend/              ванильный JS + esbuild; build.mjs проверя
 workspace/             рабочее окно (копия Kvist Pixel) на облаке: отдаётся по /workspace/ (старые ссылки /pixel/ ведут туда), см. workspace/README.ru.md
 mobile/                страница для телефона по /m (и внутри приложений Android и iOS в ../frontends/cloud-android, cloud-ios): см. mobile/README.ru.md
 scripts/dev.sh         локальный запуск одной командой   scripts/fake_model.py  фейковая модель
-scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   выкладка, см. docs/DEPLOY.ru.md
+scripts/deploy.sh, activate_release.sh, activate_frontend.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   выкладка, см. docs/DEPLOY.ru.md
 scripts/backup*.sh, restore.sh, setup_backup_host.sh   бэкапы, см. docs/BACKUP.ru.md
 deploy/systemd, deploy/nginx   сервис, прокси и таймеры бэкапов
 ```

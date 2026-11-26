@@ -66,7 +66,7 @@ frontend/              vanilla JS + esbuild; build.mjs checks locales, contrast 
 workspace/             the workspace window (a copy of Kvist Pixel) on the cloud: served at /workspace/ (old /pixel/ links redirect there), see workspace/README.md
 mobile/                the phone page, served at /m (and inside the Android and iOS apps in ../frontends/cloud-android, cloud-ios): see mobile/README.md
 scripts/dev.sh         the one-command local run    scripts/fake_model.py  the fake model
-scripts/deploy.sh, activate_release.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   shipping, see docs/DEPLOY.md
+scripts/deploy.sh, activate_release.sh, activate_frontend.sh, smoke_prod.sh, gen-secrets.sh, rotate_master_key.sh   shipping, see docs/DEPLOY.md
 scripts/backup*.sh, restore.sh, setup_backup_host.sh   backups, see docs/BACKUP.md
 deploy/systemd, deploy/nginx   the service, the proxy and the backup timers
 ```

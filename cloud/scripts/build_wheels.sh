@@ -4,22 +4,28 @@
 # made against this computer's Python would not load there.
 #
 #   scripts/build_wheels.sh <out-dir>
+#   scripts/build_wheels.sh --sources    prints the paths the wheels are built from, one per line (deploy.sh asks)
 #
 # Needs podman or docker. The result is cached by a hash of the sources, so an unchanged core costs nothing.
 set -euo pipefail
 
 CLOUD="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(cd "$CLOUD/.." && pwd)"
+
+# What the two packages are built from. Not the whole repository: it holds gigabytes of frontends and build output.
+SOURCES=(pyproject.toml README.md LICENSE kernel frontends/gui/electron/renderer frontends/tui/classic
+         frontends/tui/ink/dist-ui frontends/zed frontends/web-local cloud/runner)
+if [[ "${1:-}" == --sources ]]; then
+    printf '%s\n' "${SOURCES[@]}"
+    exit 0
+fi
+
 OUT="${1:-}"
 [[ -n "$OUT" ]] || { echo "usage: build_wheels.sh <out-dir>" >&2; exit 2; }
 ENGINE="$(command -v podman || command -v docker || true)"
 [[ -n "$ENGINE" ]] || { echo "error: podman or docker is needed to build the guest's wheels" >&2; exit 1; }
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
-
-# What the two packages are built from. Not the whole repository: it holds gigabytes of frontends and build output.
-SOURCES=(pyproject.toml README.md LICENSE kernel frontends/gui/electron/renderer frontends/tui/classic
-         frontends/tui/ink/dist-ui frontends/zed frontends/web-local cloud/runner)
 TAR_ARGS=(--sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner
           --exclude=__pycache__ --exclude=node_modules --exclude=.pytest_cache --exclude=.ruff_cache
           --exclude=kernel/session-rs --exclude=kernel/tests --exclude='*.egg-info' --exclude=.venv)

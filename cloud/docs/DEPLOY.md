@@ -68,6 +68,13 @@ On your computer:
 scripts/deploy.sh user@server
 ```
 
+**When only the frontends changed** since the revision the server runs (everything in `cloud/frontend`, `cloud/mobile`,
+`cloud/workspace`, or outside what the server and the guests run, such as the phone apps' native code), it uploads
+just the built frontend into the live release and runs `activate_frontend.sh`: the old frontend is swapped for the
+new one, the service restarts (the phone page is read at start), and if `/healthz` does not answer the old frontend
+goes back. No venv, no backup, no migration, no guest image: seconds. Any other change, or `deploy.sh --full`, makes
+a full release:
+
 It builds the frontend, copies the tree into a new release (nothing is pushed to any git remote), and runs
 `activate_release.sh` on the server, which, in this order:
 
