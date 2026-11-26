@@ -43,7 +43,7 @@ class _Provider:
 
 
 def _final_native(message: str = "Done."):
-    return _response("", [_call("c1", "final_answer", message=message, outcome="incomplete")])
+    return _response(message, [])
 
 
 def _text_final(message: str = "Done in text.") -> str:

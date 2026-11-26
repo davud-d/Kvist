@@ -4,8 +4,8 @@ from __future__ import annotations
 """Runtime policy for the user-facing response language.
 
 The action protocol (JSON keys, action types, tool schemas) is always English.
-This module decides only the language of user-facing text: final_answer,
-report_to_user output, plain chat replies, and user-visible status/error
+This module decides only the language of user-facing text: the final answer,
+plain chat replies, and user-visible status/error
 messages. The decision is made by the runtime layer before any model call —
 no LLM involved, plain character statistics.
 """

@@ -108,9 +108,8 @@ def test_tools_follow_the_role_prompt_allowed_actions():
     reader = {tool["function"]["name"] for tool in tools_for_role(agent_model._load_role_prompt("reader"))}
 
     assert {"write_file", "replace_in_file", "run_shell", "refuse"} <= coder
-    # Plain text still ends the turn; final_answer carries explicit outcomes.
-    assert "final_answer" in coder
-    assert "report_to_user" not in coder
+    # Plain text ends the turn; there is no finishing tool.
+    assert not coder & {"final_answer", "report_to_user"}
     assert not reader & {"write_file", "append_file", "replace_in_file"}
     assert "read_file" in reader
 
@@ -314,7 +313,7 @@ def test_opening_note_gives_the_russian_example_only_to_a_russian_request():
 def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory):
     turns = [
         _response("Reading a.py", [_call("c1", "read_file", path="a.py")], reasoning="think one"),
-        _response("", [_call("c2", "final_answer", message="Done reading.", outcome="incomplete")]),
+        _response("Done reading.", []),
     ]
     agent = _native_agent(agent_factory, turns)
     (agent.executor.workspace / "a.py").write_text("MARKER = 1\n", encoding="utf-8")
@@ -335,7 +334,7 @@ def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory)
 def test_a_failed_read_does_not_stop_the_next_one(agent_factory):
     turns = [
         _response("", [_call("c1", "read_file", path="missing.py"), _call("c2", "read_file", path="b.py")]),
-        _response("", [_call("c3", "final_answer", message="Stopping.", outcome="incomplete")]),
+        _response("Stopping.", []),
     ]
     agent = _native_agent(agent_factory, turns)
     (agent.executor.workspace / "b.py").write_text("B = 2\n", encoding="utf-8")
@@ -736,37 +735,6 @@ def test_the_last_words_before_a_call_are_shown_when_the_call_begins_not_when_th
     agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
 
     assert seen_as_the_call_begins == ["Built and checked. I am removing the temporary scripts."]
-
-
-def test_a_final_answer_streams_its_message_and_shows_no_writing_status(agent_factory):
-    agent = agent_factory(max_steps=1)
-    agent._ui.streams_words = True
-    shown: list[str] = []
-    statuses: list[str] = []
-
-    class _Live:
-        def __enter__(self):
-            return shown.append
-
-        def __exit__(self, *exc):
-            return False
-
-    agent._ui.live_markdown = lambda: _Live()
-    agent._ui.update_live = lambda **kwargs: statuses.append(kwargs["user_message"])
-
-    def call(name, arguments):
-        piece = SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name=name, arguments=arguments))
-        return SimpleNamespace(
-            choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[piece]))]
-        )
-
-    stream = [call("final_answer", '{"message": "All do'), call(None, 'ne\\n'), call(None, 'ok"}')]
-
-    turn = agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
-
-    assert shown[-1] == "All done\nok"
-    assert statuses == []
-    assert turn.tool_calls[0].name == "final_answer"
 
 
 def _live_words(agent) -> list[str]:

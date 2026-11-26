@@ -269,132 +269,6 @@ _SERVICE_INSPECTION_GOAL_RE = re.compile(
 )
 
 
-def _build_report_context(
-    self, user_goal: str, summary: str, result: str, issues: str, outcome: str
-) -> str:
-    """Build a structured JSON context block for the chat reporter."""
-    state = self._state
-    context = {
-        "user_goal": user_goal,
-        "outcome": outcome,
-        "role": state.current_agent_role or "coder",
-        "summary": summary,
-        "result": result,
-        "issues": issues,
-        "files_created": [f for f in state.files_changed if f not in state.files_read] or state.files_changed,
-        "files_changed": state.files_changed,
-        "files_read": state.files_read,
-        "commands_run": [e for e in state.recent_events[-20:] if "run_shell" in e or "executed" in e],
-        "approved_plan": state.approved_plan,
-        "errors": state.error_history[-5:] if state.error_history else [],
-    }
-    safe_context = redact_value(context)
-    assert isinstance(safe_context, dict)
-    return json.dumps(safe_context, ensure_ascii=False, indent=2)
-
-
-def _render_report(self, context: str) -> str:
-    """Call the chat model to render a report from agent context. Streams markdown to console."""
-    from kernel.agent.agent_model import (
-        _emit_usage,
-        build_report_system_prompt,
-        safe_extract_completion_content,
-        append_reasoning_delta,
-        safe_extract_reasoning_delta,
-        safe_extract_stream_delta,
-        _create_json_completion,
-    )
-
-    system_prompt = build_report_system_prompt(self)
-    stream_model = self.config.fast_model
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": context},
-    ]
-
-    # The report is free-form markdown prose, so JSON mode must stay off — with
-    # it on, a JSON-mode provider returns the report wrapped in a JSON object and
-    # the raw JSON reaches the console instead of a rendered panel.
-    if not getattr(self.config, "stream", True):
-        response = _create_json_completion(
-            self, stream_model, messages, stream=False, json_mode=False
-        )
-        raw = safe_extract_completion_content(
-            response, self.config.provider, stream_model
-        )
-        self._ui.print_user_markdown(raw)
-        _emit_usage(
-            self,
-            model=stream_model,
-            input_tokens=self._count_tokens(system_prompt) + self._count_tokens(context),
-            output_tokens=self._count_tokens(raw),
-            kind="report",
-            usage_source="estimated",
-        )
-        return raw
-
-    stream = _create_json_completion(
-        self, stream_model, messages, stream=True, json_mode=False
-    )
-    chunks: list[str] = []
-    reasoning_chunks: list[str] = []
-    last_update = __import__("time").monotonic()
-    last_reasoning_update = last_update
-
-    with self._ui.live_markdown() as update_markdown:
-        reasoning_update = getattr(update_markdown, "reasoning", None)
-        for chunk in stream:
-            text = ""
-            delta = safe_extract_stream_delta(chunk)
-            if delta is not None:
-                text = getattr(delta, "content", "") if not isinstance(delta, dict) else delta.get("content", "")
-            elif isinstance(chunk, dict):
-                if "choices" in chunk and chunk["choices"]:
-                    text = chunk["choices"][0].get("delta", {}).get("content", "")
-                else:
-                    text = chunk.get("content", "")
-            elif hasattr(chunk, "content"):
-                text = chunk.content
-            elif isinstance(chunk, str):
-                text = chunk
-
-            reasoning_text = safe_extract_reasoning_delta(delta)
-            if reasoning_text and reasoning_update is not None and not chunks:
-                append_reasoning_delta(reasoning_chunks, reasoning_text)
-                now = __import__("time").monotonic()
-                if now - last_reasoning_update > 0.1:
-                    reasoning_update("".join(reasoning_chunks))
-                    last_reasoning_update = now
-
-            if text:
-                # The first answer token seals thinking: flush buffered
-                # reasoning so a fast stream never drops it.
-                if not chunks and reasoning_update is not None and reasoning_chunks:
-                    reasoning_update("".join(reasoning_chunks))
-                chunks.append(text)
-                now = __import__("time").monotonic()
-                if now - last_update > 0.1:
-                    update_markdown("".join(chunks))
-                    last_update = now
-
-        if reasoning_update is not None and reasoning_chunks and not chunks:
-            reasoning_update("".join(reasoning_chunks))
-        update_markdown("".join(chunks))
-
-    # Real tiktoken usage of the report call; thinking tokens count as output.
-    _emit_usage(
-        self,
-        model=stream_model,
-        input_tokens=self._count_tokens(system_prompt) + self._count_tokens(context),
-        output_tokens=self._count_tokens("".join(chunks))
-        + self._count_tokens("".join(reasoning_chunks)),
-        kind="report",
-        usage_source="estimated",
-    )
-
-    return "".join(chunks)
-
-
 def finalize_run(
     self,
     user_goal: str,
@@ -1096,11 +970,16 @@ def _finish_turn(self, user_goal: str, step: int, text: str) -> _ActionOutcome:
 
 
 def _run_final_answer(self, user_goal: str, step: int, command: AgentCommand) -> _ActionOutcome:
-    """The model owns completion; only authorization and plan mode constrain it."""
+    """The model owns completion; only authorization and plan mode constrain it.
+
+    The model declares no outcome: its text says what was and was not done, and
+    only the runtime marks a run unfinished (a stop, the step budget, a refusal).
+    """
     if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
-    self._state.no_change_declared = _declares_no_change(command)
-    return _finish_with_final_answer(self, step, command)
+    final_message = str(command.action.args["message"])
+    self._register_final_answer(step, final_message)
+    return _ActionOutcome(finished=True, final_message=final_message)
 
 
 def _calls_note(planned: list[_PlannedCall]) -> str:
@@ -1570,8 +1449,6 @@ def _run_one_action(
     if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
 
-    if command.action.type == "report_to_user":
-        return _finish_with_report(self, user_goal, step, command)
     if command.action.type == "verdict":
         return _finish_with_verdict(self, user_goal, step, command)
     if command.action.type in plan_mode.PLAN_ACTIONS:
@@ -1773,47 +1650,6 @@ def _reject_exhausted_web_budget(
         is_error=True,
     )
     return True
-
-
-def _is_incomplete_finish(command: AgentCommand) -> bool:
-    return command.action.args.get("outcome") == "incomplete"
-
-
-def _declares_no_change(command: AgentCommand) -> bool:
-    return command.action.args.get("outcome") == "no_change_needed"
-
-
-def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _ActionOutcome:
-    final_message = str(command.action.args["message"])
-    if _is_incomplete_finish(command):
-        _register_incomplete_finish(self, step, final_message)
-    else:
-        self._register_final_answer(step, final_message)
-    return _ActionOutcome(finished=True, final_message=final_message)
-
-
-def _finish_with_report(
-    self, user_goal: str, step: int, command: AgentCommand
-) -> _ActionOutcome:
-    incomplete = _is_incomplete_finish(command)
-    self._state.no_change_declared = _declares_no_change(command)
-    summary = str(command.action.args.get("summary", ""))
-    tech_result = str(command.action.args.get("result", ""))
-    issues = str(command.action.args.get("issues", ""))
-    outcome = "incomplete" if incomplete else "done"
-    context = _build_report_context(self, user_goal, summary, tech_result, issues, outcome)
-    report_text = _render_report(self, context)
-    final_message = report_text or tech_result or summary
-    if incomplete:
-        _register_incomplete_finish(self, step, final_message)
-    else:
-        self._register_final_answer(step, final_message)
-    return _ActionOutcome(finished=True, final_message=final_message, report_rendered=True)
-
-
-def _register_incomplete_finish(self, step: int, message: str) -> None:
-    self._state.finished_incomplete = True
-    self._register_final_answer(step, message)
 
 
 def _execute_action(
@@ -2889,7 +2725,7 @@ def update_recovery_tracking(self, command: AgentCommand, ok: bool, error_text: 
 
     if not self._state.recovery_pending:
         return
-    if command.action.type in ("final_answer", "report_to_user"):
+    if command.action.type == "final_answer":
         return
     self._state.recovery_signatures.add(self._action_signature(command))
     if len(self._state.recovery_signatures) >= _RECOVERY_ATTEMPTS_REQUIRED:

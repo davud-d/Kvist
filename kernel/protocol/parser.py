@@ -24,7 +24,6 @@ from kernel.agent.feedback import MAX_BODY_CHARS as FEEDBACK_MAX_BODY, MAX_TITLE
 from kernel.agent.scheduler import MAX_WAIT_SECONDS, WEEKDAYS
 
 ALLOWED_ACTIONS = {
-    "final_answer",
     "refuse",
     "read_file",
     "read_multiple_files",
@@ -43,7 +42,6 @@ ALLOWED_ACTIONS = {
     "web_search",
     "fetch_url",
     "delegate_task",
-    "report_to_user",
     "offer_plan",
     "propose_plan",
     "edit_plan",
@@ -87,19 +85,13 @@ MAX_BESTOF_ATTEMPTS = 6
 MAX_BATCH_ACTIONS = 30
 MAX_READ_ACTIONS = 40
 
-# Plain text without calls ends the turn. final_answer is also offered for
-# explicit outcomes; report_to_user remains supported for older prompts.
-FINISHING_ACTIONS = frozenset({"final_answer", "report_to_user", "refuse"})
+# Plain text without calls ends the turn: the runtime makes it a final_answer.
+FINISHING_ACTIONS = frozenset({"final_answer", "refuse"})
 _WRITE_ACTIONS = frozenset({"write_file", "append_file", "replace_in_file"})
 PURPOSE_KEY = "purpose"
 # run_shell's purpose is its label; git_status/git_diff take a stand-in one
 # (native_tools._PURPOSE) that is dropped unseen.
 _PURPOSE_ACTIONS = frozenset({"run_shell", "git_status", "git_diff"})
-# "incomplete" lets the model end a run it cannot or should not finish
-# without having to claim success. "no_change_needed" ends a run whose
-# requested result already holds or needs no edit: the model explains the
-# inspected evidence, without a mandatory shell command or file change.
-FINISH_OUTCOMES = ("done", "incomplete", "no_change_needed")
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
@@ -230,9 +222,8 @@ def plan_step_for_calls(names: list[str], files_changed: bool) -> str:
 def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
     if action_type == "final_answer":
         require_keys(args, {"message"})
-        require_only_allowed_keys(args, {"message", "outcome"})
+        require_only_allowed_keys(args, {"message"})
         require_str(args, "message")
-        _require_outcome(args)
 
     elif action_type == "refuse":
         require_keys(args, {"reason"})
@@ -549,15 +540,6 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_only_allowed_keys(args, {"skill", "tool", "arguments"})
         if not isinstance(args.get("arguments", {}), dict):
             raise CommandValidationError("'arguments' must be an object")
-
-    elif action_type == "report_to_user":
-        require_keys(args, {"summary", "result"})
-        require_only_allowed_keys(args, {"summary", "result", "issues", "outcome"})
-        require_str(args, "summary")
-        require_str(args, "result")
-        if "issues" in args:
-            require_text(args, "issues")
-        _require_outcome(args)
 
 
 def _require_op(args: dict[str, Any], ops: tuple[str, ...]) -> str:
@@ -879,13 +861,6 @@ def _validate_end_session(args: dict[str, Any]) -> None:
         args.pop("reason", None)
 
 
-def _require_outcome(args: dict[str, Any]) -> None:
-    if "outcome" in args and args["outcome"] not in FINISH_OUTCOMES:
-        raise CommandValidationError(
-            f"'outcome' must be one of: {', '.join(FINISH_OUTCOMES)}"
-        )
-
-
 def _require_line_range(args: dict[str, Any]) -> None:
     for key in ("start_line", "end_line"):
         value = args.get(key)
@@ -1186,8 +1161,15 @@ def _response_from_object(value: Any) -> ModelResponse | None:
         if not isinstance(items, list):
             items = [items]
         words = value.get("user_message")
+        text = words.strip() if isinstance(words, str) else ""
+        # In that contract final_answer was how a turn ended; today a response's text ends it.
+        answer = next((item for item in items if isinstance(item, dict) and item.get("type") == "final_answer"), None)
+        if answer is not None:
+            items = [item for item in items if item is not answer]
+            message = (answer.get("args") or {}).get("message")
+            text = message.strip() if isinstance(message, str) and not items else text
         calls = [_call_from_object(item, number) for number, item in enumerate(items, start=1)]
-        return ModelResponse(text=words.strip() if isinstance(words, str) else "", calls=calls)
+        return ModelResponse(text=text, calls=calls)
     if isinstance(value.get("name"), str) and any(key in value for key in _ARGUMENT_KEYS):
         return ModelResponse(text="", calls=[_call_from_object(value, 1)])
     return None

@@ -37,13 +37,11 @@ batching: up to 40 read-only calls per response, and only calls whose inputs you
 
 == 3. allowed actions ==
 
-final_answer, read_file, read_multiple_files, list_dir, list_tree, find_files, search_code, git_status, git_diff, executor, verdict.
+read_file, read_multiple_files, list_dir, list_tree, find_files, search_code, git_status, git_diff, executor, verdict.
 
 this is the reviewer's subset of the runtime's tools. no write tools and no shell exist for you; checks run through executor check, in the executor's own folder. no invention, no renaming.
 
 == 4. args schemas ==
-
-final_answer: {"message":"<str>","outcome":"done|incomplete|no_change_needed"} — not the way to end the review: end it with verdict (winner null when nobody solves the task); ordinary text also ends the turn, without a verdict.
 
 read_file: {"path":"<rel>","start_line":1,"end_line":200} — start_line/end_line optional (1-based, inclusive); a range answer carries the file's total_lines
 read_multiple_files: {"paths":["<rel>",...]}

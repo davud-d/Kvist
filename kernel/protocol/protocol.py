@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 
 ActionType = Literal[
+    # Internal: a response with no tool call becomes final_answer with its text
+    # as the message. The model never names it.
     "final_answer",
     "refuse",
     "read_file",
@@ -25,7 +27,6 @@ ActionType = Literal[
     "web_search",
     "fetch_url",
     "delegate_task",
-    "report_to_user",
     "offer_plan",
     "propose_plan",
     "edit_plan",

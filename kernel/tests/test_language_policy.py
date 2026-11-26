@@ -96,7 +96,7 @@ def test_role_prompts_have_no_conflicting_english_only_directive():
     from pathlib import Path
 
     prompts_dir = Path(__file__).resolve().parent.parent / "prompts" / "system"
-    for name in ("coder_prompt.txt", "devops_prompt.txt", "chat_prompt.txt", "report_prompt.txt"):
+    for name in ("coder_prompt.txt", "devops_prompt.txt", "chat_prompt.txt"):
         content = (prompts_dir / name).read_text(encoding="utf-8")
         assert "only in English" not in content, name
 
@@ -120,16 +120,6 @@ def test_chat_prompt_does_not_script_the_refusal():
     ).read_text(encoding="utf-8")
     assert "I apologize" not in content
     assert "Respond: \"" not in content
-
-
-def test_report_context_leaves_the_language_to_the_reporter(agent_factory):
-    from kernel.agent.agent_runtime import _build_report_context
-
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    context = json.loads(_build_report_context(agent, "создай hello.txt", "s", "r", "", "incomplete"))
-    assert "response_language" not in context
-    assert context["outcome"] == "incomplete"
 
 
 @pytest.mark.parametrize("message", ["npm test: 18 passed.", "README.md", "30"])

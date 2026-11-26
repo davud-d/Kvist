@@ -24,14 +24,6 @@ from kernel.sandbox.redaction import redact_value
 
 _STRING: dict[str, Any] = {"type": "string"}
 _STRINGS: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
-_OUTCOME: dict[str, Any] = {
-    "type": "string",
-    "enum": ["done", "incomplete", "no_change_needed"],
-    "description": (
-        "incomplete: the work was not done. no_change_needed: you ran the reported "
-        "problem and it does not occur; show that run's output in the message."
-    ),
-}
 # The schema is what a model reads while it fills the arguments, so the path
 # rule belongs here as well as in the prompt: a task naming the repository by
 # its absolute path otherwise walks the model into refusals.
@@ -81,16 +73,6 @@ class ToolSpec:
 
 # Bounds mirror the parser's validate_action_args, which still checks every call.
 ACTION_TOOLS: dict[str, ToolSpec] = {
-    "final_answer": ToolSpec(
-        "Finish the task with a direct answer to the person.",
-        {"message": _STRING, "outcome": _OUTCOME},
-        ("message",),
-    ),
-    "report_to_user": ToolSpec(
-        "Finish the task with facts a reporter turns into the person's report.",
-        {"summary": _STRING, "result": _STRING, "issues": _STRING, "outcome": _OUTCOME},
-        ("summary", "result"),
-    ),
     "refuse": ToolSpec("Refuse an illegal or malicious task.", {"reason": _STRING}, ("reason",)),
     "read_file": ToolSpec(
         "Read one workspace file, whole or a range of its lines. The answer carries the file's total_lines.",
@@ -462,8 +444,9 @@ ACTION_TOOLS.update({
 
 READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.readonly)
 # Action types the model never names: a call of an attached skill's tool
-# (``<skill>__<tool>``, defined by the skill's manifest) becomes skill_call.
-INTERNAL_ACTIONS = frozenset({"skill_call"})
+# (``<skill>__<tool>``, defined by the skill's manifest) becomes skill_call,
+# and a response with no tool call becomes final_answer.
+INTERNAL_ACTIONS = frozenset({"skill_call", "final_answer"})
 
 _ALLOWED_ACTIONS_RE = re.compile(r"^== \d+\. allowed actions ==\s*\n\s*([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)

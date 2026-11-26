@@ -133,8 +133,8 @@ _RUNTIME_TEXT = {
             "You choose the actions, relevant checks and when to finish. A build, command, analysis or a result "
             "that already holds may need no source edits. Never create or modify files just to demonstrate activity. "
             "Report only what the executed tools and inspected evidence support; say what was not checked. End the reply where its content ends. "
-            "If the work cannot or should not be finished, stop with outcome incomplete and explain why. "
-            "If no change is needed, use outcome no_change_needed and explain the evidence; no token command is required."
+            "If the work cannot or should not be finished, stop and say plainly what was not done and why. "
+            "If no change is needed, say so and give the evidence; no token command is required."
         ),
         "error_instruction": (
             "If normalized_error is present, use it for the next step; do not copy raw_error into public text."

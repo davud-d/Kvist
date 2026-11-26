@@ -13,8 +13,8 @@ Two outcomes are both useful:
 - It fails. You now have a check that will tell you when the fix works.
 - It does not fail. Say so. Find out what differs from the report (version,
   input, environment, order of steps) and run again. If it still does not
-  occur, finish with `outcome: "no_change_needed"` and state what you ran and
-  what you saw. A change made to a problem you could not reproduce is a risk
+  occur, finish by saying no change was needed, with what you ran and what
+  you saw. A change made to a problem you could not reproduce is a risk
   with no benefit.
 
 ## 2. Narrow it

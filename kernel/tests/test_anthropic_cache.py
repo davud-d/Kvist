@@ -230,12 +230,6 @@ def _chat_later_turn(agent, tmp_path):
     agent._run_chat("and one more thing")
 
 
-def _report(agent, tmp_path):
-    from kernel.agent.agent_runtime import _render_report
-
-    _render_report(agent, "what the run did")
-
-
 def _router(agent, tmp_path):
     from kernel.agent.role_router import route_role_decision_with_llm
 
@@ -307,7 +301,6 @@ _PATHS = {
     "text step": (_text_step, 0, (0, 2, 0)),
     "chat, first message": (_chat_turn, 0, (0, 2, 0)),
     "chat, later message": (_chat_later_turn, 1, (0, 2, 1)),
-    "report": (_report, 0, (0, 1, 0)),
     "role router": (_router, 0, (0, 1, 0)),
     "session title": (_title, 0, (0, 1, 0)),
     "narrator": (_narrator, 0, (0, 1, 0)),

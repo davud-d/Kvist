@@ -111,15 +111,6 @@ def test_the_tail_of_the_working_roles_holds_the_voice_mode_section_after_the_st
     assert tail.index("voice mode") > len(SELECTED_STYLE_MARKER)
 
 
-def test_the_report_prompt_keeps_the_style_block_as_before(tmp_path):
-    from kernel.agent.agent_model import build_report_system_prompt
-
-    prompt = build_report_system_prompt(_agent(tmp_path))
-
-    assert "## response style" in prompt
-    assert SELECTED_STYLE_MARKER not in prompt
-
-
 # ── Best-of executors ────────────────────────────────────────────────────────
 
 

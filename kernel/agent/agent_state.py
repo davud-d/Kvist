@@ -188,8 +188,6 @@ class RunState:
     # Exit code of the latest run_shell that actually ran (None until one
     # does). This is an observation, not a prerequisite for finishing.
     last_shell_returncode: int | None = None
-    # The model ended this attempt with outcome "no_change_needed".
-    no_change_declared: bool = False
     # Legacy refusal count, unused by the model-owned completion path.
     finish_refusals: int = 0
     # Blank cells observed in CSV/TSV reads. Legacy flag fields are unused;

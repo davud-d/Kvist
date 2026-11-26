@@ -17,15 +17,12 @@ def _example_calls(prompt_text: str) -> list[str]:
     examples = prompt_text[re.search(r"^== \d+\. examples ==$", prompt_text, re.MULTILINE).end():]
     following = re.search(r"^== \d+\. ", examples, re.MULTILINE)
     return _TOOL_CALL_RE.findall(examples[: following.start()] if following else examples)
-# Only the reporter handoff is legacy. final_answer is optional for explicit
-# outcomes; ordinary text without calls still ends the turn.
-_LEGACY_FINISHES = {"report_to_user"}
 # Added to the prompt at run time, and only by an interactive frontend
 # (end_session.with_tool_in_prompt); the static prompt files never list it.
 _CONDITIONAL = {"end_session", "generate_image"}
 # Offered by the reviewer's role prompt of a best-of run only (judge_prompt.txt), never by the roles above.
 _REVIEW_ACTIONS = {"executor", "verdict"}
-_REVIEWER_ACTIONS = {"final_answer", "read_file", "read_multiple_files", "list_dir", "list_tree", "find_files",
+_REVIEWER_ACTIONS = {"read_file", "read_multiple_files", "list_dir", "list_tree", "find_files",
                      "search_code", "git_status", "git_diff", "executor", "verdict"}
 
 
@@ -53,7 +50,7 @@ def test_prompt_action_list_matches_parser(role):
     """The allowed-actions list in role prompts must mirror parser.ALLOWED_ACTIONS."""
     prompt_text = _load_role_prompt(role)
     prompt_actions = _extract_allowed_actions_block(prompt_text)
-    offered = ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL - _REVIEW_ACTIONS
+    offered = ALLOWED_ACTIONS - _CONDITIONAL - _REVIEW_ACTIONS
     assert prompt_actions == offered, (
         f"{role} prompt action list is out of sync with parser.ALLOWED_ACTIONS. "
         f"Missing in prompt: {sorted(offered - prompt_actions)}. "
@@ -81,7 +78,7 @@ def test_prompt_tool_call_examples_pass_the_parser(role):
 
     for example in examples:
         (command,) = commands_from_response(example)
-        assert command.action.type in ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL
+        assert command.action.type in ALLOWED_ACTIONS - _CONDITIONAL
 
 
 @pytest.mark.parametrize("role", ["coder", "devops", "universal", "judge"])
@@ -135,8 +132,9 @@ def test_both_transports_describe_model_owned_completion(role):
     for prompt in (original, native):
         assert "refused once" not in prompt
         assert "runtime never records a fix task with no edits as done" not in prompt
-        assert "final_answer" in _extract_allowed_actions_block(prompt)
-        assert "no_change_needed" in prompt
+        # A response's text ends the turn; the model declares no outcome.
+        assert "final_answer" not in prompt
+        assert "no_change_needed" not in prompt
 
 
 def test_the_reviewer_prompt_offers_the_reads_and_the_two_review_actions_and_nothing_that_writes():

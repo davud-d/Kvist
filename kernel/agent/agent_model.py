@@ -122,7 +122,6 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "chat": "chat_prompt.txt",
     "universal": "universal_prompt.txt",
     "judge": "judge_prompt.txt",
-    "report": "report_prompt.txt",
     "commit": "commit_prompt.txt",
     "complete": "complete_prompt.txt",
     "complete_replace": "complete_replace_prompt.txt",
@@ -420,12 +419,6 @@ def _style_sections(self, role: str) -> tuple[str, str]:
     return "## response style\n\n" + common, "\n\n".join(part for part in parts if part)
 
 
-def _style_context(self, role: str) -> str:
-    """The shared voice followed by the style, as one block (the reporter's prompt)."""
-    shared, selected = _style_sections(self, role)
-    return f"{shared}\n\n{selected}" if selected else shared
-
-
 def _load_plan_mode_section() -> str:
     """The PLAN MODE guidance shared by every role that changes files."""
     if _PLAN_MODE_KEY not in _PROMPT_CACHE:
@@ -456,8 +449,7 @@ def _load_constitution() -> str:
 
     Cached like a role prompt. The commit prompt, which `_load_role_prompt`
     serves directly, deliberately goes without it: it turns a diff into a
-    commit message and never speaks to the person. The reporter does speak to
-    them and gets it through `build_report_system_prompt`.
+    commit message and never speaks to the person.
     """
     if _CONSTITUTION_KEY in _PROMPT_CACHE:
         return _PROMPT_CACHE[_CONSTITUTION_KEY]
@@ -528,23 +520,6 @@ def build_role_system_prompt(
     if role != "chat" and self.config.voice_mode:
         base = f"{base}\n\n{_load_voice_mode_section()}"
     return base
-
-
-def build_report_system_prompt(self) -> str:
-    """The reporter's system prompt: the constitution, the report prompt, this
-    session's working style, in build_role_system_prompt's order.
-
-    The report is the person's account of the run, so it is written by the same
-    character and in the same voice as the run: a fast-and-dirty prototype label
-    has to survive into it. The workspace instruction file stays out, because
-    the report prompt carries none of the rules that bound it.
-    """
-    from kernel.protocol.slash_commands import slash_commands_context
-    base = f"{_load_constitution()}\n\n{_load_role_prompt('report')}\n\n{slash_commands_context()}"
-    if self.config.voice_mode:
-        base = f"{base}\n\n{_load_voice_mode_section()}"
-    style = _style_context(self, "report")
-    return f"{base}\n\n{style}" if style else base
 
 
 def resolve_action_model(self) -> str:
@@ -1075,9 +1050,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             if calls and not words_flushed:
                 words_flushed = True
                 spoken.flush("".join(content))
-            if calls and _final_answer_words(calls):
-                spoken.feed_words(_spoken_with_answer("".join(content), calls))
-            elif calls and _writes_a_call(calls) and time.monotonic() - last_call_push > 0.5:
+            if calls and _writes_a_call(calls) and time.monotonic() - last_call_push > 0.5:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
             _announce_finished_calls(self, calls, announced)
@@ -1096,7 +1069,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             )
     finally:
         ends_session = _calls_end_session(entry["name"] for entry in calls.values())
-        spoken.close("" if ends_session else _spoken_with_answer("".join(content), calls))
+        spoken.close("" if ends_session else speakable_prefix("".join(content)))
         close = getattr(stream, "close", None)
         if close is not None:
             try:
@@ -1160,47 +1133,13 @@ def _seal_thinking(self, reasoning: list[str]) -> None:
 
 _PATH_IN_ARGUMENTS_RE = re.compile(r'"path"\s*:\s*"([^"]*)"')
 _DESCRIPTION_IN_ARGUMENTS_RE = re.compile(r'"description"\s*:\s*"((?:[^"\\]|\\.)*)"')
-_MESSAGE_IN_ARGUMENTS_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)')
-# Calls that carry the person's words, not work: the words stream as an answer
-# and a "Writing ..." status would only describe the same text twice.
-_ANSWER_TOOLS = frozenset({"final_answer", "report_to_user", "refuse"})
+# A call that carries the person's words, not work: a "Writing ..." status
+# would only describe the refusal it is about to show.
+_ANSWER_TOOLS = frozenset({"refuse"})
 
 
 def _writes_a_call(calls: dict[int, dict[str, str]]) -> bool:
     return calls[max(calls)]["name"] not in _ANSWER_TOOLS
-
-
-def _final_answer_words(calls: dict[int, dict[str, str]]) -> str:
-    """The part of a ``final_answer`` message that has arrived so far."""
-    entry = calls[max(calls)]
-    if entry["name"] != "final_answer":
-        return ""
-    found = _MESSAGE_IN_ARGUMENTS_RE.search(entry["arguments"])
-    if found is None:
-        return ""
-    return decode_json_prefix(found.group(1))
-
-
-def _spoken_with_answer(content: str, calls: dict[int, dict[str, str]]) -> str:
-    """Words said before the call, then the answer being written."""
-    opening = speakable_prefix(content)
-    answer = _final_answer_words(calls) if calls else ""
-    if _answer_repeats_opening(opening, answer):
-        return answer
-    return f"{opening}\n\n{answer}" if opening and answer else opening or answer
-
-
-# Shorter than this a shared first line is a coincidence ("Done."), not the same answer written twice.
-_REPEAT_MIN_CHARS = 40
-
-
-def _answer_repeats_opening(opening: str, answer: str) -> bool:
-    """The model wrote its answer as the words before the call and again inside the call.
-
-    The person should read it once: the call's text is the answer the session ends with.
-    """
-    first_line = answer.split("\n", 1)[0].strip()
-    return len(first_line) >= _REPEAT_MIN_CHARS and opening.strip().startswith(first_line)
 
 
 def _note_tool_call_progress(self, entry: dict[str, str]) -> None:

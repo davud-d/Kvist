@@ -114,7 +114,7 @@ def test_through_the_anthropic_adapter_the_probe_has_thinking_off_and_the_tool_f
 def test_a_probe_with_no_answer_on_step_one_is_asked_again_on_step_two_and_history_crosses_over(agent_factory):
     provider = _Provider(
         [TimeoutError("Request timed out."), True],
-        turns=[_response("", [_call("c1", "final_answer", message="Done natively.", outcome="incomplete")])],
+        turns=[_response("Done natively.", [])],
     )
     agent = _agent(agent_factory, provider, [_text_answer(_read("a.py"))])
     (agent.executor.workspace / "a.py").write_text("MARKER_FROM_TEXT_STEP = 1\n", encoding="utf-8")
@@ -153,7 +153,7 @@ def test_a_probe_the_provider_answered_is_not_repeated_within_the_run(agent_fact
         [True],
         turns=[
             _response("", [_call("c1", "read_file", path="a.py")]),
-            _response("", [_call("c2", "final_answer", message="Done.", outcome="incomplete")]),
+            _response("Done.", []),
         ],
     )
     agent = _agent(agent_factory, provider, [])

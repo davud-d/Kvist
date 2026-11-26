@@ -151,29 +151,11 @@ def test_no_change_can_be_reported_from_inspection_without_a_token_command(agent
     agent = agent_factory(max_steps=4)
     (agent.executor.workspace / "app.py").write_text("TIMEOUT = 30\n", encoding="utf-8")
     answer = "TIMEOUT is already 30; no change is needed."
-    _script(agent, [_call("read_file", path="app.py"), json.dumps({"plan_step": "done", "action": {
-        "type": "final_answer", "args": {"message": answer, "outcome": "no_change_needed"},
-    }})])
+    _script(agent, [_call("read_file", path="app.py"), answer])
 
     assert agent._run_loop("Change TIMEOUT to 30 in app.py", 1) == answer
-    assert agent._state.no_change_declared
     assert agent._state.last_shell_returncode is None
     assert agent._state.run_status == "completed"
-
-
-@pytest.mark.parametrize("outcome", ["done", "incomplete", "no_change_needed"])
-def test_reporter_preserves_the_models_declared_outcome(agent_factory, monkeypatch, outcome):
-    from kernel.agent import agent_runtime
-    agent = agent_factory(max_steps=4)
-    contexts = []
-    monkeypatch.setattr(agent_runtime, "_render_report", lambda self, context: contexts.append(json.loads(context)) or "Reported.")
-    _script(agent, [json.dumps({"plan_step": "done", "action": {"type": "report_to_user", "args": {
-        "summary": "Result", "result": "No source edits", "outcome": outcome,
-    }}})])
-
-    assert agent._run_loop("Build the binary", 1) == "Reported."
-    assert contexts[0]["outcome"] == ("incomplete" if outcome == "incomplete" else "done")
-    assert agent._state.run_status == ("blocked" if outcome == "incomplete" else "completed")
 
 
 def test_old_checkpoint_does_not_restore_workflow_restrictions(agent_factory):

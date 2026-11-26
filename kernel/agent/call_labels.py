@@ -33,7 +33,6 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "delegate_task": ("передаёт задачу роли {target}", "hands the task to {target}"),
     "refuse": ("отказывается", "refuses"),
     "final_answer": ("отвечает", "answers"),
-    "report_to_user": ("готовит отчёт", "writes the report"),
     "offer_plan": ("предлагает сначала показать план", "offers to show a plan first"),
     "offer_best_of": ("предлагает запустить best-of", "offers to run best-of"),
     "propose_plan": ("предлагает план", "proposes a plan"),

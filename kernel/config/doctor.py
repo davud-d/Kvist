@@ -56,7 +56,6 @@ _PROMPT_FILES = (
     "reader_prompt.txt",
     "devops_prompt.txt",
     "universal_prompt.txt",
-    "report_prompt.txt",
     "router_prompt.txt",
     "native_tools.txt",
     "plan_mode.txt",

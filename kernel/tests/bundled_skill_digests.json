@@ -2,7 +2,7 @@
   "app_screen": {"version": "0.1.4", "digest": "sha256:1c53e147bd249f287b83e06a3519d8448220ebcdc84a14f0ec0714b044f62b89"},
   "browser": {"version": "0.2.9", "digest": "sha256:de51166289a5379f77cd29697066c37882f0769409b9ef8c986d5a06ea79a1fb"},
   "code_nav": {"version": "0.1.0", "digest": "sha256:5d118c6ebcf101d0b4930ca41d73d967e77b436f8972777331f16f032b823ce6"},
-  "debugging": {"version": "0.1.0", "digest": "sha256:3a7fcac2c719895558fdd6060c3cb477e6893010aaa11b5cb5e7db285217d4d3"},
+  "debugging": {"version": "0.1.1", "digest": "sha256:c28200aee55f0a6549b63b8fbe43628b90bced39865fdbfaa694ac0f28a3f4cd"},
   "design": {"version": "0.2.0", "digest": "sha256:f3b94c916673aba9738d6c4a98753b39b0b2951272d4557b5f25c84afd28825a"},
   "desktop": {"version": "0.2.2", "digest": "sha256:733606961b9bbe698c1a1ba5251b74cff57ab47ee79d11abfd33eae909a23f5c"},
   "documents": {"version": "0.1.1", "digest": "sha256:ea2179111f836b3dc23b6f8e749de5b54b6d56ffd46d8b0b9c45846514921eba"},

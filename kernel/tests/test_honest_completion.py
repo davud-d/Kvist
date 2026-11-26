@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Model-declared outcomes are preserved; the runtime never invents success."""
+"""The model ends a run in its own words; the runtime never invents success."""
 from __future__ import annotations
 
 import json
@@ -51,55 +51,28 @@ def _fix_agent(agent_factory, **overrides):
     return _planned_agent(agent_factory, **overrides)
 
 
-def test_parser_accepts_finish_outcome_and_rejects_unknown_values():
-    validate_action_args("final_answer", {"message": "Not done: file missing.", "outcome": "incomplete"})
-    validate_action_args("report_to_user", {"summary": "s", "result": "r", "outcome": "done"})
+def test_the_model_has_no_finishing_tool_and_declares_no_outcome():
+    from kernel.protocol.parser import ALLOWED_ACTIONS
 
+    assert not {"final_answer", "report_to_user"} & ALLOWED_ACTIONS
     with pytest.raises(CommandValidationError, match="outcome"):
-        validate_action_args("final_answer", {"message": "x", "outcome": "success"})
+        validate_action_args("final_answer", {"message": "Not done: file missing.", "outcome": "incomplete"})
 
 
-def test_modify_task_with_missing_target_ends_honestly_on_first_final_answer(agent_factory):
+def test_a_task_that_cannot_be_done_ends_on_the_models_own_words(agent_factory):
     agent = _fix_agent(agent_factory, max_steps=6)
     message = "src/payment.py does not exist in this workspace, so there is nothing to fix."
     prompts = _script(agent, [
         _step("read_file", {"path": "src/payment.py"}),
-        _step("final_answer", {"message": message, "outcome": "incomplete"}, "done"),
+        {"user_message": message, "actions": []},
     ])
 
     result = agent._run_loop("Fix the bug in src/payment.py", start_step=1)
 
     assert len(prompts) == 2
     assert result == message
-    assert agent._state.run_status == "blocked"
-    assert agent._state.progress < 100
     assert agent._state.step_logs[-1]["status"] == "final_answer"
-    assert agent._state.step_logs[-1]["outcome"] == "incomplete"
     assert not any(log.get("status") == "blocked_final_answer" for log in agent._state.step_logs)
-
-
-def test_incomplete_report_skips_gates_and_tells_the_reporter(agent_factory, monkeypatch):
-    from kernel.agent import agent_runtime
-    agent = _fix_agent(agent_factory, max_steps=4)
-    contexts: list[dict] = []
-    monkeypatch.setattr(
-        agent_runtime,
-        "_render_report",
-        lambda self, context: contexts.append(json.loads(context)) or "Not changed: the user denied the write.",
-    )
-    _script(agent, [
-        _step(
-            "report_to_user",
-            {"summary": "Not changed", "result": "The user denied the write.", "outcome": "incomplete"},
-            "done",
-        ),
-    ])
-
-    result = agent._run_loop("Fix the bug in src/payment.py", start_step=1)
-
-    assert result == "Not changed: the user denied the write."
-    assert contexts and contexts[0]["outcome"] == "incomplete"
-    assert agent._state.run_status == "blocked"
 
 
 def _call(name: str, **arguments) -> str:

@@ -6,7 +6,7 @@ import time
 from types import SimpleNamespace
 
 from kernel.session import session_events
-from kernel.agent.agent_model import build_report_system_prompt, build_role_system_prompt
+from kernel.agent.agent_model import build_role_system_prompt
 from kernel.protocol.event_stream_ui import EventStreamUI
 from kernel.protocol.frontend_protocol import FrontendChannel
 from kernel.agent.narrator import narrating, narration_material, spoken_line
@@ -50,7 +50,7 @@ def _voice_agent(agent_factory, content="so... tests first.", **overrides):
     return agent
 
 
-def test_voice_section_reaches_the_action_roles_and_the_report_only_in_voice_mode(agent_factory):
+def test_voice_section_reaches_the_action_roles_only_in_voice_mode(agent_factory):
     quiet = agent_factory()
     voice = agent_factory(voice_mode=True)
 
@@ -58,8 +58,6 @@ def test_voice_section_reaches_the_action_roles_and_the_report_only_in_voice_mod
         assert "== VOICE MODE ==" not in build_role_system_prompt(quiet, role)
         assert "== voice mode ==" in build_role_system_prompt(voice, role)
         assert "== voice mode ==" in build_role_system_prompt(voice, role, native_tools=True)
-    assert "== VOICE MODE ==" not in build_report_system_prompt(quiet)
-    assert "== voice mode ==" in build_report_system_prompt(voice)
 
 
 def test_chat_role_is_left_alone_in_voice_mode(agent_factory):

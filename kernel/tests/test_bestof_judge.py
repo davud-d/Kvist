@@ -156,7 +156,7 @@ def test_only_the_reviewers_role_prompt_offers_the_two_actions_to_the_model():
     names = {role: {tool["function"]["name"] for tool in tools_for_role(_load_role_prompt(role))}
              for role in ("judge", "coder", "reader", "devops", "universal")}
 
-    assert names["judge"] == {"final_answer", "read_file", "read_multiple_files", "list_dir", "list_tree",
+    assert names["judge"] == {"read_file", "read_multiple_files", "list_dir", "list_tree",
                               "find_files", "search_code", "git_status", "git_diff", "executor", "verdict"}
     for role in ("coder", "reader", "devops", "universal"):
         assert not names[role] & JUDGE_ACTIONS

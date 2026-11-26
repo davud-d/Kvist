@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 
 from kernel.agent.agent_model import (
-    build_report_system_prompt,
     build_role_system_prompt,
     call_action_model,
     _load_constitution,
@@ -57,9 +56,8 @@ def test_action_model_uses_current_agent_role_prompt(tmp_path):
 def test_constitution_precedes_every_acting_role(tmp_path):
     """The layer above every role that acts or speaks to the person.
 
-    The prompt files themselves never carry it: build_role_system_prompt and
-    build_report_system_prompt put it in front. commit turns a diff into a
-    message nobody talks to and never pays for it.
+    The prompt files themselves never carry it: build_role_system_prompt puts it
+    in front. commit turns a diff into a message nobody talks to and never pays for it.
     """
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
@@ -74,11 +72,10 @@ def test_constitution_precedes_every_acting_role(tmp_path):
         assert built.startswith(constitution), role
         assert built.index(_load_role_prompt(role)) >= len(constitution), role
 
-    for role in ("report", "commit"):
-        assert constitution not in _load_role_prompt(role)
+    assert constitution not in _load_role_prompt("commit")
 
 
-@pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "report", "universal"])
+@pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "universal"])
 def test_roles_receive_current_command_reference(tmp_path, role):
     from kernel.protocol.slash_commands import SLASH_COMMANDS
 
@@ -89,8 +86,7 @@ def test_roles_receive_current_command_reference(tmp_path, role):
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role=role, plan_phase="", read_only_goal=False),
     )
-    built = (build_report_system_prompt(agent) if role == "report"
-             else build_role_system_prompt(agent, role))
+    built = build_role_system_prompt(agent, role)
     for command in SLASH_COMMANDS:
         assert f"/{command.name}:" in built or f"/{command.name}," in built
         assert command.description in built
@@ -104,43 +100,15 @@ def test_roles_receive_current_command_reference(tmp_path, role):
     assert "reference does not reveal the active role" in built
 
 
-def _report_agent(workspace, agents_style):
-    return SimpleNamespace(
-        config=SimpleNamespace(voice_mode=False),
-        executor=SimpleNamespace(workspace=workspace),
-        _session_styles={"agents": agents_style, "chat": "Default"},
-    )
-
-
 @pytest.mark.parametrize("style", sorted(get_style_options()))
-def test_the_reporter_speaks_under_the_constitution_and_the_session_style(tmp_path, style):
-    """The report is the person's account of the run: same character, same voice."""
-    constitution = _load_constitution()
-    built = build_report_system_prompt(_report_agent(tmp_path, style))
-
-    assert built.startswith(constitution)
-    assert "\nstance. " in built
-    report_at = built.index(_load_role_prompt("report"))
-    assert report_at >= len(constitution)
-    assert built.index(f"working style: {style_slug(style)}") > report_at
-
-
-def test_the_prototype_label_reaches_the_reporter(tmp_path):
-    built = build_report_system_prompt(_report_agent(tmp_path, "Fast-and-dirty"))
-
-    assert "the label is mandatory, it stands in the first line of the\nreport" in built
-
-
-@pytest.mark.parametrize("style", sorted(get_style_options()))
-@pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "report"])
+@pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat"])
 def test_every_style_and_role_gets_the_shared_voice(agent_factory, style, role):
     from kernel.agent.agent_model import _STYLES_DIR
     from kernel.config.user_config import chat_style_for
 
     agent = agent_factory()
     agent._session_styles = {"agents": style, "chat": chat_style_for(style)}
-    built = (build_report_system_prompt(agent) if role == "report"
-             else build_role_system_prompt(agent, role))
+    built = build_role_system_prompt(agent, role)
     common = (_STYLES_DIR / "common.txt").read_text(encoding="utf-8").strip()
 
     assert built.count(common) == 1
@@ -214,39 +182,6 @@ def test_missing_selected_style_keeps_the_shared_voice(agent_factory):
         built = build_role_system_prompt(agent, role)
         assert "shared voice: Kvist" in built
         assert "== selected style's conversation accent ==" not in built
-
-
-def test_the_reporter_never_gets_the_workspace_instructions(tmp_path):
-    (tmp_path / "KVIST.md").write_text("# Rules\n\nAlways end reports with a haiku.\n", encoding="utf-8")
-    agent = SimpleNamespace(
-        executor=SimpleNamespace(workspace=tmp_path),
-        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5", voice_mode=False),
-        _session_styles={},
-        _ui=SimpleNamespace(),
-        _state=SimpleNamespace(current_agent_role="coder", plan_phase="", read_only_goal=False),
-    )
-
-    assert "haiku" in build_role_system_prompt(agent, "coder")
-    assert "haiku" not in build_report_system_prompt(agent)
-
-
-def test_render_report_sends_the_reporter_system_prompt(agent_factory, monkeypatch):
-    from kernel.agent import agent_model
-    from kernel.agent.agent_runtime import _render_report
-
-    sent = {}
-
-    def fake_completion(self, model, messages, stream=False, json_mode=True):
-        sent["messages"] = messages
-        return "done"
-
-    monkeypatch.setattr(agent_model, "_create_json_completion", fake_completion)
-    monkeypatch.setattr(agent_model, "safe_extract_completion_content", lambda resp, *a: resp)
-    agent = agent_factory(stream=False)
-
-    _render_report(agent, "{}")
-
-    assert sent["messages"][0] == {"role": "system", "content": build_report_system_prompt(agent)}
 
 
 def test_prompt_dir_resolves_to_correct_directory():

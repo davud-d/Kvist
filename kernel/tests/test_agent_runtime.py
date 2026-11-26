@@ -123,8 +123,6 @@ def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
     # batch of three reads: one save; the write: its write-ahead record, its
     # post-step save, and the batch save.
     assert saves[:4] == [False, True, False, False]
-    assert agent._state.finished_incomplete
-    assert agent._peek_checkpoint() is not None
 
 
 def test_prompt_carries_no_standing_governance(agent_factory):
@@ -1379,7 +1377,7 @@ def test_empty_data_cells_finds_blank_csv_fields_and_ignores_other_files():
 
 
 def test_blank_cells_are_observed_without_refusing_the_final_answer(agent_factory):
-    from kernel.agent.agent_runtime import _finish_with_final_answer
+    from kernel.agent.agent_runtime import _run_final_answer
 
     agent = agent_factory(max_steps=1)
     agent._state.read_only_goal = True
@@ -1391,8 +1389,8 @@ def test_blank_cells_are_observed_without_refusing_the_final_answer(agent_factor
     )
     command = make_command("final_answer", {"message": "13.00"}, "done")
 
-    first = _finish_with_final_answer(agent, 1, command)
-    second = _finish_with_final_answer(agent, 2, command)
+    first = _run_final_answer(agent, "sum the prices", 1, command)
+    second = _run_final_answer(agent, "sum the prices", 2, command)
 
     assert first.finished
     assert "orders.csv line 2, column price" in agent._state.empty_data_cells
@@ -1400,7 +1398,7 @@ def test_blank_cells_are_observed_without_refusing_the_final_answer(agent_factor
 
 
 def test_final_answer_is_not_held_without_blank_cells(agent_factory):
-    from kernel.agent.agent_runtime import _finish_with_final_answer
+    from kernel.agent.agent_runtime import _run_final_answer
 
     agent = agent_factory(max_steps=1)
     agent._state.read_only_goal = True
@@ -1410,7 +1408,7 @@ def test_final_answer_is_not_held_without_blank_cells(agent_factory):
         {"ok": True, "data": {"path": "orders.csv", "content": "item,price\nbolt,2\n"}},
     )
 
-    outcome = _finish_with_final_answer(agent, 1, make_command("final_answer", {"message": "2"}, "done"))
+    outcome = _run_final_answer(agent, "sum the prices", 1, make_command("final_answer", {"message": "2"}, "done"))
 
     assert outcome.finished
 
