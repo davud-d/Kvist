@@ -2,6 +2,8 @@
 // view (the sky stays where it is in the room, so turning the phone looks around), and the whole field drifts slowly
 // past, near stars faster than far ones, which is what gives the depth. Drawn at the screen's own pixel density.
 // Without a gyroscope (a desktop browser, permission refused) the view turns by itself, very slowly.
+// The pointer (a mouse, or a finger while it touches) reaches into the sky too: the eye moves a little after it, so near
+// stars slide against far ones; around it the stars part and brighten; a click or a tap sends a wave through them.
 // Under reduced motion the sky is drawn once and stays still.
 
 const NEAR = 3200; // stars in a cube of side 2 around the viewer, which drifts past
@@ -9,6 +11,10 @@ const FAR = 9000; // stars at infinity: they only turn with the view; a third of
 const DRIFT = 0.012; // cube units per second, along a horizontal direction of the room
 const FOV = 1.15; // vertical field of view, radians
 const EASE = 0.12; // how much of the way to the phone's orientation the view goes each frame
+const SHIFT = 0.12; // how far the eye moves after the pointer, in cube units per half of the screen's short side
+const LENS = 150; // CSS px: the radius in which stars part around the pointer
+const WAVE_SPEED = 900; // CSS px per second
+const WAVE_LIFE = 1.6; // seconds
 
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -121,6 +127,31 @@ export function startStars() {
   });
   askForMotion();
 
+  // The pointer in CSS px; `hover` eases to `present` (1 while a mouse is over the page or a finger is down).
+  const pointer = { x: 0, y: 0, sx: 0, sy: 0, present: 0, hover: 0 };
+  const waves = [];
+  const place = (event) => {
+    if (!pointer.hover) [pointer.sx, pointer.sy] = [event.clientX, event.clientY];
+    [pointer.x, pointer.y] = [event.clientX, event.clientY];
+  };
+  window.addEventListener("pointermove", (event) => {
+    if (event.pointerType === "touch" && !event.isPrimary) return;
+    place(event);
+    if (event.pointerType === "mouse") pointer.present = 1;
+  }, { passive: true });
+  window.addEventListener("pointerdown", (event) => {
+    place(event);
+    pointer.present = 1;
+    waves.push({ x: event.clientX, y: event.clientY, born: performance.now() / 1000 });
+  }, { passive: true });
+  const lift = (event) => {
+    if (event.pointerType !== "mouse") pointer.present = 0;
+  };
+  window.addEventListener("pointerup", lift, { passive: true });
+  window.addEventListener("pointercancel", lift, { passive: true });
+  document.documentElement.addEventListener("pointerleave", () => (pointer.present = 0));
+  window.addEventListener("blur", () => (pointer.present = 0));
+
   let offset = 0;
   let last = performance.now();
   let frame = 0;
@@ -132,6 +163,11 @@ export function startStars() {
       offset = (offset + DRIFT * dt) % 2;
       if (!gyro) target = quaternion((now / 1000) * 1.2, 90, 0);
       view = slerp(view, target, gyro ? 1 - (1 - EASE) ** (dt * 60) : 1);
+      const follow = 1 - 0.9 ** (dt * 60);
+      pointer.sx += (pointer.x - pointer.sx) * follow;
+      pointer.sy += (pointer.y - pointer.sy) * follow;
+      pointer.hover += (pointer.present - pointer.hover) * (1 - 0.94 ** (dt * 60));
+      while (waves.length && now / 1000 - waves[0].born > WAVE_LIFE) waves.shift();
     }
     render(now / 1000);
     if (!still.matches) frame = requestAnimationFrame(draw);
@@ -143,13 +179,48 @@ export function startStars() {
     // The screen's own axes in the device frame: x right, y up, the camera looks along -z (out of the back).
     const m = inverseMatrix(view);
     const [cx, cy] = [canvas.width / 2, canvas.height / 2];
+    const [mx, my, hover] = [pointer.sx * dpr, pointer.sy * dpr, pointer.hover];
+    const lens = LENS * dpr;
+    const rings = waves.map((w) => ({ x: w.x * dpr, y: w.y * dpr, radius: (seconds - w.born) * WAVE_SPEED * dpr, fade: 1 - (seconds - w.born) / WAVE_LIFE }));
+    if (hover > 0.01) {
+      const glow = ctx.createRadialGradient(mx, my, 0, mx, my, lens * 1.3);
+      glow.addColorStop(0, `rgba(170,190,255,${0.07 * hover})`);
+      glow.addColorStop(1, "rgba(170,190,255,0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(mx - lens * 1.3, my - lens * 1.3, lens * 2.6, lens * 2.6);
+    }
+    for (const ring of rings) {
+      ctx.strokeStyle = `rgba(190,205,255,${0.09 * ring.fade * ring.fade})`;
+      ctx.lineWidth = 1.5 * dpr;
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, ring.radius, 0, 6.2832);
+      ctx.stroke();
+    }
     const point = (s, x, y, z, a, radius) => {
       if (z > -0.02) return;
-      const px = cx + (x / -z) * focal;
-      const py = cy + (y / z) * focal;
+      let px = cx + (x / -z) * focal;
+      let py = cy + (y / z) * focal;
       if (px < -8 || py < -8 || px > canvas.width + 8 || py > canvas.height + 8) return;
-      const alpha = a * (0.85 + 0.15 * Math.sin(seconds * 1.7 + s.phase));
-      const r = radius * dpr;
+      let alpha = a * (0.85 + 0.15 * Math.sin(seconds * 1.7 + s.phase));
+      let r = radius * dpr;
+      if (hover > 0.01) {
+        // Stars part around the pointer, as if it were a lens, and the ones it passes light up.
+        const [dx, dy] = [px - mx, py - my];
+        const d = Math.hypot(dx, dy) || 1;
+        if (d < lens) {
+          const k = (1 - d / lens) ** 2 * hover;
+          px += (dx / d) * k * 22 * dpr;
+          py += (dy / d) * k * 22 * dpr;
+          alpha = Math.min(1, alpha * (1 + k * 2.5));
+          r *= 1 + k * 0.8;
+        }
+      }
+      for (const ring of rings) {
+        const k = Math.max(0, 1 - Math.abs(Math.hypot(px - ring.x, py - ring.y) - ring.radius) / (36 * dpr)) * ring.fade;
+        if (k <= 0) continue;
+        alpha = Math.min(1, alpha * (1 + k * 3));
+        r *= 1 + k * 0.9;
+      }
       const [red, green, blue] = s.color;
       if (r < 1.2) {
         ctx.fillStyle = `rgba(${red},${green},${blue},${alpha * Math.max(r, 0.7)})`;
@@ -174,11 +245,15 @@ export function startStars() {
       const z = m[2][0] * s.x + m[2][1] * s.y + m[2][2] * s.z;
       point(s, x, y, z, s.alpha, s.size * 0.5);
     }
+    // The eye moves after the pointer: near stars slide against the far ones, which stay put.
+    const half = Math.min(width, height) / 2;
+    const tx = ((pointer.sx - width / 2) / half) * SHIFT * hover;
+    const ty = ((height / 2 - pointer.sy) / half) * SHIFT * hover;
     for (const s of near) {
       let wy = s.y - offset;
       if (wy < -1) wy += 2;
-      const x = m[0][0] * s.x + m[0][1] * wy + m[0][2] * s.z;
-      const y = m[1][0] * s.x + m[1][1] * wy + m[1][2] * s.z;
+      const x = m[0][0] * s.x + m[0][1] * wy + m[0][2] * s.z - tx;
+      const y = m[1][0] * s.x + m[1][1] * wy + m[1][2] * s.z - ty;
       const z = m[2][0] * s.x + m[2][1] * wy + m[2][2] * s.z;
       // Near stars are larger; each fades in at the far edge of the cube and out as it passes the viewer.
       const distance = Math.hypot(x, y, z);
