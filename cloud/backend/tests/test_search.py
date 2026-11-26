@@ -57,6 +57,15 @@ def test_a_search_goes_to_exa_with_the_servers_key_and_counts(client_factory):
     assert EXA_KEY not in answer.text
 
 
+def test_the_exa_key_is_scrubbed_from_any_log_line(client_factory, caplog):
+    import logging
+
+    client_factory(EXA_API_KEY=EXA_KEY)
+    with caplog.at_level(logging.WARNING):
+        logging.getLogger("kvist_cloud.anything").warning("Exa refused key %s", EXA_KEY)
+    assert caplog.records and all(EXA_KEY not in record.getMessage() for record in caplog.records)
+
+
 def test_a_made_up_or_missing_token_is_refused(client_factory):
     client = client_factory(EXA_API_KEY=EXA_KEY)
     _, token = _account(client)

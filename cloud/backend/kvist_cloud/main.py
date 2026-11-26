@@ -97,6 +97,7 @@ def create_app(
             settings.github_client_secret,
             settings.platega_merchant_id,
             settings.platega_secret,
+            settings.exa_api_key,
         ]
     )
     settings.data_dir.mkdir(parents=True, exist_ok=True)

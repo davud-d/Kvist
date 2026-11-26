@@ -9,10 +9,10 @@ import { lang, setLang, t } from "../i18n.js";
 import * as native from "../native.js";
 import { machineState } from "../rules.js";
 import { openSheet, toast } from "../sheet.js";
-import { plansSheet } from "./billing.js";
+import { paySheet, plansSheet } from "./billing.js";
 import { keySheet } from "./key.js";
 
-export function hoursCard(sub) {
+export function hoursCard(sub, closeSheet) {
   if (!sub || sub.status === "none") {
     return h("div", { class: "card hours" }, h("div", { class: "dim" }, t("no plan")), h("button", { class: "btn primary", type: "button", onclick: plansSheet }, t("choose plan")));
   }
@@ -28,7 +28,24 @@ export function hoursCard(sub) {
       renews ? h("span", {}, sub.status === "trialing" ? t("trial ends", { date: renews }) : t("renews", { date: renews })) : null),
     h("div", { class: "btn-row" },
       h("button", { class: "btn", type: "button", onclick: plansSheet }, t("plans")),
-      h("button", { class: "btn", type: "button", onclick: plansSheet }, t("buy hours"))));
+      h("button", { class: "btn", type: "button", onclick: plansSheet }, t("buy hours"))),
+    searchesPart(account.searches, closeSheet));
+}
+
+/** Under the hours: the free web searches left, the bought ones, and the pack's button. Paying closes the account
+ * sheet too, so it is opened again with the new count rather than left showing the old one. */
+function searchesPart(usage, closeSheet) {
+  if (!usage?.enabled) return null;
+  const out = (usage.day === 0 || usage.week === 0) && usage.bought === 0;
+  const left = t("searches left", { day: usage.day, perDay: usage.per_day, week: usage.week, perWeek: usage.per_week });
+  return h("div", { class: "searches" },
+    out ? h("p", { class: "searches-out", role: "status" }, t("searches out")) : null,
+    h("div", { class: "hours-meta dim" },
+      h("span", {}, left),
+      usage.bought > 0 ? h("span", {}, t("searches bought", { n: usage.bought })) : null),
+    h("div", { class: "btn-row" },
+      h("button", { class: `btn${out ? " primary" : ""}`, type: "button", onclick: () => paySheet("searches", closeSheet) },
+        t("buy searches"))));
 }
 
 function machineRow() {
@@ -59,7 +76,7 @@ export function accountSheet() {
     title: account.me?.name || account.me?.login || t("account"),
     variant: "tall",
     build: (close) => [
-      hoursCard(account.sub),
+      hoursCard(account.sub, close),
       h("div", { class: "group" },
         machineRow(),
         h("button", { class: "row", type: "button", onclick: () => keySheet() },

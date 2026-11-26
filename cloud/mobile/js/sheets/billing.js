@@ -23,6 +23,7 @@ function spec(plan) {
 
 /** What a purchase gives, one line, for the pay sheet. */
 function whatYouGet(kind) {
+  if (kind === "searches") return t("searches pack gives", { n: account.billing.search_pack.searches });
   if (kind === "hours") return t("hours pack gives", { n: account.billing.hour_pack.hours });
   const plan = account.billing.plans.find((p) => p.id === kind);
   return `${hoursLabel(plan.hours)} · ${spec(plan)}`;
@@ -32,12 +33,13 @@ function whatYouGet(kind) {
 function priceOf(kind) {
   const wallet = account.wallet;
   if (wallet?.enabled && wallet.prices?.[kind]) return money(wallet.prices[kind], wallet.currency);
-  const plan = kind === "hours" ? account.billing.hour_pack : account.billing.plans.find((p) => p.id === kind);
+  const packs = { hours: account.billing.hour_pack, searches: account.billing.search_pack };
+  const plan = packs[kind] ?? account.billing.plans.find((p) => p.id === kind);
   return money(plan.price_usd, "USD");
 }
 
 async function afterPaid(close) {
-  await refresh("sub", "machines");
+  await refresh("sub", "machines", "searches");
   native.haptic("success");
   toast(t("pay done"));
   close();
@@ -95,8 +97,8 @@ async function payOnPage(path, body, kind, say, closeAll) {
       if (document.hidden) return;
       document.removeEventListener("visibilitychange", settle);
       await post("/api/billing/sync");
-      await refresh("sub");
-      if (account.sub?.plan === kind || kind === "hours") closeAll();
+      await refresh("sub", "searches");
+      if (account.sub?.plan === kind || kind === "hours" || kind === "searches") closeAll();
     };
     document.addEventListener("visibilitychange", settle);
   } catch (error) {
@@ -109,7 +111,8 @@ function otherWays(kind, say, closeAll) {
   const freedom = account.billing?.freedompay;
   if (!charge && !freedom) return null;
   const rows = [];
-  if (freedom) {
+  // The search pack is optional on a server: offered only where its price is set.
+  if (freedom && (kind !== "searches" || freedom.prices?.searches)) {
     // Freedom Pay's own page shows its cards and, where connected, Apple Pay and Google Pay.
     rows.push(h("button", { class: "row", type: "button", onclick: () => payOnPage("/api/freedompay/checkout", { plan: kind }, kind, say, closeAll) },
       icon("card", 20),
@@ -118,6 +121,7 @@ function otherWays(kind, say, closeAll) {
   }
   for (const method of charge?.methods ?? []) {
     const price = charge.prices?.[kind];
+    if (kind === "searches" && !price) break;
     rows.push(h("button", { class: "row", type: "button", onclick: () => payOnPage("/api/billing/checkout", { plan: kind, method }, kind, say, closeAll) },
       icon("card", 20),
       h("span", { class: "row-main" }, t(METHODS[method] ?? "method card")),
@@ -129,7 +133,8 @@ function otherWays(kind, say, closeAll) {
 function devSkip(kind, closeAll) {
   return h("button", { class: "row dev", type: "button", onclick: async () => {
     try {
-      await post(kind === "hours" ? "/api/billing/dev/buy-hours" : "/api/billing/dev/skip-checkout");
+      const paths = { hours: "/api/billing/dev/buy-hours", searches: "/api/billing/dev/buy-searches" };
+      await post(paths[kind] ?? "/api/billing/dev/skip-checkout");
       await afterPaid(closeAll);
     } catch (error) {
       toast(error.localized, "error");
@@ -137,14 +142,20 @@ function devSkip(kind, closeAll) {
   } }, icon("lock", 20), h("span", { class: "row-main" }, t("pay dev skip")));
 }
 
-/** The sheet where a plan (or the hour pack) is paid for. */
+function periodOf(kind) {
+  if (kind === "searches") return t("until used");
+  if (kind === "hours") return t("one time");
+  return t("per period", { days: account.billing.plans.find((p) => p.id === kind)?.days ?? 30 });
+}
+
+/** The sheet where a plan, the hour pack or the search pack is paid for. */
 export function paySheet(kind, parent) {
   openSheet({
-    title: kind === "hours" ? t("buy hours") : t("plan named", { name: planName(kind) }),
+    title: { hours: t("buy hours"), searches: t("buy searches") }[kind] ?? t("plan named", { name: planName(kind) }),
     build: (close) => [
       h("div", { class: "pay-summary" },
         h("div", { class: "pay-price" }, priceOf(kind)),
-        h("div", { class: "dim" }, kind === "hours" ? t("one time") : t("per period", { days: account.billing.plans.find((p) => p.id === kind)?.days ?? 30 })),
+        h("div", { class: "dim" }, periodOf(kind)),
         h("p", { class: "pay-gets" }, whatYouGet(kind))),
       payRows(kind, () => {
         close();

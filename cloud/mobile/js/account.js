@@ -11,6 +11,8 @@ export const account = {
   machines: [],
   projects: [],
   tasks: [],
+  // The shared web search: free searches left, bought ones, the pack (search.py); enabled false = none here.
+  searches: null,
   billing: null,
   wallet: { enabled: false },
   // What this phone's own wallet can pay with right now (the app answers; a browser has none).
@@ -32,6 +34,7 @@ const loaders = {
   machines: () => api("/api/machines"),
   projects: () => api("/api/projects"),
   tasks: () => api("/api/tasks"),
+  searches: () => api("/api/search/usage"),
 };
 
 /** Re-reads one part (or several) of the account; a part that fails keeps what it had. */
@@ -57,7 +60,7 @@ export async function load() {
     native.wallets(),
   ]);
   Object.assign(account, { billing, wallet, providers, wallets });
-  await refresh("sub", "key", "machines", "projects", "tasks");
+  await refresh("sub", "key", "machines", "projects", "tasks", "searches");
   account.ready = true;
   changed();
 }

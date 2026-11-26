@@ -238,6 +238,8 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .hours-line { display: flex; align-items: baseline; gap: 10px; }
 .hours-big { font-size: 30px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .hours-meta { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.searches { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.searches-out { margin: 0; font-size: 13px; color: var(--warn); }
 .plan-card { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--bg); text-align: left; width: 100%; position: relative; }
 .plan-card:active:not(:disabled) { background: var(--s2); }
 .plan-card:disabled { opacity: .55; }
