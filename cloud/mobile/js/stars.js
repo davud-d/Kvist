@@ -181,7 +181,9 @@ export function startStars() {
     const [cx, cy] = [canvas.width / 2, canvas.height / 2];
     const [mx, my, hover] = [pointer.sx * dpr, pointer.sy * dpr, pointer.hover];
     const lens = LENS * dpr;
-    const rings = waves.map((w) => ({ x: w.x * dpr, y: w.y * dpr, radius: (seconds - w.born) * WAVE_SPEED * dpr, fade: 1 - (seconds - w.born) / WAVE_LIFE }));
+    // A click lands between frames: its wave can be born after this frame's clock, and a negative radius throws.
+    const age = (w) => Math.max(0, seconds - w.born);
+    const rings = waves.map((w) => ({ x: w.x * dpr, y: w.y * dpr, radius: age(w) * WAVE_SPEED * dpr, fade: 1 - age(w) / WAVE_LIFE }));
     if (hover > 0.01) {
       const glow = ctx.createRadialGradient(mx, my, 0, mx, my, lens * 1.3);
       glow.addColorStop(0, `rgba(170,190,255,${0.07 * hover})`);

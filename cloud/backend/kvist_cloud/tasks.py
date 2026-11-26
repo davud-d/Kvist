@@ -14,7 +14,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from . import images, ledger
-from .auth import SESSION_COOKIE, ban_active, current_user, user_from_cookie
+from .auth import ban_active, current_user, session_value, user_from_cookie
 from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
 from .funnel import record_step
@@ -679,7 +679,7 @@ async def stream(socket: WebSocket, task_id: int, after: int = 0) -> None:
         await socket.close(code=4403)
         return
     with session_scope(app.state.session_factory) as db:
-        user = user_from_cookie(db, settings, socket.cookies.get(SESSION_COOKIE))
+        user = user_from_cookie(db, settings, session_value(socket.cookies))
         task = db.get(Task, task_id)
         allowed = (user is not None and not ban_active(user) and task is not None
                    and task.user_id == user.id)

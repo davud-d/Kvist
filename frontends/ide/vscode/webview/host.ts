@@ -33,7 +33,12 @@ function deliver(message: ToWebview): void {
 function connect(): (message: ToHost) => void {
   if (typeof acquireVsCodeApi === "function") {
     const api = acquireVsCodeApi()
-    window.addEventListener("message", (event: MessageEvent<ToWebview>) => deliver(event.data))
+    // The framed Kvist Cloud page talks to this window too (cloud.tsx); only the extension speaks for the host.
+    const cloud = document.getElementById("root")?.dataset.cloud
+    window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
+      if (cloud && event.origin === new URL(cloud).origin) return
+      deliver(event.data)
+    })
     return (message) => api.postMessage(message)
   }
   const injected = window.kvistHost

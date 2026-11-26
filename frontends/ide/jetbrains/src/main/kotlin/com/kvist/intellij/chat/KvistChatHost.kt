@@ -116,7 +116,29 @@ internal class KvistChatHost(
             }
             "openLink" -> openLink(message.stringField("url").orEmpty())
             "sessionTitle" -> onSessionTitle(message.stringField("title").orEmpty())
+            "cloudSignIn" -> background { signInToCloud() }
         }
+    }
+
+    private fun signInToCloud() {
+        val origin = KvistCloud.origin().ifEmpty { return }
+        val reply = try {
+            val url = KvistCloud.signIn(origin) { BrowserUtil.browse(it) }
+            message("cloudSignIn") { addProperty("url", url) }
+        }
+        catch (_: TimeoutException) {
+            cloudSignInFailed("The sign-in was not finished in time. / Вход не завершён вовремя.")
+        }
+        catch (exception: IOException) {
+            LOG.warn("Kvist Cloud sign-in failed", exception)
+            cloudSignInFailed("Could not sign in: ${exception.message} / Не удалось войти: ${exception.message}")
+        }
+        post(reply)
+    }
+
+    private fun cloudSignInFailed(text: String): JsonObject = message("cloudSignIn") {
+        add("url", JsonNull.INSTANCE)
+        addProperty("error", text)
     }
 
     override fun onEvent(event: JsonObject) {

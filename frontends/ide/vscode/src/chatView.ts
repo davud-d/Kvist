@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import { KvistCore, type CoreCommand } from '../../../tui/ink/core';
 import { sessionOp } from '../../../tui/ink/session';
 import { BinaryResolver } from './binaryResolver';
+import { signInToCloud } from './cloudSignIn';
 import { splitEnvironment } from './environment';
 import { pickWorkspaceFiles } from './filePicker';
 import type { JournalEvent } from '../../../tui/ink/protocol';
@@ -138,6 +139,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             case 'openLink':
                 await vscode.env.openExternal(vscode.Uri.parse(message.url));
                 return;
+            case 'cloudSignIn':
+                return this.signInToCloud();
         }
     }
 
@@ -400,11 +403,23 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         await vscode.window.showTextDocument(vscode.Uri.file(target), { selection: new vscode.Range(position, position) });
     }
 
+    private async signInToCloud(): Promise<void> {
+        const cloud = cloudOrigin();
+        if (!cloud) return;
+        try {
+            const url = await signInToCloud(cloud, (address) => vscode.env.openExternal(vscode.Uri.parse(address)));
+            this.post({ type: 'cloudSignIn', url });
+        } catch (error) {
+            this.post({ type: 'cloudSignIn', url: null, error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
     private html(webview: vscode.Webview, media: vscode.Uri, resources: vscode.Uri): string {
         const script = webview.asWebviewUri(vscode.Uri.joinPath(media, 'webview.js'));
         const style = webview.asWebviewUri(vscode.Uri.joinPath(media, 'webview.css'));
         const logo = webview.asWebviewUri(vscode.Uri.joinPath(resources, 'kvist-logo.png'));
         const nonce = randomNonce();
+        const cloud = cloudOrigin();
         const csp = [
             "default-src 'none'",
             `style-src ${webview.cspSource}`,
@@ -412,6 +427,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             `font-src ${webview.cspSource}`,
             // The agent's screen preview comes from Kvist's own loopback viewer.
             `img-src ${webview.cspSource} data: http://127.0.0.1:*`,
+            // The panel's cloud half is the Kvist Cloud page itself.
+            ...(cloud ? [`frame-src ${cloud}`] : []),
         ].join('; ');
         return `<!DOCTYPE html>
 <html lang="en">
@@ -423,7 +440,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
 <title>Kvist</title>
 </head>
 <body class="${this.page ? 'workspace-page' : ''}">
-<div id="root" data-logo="${logo}" data-layout="${this.page ? 'workspace' : 'panel'}" data-project="${escapeHtml(vscode.workspace.workspaceFolders?.[0]?.name ?? '')}"></div>
+<div id="root" data-logo="${logo}" data-layout="${this.page ? 'workspace' : 'panel'}" data-cloud="${escapeHtml(cloud)}" data-project="${escapeHtml(vscode.workspace.workspaceFolders?.[0]?.name ?? '')}"></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
@@ -445,6 +462,17 @@ function readJson<T>(command: CoreCommand, workspace: string, args: string[]): P
 
 function escapeHtml(text: string): string {
     return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// The Kvist Cloud the panel's cloud half shows: an origin, or "" (no cloud half) when the setting is not an http(s) address.
+function cloudOrigin(): string {
+    const raw = vscode.workspace.getConfiguration('kvist').get<string>('cloudUrl', '');
+    try {
+        const url = new URL(raw);
+        return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : '';
+    } catch {
+        return '';
+    }
 }
 
 function randomNonce(): string {

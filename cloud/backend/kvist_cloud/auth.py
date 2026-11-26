@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import secrets
 import zoneinfo
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Literal
 from urllib.parse import urlencode
@@ -29,6 +29,10 @@ from .models import User
 from .validation import InputModel
 
 SESSION_COOKIE = "kc_session"
+# The session of the cloud page framed inside an IDE panel (VS Code, JetBrains). A framed page is cross-site, where a
+# Lax cookie is never sent, so this one is SameSite=None; Partitioned keeps it to frames under the IDE's own top-level
+# page, and the API's X-Kvist-Client header and the WebSocket's Origin check still stop other sites from using it.
+IDE_SESSION_COOKIE = "kc_ide_session"
 OAUTH_COOKIE = "kc_oauth"
 SESSION_MAX_AGE = 30 * 24 * 3600
 OAUTH_MAX_AGE = 600
@@ -73,6 +77,23 @@ def set_session(response: Response, settings: Settings, user: User) -> None:
     )
 
 
+def _ide_cookie(value: str, max_age: int) -> str:
+    # Written by hand: Starlette writes Partitioned only on Python 3.14+. The value is URL-safe base64 and dots.
+    # SameSite=None needs Secure; Chromium accepts a Secure cookie from http://localhost, so a local server works too.
+    return (f"{IDE_SESSION_COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; Secure; SameSite=None; "
+            "Partitioned")
+
+
+def set_ide_session(response: Response, settings: Settings, user: User) -> None:
+    value = _serializer(settings, "session").dumps({"u": user.id, "v": user.session_version})
+    response.headers.append("set-cookie", _ide_cookie(value, SESSION_MAX_AGE))
+
+
+def session_value(cookies: Mapping[str, str]) -> str | None:
+    """The session a request carries: the site's own cookie, or the one a page framed in an IDE got."""
+    return cookies.get(SESSION_COOKIE) or cookies.get(IDE_SESSION_COOKIE)
+
+
 def user_from_cookie(db: Session, settings: Settings, value: str | None) -> User | None:
     if not value:
         return None
@@ -87,7 +108,7 @@ def user_from_cookie(db: Session, settings: Settings, value: str | None) -> User
 
 
 def optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
-    return user_from_cookie(db, request.app.state.settings, request.cookies.get(SESSION_COOKIE))
+    return user_from_cookie(db, request.app.state.settings, session_value(request.cookies))
 
 
 def signed_user(user: User | None = Depends(optional_user)) -> User:
@@ -351,4 +372,5 @@ def accept_terms(
 async def logout() -> Response:
     response = Response(status_code=204)
     response.delete_cookie(SESSION_COOKIE, path="/")
+    response.headers.append("set-cookie", _ide_cookie('""', 0))
     return response

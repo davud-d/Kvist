@@ -29,11 +29,14 @@ internal object KvistWebviewPage {
         val style = inlineSafe(resource("webview.css"), "style")
         val logo = "data:image/png;base64," + Base64.getEncoder().encodeToString(resourceBytes("kvist-logo.png"))
         val nonce = nonce()
-        val csp = listOf(
+        val cloud = KvistCloud.origin()
+        val csp = listOfNotNull(
             "default-src 'none'",
             "style-src 'nonce-$nonce'",
             "script-src 'nonce-$nonce'",
             "img-src data: http://127.0.0.1:*",
+            // The panel's cloud half is the Kvist Cloud page itself.
+            if (cloud.isEmpty()) null else "frame-src $cloud",
         ).joinToString("; ")
         return """<!DOCTYPE html>
 <html lang="en">
@@ -45,7 +48,7 @@ internal object KvistWebviewPage {
 <title>Kvist</title>
 </head>
 <body class="${if (workspacePage) "workspace-page" else ""}">
-<div id="root" data-logo="$logo" data-layout="${if (workspacePage) "workspace" else "panel"}" data-project="${StringUtil.escapeXmlEntities(projectName)}"></div>
+<div id="root" data-logo="$logo" data-layout="${if (workspacePage) "workspace" else "panel"}" data-cloud="${StringUtil.escapeXmlEntities(cloud)}" data-project="${StringUtil.escapeXmlEntities(projectName)}"></div>
 <script nonce="$nonce">${bridge(postCall)}</script>
 <script nonce="$nonce">$script</script>
 </body>

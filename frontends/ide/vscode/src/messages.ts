@@ -47,7 +47,10 @@ export type ToWebview =
     | { type: 'needsSetup'; providers: ProviderInfo[] }
     | { type: 'setupResult'; ok: boolean; error?: string }
     | { type: 'modelList'; provider: string; ok: boolean; models: string[]; error?: string }
-    | { type: 'showSettings' };
+    | { type: 'showSettings' }
+    // The end of a Kvist Cloud sign-in in the system browser: the address that gives the framed cloud page its
+    // session, or null with what went wrong.
+    | { type: 'cloudSignIn'; url: string | null; error?: string };
 
 export type ToHost =
     | { type: 'ready' }
@@ -73,4 +76,6 @@ export type ToHost =
     | { type: 'openLink'; url: string }
     | { type: 'openScreen'; url: string }
     // The session on screen, "" while it has no name yet: a host may show it next to its own title.
-    | { type: 'sessionTitle'; title: string };
+    | { type: 'sessionTitle'; title: string }
+    // The framed Kvist Cloud page asked to sign in: the host does it in the system browser.
+    | { type: 'cloudSignIn' };

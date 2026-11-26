@@ -9,6 +9,11 @@
 // "pay" ({wallet, request, environment} -> {token} | {cancelled: true} | {error}), "open" ({url}), "haptic" ({kind}),
 // "payDone" ({wallet, ok}), "signIn" (-> {started} once the app has taken the sign-in over), "share" ({text}), "copy" ({text}). The page never holds a payment card: the OS sheet hands it a token.
 
+//
+// Framed in an IDE panel (VS Code, JetBrains: frontends/ide/vscode/webview/cloud.tsx) the page has no injected host;
+// the panel around it is the host, spoken to with postMessage: {kvistCloud: {id, name, args}} up, and
+// {kvistCloudReply: {id, result}} back. It answers "signIn", "open" and "copy"; anything else is answered null.
+
 let counter = 0;
 const waiting = new Map();
 
@@ -19,7 +24,23 @@ window.__kvistReply = (id, payload) => {
   resolve(typeof payload === "string" ? JSON.parse(payload) : payload);
 };
 
-export const host = () => window.KvistHost ?? null;
+/** The page is the cloud half of an IDE panel. */
+export const inIde = () => window.parent !== window;
+
+const ideHost = {
+  platform: "ide",
+  call(id, name, json) {
+    window.parent.postMessage({ kvistCloud: { id, name, args: JSON.parse(json) } }, "*");
+  },
+};
+
+window.addEventListener("message", (event) => {
+  const reply = event.data?.kvistCloudReply;
+  if (event.source !== window.parent || !reply) return;
+  window.__kvistReply(reply.id, reply.result ?? null);
+});
+
+export const host = () => window.KvistHost ?? (inIde() ? ideHost : null);
 export const inApp = () => host() !== null;
 export const platform = () => host()?.platform ?? "web";
 

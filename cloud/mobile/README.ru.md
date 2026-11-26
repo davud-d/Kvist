@@ -56,6 +56,21 @@
 | `signIn` | | `{started: true}`, когда приложение взяло вход на себя (системный браузер входит, приложение перезагружает страницу уже со входом); `null`: страница входит обычным способом |
 | `open` `copy` `share` `haptic` | `{url}` `{text}` `{text}` `{kind}` | ничего |
 
+## В панели IDE
+
+Боковая панель VS Code и JetBrains сверху переключается между «Облако» и «Локально» (переключатель и анимация в
+[`frontends/ide/vscode/webview/cloud.tsx`](../../frontends/ide/vscode/webview/cloud.tsx), кривая в три такта: 50, 75 и 30 мс).
+Облако там — эта самая страница во фрейме, только поле ввода при фокусе не складывается в одну строку: экранной клавиатуры нет.
+
+Во фрейме нет `KvistHost`, хостом становится панель вокруг: те же вызовы идут через `postMessage`
+(`{kvistCloud: {id, name, args}}` вверх, `{kvistCloudReply: {id, result}}` обратно). Отвечает она на `signIn`, `open` и `copy`, на остальное
+отвечает `null`. Вход: страница GitHub во фрейме не открывается, поэтому плагин открывает `/auth/app/start?nonce=N&port=P` в системном
+браузере, облако отдаёт код слушателю плагина на `http://127.0.0.1:P/signed-in` (RFC 8252), и фрейм меняет код вместе с N на свою cookie.
+Это отдельная `kc_ide_session` с `SameSite=None; Secure; Partitioned`: обычная Lax-cookie во фрейм с чужого сайта не приходит. Чужим
+сайтам она ничего не даёт: она привязана к верхней странице IDE, API требует `X-Kvist-Client`, websocket проверяет Origin. Только
+`/m` разрешает фрейм, и только для `vscode-webview:`, `vscode-file:` и `file:` (страница JCEF); остальной сайт по-прежнему `frame-ancestors 'none'`.
+Адрес облака задают `kvist.cloudUrl` в VS Code и `-Dkvist.cloud.url` / `KVIST_CLOUD_URL` в JetBrains; по умолчанию `https://cloud.kvist.site`.
+
 ## Тесты
 
 ```bash

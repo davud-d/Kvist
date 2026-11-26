@@ -59,7 +59,11 @@ def test_the_page_may_load_googles_button_only_with_the_wallet_on(client_factory
     assert "script-src 'self';" in client.get("/").headers["content-security-policy"]
 
 
-def test_the_page_itself_is_not_cached_but_the_app_is_not_framed(client_factory, dist):
-    page = client_factory(FRONTEND_DIST=str(dist)).get("/m/")
-    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+def test_the_page_itself_is_not_cached_and_only_an_ide_panel_frames_it(client_factory, dist):
+    client = client_factory(FRONTEND_DIST=str(dist))
+    page = client.get("/m/")
+    assert "frame-ancestors 'self' vscode-webview: vscode-file: file:" in page.headers["content-security-policy"]
     assert page.headers["cache-control"] == "no-store"
+    # The rest of the site is still never framed.
+    for path in ("/", "/pricing", "/api/me"):
+        assert "frame-ancestors 'none'" in client.get(path).headers["content-security-policy"], path

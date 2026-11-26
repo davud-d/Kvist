@@ -71,7 +71,8 @@ export function createComposer({ onSend, onStop, chips, onPlus, onGauge, hints }
 
   // Typing is one row, as in the apps this one is read beside: the keyboard already takes half the screen. The buttons
   // do not take the focus, or touching one would fold the row back and move it from under the finger.
-  const typing = (on) => box.classList.toggle("typing", on);
+  // In an IDE panel there is no on-screen keyboard to make room for: the box stays as it is.
+  const typing = (on) => box.classList.toggle("typing", on && !native.inIde());
   field.addEventListener("focus", () => typing(true));
   field.addEventListener("blur", () => typing(false));
   for (const button of [plus, gauge, action]) button.addEventListener("pointerdown", (event) => {

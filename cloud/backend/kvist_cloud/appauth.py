@@ -11,6 +11,10 @@ its own cookies: it finishes the usual GitHub sign-in there, and the app's web v
 3. the app loads ``/auth/app/exchange?code=C&nonce=N`` in its own web view: the code must be valid, fresh and made for
    N, and then the web view gets the session cookie. An app that only saw the code (another app may register the same
    scheme) lacks N and gets nothing.
+
+The IDE plugins (the cloud page framed in the VS Code / JetBrains panel) do the same with ``&port=P``: the code goes to
+their own loopback listener, ``http://127.0.0.1:P/signed-in`` (RFC 8252), and the exchange gives the framed page the
+IDE's cookie (``auth.set_ide_session``) instead of the site's.
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature
 from sqlalchemy.orm import Session
 
-from .auth import _serializer, ban_active, optional_user, safe_next, set_session
+from .auth import _serializer, ban_active, optional_user, safe_next, set_ide_session, set_session
 from .config import Settings
 from .db import get_db
 from .errors import ApiError
@@ -41,14 +45,29 @@ def _nonce(raw: str) -> str:
     return raw
 
 
+def _port(raw: str) -> int | None:
+    """An IDE's loopback listener; none for the phone apps."""
+    if not raw:
+        return None
+    if not raw.isdigit() or not 1024 <= int(raw) <= 65535:
+        raise ApiError(400, "bad_port", "Not a sign-in request from the IDE. / Это не запрос входа из IDE.")
+    return int(raw)
+
+
 @router.get("/auth/app/start")
-def start(request: Request, nonce: str = "", user: User | None = Depends(optional_user)) -> RedirectResponse:
+def start(request: Request, nonce: str = "", port: str = "",
+          user: User | None = Depends(optional_user)) -> RedirectResponse:
     settings: Settings = request.app.state.settings
     nonce = _nonce(nonce)
+    listener = _port(port)
     if user is None or ban_active(user):
-        back = f"/auth/app/start?{urlencode({'nonce': nonce})}"
+        query = {"nonce": nonce, **({"port": listener} if listener else {})}
+        back = f"/auth/app/start?{urlencode(query)}"
         return RedirectResponse(f"/auth/github/login?{urlencode({'next': back})}", status_code=302)
-    code = _serializer(settings, "appcode").dumps({"u": user.id, "v": user.session_version, "n": nonce})
+    code = _serializer(settings, "appcode").dumps(
+        {"u": user.id, "v": user.session_version, "n": nonce, "ide": listener is not None})
+    if listener:
+        return RedirectResponse(f"http://127.0.0.1:{listener}/signed-in?{urlencode({'code': code})}", status_code=302)
     return RedirectResponse(f"{APP_SCHEME}://signed-in?{urlencode({'code': code})}", status_code=302)
 
 
@@ -66,6 +85,9 @@ def exchange(request: Request, code: str = "", nonce: str = "", next: str = "/m/
             or not secrets.compare_digest(str(data.get("n", "")), nonce)):
         raise ApiError(400, "bad_code", "The sign-in expired, start again. / Вход устарел, начни заново.")
     response = RedirectResponse(safe_next(next, "/m/"), status_code=302)
-    set_session(response, settings, user)
+    if data.get("ide"):
+        set_ide_session(response, settings, user)
+    else:
+        set_session(response, settings, user)
     return response
 

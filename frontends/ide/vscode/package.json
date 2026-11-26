@@ -163,6 +163,11 @@
           "default": "",
           "markdownDescription": "Path to the Kvist executable. Leave empty to use the binary bundled with the extension."
         },
+        "kvist.cloudUrl": {
+          "type": "string",
+          "default": "https://cloud.kvist.site",
+          "markdownDescription": "Kvist Cloud shown on the panel's **Cloud** tab. Empty hides the tab. Changes apply when the panel reloads."
+        },
         "kvist.remote.machine": {
           "type": "string",
           "default": "",

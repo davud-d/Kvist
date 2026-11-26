@@ -47,7 +47,12 @@ def is_phone_app(path: str) -> bool:
     return path == "/m" or path.startswith("/m/")
 
 
-def csp(public_url: str, google_pay: bool = False) -> str:
+# The phone page is also the cloud half of the IDE panels: VS Code's webview (vscode-webview:, inside the workbench's
+# vscode-file:) and the JetBrains panel's JCEF page (file:). frame-ancestors checks every ancestor, so all are named.
+IDE_FRAME_ANCESTORS = "'self' vscode-webview: vscode-file: file:"
+
+
+def csp(public_url: str, google_pay: bool = False, ide_frame: bool = False) -> str:
     socket = public_url.replace("https://", "wss://").replace("http://", "ws://")
     return "; ".join(
         [
@@ -60,7 +65,7 @@ def csp(public_url: str, google_pay: bool = False) -> str:
             "font-src 'self'",
             f"connect-src 'self' {socket}" + (f" {GOOGLE_PAY_SCRIPT}" if google_pay else ""),
             *([f"frame-src {GOOGLE_PAY_SCRIPT}"] if google_pay else []),
-            "frame-ancestors 'none'",
+            "frame-ancestors " + (IDE_FRAME_ANCESTORS if ide_frame else "'none'"),
             "base-uri 'none'",
             "form-action 'self' https://github.com",
         ]
@@ -118,8 +123,10 @@ def install(app: FastAPI) -> None:
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
         settings = app.state.settings
-        google_pay = settings.wallet is not None and is_phone_app(request.url.path)
-        response.headers.setdefault("Content-Security-Policy", csp(settings.public_url, google_pay))
+        phone_app = is_phone_app(request.url.path)
+        google_pay = settings.wallet is not None and phone_app
+        policy = csp(settings.public_url, google_pay, ide_frame=phone_app)
+        response.headers.setdefault("Content-Security-Policy", policy)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         if request.url.path.startswith("/assets/fonts/"):

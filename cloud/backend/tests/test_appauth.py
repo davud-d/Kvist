@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import pytest
 from conftest import dev_login
 
-from kvist_cloud.auth import SESSION_COOKIE
+from kvist_cloud.auth import IDE_SESSION_COOKIE, SESSION_COOKIE
 
 NONCE = "n" * 40
 
@@ -78,3 +78,40 @@ def test_a_request_that_is_not_the_apps_is_refused(client_factory):
     client = client_factory(AUTH_DEV_LOGIN="true")
     assert client.get("/auth/app/start").status_code == 400
     assert client.get("/auth/app/start?nonce=%0d%0aSet-Cookie:x").status_code == 400
+
+
+# -- the IDE panels: the code goes to the plugin's loopback listener, the framed page gets the IDE's cookie ----------
+
+
+def test_an_ide_is_handed_the_code_on_its_loopback_port_even_after_github(client_factory):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    response = client.get(f"/auth/app/start?nonce={NONCE}&port=43210", follow_redirects=False)
+    assert "port%3D43210" in response.headers["location"]
+    dev_login(client)
+    response = client.get(f"/auth/app/start?nonce={NONCE}&port=43210", follow_redirects=False)
+    assert response.headers["location"].startswith("http://127.0.0.1:43210/signed-in?code=")
+
+
+@pytest.mark.parametrize("port", ["80", "70000", "1e4", "-1", "43210/evil"])
+def test_an_ide_port_outside_the_user_range_is_refused(client_factory, port):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.get(f"/auth/app/start?nonce={NONCE}&port={quote(port)}", follow_redirects=False).status_code == 400
+
+
+def test_the_framed_page_gets_a_partitioned_cookie_that_the_api_accepts(client_factory):
+    browser = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(browser)
+    location = browser.get(f"/auth/app/start?nonce={NONCE}&port=43210", follow_redirects=False).headers["location"]
+    code = parse_qs(urlparse(location).query)["code"][0]
+    frame = client_factory(AUTH_DEV_LOGIN="true")
+    response = frame.get(f"/auth/app/exchange?code={code}&nonce={NONCE}", follow_redirects=False)
+    cookie = response.headers["set-cookie"]
+    assert cookie.startswith(f"{IDE_SESSION_COOKIE}=") and SESSION_COOKIE + "=" not in cookie
+    assert "SameSite=None" in cookie and "Secure" in cookie and "Partitioned" in cookie and "HttpOnly" in cookie
+    # The test client is http, where a Secure cookie is not sent back by itself; a browser on https sends it.
+    frame.cookies.set(IDE_SESSION_COOKIE, response.cookies[IDE_SESSION_COOKIE])
+    assert frame.get("/api/me").json()["login"] == "dev"
+    # Signing out ends it too.
+    assert frame.post("/auth/logout", headers={"X-Kvist-Client": "1"}).headers.get_list("set-cookie")[1].startswith(
+        f'{IDE_SESSION_COOKIE}=""')

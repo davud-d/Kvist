@@ -54,6 +54,21 @@ The apps give the page `window.KvistHost` ([`js/native.js`](js/native.js) is the
 | `signIn` | | `{started: true}` once the app has taken the sign-in over (the system browser signs in, the app reloads the page signed in); `null`: the page signs in the ordinary way |
 | `open` `copy` `share` `haptic` | `{url}` `{text}` `{text}` `{kind}` | nothing |
 
+## In an IDE panel
+
+The VS Code and JetBrains side panel switches between "Cloud" and "Local" at the top (the switch and its motion are in
+[`frontends/ide/vscode/webview/cloud.tsx`](../../frontends/ide/vscode/webview/cloud.tsx), a three-beat curve of 50, 75 and 30 ms).
+The cloud there is this page, framed, except that the composer does not fold to one row when focused: there is no on-screen keyboard.
+
+A frame has no `KvistHost`; the panel around it is the host, with the same calls over `postMessage` (`{kvistCloud: {id, name, args}}` up,
+`{kvistCloudReply: {id, result}}` back). It answers `signIn`, `open` and `copy`, and anything else with `null`. Signing in: GitHub's page
+refuses frames, so the plugin opens `/auth/app/start?nonce=N&port=P` in the system browser, the cloud hands the code to the plugin's
+listener at `http://127.0.0.1:P/signed-in` (RFC 8252), and the frame trades the code and N for its cookie. That is a separate
+`kc_ide_session`, `SameSite=None; Secure; Partitioned`, because a Lax cookie never reaches a cross-site frame. Other sites get nothing
+from it: it is keyed to the IDE's top-level page, the API wants `X-Kvist-Client`, and the WebSocket checks Origin. Only `/m` may be framed,
+and only by `vscode-webview:`, `vscode-file:` and `file:` (the JCEF page); the rest of the site stays `frame-ancestors 'none'`.
+The cloud's address is `kvist.cloudUrl` in VS Code and `-Dkvist.cloud.url` / `KVIST_CLOUD_URL` in JetBrains; `https://cloud.kvist.site` by default.
+
 ## Tests
 
 ```bash
