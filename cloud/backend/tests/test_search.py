@@ -95,6 +95,22 @@ def test_the_week_quota_holds_even_when_each_day_is_under_its_own(client_factory
     assert "190" in refused.json()["error"]["message"]
 
 
+def test_the_servers_daily_cap_holds_for_all_accounts_together(client_factory):
+    client = client_factory(_exa([]), EXA_API_KEY=EXA_KEY, SEARCH_DAILY_CAP="3")
+    user_id, token = _account(client)
+    with session_scope(client.app.state.session_factory) as db:
+        other = make_user(db, login="other", github_id=2).id
+    _used(client, other, [timedelta(hours=23), timedelta(hours=1)])
+    _used(client, user_id, [timedelta(hours=30)])
+
+    assert _search(client, token).status_code == 200
+    refused = _search(client, token)
+
+    assert refused.status_code == 429
+    assert "all accounts together" in refused.json()["error"]["message"]
+    assert refused.json()["error"]["frees_at"].startswith((utcnow() + timedelta(hours=1)).strftime("%Y-%m-%dT%H"))
+
+
 def test_a_failed_search_does_not_count(client_factory):
     client = client_factory(lambda request: httpx.Response(500), EXA_API_KEY=EXA_KEY)
     user_id, token = _account(client)

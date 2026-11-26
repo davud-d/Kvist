@@ -94,9 +94,33 @@ def _quota_error(frees_at: datetime, limit: int, window: str) -> ApiError:
     )
 
 
-def reserve(db: Session, user_id: int, now: datetime) -> SearchUse:
+def _server_cap_error(db: Session, now: datetime, cap: int) -> ApiError | None:
+    """Everyone's searches in the last 24 hours against the server's cap (what the shared Exa balance can bear)."""
+    # Counted without a server-wide lock: parallel searches of different accounts may pass the cap by a few,
+    # which costs cents, while one lock would make every search on the server wait in a single line.
+    latest = list(db.scalars(
+        select(SearchUse.created_at).where(SearchUse.created_at > now - DAY)
+        .order_by(SearchUse.created_at.desc()).limit(cap)
+    ))
+    if len(latest) < cap:
+        return None
+    frees_at = latest[-1] + DAY
+    return ApiError(
+        429,
+        "search_quota",
+        f"The shared web search of Kvist Cloud has reached its daily limit for all accounts together; it frees up "
+        f"at {frees_at.strftime('%Y-%m-%d %H:%M')} UTC. A search key of your own (Exa, Tavily, Brave, ...) in "
+        f"Kvist's /web-search-provider has no such limit.",
+        frees_at=frees_at.isoformat(),
+    )
+
+
+def reserve(db: Session, user_id: int, now: datetime, server_cap: int) -> SearchUse:
     """Count one search against the account, or refuse with the moment the next one becomes possible."""
     lock_account(db, user_id)
+    refused = _server_cap_error(db, now, server_cap)
+    if refused is not None:
+        raise refused
     week = _used_since(db, user_id, now - WEEK)
     if len(week) >= PER_WEEK:
         raise _quota_error(week[-PER_WEEK] + WEEK, PER_WEEK, "week")
@@ -180,7 +204,7 @@ async def search(body: SearchRequest, request: Request) -> dict:
         user_id = _user_for_token(db, settings, token)
         if user_id is None:
             raise ApiError(403, "forbidden", "Not allowed.")
-        use_id = reserve(db, user_id, now).id
+        use_id = reserve(db, user_id, now, settings.search_daily_cap).id
     try:
         results = await _ask_exa(app, _exa_payload(body, now))
     except ApiError:

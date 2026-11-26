@@ -110,6 +110,8 @@ class Settings:
     admin_logins: frozenset[str] = frozenset()
     # The shared Exa key behind Kvist's web search on customers' machines (search.py). Empty: no shared search.
     exa_api_key: str = field(default="", repr=False)
+    # All accounts together in any 24 hours: what the Exa balance can bear, raised when it is topped up.
+    search_daily_cap: int = 2500
     # Dev only: lets a model endpoint or a repository live on this computer.
     allow_local_endpoints: bool = False
     frontend_dist: Path = CLOUD_ROOT / "frontend" / "dist"
@@ -386,6 +388,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         chatgpt_check_seconds=_number(env, "CHATGPT_CHECK_SECONDS", 86400.0),
         admin_logins=admins,
         exa_api_key=env.get("EXA_API_KEY", "").strip(),
+        search_daily_cap=int(_number(env, "SEARCH_DAILY_CAP", 2500)),
         allow_local_endpoints=allow_local,
         frontend_dist=Path(env.get("FRONTEND_DIST", "") or CLOUD_ROOT / "frontend" / "dist"),
     )
