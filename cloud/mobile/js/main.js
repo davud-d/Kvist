@@ -8,6 +8,7 @@ import { lang, t } from "./i18n.js";
 import * as native from "./native.js";
 import { closeTop, toast } from "./sheet.js";
 import { startShell } from "./shell.js";
+import { startStars } from "./stars.js";
 import { watchViewport } from "./viewport.js";
 
 const screen = document.getElementById("screen");
@@ -130,4 +131,5 @@ window.kvistBack = () => {
 };
 
 watchViewport();
+startStars();
 boot();

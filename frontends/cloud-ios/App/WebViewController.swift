@@ -200,6 +200,19 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         return nil
     }
 
+    /// The starry background turns with the phone; the cloud's own page gets the motion sensors without a second
+    /// question (the orientation says nothing about the person), anything else is refused.
+    @available(iOS 15.0, *)
+    func webView(
+        _ webView: WKWebView,
+        requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        let page = Origins.origin(scheme: origin.protocol, host: origin.host, port: origin.port)
+        decisionHandler(page != nil && page == Origins.originOf(cloudURL) ? .grant : .deny)
+    }
+
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         showOffline(error)
     }

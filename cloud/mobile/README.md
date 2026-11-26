@@ -7,6 +7,11 @@ projects, a model key) rather than for a generic assistant. Black and grey, one 
 for states (working, done, failed). Plain files, no bundler: `cloud/frontend/build.mjs` copies this folder to `dist/mobile` and
 the server serves it at `/m`, `/m/s/<session id>` and `/m/p/<project id>` (one page for all of them).
 
+Behind everything is the night sky ([`js/stars.js`](js/stars.js)): stars all around the phone in 3D, drawn at the screen's own
+pixel density. The phone is a window into it: turning the phone looks around the sky (the gyroscope; iOS asks once, on the
+first touch, and the iOS app grants it to the cloud's own page), and the near stars drift slowly past the far ones. Without a
+gyroscope the view turns by itself, very slowly; under reduced motion the sky stands still; a hidden page draws nothing.
+
 It runs in any phone browser (and can be added to the home screen), and inside the Android and iOS apps
 ([`frontends/cloud-android`](../../frontends/cloud-android), [`frontends/cloud-ios`](../../frontends/cloud-ios)), which add the
 operating system's own payment sheets.

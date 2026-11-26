@@ -1,5 +1,6 @@
 /* Kvist Cloud on a phone. Black and grey, one typeface, no gradients, no glow, no decoration: the only things
-   that carry colour are states (working, done, failed), and they are small. */
+   that carry colour are states (working, done, failed), and they are small. Behind it all is the night sky
+   (js/stars.js), which the glass of the bar and the composer blurs. */
 
 :root {
   color-scheme: dark;
@@ -40,7 +41,10 @@ html, body {
   touch-action: manipulation;
 }
 
+#stars { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
 #app {
+  position: relative;
+  z-index: 1;
   height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
