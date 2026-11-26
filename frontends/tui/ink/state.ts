@@ -642,8 +642,9 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
     case "message":
       return push(state, (id) => ({ id, kind: "answer", text: event.markdown, done: true }))
     case "final": {
-      // A streamed reply and its `final` carry the same text: show it once.
-      if (lastAnswerText(state) === event.message.trim()) return state
+      // A streamed reply ends with its `final` (the words before the call come first): show it once.
+      const message = event.message.trim()
+      if (message && lastAnswerText(state)?.endsWith(message)) return state
       return push(state, (id) => ({ id, kind: "answer", text: event.message, done: true }))
     }
     case "usage": {

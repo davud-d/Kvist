@@ -198,6 +198,18 @@ def test_a_batch_says_its_words_once_on_its_first_step():
     assert [event.user_message for event in ch.drain()] == ["Читаю оба файла", "", "Теперь третий"]
 
 
+def test_a_step_does_not_repeat_the_opening_its_answer_stream_began_with():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    with ui.live_markdown() as update:
+        update("тут нет задачи.\n\nчем займёмся?")
+    ch.drain()
+
+    ui.print_step_header(1, make_command("final_answer", {"message": "чем займёмся?"}, text="тут нет задачи."))
+
+    assert ch.drain()[0].user_message == ""
+
+
 def test_live_markdown_stream_sequence():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)

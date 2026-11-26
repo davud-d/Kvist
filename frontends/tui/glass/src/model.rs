@@ -460,14 +460,15 @@ impl Session {
     }
 
     /// The agent's words; a final answer that repeats the reply just streamed
-    /// is not shown twice.
+    /// is not shown twice. That reply is the words before the call plus the
+    /// answer, so the answer is its end.
     fn say(&mut self, text: String) {
         self.thinking_since = None;
         if text.trim().is_empty() {
             return;
         }
         let repeat = self.items.iter().rev().find_map(|item| match item {
-            Item::Agent { text: last, .. } => Some(last.trim() == text.trim()),
+            Item::Agent { text: last, .. } => Some(last.trim().ends_with(text.trim())),
             Item::User(_) => Some(false),
             _ => None,
         });
@@ -718,6 +719,17 @@ mod tests {
         assert_eq!(session.items.len(), 2);
         session.apply(CoreEvent::Say("Ещё одно.".into()), now);
         assert_eq!(session.items.len(), 3);
+    }
+
+    #[test]
+    fn a_final_answer_at_the_end_of_the_stream_is_shown_once() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        session.submit("q".into(), now);
+        let streamed = "привет, тут нет задачи.\n\nчем займёмся?";
+        session.apply(CoreEvent::Stream { id: "s".into(), text: streamed.into(), append: false, done: true }, now);
+        session.apply(CoreEvent::Say("чем займёмся?".into()), now);
+        assert_eq!(session.items.len(), 2);
     }
 
     #[test]

@@ -211,7 +211,10 @@ class EventStreamUI:
         if not command.batch_id or command.batch_id != self._said_batch:
             self._said_batch = command.batch_id
             text = command.text
-            if redact_text(text).strip() == self._streamed_words:
+            # The stream of a final_answer response is the opening words plus the answer,
+            # so the step's own words are its beginning, not all of it.
+            said = redact_text(text).strip()
+            if said and self._streamed_words.startswith(said):
                 text = ""
         self._channel.emit(
             StepEvent(

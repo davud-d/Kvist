@@ -475,6 +475,8 @@ ELIDED_OUTPUT = "[output removed to fit the context window; run the action again
 # router stayed silent on every first turn); beside the task it held. The
 # grammatical gender rule rides along for the same reason: in the constitution
 # alone, Claude through a gateway answered "перенёс" after the interface said "она".
+# The lowercase voice of styles/common.txt rides along too: Haiku and DeepSeek
+# wrote ordinary capitals with it only in the system prompt.
 OPENING_NOTE = (
     "\n\nOPENING: the person has just handed you this task and sees nothing until you write. "
     "Your first response opens with your line to them, in the language of the person's request and in the voice "
@@ -484,6 +486,10 @@ OPENING_NOTE = (
     "words you have not used before, then the work, built in full. A request that is only ordinary gets no joke."
     "\nGENDER: in languages that mark the speaker's gender you are feminine in every message, "
     "including the last one after the tools finish."
+    "\nCASE: what you say to the person is in lowercase in every message, the last one included, the first letter "
+    "of a sentence and names too, because capitals are a louder register than this voice. Code, paths, commands, "
+    "identifiers and quoted text keep their exact case, since changing it would make them wrong. If the person or "
+    "the workspace instructions ask for ordinary capitalization, that wins."
 )
 _RUSSIAN_GENDER_EXAMPLE = " In Russian: \"я прочитала\", \"перенесла\", never \"прочитал\"."
 
