@@ -185,6 +185,23 @@ Not verified against Stripe itself (no keys here; tests use `backend/tests/strip
 at `POST /v1/tokens` with `pk_token` the way its iOS library sends it, and the exact account behaviour of `allow_redirects=never`.
 Run one test-mode payment from a phone before switching anything on.
 
+### Web search on the shared key
+
+Kvist on customers' machines searches the web with the cloud's own Exa key (`EXA_API_KEY`), which never
+leaves the server: a task gets its machine's search token and asks `POST /gateway/search`
+(`backend/kvist_cloud/search.py`). Each account has 25 free searches in any 24 hours and 190 in any 7
+days; past that it spends bought searches (a pack of 250 for $4.50, `plans.SEARCH_PACK_*`; they do not
+expire). All accounts together stop at `SEARCH_DAILY_CAP` (2500 in any 24 hours), which no purchase lifts:
+it is what the Exa balance can bear. When the free searches run out, the agent is told where to buy more
+and the bell shows a notice with a button to the dashboard's search card. A customer who set a search key
+of their own in Kvist (`/web-search-provider`) searches with it directly and spends nothing here.
+
+The pack is sold where its price is set: `PLATEGA_PRICE_SEARCHES` and `FREEDOMPAY_PRICE_SEARCHES` (in their
+currencies, optional: a server without them simply does not offer the pack there), `WALLET_PRICE_SEARCHES`
+(defaults to $4.50). The dev stub sells it with `POST /api/billing/dev/buy-searches`. An admin gives or takes
+back bought searches on a person's page in `/admin` (`POST /api/admin/users/{id}/searches`); the person gets
+a notice when given some.
+
 ### Remote: the customer's own machine
 
 A fourth plan for people who already have a computer: **$48 a year, paid once, no monthly charges**

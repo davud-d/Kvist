@@ -1325,6 +1325,26 @@ def test_cloud_search_sends_the_token_and_explains_a_used_up_quota(tmp_path, mon
         executor._search_kvist_cloud("query", top_k=3, freshness="any")
 
 
+def test_a_refused_cloud_search_passes_the_servers_words_to_the_agent(tmp_path, monkeypatch):
+    import io
+    import urllib.error
+
+    _cloud_search_env(monkeypatch)
+    executor = _executor_with_search_keys(tmp_path, monkeypatch)
+    answer = {"error": {"code": "search_quota", "message": "Buy 250 more searches at https://cloud.example/dashboard"}}
+
+    def refused(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", {},
+                                     io.BytesIO(json.dumps(answer).encode()))
+
+    class _Opener:
+        open = staticmethod(refused)
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *handlers: _Opener())
+    with pytest.raises(ExecutorError, match="https://cloud.example/dashboard"):
+        executor._search_kvist_cloud("query", top_k=3, freshness="any")
+
+
 def test_gemini_search_maps_grounding_chunks_to_results(tmp_path, monkeypatch):
     executor = _executor_with_search_keys(tmp_path, monkeypatch, gemini_search_api_key="g-key")
     sent = {}

@@ -15,7 +15,7 @@ from pydantic import Field, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from . import billing, ledger, machines, plans, tasks
+from . import billing, ledger, machines, plans, search, tasks
 from .auth import admin_user, ban_view, is_admin, is_owner
 from .db import get_db, lock_account, session_scope, utcnow
 from .errors import ApiError, not_found
@@ -38,6 +38,12 @@ class PlanIn(InputModel):
 class HoursIn(InputModel):
     # Positive gives hours, negative takes them back.
     minutes: int = Field(ge=-100_000, le=100_000)
+    note: str = Field(min_length=3, max_length=300)
+
+
+class SearchesIn(InputModel):
+    # Positive gives bought web searches (search.py), negative takes them back.
+    searches: int = Field(ge=-100_000, le=100_000)
     note: str = Field(min_length=3, max_length=300)
 
 
@@ -90,6 +96,7 @@ def _user_row(db: Session, app: FastAPI, user: User) -> dict[str, object]:
         "plan_ends_at": subscription.current_period_end.isoformat() if subscription is not None else None,
         "own_machine": bool(plan is not None and plan.own_machine),
         "balance_minutes": ledger.minutes(max(ledger.balance_seconds(db, user.id), 0)) if subscription else 0,
+        "search_credits": user.search_credits,
         "machine": _machine_row(db, machine) if machine is not None else None,
         "is_admin": is_admin(settings, user),
         "is_owner": is_owner(settings, user),
@@ -172,6 +179,23 @@ def give_hours(user_id: int, payload: HoursIn, request: Request, background: Bac
     if payload.minutes > 0:
         background.add_task(machines.ensure_machine_for, request.app, user.id)
     return {"ok": True, "balance_minutes": ledger.minutes(max(ledger.balance_seconds(db, user.id), 0))}
+
+
+@router.post("/api/admin/users/{user_id}/searches")
+def give_searches(user_id: int, payload: SearchesIn, admin: User = Depends(admin_user),
+                  db: Session = Depends(get_db)) -> dict[str, object]:
+    if payload.searches == 0:
+        raise ApiError(400, "bad_request", "Searches cannot be zero. / Количество не может быть нулём.")
+    user = _target(db, user_id)
+    note = payload.note.strip()
+    if payload.searches > 0:
+        search.grant(db, user.id, payload.searches)
+        notify(db, user.id, "searches_granted", count=payload.searches, note=note)
+    else:
+        search.take_back(db, user.id, -payload.searches)
+    _record(db, admin, user, "searches", searches=payload.searches, note=note)
+    db.commit()
+    return {"ok": True, "search_credits": db.get(User, user.id).search_credits}
 
 
 @router.post("/api/admin/users/{user_id}/admin")

@@ -348,6 +348,13 @@
     "buyHours": "Buy {h} h for ${p}",
     "buyHoursCharge": "Buy {h} h for {p}",
     "bought": "Added {h} h.",
+    "searchTitle": "Web search",
+    "searchFree": "Free searches left: {day} of {perDay} today, {week} of {perWeek} this week",
+    "searchBought": "Bought searches left: {n}. They do not expire.",
+    "searchOut": "Free searches are used up. Buy a pack so Kvist can keep searching.",
+    "buySearches": "Buy {n} searches for {p}",
+    "boughtSearches": "Added {n} searches.",
+    "searchOwnKey": "With a search key of your own (/web-search-provider in Kvist) there is no limit.",
     "machinesTitle": "Machine",
     "noMachine": "No machine yet. It is created when you start a task.",
     "export": "Export archive",
@@ -391,6 +398,7 @@
   },
   "notify": {
     "title": "Notifications",
+    "buySearches": "Buy searches",
     "none": "Nothing new.",
     "label": "Notifications, {n} unread",
     "note": "Note: {note}",
@@ -402,7 +410,9 @@
       "machine_resumed": "Your machine is available again. Press Continue on the paused tasks.",
       "admin_granted": "You are now an administrator.",
       "admin_revoked": "Your administrator rights were taken away.",
-      "unbanned": "Your account is unblocked."
+      "unbanned": "Your account is unblocked.",
+      "searches_granted": "An administrator added {count} web searches to your account.",
+      "search_quota": "Kvist's free web searches ran out. They come back {date}, or buy a pack."
     }
   },
   "ban": {
@@ -434,6 +444,9 @@
     "thirtyDays": "30 days",
     "thisPeriod": "this period",
     "pack": "Hour pack",
+    "searchPack": "Search pack",
+    "searches": "Web searches",
+    "untilUsed": "until used",
     "ruIp": "To pay from Russia, use a Russian IP address (or turn your VPN off): payments through Russian banks often fail otherwise.",
     "go": "Go to payment",
     "note": "You pay on Platega's page. Access appears as soon as the payment is confirmed.",

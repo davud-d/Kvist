@@ -47,7 +47,7 @@ OK_ANSWER = '<?xml version="1.0" encoding="utf-8"?><response><pg_status>ok</pg_s
 
 
 class CheckoutIn(InputModel):
-    plan: Literal["start", "pro", "max", "hours"]
+    plan: Literal["start", "pro", "max", "hours", "searches"]
 
 
 def _unavailable() -> ApiError:
@@ -155,6 +155,8 @@ def _reusable(db: Session, user: User, plan: str) -> BillingCheckout | None:
 async def checkout(payload: CheckoutIn, request: Request, user: User = Depends(current_user),
                    db: Session = Depends(get_db)) -> dict[str, str]:
     fp = _settings(request)
+    if payload.plan not in fp.prices:
+        raise ApiError(503, "billing_unavailable", "Price is not configured. / Цена не настроена.")
     lock_account(db, user.id)
     db.refresh(user)
     billing._check_purchase_allowed(db, user, payload.plan)

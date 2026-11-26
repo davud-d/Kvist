@@ -97,6 +97,17 @@ function hoursBlock(user, refresh) {
   });
 }
 
+function searchesBlock(user, refresh) {
+  const searches = h("input.input", { type: "number", min: -100000, max: 100000, style: "max-width:9em" });
+  const note = h("input.input", { type: "text", maxLength: 300 });
+  return actionBlock({
+    title: t("admin.searches"), hint: t("admin.searchesHint", { n: user.search_credits }), button: t("admin.apply"),
+    refresh,
+    controls: [field(t("admin.searchesCount"), searches), field(t("admin.hoursNote"), note)],
+    run: () => post(`/api/admin/users/${user.id}/searches`, { searches: Number(searches.value), note: note.value }),
+  });
+}
+
 function rightsBlock(user, me, refresh) {
   if (user.is_owner) return h("p.small.dim", {}, t("admin.isOwner"));
   if (!me.is_owner) return h("p.small.dim", {}, t(user.is_admin ? "admin.isAdmin" : "admin.ownersOnly"));
@@ -195,6 +206,7 @@ function peopleSection(me) {
             userFlags(user) ? ` · ${userFlags(user)}` : ""),
           planBlock(user, user.plans, refresh),
           hoursBlock(user, refresh),
+          searchesBlock(user, refresh),
           rightsBlock(user, me, refresh),
           machineBlock(user, refresh),
           banBlock(user, refresh),

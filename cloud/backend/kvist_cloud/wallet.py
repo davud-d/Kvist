@@ -54,7 +54,7 @@ WalletName = Literal["google_pay", "apple_pay"]
 
 
 class WalletCheckoutIn(InputModel):
-    plan: Literal["start", "pro", "max", "hours"]
+    plan: Literal["start", "pro", "max", "hours", "searches"]
     wallet: WalletName
 
 
@@ -86,6 +86,8 @@ def cents(amount: str | Decimal) -> int:
 
 
 def label_of(kind: str) -> str:
+    if kind == "searches":
+        return f"{plans.SEARCH_PACK_SEARCHES} web searches"
     if kind == "hours":
         return f"{plans.HOUR_PACK_HOURS} hours"
     return f"{kind.capitalize()}, {plans.get_plan(kind).period_days} days"

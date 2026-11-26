@@ -87,6 +87,40 @@ function hoursCard(view, config, refresh, announce, forecast) {
     config.enabled || config.dev ? h("p", {}, buy) : manualAccessBox());
 }
 
+// The shared web search: free searches left, bought ones, and the pack. Hidden when the server has no shared key.
+function searchCard(usage, config, refresh, announce) {
+  if (!usage.enabled) return null;
+  const out = (usage.day === 0 || usage.week === 0) && usage.bought === 0;
+  // Billing on, but the pack has no price for these payments yet: no button that cannot work.
+  const sold = config.dev || (config.enabled && config.charge.prices.searches);
+  const buy = h("button.btn", { type: "button", text: t("dashboard.buySearches", { n: usage.pack.searches,
+    p: chargeLabel(config, "searches", usage.pack.price_usd) }) });
+  buy.addEventListener("click", async () => {
+    buy.disabled = true;
+    try {
+      if (config.enabled) {
+        choosePayment(config, "searches");
+        buy.disabled = false;
+      } else {
+        await api("/api/billing/dev/buy-searches", { method: "POST" });
+        announce.textContent = t("dashboard.boughtSearches", { n: usage.pack.searches });
+        refresh();
+      }
+    } catch (error) {
+      buy.disabled = false;
+      buy.after(errorBox(error));
+    }
+  });
+  return h("section.card", { id: "searches", "aria-labelledby": "searches-title" },
+    h("h2.h3", { id: "searches-title" }, t("dashboard.searchTitle")),
+    out ? h("p.banner.warn", { role: "status" }, t("dashboard.searchOut")) : null,
+    h("p", {}, t("dashboard.searchFree", { day: usage.day, perDay: usage.per_day, week: usage.week,
+      perWeek: usage.per_week })),
+    usage.bought > 0 ? h("p.small", {}, t("dashboard.searchBought", { n: usage.bought })) : null,
+    sold ? h("p", {}, buy) : null,
+    h("p.small.dim", {}, t("dashboard.searchOwnKey")));
+}
+
 // The Remote plan: the machine is the person's own, so the page shows how to connect it, not hours.
 function connectDialog(config) {
   const text = JSON.stringify(config, null, 2);
@@ -192,8 +226,9 @@ function feedCard(feed, refresh) {
 export async function dashboardScreen(root, { navigate }) {
   const announce = liveRegion();
   const load = async () => {
-    const [ledgerView, config, machines, tasks, key] = await Promise.all([
+    const [ledgerView, config, machines, tasks, key, searches] = await Promise.all([
       api("/api/ledger"), api("/api/billing/config"), api("/api/machines"), api("/api/tasks"), api("/api/model-key"),
+      api("/api/search/usage"),
     ]);
     const view = ledgerView.subscription;
     if (view.status === "none") {
@@ -222,6 +257,7 @@ export async function dashboardScreen(root, { navigate }) {
             h("p", {}, h("a.inline", { href: "/settings", "data-link": "" }, t("dashboard.toSettings"))))
         : null,
       view.own_machine ? remoteCard(view, machines, reload) : hoursCard(view, config, reload, announce, forecast),
+      searchCard(searches, config, reload, announce),
       machineCard(machines, view.own_machine, reload),
       tasksCard(tasks, navigate),
       feedCard(ledgerView.feed, reload),

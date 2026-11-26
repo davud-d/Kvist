@@ -29,7 +29,7 @@ from pydantic import StrictInt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import ledger, plans
+from . import ledger, plans, search
 from .auth import app_http_client, current_user
 from .config import Settings
 from .db import get_db, lock_account, session_scope, utcnow
@@ -74,7 +74,7 @@ FREEDOMPAY_METHOD = 101
 
 
 class CheckoutIn(InputModel):
-    plan: Literal["trial", "start", "pro", "max", "remote", "hours"] = "trial"
+    plan: Literal["trial", "start", "pro", "max", "remote", "hours", "searches"] = "trial"
     # One of the server's own methods (/api/billing/config); left out, the first one is used.
     method: StrictInt | None = None
 
@@ -258,7 +258,13 @@ def _grant_hours(db: Session, checkout: BillingCheckout) -> bool:
 
 def fulfill(db: Session, checkout: BillingCheckout, now: datetime) -> None:
     """Platega confirmed exactly what we asked for: apply it, once."""
-    applied = _grant_hours(db, checkout) if checkout.kind == "hours" else _grant_plan(db, checkout, now)
+    if checkout.kind == "searches":
+        search.grant(db, checkout.user_id, plans.SEARCH_PACK_SEARCHES)
+        applied = True
+    elif checkout.kind == "hours":
+        applied = _grant_hours(db, checkout)
+    else:
+        applied = _grant_plan(db, checkout, now)
     if not applied:
         # The money arrived but the purchase no longer fits (the plan ended, or one was bought twice).
         checkout.status = CheckoutStatus.NEEDS_REVIEW
@@ -270,6 +276,8 @@ def fulfill(db: Session, checkout: BillingCheckout, now: datetime) -> None:
 
 def revoke(db: Session, checkout: BillingCheckout) -> None:
     """A paid purchase was cancelled or charged back: take back what it gave."""
+    if checkout.kind == "searches":
+        search.take_back(db, checkout.user_id, plans.SEARCH_PACK_SEARCHES)
     if checkout.ledger_entry_id is not None:
         original = db.get(LedgerEntry, checkout.ledger_entry_id)
         db.add(LedgerEntry(user_id=original.user_id, period_start=original.period_start, kind=LedgerKind.REVERSAL,
@@ -454,6 +462,7 @@ def billing_config(request: Request) -> dict[str, object]:
         else None,
         "plans": plans.public_catalog(),
         "hour_pack": {"hours": plans.HOUR_PACK_HOURS, "price_usd": plans.HOUR_PACK_PRICE_USD},
+        "search_pack": {"searches": plans.SEARCH_PACK_SEARCHES, "price_usd": plans.SEARCH_PACK_PRICE_USD},
         "remote": plans.remote_offer(),
         "freedompay": freedompay_offer(settings),
     }
@@ -491,7 +500,11 @@ async def sync_my_payments(request: Request, user: User = Depends(current_user),
 
 def _check_purchase_allowed(db: Session, user: User, plan: str) -> None:
     now = utcnow()
-    if plan == "hours":
+    if plan == "searches":
+        # Searches are made by a task's machine, and there is none without a plan.
+        if ledger.current_subscription(db, user.id) is None:
+            raise ApiError(402, "no_subscription", "An active plan is required. / Нужен активный тариф.")
+    elif plan == "hours":
         current = ledger.current_subscription(db, user.id)
         if current is None:
             raise ApiError(402, "no_subscription", "An active plan is required. / Нужен активный тариф.")
@@ -503,9 +516,13 @@ def _check_purchase_allowed(db: Session, user: User, plan: str) -> None:
 
 
 def _transaction_body(settings: Settings, user: User, checkout: BillingCheckout) -> dict[str, object]:
-    page = "/dashboard" if checkout.kind == "hours" else "/start"
-    label = ("10 hour pack" if checkout.kind == "hours"
-             else f"{checkout.kind.capitalize()} plan, {plans.get_plan(checkout.kind).period_days} days")
+    page = "/dashboard" if checkout.kind in ("hours", "searches") else "/start"
+    if checkout.kind == "searches":
+        label = f"{plans.SEARCH_PACK_SEARCHES} web searches"
+    elif checkout.kind == "hours":
+        label = "10 hour pack"
+    else:
+        label = f"{checkout.kind.capitalize()} plan, {plans.get_plan(checkout.kind).period_days} days"
     return {
         "paymentMethod": checkout.payment_method,
         "paymentDetails": {"amount": float(Decimal(checkout.amount)), "currency": checkout.currency},
@@ -635,6 +652,15 @@ def dev_buy_hours(request: Request, user: User = Depends(current_user), db: Sess
         raise ApiError(402, "no_subscription", "Start the trial first. / Сначала начни пробный период.") from error
     db.commit()
     return subscription_view(db, user)
+
+
+@router.post("/api/billing/dev/buy-searches")
+def dev_buy_searches(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    _dev_only(request)
+    _check_purchase_allowed(db, user, "searches")
+    search.grant(db, user.id, plans.SEARCH_PACK_SEARCHES)
+    db.commit()
+    return {"bought": db.get(User, user.id).search_credits}
 
 
 @router.post("/api/billing/cancel")

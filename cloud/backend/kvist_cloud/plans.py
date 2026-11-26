@@ -48,6 +48,9 @@ PAID_PLANS = (START, PRO, MAX)
 # One-off top-up sold as "buy more hours": one pack, one price, current period only.
 HOUR_PACK_HOURS = 10
 HOUR_PACK_PRICE_USD = 5
+# Web searches on the shared key past the free quota (search.py); they do not expire.
+SEARCH_PACK_SEARCHES = 250
+SEARCH_PACK_PRICE_USD = 4.5
 
 
 def get_plan(plan_id: str) -> Plan:

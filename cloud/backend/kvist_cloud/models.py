@@ -112,6 +112,8 @@ class User(Base):
     terms_accepted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # The person's own IANA time zone, as their browser or phone reports it (auth.remember_timezone); "" = not yet seen.
     timezone: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    # Bought web searches left (search.py), spent only once the free quota is used up.
+    search_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     # Navigation only, not a schema change: the link is machines.user_id.
     machines: Mapped[list[Machine]] = relationship(back_populates="user")
@@ -384,6 +386,8 @@ class SearchUse(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    # Paid with a bought search: it does not count against the free quota.
+    paid: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 @event.listens_for(LedgerEntry, "before_update")

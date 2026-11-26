@@ -28,6 +28,8 @@ DEFAULT_WHEELS_DIR = Path("/opt/kvist-cloud/wheels")
 PLATEGA_PRICE_KEYS = ("start", "pro", "max", "hours", "remote")
 # What the phone's own wallets (Google Pay, Apple Pay) can buy, and the currencies whose amounts have two decimals.
 WALLET_KINDS = ("start", "pro", "max", "hours")
+# The search pack: sold where its price is set, so a server configured before it existed still starts.
+OPTIONAL_PRICE_KEY = "searches"
 WALLET_CURRENCIES = frozenset({"USD", "EUR", "GBP"})
 
 
@@ -212,7 +214,7 @@ def _platega(env: Mapping[str, str], enabled: bool) -> tuple[str, str, str, str,
     if not base_url.startswith("https://"):
         raise ConfigError("PLATEGA_BASE_URL must be https")
     prices: dict[str, Decimal] = {}
-    for key in PLATEGA_PRICE_KEYS:
+    for key in (*PLATEGA_PRICE_KEYS, OPTIONAL_PRICE_KEY):
         raw = env.get(f"PLATEGA_PRICE_{key.upper()}", "").strip()
         if not raw:
             continue
@@ -257,9 +259,10 @@ def _wallet(env: Mapping[str, str]) -> WalletSettings | None:
         raise ConfigError(f"WALLET_CURRENCY must be one of {sorted(WALLET_CURRENCIES)}")
     from . import plans
 
+    packs = {"hours": plans.HOUR_PACK_PRICE_USD, "searches": plans.SEARCH_PACK_PRICE_USD}
     prices: dict[str, Decimal] = {}
-    for key in WALLET_KINDS:
-        default = plans.HOUR_PACK_PRICE_USD if key == "hours" else plans.get_plan(key).price_usd
+    for key in (*WALLET_KINDS, OPTIONAL_PRICE_KEY):
+        default = packs[key] if key in packs else plans.get_plan(key).price_usd
         raw = env.get(f"WALLET_PRICE_{key.upper()}", "").strip() or str(default)
         try:
             amount = Decimal(raw)
@@ -301,8 +304,10 @@ def _freedompay(env: Mapping[str, str]) -> FreedomPaySettings | None:
     if not re.fullmatch(r"[A-Z]{3}", currency):
         raise ConfigError("FREEDOMPAY_CURRENCY must be an ISO 4217 code")
     prices: dict[str, Decimal] = {}
-    for key in WALLET_KINDS:
+    for key in (*WALLET_KINDS, OPTIONAL_PRICE_KEY):
         raw = env.get(f"FREEDOMPAY_PRICE_{key.upper()}", "").strip()
+        if not raw and key == OPTIONAL_PRICE_KEY:
+            continue
         if not raw:
             raise ConfigError(f"FREEDOMPAY_ENABLED needs FREEDOMPAY_PRICE_{key.upper()}")
         try:

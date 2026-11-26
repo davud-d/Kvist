@@ -138,6 +138,7 @@ FIELDS = [
     *[("POST", "/api/admin/disputes/1/refund", {"minutes": 1, "note": "refund"}, k) for k in ("minutes", "note")],
     *[("POST", "/api/admin/users/1/plan", {"plan": "pro"}, k) for k in ("plan", "days", "note")],
     *[("POST", "/api/admin/users/1/hours", {"minutes": 5, "note": "gift"}, k) for k in ("minutes", "note")],
+    *[("POST", "/api/admin/users/1/searches", {"searches": 5, "note": "gift"}, k) for k in ("searches", "note")],
     ("POST", "/api/admin/users/1/admin", {"value": True}, "value"),
     *[("POST", "/api/admin/users/1/ban", {"days": 1, "reason": "abuse"}, k) for k in ("permanent", "days", "reason")],
     *[("POST", "/api/billing/checkout", {"plan": "trial"}, k) for k in ("plan", "method")],

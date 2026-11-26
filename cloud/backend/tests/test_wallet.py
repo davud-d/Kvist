@@ -20,10 +20,10 @@ from stripe_fake import (
     wallet_client,
 )
 
-from kvist_cloud import billing, ledger
+from kvist_cloud import billing, ledger, plans
 from kvist_cloud.config import ConfigError, load_settings
 from kvist_cloud.db import session_scope
-from kvist_cloud.models import BillingCheckout, CheckoutStatus, Subscription
+from kvist_cloud.models import BillingCheckout, CheckoutStatus, Subscription, User
 
 
 def rows(client) -> list[BillingCheckout]:
@@ -149,6 +149,16 @@ def test_the_hour_pack_adds_hours_to_a_running_plan(client_factory):
     assert pay(client, open_checkout(client, "start")).status_code == 200
     assert pay(client, open_checkout(client, "hours")).status_code == 200
     assert hours(client) == 60
+
+
+def test_the_search_pack_is_sold_at_its_default_price(client_factory):
+    client, stripe = wallet_client(client_factory)
+    assert pay(client, open_checkout(client, "start")).status_code == 200
+    checkout = open_checkout(client, "searches")
+    assert (checkout["amount"], checkout["label"]) == ("4.50", f"{plans.SEARCH_PACK_SEARCHES} web searches")
+    assert pay(client, checkout).status_code == 200
+    with session_scope(client.app.state.session_factory) as db:
+        assert db.scalar(select(User)).search_credits == plans.SEARCH_PACK_SEARCHES
 
 
 def test_paying_the_same_checkout_twice_charges_once(client_factory):

@@ -27,6 +27,9 @@
   "hoursHint": "Positive adds hours to this period, negative takes them back. The person sees the reason.",
   "minutes": "Minutes",
   "hoursNote": "Reason",
+  "searches": "Web searches",
+  "searchesHint": "Bought searches: spent after the free 25 a day / 190 a week, they do not expire. Positive gives, negative takes back. Now: {n}.",
+  "searchesCount": "Searches",
   "apply": "Apply",
   "noHoursOwn": "This plan runs on the customer’s own machine: it has no hours.",
   "noHoursNoPlan": "No plan: nothing to add hours to. Give a plan first.",
@@ -67,6 +70,7 @@
   "act": {
     "plan": "Plan given",
     "hours": "Hours changed",
+    "searches": "Searches changed",
     "admin": "Admin rights changed",
     "ban": "Banned",
     "unban": "Ban lifted",

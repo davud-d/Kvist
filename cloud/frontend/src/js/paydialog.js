@@ -29,6 +29,10 @@ function money(amount, currency) {
 
 function summary(config, plan) {
   const charge = config.charge;
+  if (plan === "searches") {
+    return { name: t("pay.searchPack"), searches: config.search_pack.searches, price: charge.prices.searches,
+      period: t("pay.untilUsed") };
+  }
   if (plan === "hours") {
     return { name: t("pay.pack"), hours: config.hour_pack.hours, price: charge.prices.hours, period: t("pay.thisPeriod") };
   }
@@ -37,6 +41,16 @@ function summary(config, plan) {
   }
   const found = config.plans.find((item) => item.id === plan);
   return { name: t(`pricing.planNames.${plan}`), hours: found.hours, price: charge.prices[plan], period: t("pay.thirtyDays") };
+}
+
+function whatRow(bought) {
+  if (bought.searches) {
+    return h("div", {}, h("span", { text: t("pay.searches") }), h("span", { text: String(bought.searches) }));
+  }
+  if (bought.hours === null) {
+    return h("div", {}, h("span", { text: t("pay.machine") }), h("span", { text: t("pay.yours") }));
+  }
+  return h("div", {}, h("span", { text: t("pay.hours") }), h("span", { text: `${bought.hours} ${t("pay.h")}` }));
 }
 
 export function choosePayment(config, plan) {
@@ -80,9 +94,7 @@ export function choosePayment(config, plan) {
           h("p.pay-sum", { text: money(bought.price, currency) }),
           h("div.pay-rows", {},
             h("div", {}, h("span", { text: t("pay.item") }), h("span", { text: bought.name })),
-            bought.hours === null
-              ? h("div", {}, h("span", { text: t("pay.machine") }), h("span", { text: t("pay.yours") }))
-              : h("div", {}, h("span", { text: t("pay.hours") }), h("span", { text: `${bought.hours} ${t("pay.h")}` })),
+            whatRow(bought),
             h("div", {}, h("span", { text: t("pay.valid") }), h("span", { text: bought.period }))),
           go,
           h("p.hint", { text: t("pay.note") }))),

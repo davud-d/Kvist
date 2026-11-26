@@ -10,10 +10,10 @@ from conftest import dev_login, make_user
 from platega_fake import MERCHANT, PLATEGA, PRICES, SECRET, callback, open_checkout, paid_client, pay_and_notify
 from sqlalchemy import select
 
-from kvist_cloud import billing, ledger
+from kvist_cloud import billing, ledger, plans
 from kvist_cloud.config import ConfigError, load_settings, read_env_file
 from kvist_cloud.db import make_session_factory, session_scope, utcnow
-from kvist_cloud.models import BillingCheckout, CheckoutStatus, Outbox, Subscription, SubscriptionStatus
+from kvist_cloud.models import BillingCheckout, CheckoutStatus, Outbox, Subscription, SubscriptionStatus, User
 
 
 def subscriptions(engine) -> list[Subscription]:
@@ -324,6 +324,40 @@ def test_a_charged_back_hour_pack_takes_its_hours_once(client_factory, engine):
     for _ in range(3):
         callback(client, transaction_id, status="CHARGEBACKED")
     assert balance(engine) == 50 * 3600
+
+
+def search_credits(engine) -> int:
+    with session_scope(make_session_factory(engine)) as db:
+        return db.get(User, 1).search_credits
+
+
+def test_a_search_pack_adds_searches_and_a_chargeback_takes_back_what_is_left(client_factory, engine):
+    client, platega = paid_client(client_factory, PLATEGA_PRICE_SEARCHES="450.00")
+    pay_and_notify(client, platega, "start")
+    transaction_id = pay_and_notify(client, platega, "searches")
+    assert search_credits(engine) == plans.SEARCH_PACK_SEARCHES
+    assert checkout_row(engine).amount == "450.00"
+    assert platega.transactions[transaction_id]["request"]["return"].endswith("/dashboard")
+
+    platega.pay(transaction_id, "CHARGEBACKED")
+    callback(client, transaction_id, status="CHARGEBACKED")
+    assert search_credits(engine) == 0
+
+
+def test_a_search_pack_needs_a_plan_and_its_price(client_factory):
+    client, platega = paid_client(client_factory, PLATEGA_PRICE_SEARCHES="450.00")
+    assert client.post("/api/billing/checkout", json={"plan": "searches"}).status_code == 402
+    unpriced, _ = paid_client(client_factory)
+    pay_and_notify(unpriced, _, "start")
+    assert unpriced.post("/api/billing/checkout", json={"plan": "searches"}).status_code == 503
+
+
+def test_dev_stub_sells_search_packs(client_factory, engine):
+    client = client_factory(AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    assert client.post("/api/billing/dev/buy-searches").status_code == 402
+    client.post("/api/billing/dev/skip-checkout")
+    assert client.post("/api/billing/dev/buy-searches").json() == {"bought": plans.SEARCH_PACK_SEARCHES}
 
 
 # -- dev stub, cancel, reminders --------------------------------------------------------------------

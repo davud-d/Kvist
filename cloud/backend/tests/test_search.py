@@ -6,11 +6,12 @@ import json
 from datetime import timedelta
 
 import httpx
-from conftest import make_machine, make_user
+from conftest import dev_login, make_machine, make_user
+from sqlalchemy import select
 
-from kvist_cloud import search
+from kvist_cloud import plans, search
 from kvist_cloud.db import session_scope, utcnow
-from kvist_cloud.models import SearchUse
+from kvist_cloud.models import Notification, SearchUse, User
 
 EXA_KEY = "exa-test-key-1234567890"
 
@@ -50,7 +51,7 @@ def test_a_search_goes_to_exa_with_the_servers_key_and_counts(client_factory):
 
     assert answer.status_code == 200
     assert answer.json()["results"] == [{"title": "T", "url": "https://example.org/", "snippet": "a b"}]
-    assert answer.json()["remaining"] == {"day": search.PER_DAY - 1, "week": search.PER_WEEK - 1}
+    assert answer.json()["remaining"] == {"day": search.PER_DAY - 1, "week": search.PER_WEEK - 1, "bought": 0}
     assert seen[0]["key"] == EXA_KEY and seen[0]["body"]["numResults"] == 3
     assert "startPublishedDate" in seen[0]["body"]
     assert EXA_KEY not in answer.text
@@ -117,7 +118,80 @@ def test_a_failed_search_does_not_count(client_factory):
 
     assert _search(client, token).status_code == 502
     with session_scope(client.app.state.session_factory) as db:
-        assert search.remaining(db, user_id, utcnow()) == {"day": search.PER_DAY, "week": search.PER_WEEK}
+        assert search.usage(db, user_id, utcnow()) == {"day": search.PER_DAY, "week": search.PER_WEEK, "bought": 0}
+
+
+def _credits(client, user_id: int, value: int | None = None) -> int:
+    with session_scope(client.app.state.session_factory) as db:
+        user = db.get(User, user_id)
+        if value is not None:
+            user.search_credits = value
+        return user.search_credits
+
+
+def test_bought_searches_are_spent_only_past_the_free_quota_and_never_eat_it(client_factory):
+    client = client_factory(_exa([]), EXA_API_KEY=EXA_KEY)
+    user_id, token = _account(client)
+    _credits(client, user_id, 2)
+    assert _search(client, token).status_code == 200
+    assert _credits(client, user_id) == 2
+
+    _used(client, user_id, [timedelta(hours=1)] * search.PER_DAY)
+    answer = _search(client, token)
+
+    assert answer.status_code == 200
+    assert answer.json()["remaining"]["bought"] == 1
+    with session_scope(client.app.state.session_factory) as db:
+        # The paid search left the free count where it was.
+        assert search.usage(db, user_id, utcnow())["day"] == 0
+        assert db.scalars(select(SearchUse).where(SearchUse.paid.is_(True))).one()
+
+
+def test_a_used_up_quota_tells_the_agent_where_to_buy_and_rings_the_bell_once_a_day(client_factory):
+    client = client_factory(_exa([]), EXA_API_KEY=EXA_KEY)
+    user_id, token = _account(client)
+    _used(client, user_id, [timedelta(hours=1)] * search.PER_DAY)
+
+    refusals = [_search(client, token) for _ in range(3)]
+
+    error = refusals[0].json()["error"]
+    assert all(answer.status_code == 429 for answer in refusals)
+    assert error["buy_url"] == "http://127.0.0.1:8740/dashboard"
+    assert f"{plans.SEARCH_PACK_SEARCHES} more searches" in error["message"] and "/dashboard" in error["message"]
+    with session_scope(client.app.state.session_factory) as db:
+        notices = list(db.scalars(select(Notification).where(Notification.kind == "search_quota")))
+    assert len(notices) == 1 and notices[0].user_id == user_id
+
+
+def test_a_failed_bought_search_is_given_back(client_factory):
+    client = client_factory(lambda request: httpx.Response(500), EXA_API_KEY=EXA_KEY)
+    user_id, token = _account(client)
+    _credits(client, user_id, 1)
+    _used(client, user_id, [timedelta(hours=1)] * search.PER_DAY)
+
+    assert _search(client, token).status_code == 502
+    assert _credits(client, user_id) == 1
+
+
+def test_bought_searches_do_not_lift_the_servers_cap(client_factory):
+    client = client_factory(_exa([]), EXA_API_KEY=EXA_KEY, SEARCH_DAILY_CAP="2")
+    user_id, token = _account(client)
+    _credits(client, user_id, 10)
+    _used(client, user_id, [timedelta(hours=1)] * 2)
+
+    refused = _search(client, token)
+
+    assert refused.status_code == 429 and "all accounts together" in refused.json()["error"]["message"]
+    assert _credits(client, user_id) == 10
+
+
+def test_the_dashboard_sees_its_searches_and_the_pack(client_factory):
+    client = client_factory(EXA_API_KEY=EXA_KEY, AUTH_DEV_LOGIN="true")
+    dev_login(client)
+    answer = client.get("/api/search/usage").json()
+    assert answer == {"enabled": True, "per_day": search.PER_DAY, "per_week": search.PER_WEEK,
+                      "day": search.PER_DAY, "week": search.PER_WEEK, "bought": 0,
+                      "pack": {"searches": plans.SEARCH_PACK_SEARCHES, "price_usd": plans.SEARCH_PACK_PRICE_USD}}
 
 
 def test_tasks_get_their_machines_token_and_the_servers_url(settings):

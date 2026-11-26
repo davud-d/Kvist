@@ -20,5 +20,6 @@ export function syncPayments() {
 
 export function chargeLabel(config, key, usd) {
   const charge = config.charge;
-  return charge ? `${charge.prices[key]} ${charge.currency}` : `$${usd}`;
+  // $4.50, not $4.5; whole prices stay $5.
+  return charge ? `${charge.prices[key]} ${charge.currency}` : `$${Number.isInteger(usd) ? usd : usd.toFixed(2)}`;
 }

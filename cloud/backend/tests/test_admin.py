@@ -113,6 +113,23 @@ def test_hours_can_be_given_and_taken_but_not_below_zero(admin):
     assert shown == [(30, True, "mistake"), (90, False, "sorry")]
 
 
+def test_searches_can_be_given_and_taken_but_not_below_zero(admin, client_factory):
+    user_id, _ = customer(admin)
+    given = admin.post(f"/api/admin/users/{user_id}/searches", json={"searches": 40, "note": "for the demo"})
+    assert given.status_code == 200 and given.json()["search_credits"] == 40
+    taken = admin.post(f"/api/admin/users/{user_id}/searches", json={"searches": -100, "note": "too many"})
+    assert taken.json()["search_credits"] == 0
+    assert admin.post(f"/api/admin/users/{user_id}/searches",
+                      json={"searches": 0, "note": "nothing"}).status_code in (400, 422)
+    assert admin.get(f"/api/admin/users/{user_id}").json()["search_credits"] == 0
+    assert notices(admin, user_id) == [("searches_granted", {"count": 40, "note": "for the demo"})]
+    with session_scope(admin.app.state.session_factory) as db:
+        assert [a.detail["searches"] for a in db.scalars(select(AdminAction).where(
+            AdminAction.action == "searches").order_by(AdminAction.id))] == [40, -100]
+    plain = as_user(client_factory, admin, user_id)
+    assert plain.post(f"/api/admin/users/{user_id}/searches", json={"searches": 5, "note": "self"}).status_code == 403
+
+
 def test_hours_mean_nothing_on_a_plan_that_runs_on_the_customers_machine(admin):
     user_id, _ = customer(admin, plan="remote", machine=False)
     response = admin.post(f"/api/admin/users/{user_id}/hours", json={"minutes": 60, "note": "gift"})

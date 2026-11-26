@@ -11,6 +11,7 @@ export function noticeText(item) {
     plan: p.plan ? t(`pricing.planNames.${p.plan}`) : "",
     date: p.until ? shortDate(p.until, locale()) : "",
     time: p.minutes ? hoursMinutes(p.minutes * 60, t) : "",
+    count: p.count ?? "",
   });
   return p.note ? `${text} ${t("notify.note", { note: p.note })}` : text;
 }
@@ -21,7 +22,11 @@ function openList(items, button) {
     items.length
       ? h("ul.list", {}, items.map((item) => h("li", {},
           h("p", {}, item.read ? noticeText(item) : h("b", {}, noticeText(item))),
-          h("p.small.dim", {}, dateTime(item.at, locale())))))
+          h("p.small.dim", {}, dateTime(item.at, locale())),
+          item.kind === "search_quota"
+            ? h("p", {}, h("a.btn.ghost", { href: "/dashboard#searches", "data-link": "", onclick: close },
+                t("notify.buySearches")))
+            : null)))
       : h("p.dim", {}, t("notify.none")),
     h("div.row", {}, h("button.btn", { type: "button", autofocus: true, text: t("common.close"), onclick: close }))));
   if (items.some((item) => !item.read)) {

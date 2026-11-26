@@ -2821,10 +2821,8 @@ class SafeExecutor:
         except ExecutorError as error:
             if not str(error).startswith("HTTP 429"):
                 raise
-            raise ExecutorError(
-                "the shared Kvist Cloud search quota is used up (25 searches a day, 190 a week per account). "
-                "A key of the user's own (Exa, Tavily, Brave, ...) set with /web-search-provider has no such limit."
-            ) from error
+            # The server's own words: when the quota frees up and where the user can buy more searches.
+            raise ExecutorError(_cloud_search_refusal(error.__cause__)) from error
         raw_results = response.get("results")
         if not isinstance(raw_results, list):
             raise ExecutorError("Kvist Cloud search returned an invalid result format")
@@ -3461,6 +3459,23 @@ class SafeExecutor:
                 path = root_path / filename
                 if path.is_file():
                     yield path
+
+
+def _cloud_search_refusal(cause: BaseException | None) -> str:
+    """Kvist Cloud's reason for refusing a search, read from its 429 answer."""
+    fallback = (
+        "the shared Kvist Cloud web search quota is used up. A key of the user's own (Exa, Tavily, Brave, ...) "
+        "set with /web-search-provider has no such limit."
+    )
+    if not isinstance(cause, urllib.error.HTTPError):
+        return fallback
+    try:
+        answer = json.loads(cause.read(8192).decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return fallback
+    error = answer.get("error") if isinstance(answer, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    return message if isinstance(message, str) and message.strip() else fallback
 
 
 def _config_dir_inside(workspace: Path) -> Path | None:
