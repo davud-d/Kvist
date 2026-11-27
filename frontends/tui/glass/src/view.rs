@@ -791,41 +791,117 @@ fn draw_pane(p: &mut Painter, app: &App, ms: u128, drawn: &mut Drawn) -> Option<
     Some(card)
 }
 
-/// Lines of the input, wrapped by character, and where the caret sits.
+/// The most rows the input shows at once; longer text scrolls inside it.
+pub const INPUT_ROWS: usize = 8;
+
+/// Lines of the input, wrapped at spaces like a browser's text box, and where
+/// the caret sits.
 pub fn input_lines(input: &str, cursor: usize, width: usize) -> (Vec<String>, (usize, usize)) {
     let (lines, carets) = input_layout(input, width);
     let caret = carets[cursor.min(carets.len() - 1)];
     (lines, caret)
 }
 
+/// The first of the input's lines to show: the earlier one stays while the
+/// caret is in view, so the text moves only when the caret would leave it.
+pub fn input_window(top: usize, caret_row: usize, total: usize) -> usize {
+    let last_top = total.saturating_sub(INPUT_ROWS);
+    let top = top.min(last_top);
+    if caret_row < top {
+        return caret_row;
+    }
+    if caret_row >= top + INPUT_ROWS {
+        return caret_row + 1 - INPUT_ROWS;
+    }
+    top
+}
+
+fn char_width(c: char) -> usize {
+    unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Where each drawn line starts, as character indices. A line breaks after the
+/// last space that fits; spaces at the break hang past the edge instead of
+/// starting the next line, and a word longer than the line is cut by character.
+fn line_starts(chars: &[char], width: usize) -> Vec<usize> {
+    let mut starts = vec![0];
+    let mut line_start = 0;
+    let mut used = 0;
+    let mut after_space = None;
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '\n' {
+            starts.push(i + 1);
+            (line_start, used, after_space) = (i + 1, 0, None);
+            continue;
+        }
+        let w = char_width(c);
+        if c == ' ' {
+            used += w;
+            after_space = Some(i + 1);
+            continue;
+        }
+        if used + w > width && i > line_start {
+            let start = after_space.filter(|&at| at > line_start).unwrap_or(i);
+            starts.push(start);
+            line_start = start;
+            used = chars[start..i].iter().map(|&c| char_width(c)).sum();
+            after_space = None;
+        }
+        used += w;
+    }
+    starts
+}
+
 /// The wrapped lines and, for every cursor position 0..=length, the (row,
 /// column) where the caret is drawn.
 fn input_layout(input: &str, width: usize) -> (Vec<String>, Vec<(usize, usize)>) {
     let width = width.max(4);
-    let mut lines = vec![String::new()];
-    let mut used = 0;
-    let mut carets = Vec::new();
-    for c in input.chars() {
-        carets.push((lines.len() - 1, used));
-        if c == '\n' {
-            lines.push(String::new());
-            used = 0;
-            continue;
+    let chars: Vec<char> = input.chars().collect();
+    let starts = line_starts(&chars, width);
+    let mut lines: Vec<String> = starts
+        .iter()
+        .enumerate()
+        .map(|(row, &start)| {
+            let end = starts.get(row + 1).copied().unwrap_or(chars.len());
+            chars[start..end].iter().filter(|&&c| c != '\n').collect()
+        })
+        .collect();
+    let mut carets = Vec::with_capacity(chars.len() + 1);
+    let mut row = 0;
+    let mut column = 0;
+    for (i, &c) in chars.iter().enumerate() {
+        while starts.get(row + 1).is_some_and(|&next| next <= i) {
+            row += 1;
+            column = 0;
         }
-        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if used + w > width {
-            lines.push(String::new());
-            used = 0;
+        carets.push((row, column.min(width)));
+        if c != '\n' {
+            column += char_width(c);
         }
-        lines.last_mut().unwrap().push(c);
-        used += w;
     }
-    if used >= width {
+    while starts.get(row + 1).is_some_and(|&next| next <= chars.len()) {
+        row += 1;
+        column = 0;
+    }
+    // A full last line puts the caret at the start of the next one, as typing goes on there.
+    if column >= width {
         lines.push(String::new());
-        used = 0;
+        row += 1;
+        column = 0;
     }
-    carets.push((lines.len() - 1, used));
+    carets.push((row, column));
     (lines, carets)
+}
+
+/// A line cut to the width the card shows; spaces hanging at a break go.
+fn visible_part(line: &str, width: usize) -> String {
+    let mut used = 0;
+    line.chars()
+        .take_while(|&c| {
+            used += char_width(c);
+            used <= width
+        })
+        .collect()
 }
 
 /// The cursor position one drawn row above (`up`) or below the cursor, in the
@@ -863,15 +939,26 @@ fn draw_input(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let y = card.y as i32 + 1 + dy + app.layout.attach_rows as i32;
     let width = card.width.saturating_sub(6) as usize;
     let (lines, caret) = input_lines(&app.input, app.cursor, width);
+    let top = input_window(app.input_top.get(), caret.0, lines.len());
+    app.input_top.set(top);
     if app.input.is_empty() {
         p.text(x + 1, y, strings().placeholder, st(DUSK));
     }
-    for (i, line) in lines.iter().enumerate().take(8) {
-        p.text(x, y + i as i32, line, st(FOG));
+    for (i, line) in lines.iter().skip(top).take(INPUT_ROWS).enumerate() {
+        p.text(x, y + i as i32, &visible_part(line, width), st(FOG));
+    }
+    // How much of the text is out of view, at the right edge of the rows it continues from.
+    let right = card.right() as i32 - 2;
+    if top > 0 {
+        p.text(right, y, theme::I_MORE_UP, st(MIST));
+    }
+    if lines.len() > top + INPUT_ROWS {
+        p.text(right, y + INPUT_ROWS as i32 - 1, theme::I_MORE_DOWN, st(MIST));
     }
     // The terminal's own thin bar cursor blinks here (term.rs sets its shape and colour).
     if app.modal.is_none() {
-        drawn.cursor = Some(((x + caret.1 as i32).max(0) as u16, (y + caret.0 as i32).max(0) as u16));
+        let row = caret.0 - top;
+        drawn.cursor = Some(((x + caret.1 as i32).max(0) as u16, (y + row as i32).max(0) as u16));
     }
     drawn.hits.push((card, Hit::Input));
 }
@@ -1641,6 +1728,41 @@ mod tests {
     fn up_and_down_follow_wrapped_rows_too() {
         assert_eq!(move_row("abcdefgh", 6, 4, true), Some(2));
         assert_eq!(move_row("abcdefgh", 2, 4, false), Some(6));
+    }
+
+    #[test]
+    fn words_move_whole_to_the_next_line_and_spaces_hang_at_the_break() {
+        let (lines, caret) = input_lines("одна ошибка и ты", 16, 10);
+        assert_eq!(lines, vec!["одна ", "ошибка и ", "ты"]);
+        assert_eq!(caret, (2, 2));
+        assert_eq!(visible_part("ab   ", 3), "ab ");
+    }
+
+    #[test]
+    fn a_word_longer_than_the_line_is_cut_by_character() {
+        let (lines, _) = input_lines("a abcdefghij", 0, 5);
+        assert_eq!(lines, vec!["a ", "abcde", "fghij", ""]);
+    }
+
+    #[test]
+    fn the_caret_moves_along_wrapped_words() {
+        // "ab cd" at width 4: "ab " then "cd"; position 3 is the start of "cd".
+        let (_, caret) = input_lines("ab cd", 3, 4);
+        assert_eq!(caret, (1, 0));
+        assert_eq!(move_row("ab cd", 4, 4, true), Some(1));
+    }
+
+    #[test]
+    fn the_window_moves_only_when_the_caret_would_leave_it() {
+        // The caret walks down a 20-line text: the window follows from below.
+        assert_eq!(input_window(0, 7, 20), 0);
+        assert_eq!(input_window(0, 8, 20), 1);
+        assert_eq!(input_window(12, 19, 20), 12);
+        // Back up inside the window nothing moves; past its top the window follows.
+        assert_eq!(input_window(12, 13, 20), 12);
+        assert_eq!(input_window(12, 11, 20), 11);
+        // Text that got shorter pulls the window back.
+        assert_eq!(input_window(12, 3, 5), 0);
     }
 
     #[test]

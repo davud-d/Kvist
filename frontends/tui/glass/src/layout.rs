@@ -102,7 +102,7 @@ pub fn compute(grid: &Grid, shape: &Shape) -> Layout {
         }
     };
 
-    let input_h = shape.input_lines.clamp(1, 8) + 2 + shape.attach_rows;
+    let input_h = shape.input_lines.clamp(1, crate::view::INPUT_ROWS as u16) + 2 + shape.attach_rows;
     let bottom_y = status_row.saturating_sub(1 + input_h) as f32;
     let middle_y = (rows / 2).saturating_sub(input_h / 2 + 1) as f32;
     let input_y = (middle_y + (bottom_y - middle_y) * shape.input_at_bottom.clamp(0.0, 1.0)).round() as u16;

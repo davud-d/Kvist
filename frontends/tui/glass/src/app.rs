@@ -167,6 +167,8 @@ pub struct App {
     pub toast: Option<Toast>,
     pub input: String,
     pub cursor: usize,
+    /// The first of the input's wrapped lines in view; drawing keeps the caret inside the window.
+    pub input_top: std::cell::Cell<usize>,
     /// Pictures pasted into the input; each is named by an `[Image #N]` marker in it.
     attachments: Vec<Attachment>,
     next_image: u32,
@@ -282,6 +284,7 @@ impl App {
             toast: None,
             input: String::new(),
             cursor: 0,
+            input_top: std::cell::Cell::new(0),
             attachments: Vec::new(),
             next_image: 1,
             strip_in: Tween::settled(0.0),

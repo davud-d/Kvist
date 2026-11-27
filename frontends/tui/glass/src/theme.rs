@@ -51,6 +51,9 @@ pub const I_CHIP: &str = "\u{ec19}";
 pub const I_HELPER: &str = "\u{f1078}";
 pub const I_EXPAND: &str = "\u{eb4c}";
 pub const I_CHEVRON: &str = "\u{eab6}";
+/// More of the input above or below the rows it shows.
+pub const I_MORE_UP: &str = "\u{eab7}";
+pub const I_MORE_DOWN: &str = "\u{eab4}";
 
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
