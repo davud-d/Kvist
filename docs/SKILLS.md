@@ -435,10 +435,15 @@ HTTP/SSE servers are not supported.
   server says about itself is not trusted. Other tools are refused in reader runs and plan mode.
 * Results are untrusted data (bounded to 200 000 characters); `env` secrets stay in the
   core and never reach the model or skills.
+* Images in a result (up to 4) are kept as attachments of the session (origin `mcp`) and
+  reach the model as the Vision model's description, like every other picture; the result
+  lists their `attachment_id`s, so the model can crop them or ask the Vision model again.
 * The server process belongs to the task and stops with it. Cancelling a call sends
   `notifications/cancelled`, but what the server already did cannot be undone and is
   reported as unknown.
 
+* `kvist --browser-mcp` is a built-in server for the person's own browser (Chromium family over CDP,
+  Firefox over WebDriver BiDi): see [browser-mcp.md](browser-mcp.md).
 
 Bundled `gmail` and `telegram` have guided browser connection commands:
 

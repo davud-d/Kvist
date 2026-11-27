@@ -32,6 +32,13 @@ if "--session-op" in sys.argv:
 
     hand_over_plain_request(sys.argv[1:])
 
+# The browser MCP server is standard-library only; it needs none of the core.
+if "--browser-mcp" in sys.argv:
+    sys.argv.remove("--browser-mcp")
+    from kernel.browser_mcp.server import main as _browser_mcp_main
+
+    raise SystemExit(_browser_mcp_main(sys.argv[1:]))
+
 if "--web-controller" in sys.argv:
     sys.argv.remove("--web-controller")
     from kvist_web.cli import main as _web_main

@@ -34,7 +34,7 @@ RETENTION_DAYS = 30
 MAX_PIXELS = 25_000_000
 # Files a skill produces (screenshots, renders) may be larger than what a person attaches.
 MAX_DERIVED_BYTES = 20 * 1024 * 1024
-ORIGINS = frozenset({"user_message", "workspace_file", "skill", "browser_snapshot", "derived"})
+ORIGINS = frozenset({"user_message", "workspace_file", "skill", "browser_snapshot", "derived", "mcp"})
 _ID_RE = re.compile(r"^att_[0-9a-f]{16}$")
 _FORMAT_SUFFIX = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp", "GIF": ".gif", "BMP": ".bmp", "TIFF": ".tiff"}
 _MIME = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp", "GIF": "image/gif",

@@ -13,7 +13,7 @@ back, and repeats until done. Several frontends drive the same Python core.
 
 - `kernel/` — the core, Python package (`python -m kernel`). Subpackages: `agent/` (loop, router, native tools),
   `protocol/` (action protocol, parser, frontend events), `sandbox/` (executor, terminal, policies, approvals),
-  `session/`, `context/`, `llm/`, `plan/`, `memory/`, `plugins/` (skills), `ssh/` (remote core), `config/`,
+  `session/`, `context/`, `llm/`, `plan/`, `memory/`, `plugins/` (skills), `browser_mcp/` (MCP server for the person's own browser), `ssh/` (remote core), `config/`,
   `prompts/` (data), `tests/`.
 - `kernel/session-rs/` — Rust crate `kvist-session`: `--session-op` without starting Python (Linux/macOS/BSD/Windows, optional;
   `kernel/session/native.py` hands requests to it, Python serves them when it is missing).

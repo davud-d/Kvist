@@ -652,11 +652,48 @@ class SkillManager:
         except McpError as error:
             return _failed(f"mcp:{name}.{tool_name}: {error}")
         rendered = render_result(result)
+        images = rendered.pop("images")
+        if images:
+            rendered.update(self._mcp_images(name, tool_name, images))
         feedback: dict[str, Any] = {"ok": not rendered["is_error"], "action_type": "skill_call",
                                     "data": {"mcp_server": name, "tool": tool_name, **rendered}}
         if rendered["is_error"]:
             feedback["error"] = f"mcp:{name}.{tool_name} reported an error: {rendered['text'][:500]}"
         return feedback
+
+    def _mcp_images(self, name: str, tool_name: str, images: list[bytes]) -> dict[str, Any]:
+        """Keep each image as an attachment and let the Vision model describe them, as with any other picture.
+
+        The attachment id lets the model crop it or ask the Vision model again later (``images.*``).
+        """
+        from kernel.context.attachments import MAX_DERIVED_BYTES, AttachmentStore
+        from kernel.vision.vision import describe_images
+
+        agent = self._agent
+        store = AttachmentStore(agent.executor.workspace)
+        stored: list[dict[str, Any]] = []
+        prepared: list[dict[str, str]] = []
+        for index, data in enumerate(images, 1):
+            label = f"{name}.{tool_name} image #{index}"
+            try:
+                attachment = store.add_bytes(data, f"mcp-{name}-{index}.png", session=agent.current_session,
+                                             max_bytes=MAX_DERIVED_BYTES,
+                                             origin={"kind": "mcp", "server": name, "tool": tool_name})
+            except (ValueError, OSError) as error:  # AttachmentError, or a picture Pillow cannot read
+                stored.append({"image": index, "error": f"not stored: {error}"})
+                continue
+            stored.append({"image": index, "attachment_id": attachment.id,
+                           "width": attachment.width, "height": attachment.height})
+            prepared.append({**store.model_data_url(attachment.id), "name": label})
+        if not prepared:
+            return {"images": stored}
+        if agent.control.interrupted():
+            return {"images": stored, "vision": "not described: the task was stopped"}
+        try:
+            description = describe_images(agent, prepared, agent._state.user_goal)
+        except InterruptedError:
+            return {"images": stored, "vision": "not described: the task was stopped"}
+        return {"images": stored, "vision": description}
 
     # --- jobs and events -------------------------------------------------
 

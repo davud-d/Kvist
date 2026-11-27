@@ -49,7 +49,7 @@ def test_attaching_shows_the_tools_for_approval_and_names_them_apart_from_everyt
     attached = agent.skills.attach("mcp:echo")
 
     names = [tool["name"] for tool in attached["tools"]]
-    assert names == ["mcp__echo__echo", "mcp__echo__slow_op", "mcp__echo__grow"]
+    assert names == ["mcp__echo__echo", "mcp__echo__slow_op", "mcp__echo__grow", "mcp__echo__picture"]
     assert "echo" in ui.dialogs[0][1] and "secret-token-value" not in ui.dialogs[0][1]
     assert "mcp:echo" in agent.skills.prompt_section("en")
 
@@ -67,6 +67,25 @@ def test_a_call_runs_through_the_parser_and_its_result_is_untrusted(mcp_agent):
     feedback = run_agent_tool(agent, command)
 
     assert feedback["ok"] and feedback["data"]["text"] == "echo: hi" and feedback["data"]["untrusted"]
+
+
+def test_an_image_becomes_an_attachment_the_vision_model_describes(mcp_agent, monkeypatch):
+    from kernel.context.attachments import AttachmentStore
+
+    agent, ui = mcp_agent
+    asked = []
+    monkeypatch.setattr("kernel.vision.vision.describe_images",
+                        lambda _agent, images, question="": asked.append(images) or "a white pixel")
+    agent.skills.attach("mcp:echo")
+
+    feedback = agent.skills.call("mcp:echo", "picture", {}, "c1")
+
+    data = feedback["data"]
+    assert feedback["ok"] and data["text"] == "a screenshot\n[image #1]" and data["vision"] == "a white pixel"
+    attachment = AttachmentStore(agent.executor.workspace).get(data["images"][0]["attachment_id"])
+    assert attachment.origin == {"kind": "mcp", "server": "echo", "tool": "picture"}
+    assert asked[0][0]["data_url"].startswith("data:image/jpeg;base64,")
+    assert "base64" not in str(data)
 
 
 def test_the_servers_own_read_only_hint_is_not_trusted(mcp_agent):

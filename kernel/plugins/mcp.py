@@ -19,6 +19,9 @@ The rules the registry applies to skills apply here:
   when automatic approval is enabled; these tools cannot be read-only;
 * results are untrusted data; secrets in ``env`` stay in the core's process
   table and are never shown to the model or to skills;
+* images in a result become attachments of the session and reach the model as
+  the Vision model's description, the way every other picture does: the main
+  model never receives pixels;
 * the server process belongs to the task and stops with it;
 * cancelling a call sends ``notifications/cancelled``, but what a server
   already did cannot be undone and is reported as unknown.
@@ -27,6 +30,8 @@ Remote (HTTP) servers are not supported in this version.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import queue
@@ -50,6 +55,9 @@ CALL_TIMEOUT = 60.0
 START_TIMEOUT = 30.0
 MAX_RESULT_CHARS = 200_000
 MAX_TOOLS = 100
+# Images per result the Vision model is asked about; a screenshot tool returns one.
+MAX_IMAGES = 4
+MAX_IMAGE_DATA_CHARS = 28 * 1024 * 1024  # base64 of the 20 MiB a derived attachment may hold
 _WIRE_RE = re.compile(r"[^a-z0-9_]")
 
 
@@ -321,14 +329,37 @@ class AttachedServer:
     digest: str = ""
 
 
+def decode_image(item: dict[str, Any]) -> bytes | None:
+    """The bytes of an ``image`` content item, or None when its data is not valid base64."""
+    data = item.get("data")
+    if not isinstance(data, str) or len(data) > MAX_IMAGE_DATA_CHARS:
+        return None
+    try:
+        return base64.b64decode(data, validate=True) or None
+    except (binascii.Error, ValueError):
+        return None
+
+
 def render_result(result: dict[str, Any]) -> dict[str, Any]:
-    """The text a model may read from a tools/call result; images and resources are named, not inlined."""
+    """The text a model may read from a tools/call result; resources are named, not inlined.
+
+    Images come back separately under ``images`` (bytes), each marked in the text as
+    ``[image #n]``: the caller turns them into attachments the Vision model describes.
+    """
     parts: list[str] = []
+    images: list[bytes] = []
     for item in result.get("content") or []:
         if not isinstance(item, dict):
             continue
         if item.get("type") == "text":
             parts.append(str(item.get("text", "")))
+        elif item.get("type") == "image" and len(images) < MAX_IMAGES:
+            data = decode_image(item)
+            if data is None:
+                parts.append(f"[image {item.get('mimeType', '')} unreadable]")
+                continue
+            images.append(data)
+            parts.append(f"[image #{len(images)}]")
         elif item.get("type") in ("image", "audio"):
             parts.append(f"[{item.get('type')} {item.get('mimeType', '')} not shown]")
         elif item.get("type") in ("resource", "resource_link"):
@@ -337,7 +368,7 @@ def render_result(result: dict[str, Any]) -> dict[str, Any]:
     text = "\n".join(parts)
     truncated = len(text) > MAX_RESULT_CHARS
     rendered: dict[str, Any] = {"text": text[:MAX_RESULT_CHARS], "truncated": truncated,
-                                "is_error": bool(result.get("isError")), "untrusted": True}
+                                "is_error": bool(result.get("isError")), "untrusted": True, "images": images}
     if isinstance(result.get("structuredContent"), dict):
         rendered["structured"] = result["structuredContent"]
     return rendered

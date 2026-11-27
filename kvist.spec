@@ -27,7 +27,7 @@ local_hiddenimports = sorted(
         name
         for group in (
             'agent', 'plan', 'protocol', 'sandbox', 'session', 'context',
-            'vision', 'llm', 'tray', 'config', 'ide', 'plugins', 'ssh',
+            'vision', 'llm', 'tray', 'config', 'ide', 'plugins', 'ssh', 'browser_mcp',
         )
         for name in _module_names(os.path.join(SPECPATH, 'kernel', group), f'kernel.{group}.')
     ]
@@ -145,6 +145,7 @@ a = Analysis(
         ('kernel/plugins/telegram_service.py', 'kernel/plugins'),
         ('kernel/plugins/service_browser.py', 'kernel/plugins'),
         ('kernel/skills_bundled', 'kernel/skills_bundled'),
+        ('kernel/browser_mcp/page', 'kernel/browser_mcp/page'),
         ('frontends/tui/classic/assets', 'assets'),
         ('frontends/web-local/kvist_web/client', 'kvist_web/client'),
         ('frontends/gui/electron-legacy/renderer/image-attachments.js', 'kvist_web/client/utils'),
