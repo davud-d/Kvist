@@ -402,3 +402,25 @@ def test_the_bridge_driver_speaks_the_bridge_protocol_and_reports_refused_pages(
     keys = [(c["params"]["type"], c["params"]["key"]) for c in calls if c["method"] == "key"]
     assert keys == [("down", "Control"), ("down", "a"), ("up", "a"), ("up", "Control")]
     driver.close()
+
+
+def test_an_installed_bridge_without_a_restarted_browser_says_restart_and_skips_apps_on_the_port(tmp_path, monkeypatch):
+    folder = tmp_path / "browser-bridge"
+    folder.mkdir()
+    (folder / "bridge.js").write_text("// bridge")
+    monkeypatch.setattr(endpoint, "bridge_folder", lambda: folder)
+    monkeypatch.setattr(endpoint, "bridge_sockets", lambda: [tmp_path / "missing.sock"])
+    monkeypatch.setattr(endpoint, "port_files", lambda: [])
+    monkeypatch.setattr(endpoint, "_listening", lambda _candidate: True)
+    monkeypatch.setattr(endpoint, "_cdp_version", lambda _candidate: {
+        "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/x",
+        "User-Agent": "Mozilla/5.0 Chrome/151.0 Spotify/1.3.8 Safari/537.36"})
+
+    with pytest.raises(endpoint.EndpointError) as raised:
+        endpoint.connect()
+
+    assert "restart" in str(raised.value) and "Spotify" not in str(raised.value)
+
+    (folder / "bridge.js").unlink()
+    with pytest.raises(endpoint.EndpointError, match="found no browser it can use"):
+        endpoint.connect()

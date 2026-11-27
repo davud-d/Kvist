@@ -12,18 +12,13 @@ import shutil
 import sys
 from pathlib import Path
 
-from kernel.browser_mcp.endpoint import bridge_sockets
+from kernel.browser_mcp.endpoint import bridge_folder, bridge_sockets
 
 SOURCE = Path(__file__).parent / "firefox"
 BRIDGE_FILES = ("bridge.js", "bridge-frame.js")
 LOADER_FILES = ("kvist-autoconfig.cfg", "autoconfig.js")
 BROWSER_FOLDERS = ("/opt/waterfox", "/usr/lib/waterfox", "/usr/lib/firefox", "/opt/firefox", "/usr/lib/librewolf",
                    "/opt/librewolf", "/usr/lib/firefox-developer-edition")
-
-
-def bridge_folder() -> Path:
-    # Fixed, not KVIST_CONFIG_DIR: the browser's loader has no way to know another place.
-    return Path.home() / ".kvist" / "browser-bridge"
 
 
 def browser_folders() -> list[Path]:

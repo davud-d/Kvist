@@ -54,6 +54,23 @@ class EndpointError(Exception):
     """No browser could be reached; the message says what to do."""
 
 
+class NotABrowser(EndpointError):
+    """A desktop app built on Chromium holds the port; it is skipped, not reported as a failed browser."""
+
+
+BRIDGE_NOT_LOADED = (
+    "The Kvist browser bridge is installed, but no running browser has loaded it. Almost always the browser "
+    "was not restarted after the bridge was installed: ask the person to close it fully (every window) and "
+    "open it again; `kvist --browser-bridge status` shows anything still missing. Do not look for the "
+    "browser on debugging ports: with the bridge, Firefox-family browsers do not open one."
+)
+
+
+def bridge_folder() -> Path:
+    # Fixed, not KVIST_CONFIG_DIR: the browser's loader has no way to know another place.
+    return Path.home() / ".kvist" / "browser-bridge"
+
+
 @dataclass(frozen=True, slots=True)
 class Candidate:
     host: str
@@ -145,7 +162,7 @@ def connect_candidate(candidate: Candidate) -> CdpDriver | BidiDriver:
         agent = str(version.get("User-Agent", ""))
         app = next((name for name in _NOT_BROWSERS if name in agent), "")
         if app:
-            raise EndpointError(f"port {candidate.port} belongs to {app.rstrip('/')}, an app, not a browser")
+            raise NotABrowser(f"port {candidate.port} belongs to {app.rstrip('/')}, an app, not a browser")
         return CdpDriver(version["webSocketDebuggerUrl"], product=str(version.get("Browser", "")))
     return _bidi(candidate)
 
@@ -179,8 +196,12 @@ def connect(spec: str = "") -> CdpDriver | BidiDriver | BridgeDriver:
             continue
         try:
             return connect_candidate(candidate)
+        except NotABrowser:
+            continue
         except (DriverError, WebSocketError, EndpointError) as error:
             errors.append(f"{candidate.host}:{candidate.port}: {error}")
     if errors:
         raise EndpointError("A browser is listening, but Kvist could not use it:\n" + "\n".join(errors))
+    if (bridge_folder() / "bridge.js").is_file():
+        raise EndpointError(BRIDGE_NOT_LOADED)
     raise EndpointError(HOW_TO_START)
