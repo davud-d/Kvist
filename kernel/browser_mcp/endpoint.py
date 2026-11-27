@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Finding the person's browser: an address they gave, a DevToolsActivePort file, or port 9222.
+"""Finding the person's browser: the Kvist bridge, an address they gave, a DevToolsActivePort file, or port 9222.
 
 Chromium family browsers write ``DevToolsActivePort`` into their profile folder
 while remote debugging is on (``--remote-debugging-port``, or the switch on
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from kernel.browser_mcp.drivers import BidiDriver, CdpDriver, DriverError
+from kernel.browser_mcp.drivers import BidiDriver, BridgeDriver, CdpDriver, DriverError
 from kernel.browser_mcp.relay import LineSocket, socket_path
 from kernel.browser_mcp.websocket import WebSocket, WebSocketError
 
@@ -35,12 +35,19 @@ _PROFILE_DIRS = {
 }
 
 HOW_TO_START = (
-    "Kvist found no browser with remote debugging. Ask the person to start one of these and try again:\n"
+    "Kvist found no browser it can use. Ask the person to set one up and try again:\n"
+    "  Firefox, Waterfox, LibreWolf: the Kvist browser bridge (kvist --browser-bridge install, then restart the "
+    "browser); it keeps sites from seeing an automated browser;\n"
     "  Chrome/Chromium/Brave/Edge: open chrome://inspect/#remote-debugging and turn it on, or start the browser "
-    "with --remote-debugging-port=9222 (Chrome 136+ honours the flag only with a non-default --user-data-dir);\n"
-    "  Firefox: start it with --remote-debugging-port 9222.\n"
+    "with --remote-debugging-port=9222 (Chrome 136+ honours the flag only with a non-default --user-data-dir).\n"
     "Then the server finds it by itself; another port goes in --browser-endpoint."
 )
+
+
+def bridge_sockets() -> list[Path]:
+    """Where the bridge inside a Firefox-family browser listens (firefox/bridge.js picks the same)."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return [Path(runtime) / "kvist-browser-bridge.sock", Path("/tmp") / "kvist-browser-bridge.sock"]
 
 
 class EndpointError(Exception):
@@ -143,13 +150,30 @@ def connect_candidate(candidate: Candidate) -> CdpDriver | BidiDriver:
     return _bidi(candidate)
 
 
-def connect(spec: str = "") -> CdpDriver | BidiDriver:
-    if spec:
+def _bridge(errors: list[str]) -> BridgeDriver | None:
+    for path in bridge_sockets():
+        if not path.exists():
+            continue
+        try:
+            return BridgeDriver(LineSocket(path))
+        except (DriverError, WebSocketError) as error:
+            errors.append(f"bridge {path}: {error}")
+    return None
+
+
+def connect(spec: str = "") -> CdpDriver | BidiDriver | BridgeDriver:
+    errors: list[str] = []
+    if spec in ("", "bridge"):
+        bridge = _bridge(errors)
+        if bridge is not None:
+            return bridge
+    if spec == "bridge":
+        candidates = []
+    elif spec:
         candidates = [parse_spec(spec)]
     else:
         candidates = [found for found in map(read_port_file, port_files()) if found is not None]
         candidates.append(Candidate("127.0.0.1", DEFAULT_PORT, ""))
-    errors = []
     for candidate in candidates:
         if not _listening(candidate):
             continue

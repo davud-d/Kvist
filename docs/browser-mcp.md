@@ -3,59 +3,62 @@
 [Русская версия](browser-mcp.ru.md)
 
 A local MCP server that lets Kvist work in the browser you already use: your tabs, your logins.
-It connects to the browser's own debugging port, so nothing is installed into the browser.
 
-* **Chromium family** (Chrome, Chromium, Brave, Edge, Vivaldi, Yandex): Chrome DevTools Protocol.
-* **Firefox**: WebDriver BiDi (Firefox no longer speaks CDP).
+* **Firefox family** (Firefox, Waterfox, LibreWolf): the **Kvist bridge**, a small script the browser
+  loads at start-up. No remote debugging, so sites keep seeing an ordinary browser.
+* **Chromium family** (Chrome, Chromium, Brave, Edge, Vivaldi, Yandex): the browser's debugging
+  port and the Chrome DevTools Protocol (with it Chromium still reports `navigator.webdriver = false`).
 
 While Kvist works in a tab, the page shows a glowing blue frame, a "Kvist is working here" pill
 with the current step and a **Stop** button, and a blue pointer labelled *Kvist*. The pointer is
 not a picture laid over the page: Kvist moves the browser's own pointer along the same path, so
 the site receives ordinary trusted mouse and keyboard events (hover, press, release, wheel,
-key by key typing). Pressing **Stop** ends Kvist's access for the rest of the task.
+key by key typing). Pressing **Stop** takes the browser back for the rest of that turn: Kvist is told
+not to get around it and to ask what went wrong and whether it may go on; your next message opens
+the browser to it again.
 
-## 1. Turn on remote debugging
+## 1. Connect the browser
 
-| Browser | How |
-|---|---|
-| Chrome, Brave, Edge, Chromium | open `chrome://inspect/#remote-debugging` and turn it on (recent versions; your normal profile), **or** start with `--remote-debugging-port=9222` (Chrome 136+ honours the flag only with a separate `--user-data-dir`) |
-| Firefox | start with `firefox --remote-debugging-port 9222` |
+### Firefox, Waterfox, LibreWolf: the Kvist bridge
 
-The server finds a Chromium browser by its `DevToolsActivePort` file first, then tries port 9222.
-Desktop apps built on Chromium (Spotify, Electron apps) often hold 9222 too; they are recognised
-and skipped. Another port or host goes in `--browser-endpoint 9333` (or `host:port`, or a full
-`ws://` address).
+```bash
+kvist --browser-bridge install     # copies the bridge to ~/.kvist/browser-bridge, prints the next step
+```
+
+Once, as administrator, copy the loader it names into the browser's install folder (for Waterfox
+in `/opt/waterfox`), then restart the browser fully:
+
+```bash
+sudo cp ~/.kvist/browser-bridge/kvist-autoconfig.cfg /opt/waterfox/
+sudo cp ~/.kvist/browser-bridge/autoconfig.js /opt/waterfox/defaults/pref/
+```
+
+`kvist --browser-bridge status` shows what is in place. Later versions of the bridge need only
+`install` and a browser restart. To remove it, delete those two files from the browser's folder.
+
+How it works: the loader is Firefox's own autoconfig, which runs with the browser's privileges.
+The bridge listens on a Unix socket only your user can open (`$XDG_RUNTIME_DIR/kvist-browser-bridge.sock`),
+lists the tabs from the tab strip (unloaded ones too, without loading them) and runs Kvist's page
+helpers in a sandbox of each page. Mouse and wheel input is dispatched in the page's process and
+keys at the browser window, the way real devices do; pages receive trusted events. The browser's
+own pages (settings, add-ons, `about:`) are never touched.
+
+Why not remote debugging: while Firefox runs with `--remote-debugging-port`, it tells every page
+`navigator.webdriver = true`, whether Kvist is working or not, and Cloudflare, YouTube and others
+then treat you as a robot (captchas, missing features). The port also breaks on tabs restored but
+never opened (Firefox 140). If you use the port anyway, `kvist --browser-relay` holds its single
+session and the loader patches the restored-tab fault; see the source of `relay.py`.
+
+### Chrome, Brave, Edge, Chromium
+
+Open `chrome://inspect/#remote-debugging` and turn it on (recent versions; your normal profile),
+**or** start with `--remote-debugging-port=9222` (Chrome 136+ honours the flag only with a
+separate `--user-data-dir`). The server finds the browser by its `DevToolsActivePort` file, then
+tries port 9222; desktop apps on Chromium that hold 9222 (Spotify, Electron apps) are recognised
+and skipped. Another port goes in `--browser-endpoint 9333`.
 
 Remote debugging gives full control of the browser to any local program that connects to the
 port. Turn it off when you do not need it.
-
-### Firefox and its forks (Waterfox, LibreWolf)
-
-Three things differ from Chromium, measured on Firefox 140 / Waterfox 6.6:
-
-* **Sites see it.** While Firefox runs with `--remote-debugging-port`, `navigator.webdriver` is
-  `true` on every page, whether Kvist is working or not; some sites answer with more captchas.
-  Chromium with the same flag keeps it `false`.
-* **One session for the browser's whole life.** Firefox allows one automation session and
-  does not end it when the connection drops, so a server Kvist stopped with its task would lock
-  the browser until a restart. Start the session relay once beside the browser; every MCP server
-  then goes through it, and it cleans up after each one (its page scripts, any key still held):
-
-  ```bash
-  kvist --browser-relay --browser-endpoint 9222    # e.g. from i3: exec --no-startup-id ...
-  ```
-
-* **Tabs without a page break automation.** A tab restored after a restart but never opened (or
-  unloaded to save memory) has no page, and every command that visits all tabs fails on it:
-  the tab list, page scripts, events, ending the session. The fix is two files for the browser's
-  install folder (autoconfig, applied at start-up; delete them to undo):
-
-  ```bash
-  sudo cp kernel/browser_mcp/firefox/autoconfig.js /opt/waterfox/defaults/pref/
-  sudo cp kernel/browser_mcp/firefox/kvist-autoconfig.cfg /opt/waterfox/
-  ```
-
-  Without it Kvist still works, but only in tabs it opens itself.
 
 ## 2. Register the server
 
@@ -67,7 +70,7 @@ kvist --mcp-op add --mcp-name browser --mcp-payload "{
   \"description\": \"The person's own browser: tabs, logins, clicks and typing\"}"
 ```
 
-`sandbox` must be `none`: the server has to reach the browser's local port and its profile folder.
+`sandbox` must be `none`: the server has to reach the bridge socket, or the browser's local port and its profile folder.
 Add tools to `confirm_tools` (for example `browser_act`) if you want to approve every action.
 
 ## Tools

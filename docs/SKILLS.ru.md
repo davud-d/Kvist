@@ -445,8 +445,8 @@ kvist --skill-op check --skill-path ./my_skill              # независим
 * Процесс сервера принадлежит задаче и останавливается вместе с ней. Отмена вызова шлёт
   `notifications/cancelled`, но то, что сервер уже сделал, не откатить, и это сообщается как
   неизвестное.
-* `kvist --browser-mcp` — встроенный сервер для собственного браузера человека (семейство Chromium
-  через CDP, Firefox через WebDriver BiDi): см. [browser-mcp.ru.md](browser-mcp.ru.md).
+* `kvist --browser-mcp` — встроенный сервер для собственного браузера человека (семейство Firefox через мост Kvist, Chromium через CDP):
+  см. [browser-mcp.ru.md](browser-mcp.ru.md).
 
 Для встроенных `gmail` и `telegram` есть команды подключения через браузер:
 

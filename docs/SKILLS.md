@@ -442,8 +442,8 @@ HTTP/SSE servers are not supported.
   `notifications/cancelled`, but what the server already did cannot be undone and is
   reported as unknown.
 
-* `kvist --browser-mcp` is a built-in server for the person's own browser (Chromium family over CDP,
-  Firefox over WebDriver BiDi): see [browser-mcp.md](browser-mcp.md).
+* `kvist --browser-mcp` is a built-in server for the person's own browser (Firefox family through the Kvist bridge, Chromium over CDP):
+  see [browser-mcp.md](browser-mcp.md).
 
 Bundled `gmail` and `telegram` have guided browser connection commands:
 

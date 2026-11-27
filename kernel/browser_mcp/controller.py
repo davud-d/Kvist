@@ -19,7 +19,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from kernel.browser_mcp import endpoint
-from kernel.browser_mcp.drivers import DriverError
+from kernel.browser_mcp.drivers import DriverError, PageRefused
 from kernel.browser_mcp.keys import parse_chord
 from kernel.browser_mcp.motion import STEP_MS, path
 
@@ -111,6 +111,9 @@ class Controller:
         return self._eval(self.tab, expression, mount=True, timeout=timeout)
 
     def _focused_tab(self, tabs: list[Any]) -> str:
+        if hasattr(self.driver, "focused"):
+            # The bridge knows the selected tab; asking each tab would load every unloaded one.
+            return self.driver.focused()
         best, best_score = tabs[0].id, -1
         for item in tabs:
             try:
@@ -142,7 +145,10 @@ class Controller:
         self.tab = tab
         # Stop lasts for the turn it was pressed in; this server belongs to a later turn, which the
         # person started with a message of their own, so a Stop left in the page no longer applies.
-        self._eval(tab, "k.resume()", timeout=5.0)
+        try:
+            self._eval(tab, "k.resume()", timeout=5.0)
+        except PageRefused:
+            pass  # the browser's own page: nothing of Kvist's is in it
         info = self._settle()
         self._mac = bool(info.get("mac"))
         self.cursor = (info.get("w", 800) / 2, info.get("h", 600) / 2)
@@ -174,6 +180,8 @@ class Controller:
         while time.monotonic() < deadline and not self.cancel.is_set():
             try:
                 info = self._work("k.info()", timeout=5.0) or {}
+            except PageRefused:
+                return {}  # the browser's own page: the tool that needs the page says so
             except DriverError:
                 time.sleep(0.2)
                 continue

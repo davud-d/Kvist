@@ -367,3 +367,38 @@ class _SocketLines:
 
     def close(self) -> None:
         self._sock.close()
+
+
+def test_the_bridge_driver_speaks_the_bridge_protocol_and_reports_refused_pages():
+    from kernel.browser_mcp.drivers import BridgeDriver, PageRefused
+
+    ours, theirs = socket.socketpair()
+    calls: list[dict] = []
+
+    def bridge() -> None:
+        for line in theirs.makefile("rb"):
+            request = json.loads(line)
+            calls.append(request)
+            method = request["method"]
+            reply: dict = {"id": request["id"], "result": None}
+            if method == "hello":
+                reply["result"] = {"product": "Waterfox 140.6.0", "version": 1}
+            elif method == "tabs":
+                reply["result"] = [{"id": "w1", "url": "about:welcome", "title": "Welcome", "active": True}]
+            elif method == "focused":
+                reply["result"] = "w1"
+            elif method == "evaluate":
+                reply = {"id": request["id"], "error": "the browser's own page", "code": "page_refused"}
+            theirs.sendall(json.dumps(reply).encode() + b"\n")
+
+    threading.Thread(target=bridge, daemon=True).start()
+    driver = BridgeDriver(_SocketLines(ours))
+
+    assert driver.product == "Waterfox 140.6.0" and driver.focused() == "w1"
+    assert [tab.url for tab in driver.tabs()] == ["about:welcome"]
+    with pytest.raises(PageRefused):
+        driver.evaluate("w1", "1")
+    driver.press("w1", parse_chord("Ctrl+A"), 0.0)
+    keys = [(c["params"]["type"], c["params"]["key"]) for c in calls if c["method"] == "key"]
+    assert keys == [("down", "Control"), ("down", "a"), ("up", "a"), ("up", "Control")]
+    driver.close()

@@ -277,8 +277,20 @@
     if (parent) parent.appendChild(node);
     return node;
   };
+  // Firefox refuses animate() from a script sandbox once the element is in the page (NS_ERROR_FAILURE),
+  // so the endless loops start while the overlay is still detached, and one-off changes use transitions.
   const loop = (el, frames, ms, easing = 'linear') => {
-    if (!STILL) el.animate(frames, { duration: ms, iterations: Infinity, easing });
+    if (STILL) return;
+    try {
+      el.animate(frames, { duration: ms, iterations: Infinity, easing });
+    } catch (error) {
+      // a still overlay is still an overlay
+    }
+  };
+  const settle = (el, from, to) => {
+    css(el, from);
+    void el.offsetWidth;  // apply the starting values, so the transition has somewhere to start from
+    css(el, to);
   };
   const say = (en, ru) => (RU ? ru : en);
   const IDLE = () => say('Kvist is working here', 'Kvist работает здесь');
@@ -401,8 +413,8 @@
   const setLabel = text => {
     if (!ui || ui.label.textContent === text) return;
     ui.label.textContent = text;
-    ui.label.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
-      { duration: 220, easing: 'ease-out' });
+    settle(ui.label, { transition: 'none', opacity: '0', transform: 'translateY(4px)' },
+      { transition: 'opacity .22s ease-out, transform .22s ease-out', opacity: '1', transform: 'none' });
   };
 
   const moveCursor = (x, y) => {
@@ -475,7 +487,8 @@
     const start = performance.now();
     const frame = now => {
       if (id !== glideId) return;
-      const index = Math.min(points.length - 1, Math.floor((now - start) / stepMs));
+      // The frame clock can run a hair behind performance.now(), which would make the index negative.
+      const index = Math.min(points.length - 1, Math.max(0, Math.floor((now - start) / stepMs)));
       moveCursor(points[index][0], points[index][1]);
       if (index < points.length - 1) requestAnimationFrame(frame);
     };
@@ -491,9 +504,9 @@
     if (!down) return;
     const ring = div(ui.box, { position: 'absolute', left: x + 'px', top: y + 'px', width: '14px', height: '14px',
       margin: '-7px 0 0 -7px', 'border-radius': '50%', border: '2px solid #7dd3fc',
-      'box-shadow': '0 0 14px #38bdf8, inset 0 0 6px #38bdf8', opacity: '0' });
-    ring.animate([{ transform: 'scale(.35)', opacity: 1 }, { transform: 'scale(4.4)', opacity: 0 }],
-      { duration: 650, easing: 'ease-out' });
+      'box-shadow': '0 0 14px #38bdf8, inset 0 0 6px #38bdf8' });
+    settle(ring, { transform: 'scale(.35)', opacity: '1' },
+      { transition: 'transform .65s ease-out, opacity .65s ease-out', transform: 'scale(4.4)', opacity: '0' });
     setTimeout(() => ring.remove(), 700);
   };
 

@@ -387,3 +387,116 @@ class BidiDriver:
         except DriverError:
             pass  # the browser may be gone already; the socket is closed either way
         self._rpc.close()
+
+
+class PageRefused(DriverError):
+    """The tab shows one of the browser's own pages, which Kvist does not touch."""
+
+
+# Keys the bridge needs for modifiers (DOM key, code, keyCode); keys.MODIFIERS carries CDP's bits instead.
+_BRIDGE_MODIFIERS = {"alt": ("Alt", "AltLeft", 18), "ctrl": ("Control", "ControlLeft", 17),
+                     "meta": ("Meta", "MetaLeft", 91), "shift": ("Shift", "ShiftLeft", 16)}
+
+
+class BridgeDriver:
+    """The Kvist browser bridge inside a Firefox-family browser (firefox/bridge.js).
+
+    No remote agent is involved, so sites keep seeing navigator.webdriver = false; input is
+    dispatched by the browser itself and reaches pages as trusted events.
+    """
+
+    protocol = "bridge"
+
+    def __init__(self, transport: Any) -> None:
+        self._rpc = Rpc(transport, lambda _message: None)
+        self._buttons = 0
+        self.product = str(self._call("hello").get("product") or "firefox")
+
+    def _call(self, method: str, params: dict[str, Any] | None = None, timeout: float = CALL_TIMEOUT) -> Any:
+        reply = self._rpc.call({"method": method, "params": params or {}}, timeout)
+        if "error" in reply:
+            error = PageRefused if reply.get("code") == "page_refused" else DriverError
+            raise error(f"{method}: {reply['error']}")
+        return reply.get("result")
+
+    def tabs(self) -> list[Tab]:
+        return [Tab(item["id"], item.get("url", ""), item.get("title", "")) for item in self._call("tabs") or []]
+
+    def focused(self) -> str:
+        return str(self._call("focused"))
+
+    def new_tab(self) -> str:
+        return str(self._call("new_tab"))
+
+    def close_tab(self, tab: str) -> None:
+        self._call("close_tab", {"tab": tab})
+
+    def activate(self, tab: str) -> None:
+        self._call("activate", {"tab": tab})
+
+    def navigate(self, tab: str, url: str) -> None:
+        self._call("navigate", {"tab": tab, "url": url})
+
+    def evaluate(self, tab: str, expression: str, timeout: float = CALL_TIMEOUT) -> str:
+        return self._call("evaluate", {"tab": tab, "expression": expression, "timeout": int(timeout * 1000)},
+                          timeout + 2.0)
+
+    def add_preload(self, tab: str, source: str) -> str:
+        self._call("preload", {"tab": tab, "source": source})
+        return tab
+
+    def remove_preload(self, tab: str, handle: str) -> None:
+        if handle:
+            self._call("preload", {"tab": tab, "source": None}, timeout=0.8)
+
+    def _mouse(self, tab: str, kind: str, x: float, y: float, button: str = "left", clicks: int = 0) -> None:
+        self._call("mouse", {"tab": tab, "type": kind, "x": x, "y": y, "button": _BUTTONS[button][0],
+                             "clicks": clicks, "buttons": self._buttons})
+
+    def move(self, tab: str, points: list[tuple[float, float]], cancelled: Callable[[], bool]) -> None:
+        start = time.monotonic()
+        for index, (x, y) in enumerate(points, 1):
+            if cancelled():
+                return
+            self._mouse(tab, "mousemove", x, y)
+            delay = start + index * STEP_MS / 1000 - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+
+    def button(self, tab: str, x: float, y: float, pressed: bool, button: str, clicks: int) -> None:
+        bit = _BUTTONS[button][1]
+        self._buttons = self._buttons | bit if pressed else self._buttons & ~bit
+        self._mouse(tab, "mousedown" if pressed else "mouseup", x, y, button, clicks)
+
+    def wheel(self, tab: str, x: float, y: float, dx: float, dy: float) -> None:
+        self._call("wheel", {"tab": tab, "x": x, "y": y, "dx": dx, "dy": dy})
+
+    def _key(self, tab: str, kind: str, key: str, code: str, key_code: int) -> None:
+        self._call("key", {"tab": tab, "type": kind, "key": key, "code": code, "keyCode": key_code})
+
+    def press(self, tab: str, chord: Chord, hold: float = 0.0) -> None:
+        for name in chord.modifiers:
+            self._key(tab, "down", *_BRIDGE_MODIFIERS[name])
+        self._key(tab, "down", chord.key.key, chord.key.code, chord.key.vk)
+        if hold:
+            time.sleep(hold)
+        self._key(tab, "up", chord.key.key, chord.key.code, chord.key.vk)
+        for name in reversed(chord.modifiers):
+            self._key(tab, "up", *_BRIDGE_MODIFIERS[name])
+
+    def type_text(self, tab: str, text: str, pauses: list[float]) -> None:
+        for char, pause in zip(text, pauses, strict=True):
+            key = char_key(char)
+            self._key(tab, "down", key.key, key.code, key.vk)
+            self._key(tab, "up", key.key, key.code, key.vk)
+            time.sleep(pause)
+
+    def insert_text(self, tab: str, text: str) -> None:
+        self._call("text", {"tab": tab, "text": text})
+
+    def screenshot(self, tab: str) -> bytes:
+        return base64.b64decode(self._call("screenshot", {"tab": tab}, 30.0))
+
+    def close(self) -> None:
+        # The bridge cleans up after a client the moment its socket closes.
+        self._rpc.close()
