@@ -55,10 +55,43 @@ def test_envelope_can_contain_images_without_text():
     assert text and len(images) == 1
 
 
-def test_unsupported_model_is_not_called(agent_factory):
-    agent = agent_factory(provider="deepseek", smart_model="deepseek-chat")
+def test_a_named_unsupported_vision_model_is_not_called(agent_factory, monkeypatch):
+    monkeypatch.setenv("AGENT_VISION_MODEL", "deepseek-chat")
+    agent = agent_factory(provider="deepseek", smart_model="deepseek-v4-pro", fast_model="deepseek-flash")
     assert "не поддерживает" in describe_images(agent, [attachment()])
     assert not agent.client.requests
+
+
+def test_a_blind_smart_model_hands_images_to_the_fast_one(agent_factory, monkeypatch):
+    monkeypatch.delenv("AGENT_VISION_MODEL", raising=False)
+    agent = agent_factory(provider="deepseek", smart_model="deepseek-v4-pro", fast_model="deepseek-flash")
+    agent.client.content = "A red square"
+    assert describe_images(agent, [attachment()]) == "A red square"
+    assert [r["model"] for r in agent.client.requests] == ["deepseek-flash"]
+
+
+def test_a_model_the_table_calls_blind_is_still_tried_last(agent_factory, monkeypatch):
+    monkeypatch.delenv("AGENT_VISION_MODEL", raising=False)
+    agent = agent_factory(provider="deepseek", smart_model="deepseek-v4-pro", fast_model="deepseek-flash")
+    asked = []
+    def create(**kwargs):
+        asked.append(kwargs["model"])
+        if kwargs["model"] == "deepseek-flash":
+            raise RuntimeError("overloaded")
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Red after all"))])
+    agent.client.chat.completions.create = create
+    assert describe_images(agent, [attachment()]) == "Red after all"
+    assert asked == ["deepseek-flash", "deepseek-v4-pro"]
+
+
+def test_when_every_model_fails_the_message_names_each(agent_factory, monkeypatch):
+    monkeypatch.delenv("AGENT_VISION_MODEL", raising=False)
+    agent = agent_factory(provider="deepseek", smart_model="deepseek-v4-pro", fast_model="deepseek-chat")
+    def fail(**kwargs):
+        raise RuntimeError("image_url is not supported")
+    agent.client.chat.completions.create = fail
+    result = describe_images(agent, [attachment()])
+    assert result.startswith("Vision failed") and "deepseek-v4-pro" in result and "deepseek-chat" in result
 
 
 def test_image_generation_model_is_not_vision():

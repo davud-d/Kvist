@@ -61,7 +61,7 @@ def test_constitution_precedes_every_acting_role(tmp_path):
     """
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
-        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5", voice_mode=False),
+        config=SimpleNamespace(end_session_enabled=False, provider="openai", fast_model="gpt-5-mini", smart_model="gpt-5", voice_mode=False),
         _session_styles={},
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role="coder", plan_phase="", read_only_goal=False),
@@ -81,7 +81,7 @@ def test_roles_receive_current_command_reference(tmp_path, role):
 
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
-        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5", voice_mode=False),
+        config=SimpleNamespace(end_session_enabled=False, provider="openai", fast_model="gpt-5-mini", smart_model="gpt-5", voice_mode=False),
         _session_styles={},
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role=role, plan_phase="", read_only_goal=False),

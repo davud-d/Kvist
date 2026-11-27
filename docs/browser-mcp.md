@@ -89,6 +89,10 @@ The model is told to plan from one look: steps it can already foresee go into on
 looks again only after a step that changes the screen (a new page, a dialog, "Next"). A batch
 stops at the first failing step and reports which steps were not run.
 
+Screenshots reach the model as the Vision model's description. Unless `AGENT_VISION_MODEL` (or
+`vision_model`) names one, the provider's smart and fast models are both tried, the one known to
+see first: with DeepSeek, `deepseek-v4-pro` is blind and `deepseek-flash` describes the picture.
+
 ## How it is built
 
 `kernel/browser_mcp/`: a standard-library WebSocket client, a CDP and a BiDi driver, the pointer
