@@ -30,8 +30,12 @@ MAX_WAIT_MS = 15000
 HUMAN_TYPING_LIMIT = 200  # longer text is inserted at once: a minute of typing would outlast the call
 SNAPSHOT_LIMIT = 30000
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:(?!\d)")
-STOPPED = ("The person pressed Stop in the browser. Do not use the browser again in this task "
-           "unless they ask you to; tell them where you stopped.")
+STOPPED = (
+    "The person pressed Stop on the page: they took their browser back for the rest of this turn. "
+    "Do not try to get around it: no other tab, no other browser tool, no desktop or shell tool to reach the page. "
+    "Stop working in the browser and ask them what went wrong, why they stopped you, and whether you may go on, "
+    "saying where you stopped. If they say go on, their next message opens the browser to you again."
+)
 
 
 class ToolError(Exception):
@@ -136,6 +140,9 @@ class Controller:
         self.driver.activate(tab)
         self._preload = self.driver.add_preload(tab, PRELOAD_JS)
         self.tab = tab
+        # Stop lasts for the turn it was pressed in; this server belongs to a later turn, which the
+        # person started with a message of their own, so a Stop left in the page no longer applies.
+        self._eval(tab, "k.resume()", timeout=5.0)
         info = self._settle()
         self._mac = bool(info.get("mac"))
         self.cursor = (info.get("w", 800) / 2, info.get("h", 600) / 2)
@@ -191,6 +198,8 @@ class Controller:
             pass  # a label on the overlay is not worth failing the action for
 
     def list_tabs(self) -> str:
+        # Picks the person's focused tab as the working tab, so the list can say where work happens.
+        self.ensure_tab()
         tabs = self.driver.tabs()
         if not tabs and not getattr(self.driver, "partial", False):
             return f"{self.driver.product}: no open tabs."
@@ -200,7 +209,7 @@ class Controller:
                      "(restored, never opened), so only the tabs Kvist opened are shown. Open a tab with "
                      "browser_open_tab to work; the person's other tabs cannot be reached."]
         for item in tabs:
-            mark = "  ← Kvist works here" if item.id == self.tab else ""
+            mark = "  ← the person's tab; every tool works here" if item.id == self.tab else ""
             lines.append(f"{self._alias(item.id)}  {item.title or '(untitled)'} — {item.url}{mark}")
         return "\n".join(lines)
 

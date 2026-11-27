@@ -255,77 +255,30 @@
   });
 
   // ---------------------------------------------------------------- the overlay
-  const CSS = `
-:host { all: initial; }
-.root { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .5s ease;
-  font: 600 13px/1.2 system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
-.root.on { opacity: 1; }
-.frame { position: absolute; inset: 0; padding: 3px; overflow: hidden;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude; }
-.spin { position: absolute; left: 50%; top: 50%; width: 260vmax; height: 260vmax; margin: -130vmax 0 0 -130vmax;
-  background: conic-gradient(from 0deg, rgba(56,189,248,0) 0%, #38bdf8 10%, #93c5fd 17%, rgba(59,130,246,0) 30%,
-    rgba(56,189,248,0) 50%, #22d3ee 60%, #3b82f6 68%, rgba(56,189,248,0) 80%);
-  animation: spin 6.5s linear infinite; }
-.glow { position: absolute; inset: 0; animation: breathe 3.4s ease-in-out infinite;
-  box-shadow: inset 0 0 0 1px rgba(125,211,252,.5), inset 0 0 26px 5px rgba(59,130,246,.42),
-    inset 0 0 90px 14px rgba(56,189,248,.16); }
-@keyframes spin { to { transform: rotate(1turn); } }
-@keyframes breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
-
-.pill { position: absolute; top: 14px; left: 50%; display: flex; align-items: center; gap: 10px;
-  padding: 6px 6px 6px 12px; border-radius: 999px; overflow: hidden; pointer-events: auto; color: #f0f9ff;
-  background: linear-gradient(120deg, #1d4ed8 0%, #2563eb 30%, #0ea5e9 70%, #22d3ee 100%);
-  box-shadow: 0 10px 30px -8px rgba(14,165,233,.75), 0 0 0 1px rgba(186,230,253,.5) inset;
-  opacity: 0; transform: translate(-50%, -14px) scale(.96);
-  transition: transform .55s cubic-bezier(.2,.9,.25,1.25), opacity .35s ease; }
-.root.on .pill { opacity: 1; transform: translate(-50%, 0) scale(1); }
-.pill.busy { pointer-events: none; }
-.pill::before { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,.38) 50%, transparent 62%);
-  transform: translateX(-130%); animation: sheen 4.2s ease-in-out infinite; }
-@keyframes sheen { 0%, 60% { transform: translateX(-130%); } 100% { transform: translateX(130%); } }
-.mark { width: 18px; height: 18px; flex: none; filter: drop-shadow(0 0 4px rgba(255,255,255,.55)); }
-.mark .caret { animation: blink 1.05s steps(1) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-.label { position: relative; white-space: nowrap; letter-spacing: .01em; max-width: 46vw; overflow: hidden;
-  text-overflow: ellipsis; transition: opacity .2s ease, transform .2s ease; text-shadow: 0 1px 2px rgba(2,6,23,.35); }
-.label.swap { opacity: 0; transform: translateY(4px); }
-.stop { all: unset; position: relative; display: flex; align-items: center; gap: 6px; padding: 6px 12px;
-  border-radius: 999px; background: rgba(7,18,42,.82); color: #e0f2fe; cursor: pointer;
-  font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; transition: background .2s ease, transform .15s ease; }
-.stop:hover { background: rgba(7,18,42,.96); }
-.stop:active { transform: scale(.95); }
-.stop i { width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
-.root.stopped .frame, .root.stopped .glow { opacity: 0; transition: opacity .7s ease; }
-.root.stopped .stop { display: none; }
-
-.cursor { position: absolute; left: 0; top: 0; width: 26px; height: 30px; opacity: 0; will-change: transform;
-  transition: opacity .35s ease;
-  filter: drop-shadow(0 0 7px rgba(56,189,248,.9)) drop-shadow(0 2px 3px rgba(2,6,23,.45)); }
-.cursor.shown { opacity: 1; }
-.cursor svg { display: block; transform-origin: 2px 2px; transition: transform .12s ease; }
-.cursor.down svg { transform: scale(.84); }
-.tag { position: absolute; left: 19px; top: 23px; padding: 2px 8px; border-radius: 8px 8px 8px 3px; color: #fff;
-  background: linear-gradient(135deg, #2563eb, #0ea5e9); white-space: nowrap;
-  font: 700 11px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 4px 14px -3px rgba(14,165,233,.7); }
-.ripple { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
-  border: 2px solid #7dd3fc; box-shadow: 0 0 14px #38bdf8, inset 0 0 6px #38bdf8; animation: ripple .65s ease-out forwards; }
-@keyframes ripple { from { transform: scale(.35); opacity: 1; } to { transform: scale(4.4); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .spin, .glow, .pill::before, .mark .caret { animation: none; } }
-`;
+  // Styled only through element.style and animated through element.animate(): a page's CSP may
+  // block <style> elements, and Firefox's script sandbox cannot adopt constructed style sheets.
+  // Neither restriction applies to the CSSOM or to Web Animations.
   const SVG = 'http://www.w3.org/2000/svg';
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif';
+  const STILL = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const css = (el, props) => {
+    for (const [name, value] of Object.entries(props)) el.style.setProperty(name, value);
+    return el;
+  };
   const svg = (tag, attrs, parent) => {
     const node = document.createElementNS(SVG, tag);
     for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
     if (parent) parent.appendChild(node);
     return node;
   };
-  const div = (cls, parent) => {
+  const div = (parent, props) => {
     const node = document.createElement('div');
-    node.className = cls;
+    css(node, props || {});
     if (parent) parent.appendChild(node);
     return node;
+  };
+  const loop = (el, frames, ms, easing = 'linear') => {
+    if (!STILL) el.animate(frames, { duration: ms, iterations: Infinity, easing });
   };
   const say = (en, ru) => (RU ? ru : en);
   const IDLE = () => say('Kvist is working here', 'Kvist работает здесь');
@@ -335,56 +288,105 @@
   let idleTimer = 0;
   let busyTimer = 0;
   let glideId = 0;
+  let stoppedTimer = 0;
+
+  const buildFrame = box => {
+    // A ring of light running round the window's edge: a turning conic gradient, masked to a 3 px border.
+    const frame = div(box, { position: 'absolute', inset: '0', padding: '3px', overflow: 'hidden',
+      'mask-image': 'linear-gradient(#000 0 0), linear-gradient(#000 0 0)', 'mask-clip': 'content-box, border-box',
+      'mask-composite': 'exclude', transition: 'opacity .7s ease' });
+    const spin = div(frame, { position: 'absolute', left: '50%', top: '50%', width: '260vmax', height: '260vmax',
+      margin: '-130vmax 0 0 -130vmax',
+      background: 'conic-gradient(from 0deg, rgba(56,189,248,0) 0%, #38bdf8 10%, #93c5fd 17%, rgba(59,130,246,0) 30%, ' +
+        'rgba(56,189,248,0) 50%, #22d3ee 60%, #3b82f6 68%, rgba(56,189,248,0) 80%)' });
+    loop(spin, [{ transform: 'rotate(0turn)' }, { transform: 'rotate(1turn)' }], 6500);
+    const glow = div(box, { position: 'absolute', inset: '0', opacity: '.75', transition: 'opacity .7s ease',
+      'box-shadow': 'inset 0 0 0 1px rgba(125,211,252,.5), inset 0 0 26px 5px rgba(59,130,246,.42), ' +
+        'inset 0 0 90px 14px rgba(56,189,248,.16)' });
+    loop(glow, [{ opacity: .5 }, { opacity: 1 }, { opacity: .5 }], 3400, 'ease-in-out');
+    return [frame, glow];
+  };
+
+  const buildPill = box => {
+    const pill = div(box, { position: 'absolute', top: '14px', left: '50%', display: 'flex', 'align-items': 'center',
+      gap: '10px', padding: '6px 6px 6px 12px', 'border-radius': '999px', overflow: 'hidden', 'pointer-events': 'auto',
+      color: '#f0f9ff', font: `600 13px/1.2 ${FONT}`, 'white-space': 'nowrap', opacity: '0',
+      background: 'linear-gradient(120deg, #1d4ed8 0%, #2563eb 30%, #0ea5e9 70%, #22d3ee 100%)',
+      'box-shadow': '0 10px 30px -8px rgba(14,165,233,.75), inset 0 0 0 1px rgba(186,230,253,.5)',
+      transform: 'translate(-50%, -14px) scale(.96)',
+      transition: 'transform .55s cubic-bezier(.2,.9,.25,1.25), opacity .35s ease' });
+    const sheen = div(pill, { position: 'absolute', inset: '0', 'pointer-events': 'none', transform: 'translateX(-130%)',
+      background: 'linear-gradient(105deg, transparent 38%, rgba(255,255,255,.38) 50%, transparent 62%)' });
+    loop(sheen, [{ transform: 'translateX(-130%)', offset: 0 }, { transform: 'translateX(-130%)', offset: .6 },
+      { transform: 'translateX(130%)', offset: 1 }], 4200, 'ease-in-out');
+    const mark = svg('svg', { viewBox: '0 0 512 512', width: '18', height: '18' }, pill);
+    css(mark, { flex: 'none', position: 'relative', filter: 'drop-shadow(0 0 4px rgba(255,255,255,.55))' });
+    svg('path', { d: 'M150 150 L266 256 L150 362', fill: 'none', stroke: '#fff', 'stroke-width': '52',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, mark);
+    const caret = svg('rect', { x: '286', y: '330', width: '130', height: '48', rx: '24', fill: '#fff' }, mark);
+    loop(caret, [{ opacity: 1, offset: 0 }, { opacity: 1, offset: .5 }, { opacity: 0, offset: .5 }, { opacity: 0, offset: 1 }], 1050);
+    const label = div(pill, { position: 'relative', 'max-width': '46vw', overflow: 'hidden', 'text-overflow': 'ellipsis',
+      'letter-spacing': '.01em', 'text-shadow': '0 1px 2px rgba(2,6,23,.35)' });
+    label.textContent = IDLE();
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    css(stop, { all: 'unset', position: 'relative', display: 'flex', 'align-items': 'center', gap: '6px',
+      padding: '6px 12px', 'border-radius': '999px', background: 'rgba(7,18,42,.82)', color: '#e0f2fe',
+      cursor: 'pointer', font: `600 12px/1 ${FONT}`, transition: 'background .2s ease, transform .15s ease' });
+    div(stop, { width: '8px', height: '8px', 'border-radius': '2px', background: 'currentColor' });
+    stop.appendChild(document.createTextNode(say('Stop', 'Стоп')));
+    stop.addEventListener('mouseenter', () => css(stop, { background: 'rgba(7,18,42,.97)' }));
+    stop.addEventListener('mouseleave', () => css(stop, { background: 'rgba(7,18,42,.82)', transform: 'none' }));
+    stop.addEventListener('mousedown', () => css(stop, { transform: 'scale(.95)' }));
+    pill.appendChild(stop);
+    return { pill, label, stop };
+  };
+
+  const buildCursor = box => {
+    const cursor = div(box, { position: 'absolute', left: '0', top: '0', width: '26px', height: '30px', opacity: '0',
+      'will-change': 'transform', transition: 'opacity .35s ease',
+      filter: 'drop-shadow(0 0 7px rgba(56,189,248,.9)) drop-shadow(0 2px 3px rgba(2,6,23,.45))' });
+    const arrow = svg('svg', { width: '26', height: '30', viewBox: '0 0 26 30' }, cursor);
+    css(arrow, { display: 'block', 'transform-origin': '2px 2px', transition: 'transform .12s ease' });
+    const gradient = svg('linearGradient', { id: 'kvist-cursor-fill', x1: '0', y1: '0', x2: '0.6', y2: '1' },
+      svg('defs', {}, arrow));
+    svg('stop', { offset: '0', 'stop-color': '#7dd3fc' }, gradient);
+    svg('stop', { offset: '1', 'stop-color': '#2563eb' }, gradient);
+    svg('path', { d: 'M2 2 L2 22.5 L7.4 17.4 L11.2 25.8 L15 24.1 L11.3 15.9 L18.6 15.9 Z', fill: 'url(#kvist-cursor-fill)',
+      stroke: '#fff', 'stroke-width': '1.6', 'stroke-linejoin': 'round' }, arrow);
+    const tag = div(cursor, { position: 'absolute', left: '19px', top: '23px', padding: '2px 8px', color: '#fff',
+      'border-radius': '8px 8px 8px 3px', 'white-space': 'nowrap', font: `700 11px/1.5 ${FONT}`,
+      background: 'linear-gradient(135deg, #2563eb, #0ea5e9)', 'box-shadow': '0 4px 14px -3px rgba(14,165,233,.7)' });
+    tag.textContent = 'Kvist';
+    return { cursor, arrow };
+  };
 
   const build = () => {
     host = document.createElement('div');
-    // Plain tag, no id or class: nothing for page styles to match.
+    // Plain tag, no id or class: nothing for page styles to match; a closed root keeps page scripts out.
     const root = host.attachShadow({ mode: 'closed' });
-    if (root.adoptedStyleSheets !== undefined && typeof CSSStyleSheet === 'function') {
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(CSS);
-      root.adoptedStyleSheets = [sheet];
-    } else {
-      const style = document.createElement('style');
-      style.textContent = CSS;
-      root.appendChild(style);
-    }
-    const box = div('root', root);
-    div('spin', div('frame', box));
-    div('glow', box);
-    const pill = div('pill', box);
-    const mark = svg('svg', { class: 'mark', viewBox: '0 0 512 512' }, pill);
-    svg('path', { d: 'M150 150 L266 256 L150 362', fill: 'none', stroke: '#fff', 'stroke-width': '52',
-      'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, mark);
-    svg('rect', { class: 'caret', x: '286', y: '330', width: '130', height: '48', rx: '24', fill: '#fff' }, mark);
-    const label = div('label', pill);
-    label.textContent = IDLE();
-    const stop = document.createElement('button');
-    stop.className = 'stop';
-    stop.type = 'button';
-    stop.appendChild(document.createElement('i'));
-    stop.appendChild(document.createTextNode(say('Stop', 'Стоп')));
-    pill.appendChild(stop);
+    const box = div(root, { position: 'fixed', inset: '0', 'pointer-events': 'none', opacity: '0',
+      transition: 'opacity .5s ease' });
+    const [frame, glow] = buildFrame(box);
+    const { pill, label, stop } = buildPill(box);
+    const { cursor, arrow } = buildCursor(box);
+    ui = { box, frame, glow, pill, label, stop, cursor, arrow };
     stop.addEventListener('click', event => {
       if (!event.isTrusted) return;  // only the person's own click stops Kvist
       event.preventDefault();
       event.stopPropagation();
       k.stopped = true;
       setLabel(say('Stopped', 'Остановлено'));
-      box.classList.add('stopped');
-      setTimeout(() => k.unmount(), 1600);
+      css(stop, { display: 'none' });
+      css(frame, { opacity: '0' });
+      css(glow, { opacity: '0' });
+      stoppedTimer = setTimeout(() => k.unmount(), 1600);
     }, true);
-    const cursor = div('cursor', box);
-    const arrow = svg('svg', { width: '26', height: '30', viewBox: '0 0 26 30' }, cursor);
-    const defs = svg('defs', {}, arrow);
-    const gradient = svg('linearGradient', { id: 'kvist-cursor-fill', x1: '0', y1: '0', x2: '0.6', y2: '1' }, defs);
-    svg('stop', { offset: '0', 'stop-color': '#7dd3fc' }, gradient);
-    svg('stop', { offset: '1', 'stop-color': '#2563eb' }, gradient);
-    svg('path', { d: 'M2 2 L2 22.5 L7.4 17.4 L11.2 25.8 L15 24.1 L11.3 15.9 L18.6 15.9 Z', fill: 'url(#kvist-cursor-fill)',
-      stroke: '#fff', 'stroke-width': '1.6', 'stroke-linejoin': 'round' }, arrow);
-    const tag = div('tag', cursor);
-    tag.textContent = 'Kvist';
-    ui = { box, pill, label, cursor };
+  };
+
+  const show = on => {
+    css(ui.box, { opacity: on ? '1' : '0' });
+    css(ui.pill, { opacity: on ? '1' : '0', transform: on ? 'translate(-50%, 0) scale(1)' : 'translate(-50%, -14px) scale(.96)' });
   };
 
   const place = () => {
@@ -392,19 +394,20 @@
     document.documentElement.appendChild(host);
     // The top layer keeps the overlay above the page's own modal dialogs.
     host.setAttribute('popover', 'manual');
-    try { host.showPopover(); } catch (error) { /* older browsers: z-index below still works */ }
+    try { host.showPopover(); } catch (error) { /* without popovers the z-index below still works */ }
   };
 
+  // No timers here: a browser may stretch them to a second in a tab it considers hidden.
   const setLabel = text => {
     if (!ui || ui.label.textContent === text) return;
-    ui.label.classList.add('swap');
-    setTimeout(() => { ui.label.textContent = text; ui.label.classList.remove('swap'); }, 180);
+    ui.label.textContent = text;
+    ui.label.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 220, easing: 'ease-out' });
   };
 
   const moveCursor = (x, y) => {
     k.cx = x; k.cy = y;
-    ui.cursor.style.transform = `translate(${x - 2}px, ${y - 2}px)`;
-    ui.cursor.classList.add('shown');
+    css(ui.cursor, { transform: `translate(${x - 2}px, ${y - 2}px)`, opacity: '1' });
   };
 
   k.mount = () => {
@@ -424,15 +427,27 @@
       observer = new MutationObserver(() => { if (!host.isConnected) place(); });
       observer.observe(document.documentElement, { childList: true });
     }
-    requestAnimationFrame(() => ui.box.classList.add('on'));
+    requestAnimationFrame(() => show(true));
     if (k.cx < 0) moveCursor(innerWidth / 2, innerHeight / 2);
     return true;
   };
 
+  k.resume = () => {
+    if (!k.stopped) return;
+    k.stopped = false;
+    clearTimeout(stoppedTimer);
+    if (!ui) return;
+    css(ui.stop, { display: 'flex' });
+    css(ui.frame, { opacity: '1' });
+    css(ui.glow, { opacity: '.75' });
+    setLabel(IDLE());
+  };
+
   k.unmount = () => {
     if (observer) { observer.disconnect(); observer = null; }
+    clearTimeout(stoppedTimer);
     if (host && host.isConnected) {
-      ui.box.classList.remove('on');
+      show(false);
       const gone = host;
       setTimeout(() => gone.remove(), 500);
     }
@@ -448,9 +463,9 @@
   // The pill must not catch a click the agent aims at something under it.
   k.busy = () => {
     if (!ui) return;
-    ui.pill.classList.add('busy');
+    css(ui.pill, { 'pointer-events': 'none' });
     clearTimeout(busyTimer);
-    busyTimer = setTimeout(() => ui.pill.classList.remove('busy'), 900);
+    busyTimer = setTimeout(() => css(ui.pill, { 'pointer-events': 'auto' }), 900);
   };
 
   k.glide = (points, stepMs) => {
@@ -472,11 +487,13 @@
     k.busy();
     glideId += 1;
     moveCursor(x, y);
-    ui.cursor.classList.toggle('down', down);
+    css(ui.arrow, { transform: down ? 'scale(.84)' : 'none' });
     if (!down) return;
-    const ring = div('ripple', ui.box);
-    ring.style.left = x + 'px';
-    ring.style.top = y + 'px';
+    const ring = div(ui.box, { position: 'absolute', left: x + 'px', top: y + 'px', width: '14px', height: '14px',
+      margin: '-7px 0 0 -7px', 'border-radius': '50%', border: '2px solid #7dd3fc',
+      'box-shadow': '0 0 14px #38bdf8, inset 0 0 6px #38bdf8', opacity: '0' });
+    ring.animate([{ transform: 'scale(.35)', opacity: 1 }, { transform: 'scale(4.4)', opacity: 0 }],
+      { duration: 650, easing: 'ease-out' });
     setTimeout(() => ring.remove(), 700);
   };
 

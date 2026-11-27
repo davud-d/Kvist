@@ -218,6 +218,20 @@ def test_after_stop_every_tool_refuses(fake):
     assert ("unpreload",) in driver.input
 
 
+def test_stop_lasts_for_the_turn_and_the_next_turn_takes_the_tab_back(monkeypatch):
+    monkeypatch.setattr("kernel.browser_mcp.controller._pause", lambda low, high: None)
+    driver = FakeDriver()
+    driver.stopped = True  # pressed in an earlier turn; that turn's server is gone
+    asked = []
+    original = driver.evaluate
+    driver.evaluate = lambda tab, source, timeout=15.0: asked.append(source) or original(tab, source, timeout)
+
+    Controller(connect=lambda _spec: driver).list_tabs()
+
+    assert any("k.resume()" in source for source in asked)
+    assert "ask them what went wrong" in STOPPED and "Do not try to get around it" in STOPPED
+
+
 def test_the_server_returns_a_look_after_the_batch(fake):
     driver, control = fake
     replies = []
