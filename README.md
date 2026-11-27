@@ -135,7 +135,12 @@ kvist
 ```
 
 Without `--workspace`, Kvist works in the current directory. In your home
-directory or a filesystem root it uses `Documents/Kvist Workspace` instead.
+directory or a filesystem root (or from a desktop launcher) it opens its system
+folder, `~/.kvist/workspace`: a place for requests about the computer itself and
+everyday things rather than a project ("the sound stopped working", "free some
+disk space", "convert this video"). There Kvist keeps `KVIST.md` as a notebook on
+this computer, and may run `sudo <program> <arguments>`: you approve each such
+command and type your password once per session; the model never sees it.
 
 On a clean machine Kvist asks for a provider and a key (see [Providers](#providers)).
 Then type a task, for example "find why the tests in `tests/test_parser.py`

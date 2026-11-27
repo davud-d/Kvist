@@ -96,6 +96,12 @@ class EventApprovalGate:
         # The frontend shows the request, but a window the user is not looking at cannot say so.
         return start_approval_reminder()
 
+    def ask_secret(self, title: str, help_text: str) -> str | None:
+        """A password through the frontend's secret field; the value is never part of an event."""
+        if self._mode == "deny":
+            return None
+        return self._channel.request("secret", title, help_text=help_text).value or None
+
     def confirm(self, title: str, body: str, question: str, timeout: float | None = None) -> bool:
         _ = question
         # `_remembered_pattern` is left alone: it belongs to the command approved

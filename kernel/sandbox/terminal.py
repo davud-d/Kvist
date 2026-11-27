@@ -68,6 +68,7 @@ from kernel.sandbox.terminal_env import (
 from kernel.sandbox.terminal_git import GitValidationMixin
 from kernel.sandbox.terminal_hitl import _alt_screen, _enter_hitl, _exit_hitl, is_hitl_active  # noqa: F401  is_hitl_active is re-exported
 from kernel.sandbox.terminal_interpreters import InterpreterValidationMixin
+from kernel.config.system_workspace import is_system_workspace
 from kernel.sandbox.terminal_limits import (
     _MAX_COMMAND_CHARS,
     _MAX_COMMAND_ITEMS,
@@ -87,6 +88,14 @@ from kernel.sandbox.terminal_rules import (
     _TERMINAL_PROFILES,
     _UNIX_ALLOWED,
     _WINDOWS_ALLOWED,
+)
+from kernel.sandbox.terminal_sudo import (
+    PASSWORD_HELP,
+    PASSWORD_TITLE,
+    SUDO_REASON,
+    AskpassFeed,
+    sudo_accepts,
+    sudo_argv,
 )
 from kernel.sandbox.terminal_trust import (
     _is_trusted_system_executable,  # noqa: F401  re-exported
@@ -188,6 +197,11 @@ class TerminalExecutor(
         # A sandbox over the whole home directory binds ~ writable anyway, and
         # masking its secrets means walking millions of entries per command.
         self.workspace_is_home = self.workspace == user_home()
+        # sudo exists only in the system folder, where the person asks about the computer itself.
+        self._sudo_available = os.name != "nt" and is_system_workspace(self.workspace)
+        self._sudo_password: str | None = None
+        # Set for the length of one sudo run.
+        self._sudo_feed: AskpassFeed | None = None
         self._run_network: bool | None = None
         # True while a command runs where nothing can cut it off the network.
         self._run_network_unenforced = False
@@ -291,6 +305,13 @@ class TerminalExecutor(
             ):
                 sandbox = "host"
                 justification = justification or _HOME_WORKSPACE_REASON
+            if self._is_sudo_command(command):
+                if background is not None:
+                    raise HardDenyError("Hard security denial: sudo runs in the foreground only")
+                # setuid sudo cannot work under Bubblewrap's no-new-privileges.
+                sandbox = "host"
+                justification = SUDO_REASON
+                self._sudo_feed = AskpassFeed()
             if (sandbox == "host" or network) and not (justification or "").strip():
                 raise HardDenyError("Host or network access requires a justification")
             self._rotate_child_home()
@@ -303,6 +324,9 @@ class TerminalExecutor(
             try:
                 return self._run_once(command, cwd, env_overrides, timeout, role)
             finally:
+                if self._sudo_feed is not None:
+                    self._sudo_feed.close()
+                    self._sudo_feed = None
                 self._run_sandbox = "default"
                 self._run_network = None
                 self._run_network_unenforced = False
@@ -346,7 +370,8 @@ class TerminalExecutor(
             f"Directory / Каталог: {context.cwd}\n"
             f"Reason / Причина: {self._run_justification}\n"
         )
-        if self._run_sandbox == "host" and not self._host_by_rule:
+        # A sudo command is asked about once, as a command that runs as root.
+        if self._run_sandbox == "host" and not self._host_by_rule and self._sudo_feed is None:
             approved = self._ask_user and self._approvals.confirm(
                 "Host execution / Запуск вне песочницы",
                 body + "This command can access and change host files with your permissions and runs "
@@ -553,6 +578,8 @@ class TerminalExecutor(
         """
         if self._run_network_unenforced:
             reason = f"{reason}. {NETWORK_UNENFORCED_NOTE}"
+        if self._sudo_feed is not None:
+            reason = f"{SUDO_REASON}. {reason}"
         if not (self._ask_user and self._request_user_approval(command, reason)):
             return TerminalResult(
                 command=command,
@@ -568,12 +595,55 @@ class TerminalExecutor(
                 ),
                 denied=True,
             )
+        if self._sudo_feed is not None:
+            refusal = self._feed_sudo_password(command)
+            if refusal is not None:
+                return refusal
         result = execute_authorized()
         # A rule that outlives the session is never the classifier's to grant.
         if offer_rule and not getattr(self._approvals, "auto_active", False):
             self._offer_allow_rule(command)
         self._approvals.commit_remembered_rule()
         return result
+
+    def _is_sudo_command(self, command: object) -> bool:
+        return (
+            self._sudo_available
+            and self.sandbox_mode is not SandboxMode.CONTAINER
+            and isinstance(command, list)
+            and bool(command)
+            and isinstance(command[0], str)
+            and canonical_executable_name(command[0]) == "sudo"
+        )
+
+    def _feed_sudo_password(self, command: list[str]) -> TerminalResult | None:
+        """Hand the session's password to this run's sudo, asking for it the first time; a refusal when there is none."""
+        password = self._sudo_password or self._ask_sudo_password()
+        if password is None:
+            return TerminalResult(
+                command=command, returncode=-1, stdout="",
+                stderr="sudo did not run: the person gave no password for it (or this frontend cannot ask for one).",
+                denied=True,
+            )
+        sudo_path = shutil.which("sudo")
+        if sudo_path is None:
+            raise TerminalError("Executable not found before process creation: sudo")
+        if self._sudo_password is None and not sudo_accepts(sudo_path, password):
+            return TerminalResult(
+                command=command, returncode=-1, stdout="",
+                stderr="sudo did not run: sudo did not accept the password the person typed. "
+                "They can type it again when the command is retried.",
+                denied=True,
+            )
+        self._sudo_password = password
+        self._sudo_feed.serve(password)
+        return None
+
+    def _ask_sudo_password(self) -> str | None:
+        ask = getattr(self._approvals, "ask_secret", None)
+        if ask is None or not self._ask_user:
+            return None
+        return ask(PASSWORD_TITLE, PASSWORD_HELP)
 
     def _command_needs_arbitrary_code(
         self, command: list[str], bindings: tuple[ExecutableBinding, ...] | None = None
@@ -892,6 +962,10 @@ class TerminalExecutor(
             raise TerminalError(f"Executable not found before process creation: {missing}")
 
         actual_command = self._materialize_executables(command_snapshot, bindings)
+        if self._sudo_feed is not None:
+            if not self._sudo_feed.serving:
+                raise HardDenyError("Hard security denial: sudo runs only after the person's approval and password")
+            actual_command = sudo_argv(actual_command)
         actual_command = self._wrap_for_platform(actual_command, bindings)
 
         # Auto-detect pipe usage: if command contains "|", run via sh -c.
@@ -1143,6 +1217,13 @@ class TerminalExecutor(
                     continue
                 env[name] = value
 
+        if self._sudo_feed is not None:
+            # sudo drops the caller's environment anyway, and an override could swap the askpass helper.
+            if overrides:
+                raise HardDenyError("Hard security denial: a sudo command takes no environment overrides")
+            # Two paths, no secret: the password itself only ever travels through the FIFO.
+            env.update(self._sudo_feed.env())
+            return env
         if overrides is None:
             return env
         if not isinstance(overrides, dict):

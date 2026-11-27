@@ -31,7 +31,7 @@ function argumentValue(name) {
 function defaultWorkspace() {
   const requested = argumentValue("--workspace")
   if (requested) return path.resolve(requested)
-  return app.isPackaged ? ensureDefaultWorkspace(app.getPath("documents")) : path.resolve(__dirname, "../../../..")
+  return app.isPackaged ? ensureDefaultWorkspace(app.getPath("home")) : path.resolve(__dirname, "../../../..")
 }
 
 function resolveCommand() {

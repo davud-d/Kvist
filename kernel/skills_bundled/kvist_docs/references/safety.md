@@ -19,6 +19,13 @@ in the workspace; read-only actions may use extra directories from `--allow-read
   Arbitrary-code commands on Linux without a trusted Bubblewrap need an approval each time.
 - A command may ask for two separate one-time permissions, `network: true` and
   `sandbox: "host"`; each needs a reason and its own confirmation and cannot be remembered.
+- `sudo` is forbidden everywhere except the system folder `~/.kvist/workspace` (not on
+  Windows). There only the form `sudo <program> <arguments>` runs: no sudo options, no pipe,
+  no environment overrides, and the program passes the same checks as without sudo (`rm`
+  stays forbidden). Each such command asks once, as a command running as root, outside the
+  sandbox, and is never remembered. The password is asked once per session, checked with
+  `sudo -v`, kept only in memory, and reaches sudo through a one-time askpass FIFO; a wrong
+  one is not kept. A gate that cannot ask (headless, helpers) means sudo does not run.
 
 ## Approvals
 

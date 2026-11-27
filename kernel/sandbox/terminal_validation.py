@@ -40,6 +40,7 @@ from kernel.sandbox.terminal_rules import (
     _WINDOWS_CMD_BUILTINS,
     _WINDOWS_CMD_BUILTIN_RE,
 )
+from kernel.sandbox.terminal_sudo import sudo_inner_command
 from kernel.sandbox.terminal_types import CommandNotAllowedError, ExecutableBinding, HardDenyError
 
 
@@ -86,7 +87,7 @@ class ArgumentValidationMixin:
     """Command, token, path and hardlink validation for TerminalExecutor.
 
     Instance attributes expected from TerminalExecutor.__init__: ``workspace``,
-    ``_allowed``, ``_forbidden``, ``host`` and ``host_chain``. Calls
+    ``_allowed``, ``_forbidden``, ``_sudo_feed``, ``host`` and ``host_chain``. Calls
     ``_validate_git_arguments`` from GitValidationMixin and
     ``_validate_interpreter_modes`` from InterpreterValidationMixin.
     """
@@ -128,6 +129,11 @@ class ArgumentValidationMixin:
                 "Hard security denial: command is too large for safe validation and approval"
             )
 
+        if self._sudo_feed is not None:
+            # The program sudo runs is held to the same rules as a run without sudo.
+            trusted_probe = bindings is None or bindings[0].trusted_system
+            self._hard_validate_single(sudo_inner_command(command), work_dir, trusted_probe=trusted_probe)
+            return
         for index, segment in enumerate(self._split_pipe_segments(command)):
             trusted_probe = bindings is None or bindings[index].trusted_system
             self._hard_validate_single(segment, work_dir, trusted_probe=trusted_probe)

@@ -48,6 +48,7 @@ from kernel.session.change_journal import (
 )
 from kernel.session.durable_json import JsonStorageError, exclusive_storage_lock
 from kernel.config.env_utils import read_float_env, read_int_env
+from kernel.config.system_workspace import is_system_workspace
 from kernel.protocol.protocol import AgentCommand
 from kernel.sandbox.secret_paths import (
     UnsafeSecretPathError,
@@ -265,11 +266,13 @@ class SafeExecutor:
         task, so writes to them are refused (a best-of executor works on a copy whose result is compared and
         accepted, and those notes must not ride along)."""
         self._approvals = approvals or TerminalApprovalGate()
-        self.workspace_inside_kvist = workspace_inside_kvist
         self.protect_instruction_files = protect_instruction_files
         # Helpers are handed the main agent's scratchpad, so they all share one.
         self.scratchpad = scratchpad or Scratchpad()
         self.workspace = Path(workspace).expanduser().resolve()
+        # The system folder is ~/.kvist/workspace: its own path contains ".kvist" too.
+        workspace_inside_kvist = workspace_inside_kvist or is_system_workspace(self.workspace)
+        self.workspace_inside_kvist = workspace_inside_kvist
         self.workspace.mkdir(parents=True, exist_ok=True)
         # Extra directories the read-only actions may leave the workspace for.
         # Opt-in only: an empty tuple keeps the historical workspace boundary.

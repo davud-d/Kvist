@@ -24,7 +24,9 @@ kvist
 ```
 
 - Without `--workspace`, Kvist works in the current directory. In the home directory or a
-  filesystem root it uses `Documents/Kvist Workspace` instead.
+  filesystem root it opens its system folder `~/.kvist/workspace` (beside the config that
+  `KVIST_CONFIG_DIR` names, when set): for requests about the computer and everyday things,
+  not a project. `KVIST.md` there is a notebook on the computer; see safety.md for sudo.
 - A clean machine shows a setup screen: welcome, provider, API key, (model for providers
   without defaults), interface, and an import step if sessions of other agents were found.
   Esc goes back; Esc on the first screen or Ctrl+C quits with nothing saved. Without Node.js the plain

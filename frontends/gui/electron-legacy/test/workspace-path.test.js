@@ -8,12 +8,25 @@ const test = require("node:test")
 
 const { ensureDefaultWorkspace } = require("../src/workspace-path")
 
-test("creates the default Kvist workspace under Documents", (context) => {
-  const documents = fs.mkdtempSync(path.join(os.tmpdir(), "kvist-documents-"))
-  context.after(() => fs.rmSync(documents, { recursive: true, force: true }))
+function temporaryDirectory(context) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kvist-home-"))
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  return directory
+}
 
-  const workspace = ensureDefaultWorkspace(path.join(documents, "nested"))
+test("creates the system folder under ~/.kvist", (context) => {
+  const home = temporaryDirectory(context)
 
-  assert.equal(workspace, path.resolve(documents, "nested", "Kvist Workspace"))
+  const workspace = ensureDefaultWorkspace(home, {})
+
+  assert.equal(workspace, path.resolve(home, ".kvist", "workspace"))
   assert.equal(fs.statSync(workspace).isDirectory(), true)
+})
+
+test("follows KVIST_CONFIG_DIR like the core does", (context) => {
+  const config = temporaryDirectory(context)
+
+  const workspace = ensureDefaultWorkspace("/nowhere", { KVIST_CONFIG_DIR: config })
+
+  assert.equal(workspace, path.resolve(config, "workspace"))
 })

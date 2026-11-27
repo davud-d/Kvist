@@ -21,6 +21,7 @@ import sys
 import distro
 import subprocess
 
+from kernel.config.system_workspace import is_system_workspace
 from kernel.sandbox.redaction import defang_prompt_boundary_tags
 
 
@@ -222,7 +223,25 @@ def current_workspace_context(workspace) -> str:
     root = Path(workspace)
     entries = [entry for entry in root.iterdir() if entry.name not in _KVIST_OWN_ENTRIES]
     state = f"{len(entries)} top-level entries" if entries else "empty, nothing there yet"
+    if is_system_workspace(root):
+        return f"{root}, {state}. {_SYSTEM_WORKSPACE_FACT}"
     return f"{root.name}, {state}"
+
+
+# Every role prompt is written for a project; this tells the model the folder is not one, so
+# "my sound stopped working" is read as being about the computer, not about the files here.
+_SYSTEM_WORKSPACE_FACT = (
+    "This is Kvist's system folder, not a project: the person opened Kvist without choosing a folder, "
+    "to get help with their computer and everyday things (a service that broke, a full disk, a program "
+    "to install, a file to convert, a question). What a request is about is their machine and their life, "
+    "not the files here; this folder only keeps what a task produces (a downloaded or converted file, "
+    "a script) and KVIST.md, your notebook on this computer. The person may not be a programmer: they "
+    "need to hear what was wrong, what you did and what they should know, not a diff. Logs, services "
+    "and most of /etc are hidden inside the sandbox, so looking at the system usually takes "
+    "sandbox=\"host\". Only in this folder run_shell also accepts sudo, as one command of the form "
+    "sudo <program> <arguments> (no sudo options, no pipe): the person approves each such command "
+    "and types their password into Kvist once per session; it never reaches you or the command's environment."
+)
 
 
 def scratchpad_context(scratchpad) -> str:
@@ -341,8 +360,40 @@ Preferred language, level of detail, tone, how much code to show.
 Docs, dashboards, tickets or people to refer to for anything outside this repo.
 """
 
+_SYSTEM_AGENT_INSTRUCTIONS_TEMPLATE = """# KVIST.md
+
+Kvist's notebook on this computer. This is her system folder: here she helps
+with the machine itself and with everyday things, not with a project. She
+reads this file at the start of every task and keeps it up to date herself;
+you can edit it too. Every line costs context on every request, so old detail
+is merged or dropped rather than piled up.
+
+## This computer
+
+The facts not worth rediscovering every time: the system and its version, the
+desktop, the package manager, the hardware that matters.
+
+## The person
+
+How they want to be helped: language, how much to explain, what to ask before
+doing it.
+
+## Rules
+
+What Kvist must never do on this computer, or never without asking first.
+
+## History
+
+Dated, oldest first: what broke and how it was fixed, what was installed or
+changed and why.
+
+- {date}: Kvist first opened her system folder.
+"""
+
 _UNTOUCHED_TEMPLATES: dict[str, tuple[str, ...]] = {
-    AGENT_INSTRUCTIONS_FILE: (_AGENT_INSTRUCTIONS_TEMPLATE, _LEGACY_AGENT_INSTRUCTIONS_TEMPLATE),
+    AGENT_INSTRUCTIONS_FILE: (
+        _AGENT_INSTRUCTIONS_TEMPLATE, _LEGACY_AGENT_INSTRUCTIONS_TEMPLATE, _SYSTEM_AGENT_INSTRUCTIONS_TEMPLATE,
+    ),
     CHAT_INSTRUCTIONS_FILE: (_CHAT_INSTRUCTIONS_TEMPLATE,),
 }
 
@@ -438,6 +489,10 @@ def ensure_workspace_instructions(workspace) -> None:
     """
     root = Path(workspace)
     today = datetime.now().astimezone().date().isoformat()
+    if is_system_workspace(root):
+        # No project here to explain to a chat, and no git to keep the notebook out of.
+        _create_from_template(root / AGENT_INSTRUCTIONS_FILE, _SYSTEM_AGENT_INSTRUCTIONS_TEMPLATE.format(date=today))
+        return
     for filename, template in _INSTRUCTIONS_TEMPLATES.items():
         _create_from_template(root / filename, template.format(date=today))
     _add_instructions_to_gitignore(root)

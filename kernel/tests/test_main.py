@@ -74,24 +74,24 @@ def test_resolve_workspace_path_creates_directory_and_rejects_file(tmp_path):
 def test_resolve_workspace_path_defaults_to_launch_directory(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
-    monkeypatch.setattr(main, "_documents_directory", lambda: tmp_path / "Documents")
+    monkeypatch.setenv("KVIST_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.chdir(project)
 
     assert main.resolve_workspace_path() == project.resolve()
-    assert not (tmp_path / "Documents").exists()
+    assert not (tmp_path / "config" / "workspace").exists()
 
 
 @pytest.mark.parametrize("launch", ["home", "root"])
 def test_resolve_workspace_path_falls_back_from_a_broad_launch_directory(tmp_path, monkeypatch, launch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr(main, "_documents_directory", lambda: tmp_path / "Documents")
+    monkeypatch.setenv("KVIST_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setattr(main.Path, "home", classmethod(lambda cls: home))
     monkeypatch.chdir(home if launch == "home" else Path(home.anchor))
 
     workspace = main.resolve_workspace_path()
 
-    assert workspace == (tmp_path / "Documents" / "Kvist Workspace").resolve()
+    assert workspace == (tmp_path / "config" / "workspace").resolve()
     assert workspace.is_dir()
 
 

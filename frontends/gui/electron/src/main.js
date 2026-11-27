@@ -165,7 +165,7 @@ async function resolveInitialWorkspace() {
       }
     }
   }
-  return ensureDefaultWorkspace(app.getPath("documents"))
+  return ensureDefaultWorkspace(app.getPath("home"))
 }
 
 // --- the running task -----------------------------------------------------------

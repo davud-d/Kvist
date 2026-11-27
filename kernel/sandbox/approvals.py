@@ -134,6 +134,34 @@ class TerminalApprovalGate:
     def waiting_confirm_command(self) -> threading.Timer | None:
         return start_approval_reminder()
 
+    def ask_secret(self, title: str, help_text: str) -> str | None:
+        """A password typed without echo; None off a TTY or when nothing was typed.
+
+        Optional for a gate: the terminal probes for it, and a gate without it
+        (a helper's, a container's) means nobody can be asked.
+        """
+        import getpass
+        import sys
+
+        from kernel.sandbox.terminal import TerminalExecutor, _enter_hitl, _exit_hitl
+
+        if not sys.stdin.isatty():
+            return None
+        if TerminalExecutor._hitl_suspend_fn is not None:
+            TerminalExecutor._hitl_suspend_fn()
+        _enter_hitl()
+        try:
+            print(f"\n{title}\n{help_text}", flush=True)
+            try:
+                value = getpass.getpass("> ")
+            except EOFError:
+                return None
+            return value or None
+        finally:
+            _exit_hitl()
+            if TerminalExecutor._hitl_resume_fn is not None:
+                TerminalExecutor._hitl_resume_fn()
+
     def confirm_command(self, command: list[str], reason: str, timeout: float | None = None) -> bool:
         """Interactive approval prompt (Human-in-the-Loop).
 

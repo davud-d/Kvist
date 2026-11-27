@@ -143,7 +143,11 @@ fn launch_dir() -> Result<String, String> {
     if !too_wide {
         return Ok(here.display().to_string());
     }
-    let fallback = home.ok_or("no home folder")?.join("Documents").join("Kvist Workspace");
+    // The core's system folder: it treats this place as help with the computer, not a project.
+    let fallback = match std::env::var_os("KVIST_CONFIG_DIR").filter(|dir| !dir.is_empty()) {
+        Some(config) => PathBuf::from(config).join("workspace"),
+        None => home.ok_or("no home folder")?.join(".kvist").join("workspace"),
+    };
     std::fs::create_dir_all(&fallback).map_err(|error| error.to_string())?;
     Ok(fallback.display().to_string())
 }

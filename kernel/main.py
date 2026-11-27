@@ -32,8 +32,9 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "--workspace",
         help=(
             "Path to the project workspace directory. Defaults to the "
-            "directory Kvist was started from (Documents/Kvist Workspace "
-            "when that is the home directory or a filesystem root)."
+            "directory Kvist was started from (~/.kvist/workspace, the system "
+            "folder for requests about this computer, when that is the home "
+            "directory or a filesystem root)."
         ),
     )
     parser.add_argument(
@@ -795,6 +796,7 @@ from kernel.llm.custom_provider import (
 )
 from prompt_history import WorkspaceInputHistory
 from kernel.context.system_context import ensure_workspace_instructions
+from kernel.config.system_workspace import system_workspace_path
 from kernel.plugins.bundled import sync_bundled
 from kernel.plugins.registry import SkillRegistry
 from kernel.protocol.ui import AgentUI
@@ -951,31 +953,8 @@ def _get_session() -> PromptSession:
     return _session
 
 
-def _documents_directory() -> Path:
-    """Return the user's standard documents directory on the current OS."""
-    if os.name == "nt":
-        return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents"
-
-    # Respect a localized XDG documents directory when it is configured.
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    user_dirs = config_home / "user-dirs.dirs"
-    try:
-        for line in user_dirs.read_text(encoding="utf-8").splitlines():
-            if line.startswith("XDG_DOCUMENTS_DIR="):
-                value = line.partition("=")[2].strip().strip('"')
-                if value.startswith("$HOME/"):
-                    return Path.home() / value[6:]
-                if value:
-                    return Path(value).expanduser()
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        raise RuntimeError(f"Cannot read user directories configuration: {error}") from error
-    return Path.home() / "Documents"
-
-
 def default_workspace_path() -> Path:
-    return _documents_directory() / "Kvist Workspace"
+    return system_workspace_path()
 
 
 def default_workspace_for_launch() -> Path:
@@ -983,7 +962,7 @@ def default_workspace_for_launch() -> Path:
 
     A home directory or a filesystem root as the workspace would give the agent
     the person's whole account, which usually means a desktop launcher's cwd,
-    not a project the person chose.
+    not a project the person chose: such a launch opens the system folder.
     """
     try:
         launch_dir = Path.cwd().resolve()
