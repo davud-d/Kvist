@@ -23,7 +23,10 @@ Each provider has a **fast** model for routine steps and a **smart** model. A ru
 fast and moves to smart, once and never back, on parse errors, repeated failures or
 stagnation, unless the person pinned a model. Choose both with `/models`; the picker
 filters by typing. The model list is loaded from the provider at launch; switch that off
-under `/settings-api` if discovery is slow.
+under `/settings-api` if discovery is slow. A chosen model that has left the catalog
+(retired) is replaced, with a warning, by the newest model of the same family there
+(`deepseek-v4-pro` → `deepseek-v4.1-pro`, never a flash or another size); with none,
+Kvist keeps it and points to `/models`.
 
 ## Reasoning effort
 

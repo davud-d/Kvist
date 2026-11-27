@@ -90,6 +90,15 @@ to disconnect the app in ChatGPT Settings.
 
 ## Models, context and reasoning
 
+**Retired models.** At launch the chosen fast and smart models are checked
+against the provider's live `/models` catalog. One that has left it is replaced,
+with a warning, by the newest model of exactly the same family there:
+`deepseek-v4-pro` becomes `deepseek-v4.1-pro` or an unversioned `deepseek-pro`,
+`claude-sonnet-4-5` becomes `claude-sonnet-5`. A different family, size or
+variant (`flash`, `-mini`, `70b`, `-vision`) and an older version never count.
+With no such model the choice is kept, since a gateway's catalog can be
+incomplete, and the warning points to `/models`.
+
 **Context budget.** When the provider's `/models` catalog states the model's
 window (DeepSeek, OpenRouter, Anthropic, vLLM and gateways copying them), the
 prompt budget is that window less 30k tokens, kept for the reply and for

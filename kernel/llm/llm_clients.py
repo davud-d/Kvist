@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -991,6 +992,60 @@ def fetch_available_models(
     )
 
 
+_NAME_TOKEN_RE = re.compile(r"[-_./:\s]+")
+_RUN_RE = re.compile(r"\d+|[a-z]+")
+# A size ("8b", "1.5b" as "1"+"5b", "a22b", "128k") names a different model, not a newer one.
+_SIZE_TOKEN_RE = re.compile(r"a?\d+[bmk]")
+
+
+def _family_and_version(model: str) -> tuple[frozenset[str], tuple[int, ...]]:
+    """Split a model id into its family words and its version numbers.
+
+    ``deepseek-v4.1-pro`` -> ({deepseek, pro}, (4, 1)); ``qwen3-coder`` ->
+    ({qwen, coder}, (3,)); ``llama-3.1-8b`` -> ({llama, 8b}, (3, 1)). Letters
+    stay family even inside a mixed token, so ``gpt-4o`` is not a ``gpt-5``;
+    a lone "v" before a number is only a version marker.
+    """
+    family: set[str] = set()
+    version: list[int] = []
+    for token in _NAME_TOKEN_RE.split(model.lower()):
+        if _SIZE_TOKEN_RE.fullmatch(token):
+            family.add(token)
+            continue
+        for run in _RUN_RE.findall(token):
+            if run.isdigit():
+                version.append(int(run))
+            elif run != "v":
+                family.add(run)
+    return frozenset(family), tuple(version)
+
+
+def successor_in_catalog(model: str, available: set[str]) -> str | None:
+    """The model a retired *model* most plausibly became: same family, newest version.
+
+    Family must match exactly, so a "pro" never becomes a "flash" and a text
+    model never becomes its "-vision" sibling. With no newer version, an
+    unversioned alias of the family counts (DeepSeek names V4.1 Flash just
+    ``deepseek-flash``). None when the catalog holds nothing of the family.
+    """
+    family, version = _family_and_version(model)
+    if not family:
+        return None
+    newer: list[tuple[tuple[int, ...], str]] = []
+    aliases: list[str] = []
+    for candidate in available:
+        candidate_family, candidate_version = _family_and_version(candidate)
+        if candidate_family != family:
+            continue
+        if not candidate_version:
+            aliases.append(candidate)
+        elif candidate_version > version:
+            newer.append((candidate_version, candidate))
+    if newer:
+        return max(newer)[1]
+    return min(aliases) if aliases else None
+
+
 def resolve_accessible_models(
     provider: str,
     requested_models: dict[str, str],
@@ -1000,9 +1055,10 @@ def resolve_accessible_models(
     """Reconcile requested role models against the provider's live catalog.
 
     Models missing from the catalog fall back to the closest available entry
-    of the provider fallback chain; if nothing matches, the request is kept
-    unchanged with a warning. An empty catalog (discovery unavailable) leaves
-    everything untouched.
+    of the provider fallback chain, then to the newest model of the same family
+    the catalog holds (a retired model's successor). If nothing matches, the
+    request is kept with a warning, since a gateway's catalog may be incomplete.
+    An empty catalog (discovery unavailable) leaves everything untouched.
     """
     normalized_provider = normalize_provider(provider)
     available = {str(item).strip() for item in available_models if str(item).strip()}
@@ -1030,16 +1086,31 @@ def resolve_accessible_models(
                     language_hint,
                 )
             )
-        else:
-            selected_model = requested_model
+            resolved[role] = selected_model
+            continue
+        successor = successor_in_catalog(requested_model, available)
+        if successor is not None:
             warnings.append(
                 choose_localized_text(
-                    f"Модель '{requested_model}' не найдена в каталоге {label}. Оставляю её для роли {role}.",
-                    f"Model '{requested_model}' was not found in the {label} catalog. Keeping it for role {role}.",
+                    f"Модели '{requested_model}' больше нет в каталоге {label}: похоже, её сняли. Для роли {role} "
+                    f"беру '{successor}' — новейшую из того же семейства. Другую можно выбрать в /models.",
+                    f"Model '{requested_model}' is gone from the {label} catalog, likely retired. Using '{successor}', "
+                    f"the newest of the same family, for role {role}. Pick another with /models.",
                     language_hint,
                 )
             )
-        resolved[role] = selected_model
+            resolved[role] = successor
+            continue
+        warnings.append(
+            choose_localized_text(
+                f"Модель '{requested_model}' не найдена в каталоге {label}. Оставляю её для роли {role}; "
+                "если запросы начнут падать, выбери другую в /models.",
+                f"Model '{requested_model}' was not found in the {label} catalog. Keeping it for role {role}; "
+                "if requests fail, pick another with /models.",
+                language_hint,
+            )
+        )
+        resolved[role] = requested_model
 
     return resolved, warnings
 
