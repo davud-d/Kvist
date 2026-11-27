@@ -2657,7 +2657,7 @@ function populateGlobalSettings() {
   const requestsText = createElement("div", "advanced-row-text")
   requestsText.append(
     createElement("div", "advanced-row-title", "Requests"),
-    createElement("div", "advanced-row-hint", "Pacing, timeouts, context window"),
+    createElement("div", "advanced-row-hint", "Pacing, timeouts, retries"),
   )
   const requestsBtn = createElement("button", "advanced-btn")
   requestsBtn.textContent = "Open"

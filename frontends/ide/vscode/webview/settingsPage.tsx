@@ -133,7 +133,7 @@ export function SettingsPage({ russian, config, provider, model, role, effort, e
           <section id="prefs-advanced">
             <h2>{t("Advanced", "Дополнительно")}</h2>
             <div class="group">
-              <Row title={t("Requests", "Запросы")} hint={t("Pacing, timeouts, context window", "Интервалы, таймауты, окно контекста")}>
+              <Row title={t("Requests", "Запросы")} hint={t("Pacing, timeouts, retries", "Интервалы, таймауты, повторы")}>
                 <button class="btn" disabled={busy} onClick={() => run("settings-api")}>{t("Open", "Открыть")}</button>
               </Row>
               {environment ? <VariableRows environment={environment} busy={busy} apply={applyEnvironment} russian={russian} /> : null}

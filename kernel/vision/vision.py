@@ -100,9 +100,14 @@ def cannot_take_images(provider: str, model: str) -> bool:
 
 
 def model_supports_vision(provider: str, model: str) -> bool | None:
+    from kernel.llm.model_facts import facts_for
+
     name = model.lower().split("/")[-1]
     if cannot_take_images(provider, model):
         return False
+    facts = facts_for(provider, model)
+    if facts is not None and facts.sees_images is not None:
+        return facts.sees_images  # The provider's own catalog said so; the name table below is a guess.
     if name == "deepseek-flash" or "vision" in name or "-vl" in name:
         return True
     if name in {"deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro", "deepseek-v4-flash"}:

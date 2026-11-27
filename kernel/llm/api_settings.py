@@ -3,9 +3,9 @@
 
 These are the parameters a user must be able to change without editing code:
 how fast Kvist may hit the provider, how long it waits for one call, how hard
-it retries, how large a prompt it may build, and whether it trusts the
-provider's live model catalog. Each one is a single global preference stored in
-``~/.kvist/config.json`` under ``api_settings`` and stamped onto ``AgentConfig``.
+it retries, and whether it trusts the provider's live model catalog. Each one is
+a single global preference stored in ``~/.kvist/config.json`` under
+``api_settings`` and stamped onto ``AgentConfig``.
 
 Only the keys the user actually changed are stored, and that is also how an
 explicitly chosen request interval is told apart from the shipped default: the
@@ -13,9 +13,10 @@ pacing table in ``agent_model`` zeroes the interval for the direct vendor APIs,
 so a user who typed a number has to outrank that table instead of being
 silently ignored.
 
-The two env vars that cover the same ground (``AGENT_API_INTERVAL``,
-``AGENT_MAX_CONTEXT_TOKENS``) are read at call time and keep winning over these
-values; the dialog says so rather than pretending its number is in effect.
+``AGENT_API_INTERVAL`` covers the same ground as the interval and is read at
+call time, winning over the saved value; the dialog says so rather than
+pretending its number is in effect. The prompt budget is not here: it follows
+the window the provider states, and only ``AGENT_MAX_CONTEXT_TOKENS`` pins it.
 """
 from __future__ import annotations
 
@@ -97,21 +98,6 @@ API_SETTINGS: tuple[ApiSetting, ...] = (
         unit="s",
     ),
     ApiSetting(
-        key="context_tokens",
-        label="Context window",
-        description=(
-            "Prompt budget for one call. 0 derives it from the active model's "
-            "documented input limit; a number overrides that both ways."
-        ),
-        kind="int",
-        default=0,
-        minimum=8_000,
-        maximum=2_000_000,
-        unit="tokens",
-        zero_label="auto",
-        env_var="AGENT_MAX_CONTEXT_TOKENS",
-    ),
-    ApiSetting(
         key="dynamic_models",
         label="Dynamic model loading",
         description=(
@@ -142,7 +128,6 @@ API_SETTINGS: tuple[ApiSetting, ...] = (
 
 _BY_KEY: dict[str, ApiSetting] = {setting.key: setting for setting in API_SETTINGS}
 
-_SUFFIX_MULTIPLIERS = {"k": 1_000, "m": 1_000_000}
 _ZERO_WORDS = frozenset({"auto", "off", "none", "no", "default", "-"})
 
 
@@ -200,7 +185,6 @@ def apply_api_settings(
     config.api_timeout = float(values["request_timeout"])
     config.max_retries = int(values["max_retries"])
     config.retry_base_delay = float(values["retry_base_delay"])
-    config.max_context_tokens = int(values["context_tokens"])
     config.cache_enabled = bool(values["response_cache"])
     config.runtime_model_fallbacks_enabled = bool(values["model_fallbacks"])
     return values
@@ -246,9 +230,9 @@ def _format_number(setting: ApiSetting, value: Value) -> str:
 def parse_number(setting: ApiSetting, text: str) -> Number:
     """Read a typed value for a numeric setting, or raise ``ValueError``.
 
-    Accepts the words behind ``zero_label`` ("auto", "off"), a ``k``/``m``
-    suffix so a million-token window is "1m", and the setting's own unit as a
-    trailing word so echoing what the menu shows back is not an error.
+    Accepts the words behind ``zero_label`` ("auto", "off") and the setting's
+    own unit as a trailing word, so echoing what the menu shows back is not an
+    error.
     """
     cleaned = text.strip().casefold().replace(",", ".").replace(" ", "")
     if not cleaned:
@@ -258,12 +242,9 @@ def parse_number(setting: ApiSetting, text: str) -> Number:
 
     if setting.unit and cleaned.endswith(setting.unit) and cleaned != setting.unit:
         cleaned = cleaned[: -len(setting.unit)]
-    multiplier = _SUFFIX_MULTIPLIERS.get(cleaned[-1:], 1)
-    if multiplier != 1:
-        cleaned = cleaned[:-1]
 
     try:
-        number = float(cleaned) * multiplier
+        number = float(cleaned)
     except ValueError as error:
         raise ValueError(f"'{text.strip()}' is not a number.") from error
     return _coerce_number(setting, number)

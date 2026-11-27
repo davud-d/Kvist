@@ -90,7 +90,14 @@ to disconnect the app in ChatGPT Settings.
 
 ## Models, context and reasoning
 
-**Context budget.** The prompt budget comes from the active model's documented
+**Context budget.** When the provider's `/models` catalog states the model's
+window (DeepSeek, OpenRouter, Anthropic, vLLM and gateways copying them), the
+prompt budget is that window less 30k tokens, kept for the reply and for
+tokenizer error (on a window under 200k the reserve is 15% instead). Past the
+budget, the oldest tool outputs are elided first. The same catalog says whether
+a model accepts images, which picks the Vision model (`kernel/llm/model_facts.py`).
+
+Otherwise the budget comes from the active model's documented
 maximum *input* size (`kernel/context/context_budget.py`), not from its context window.
 OpenAI reserves 128k of the window for output, so a 400k-window GPT-5 model
 rejects prompts over 272k; Anthropic limits only the input. The budget is 85% of
@@ -98,14 +105,14 @@ the input limit, because tiktoken under-counts for the Anthropic and DeepSeek
 tokenizers: a 1M model gets 850k and a 272k model gets 231k. Models newer than
 the built-in table inherit the limit of their family. If a provider still
 rejects a prompt as too long, Kvist lowers the budget for that model and resends.
-`AGENT_MAX_CONTEXT_TOKENS` pins a value. `/context` shows current usage.
+`AGENT_MAX_CONTEXT_TOKENS` pins a value; it is the only way to set one by hand.
+`/context` shows current usage.
 
 **`/settings-api`** edits transport settings saved under `api_settings` in the
-config: minimum gap between requests, timeout, retry count and backoff, the
-prompt budget (`auto`, `1m`, `250k`), loading the model catalog from `/v1/models`
-at launch, the in-run response cache and model fallbacks. Only values that differ
-from the defaults are stored. `AGENT_API_INTERVAL` and `AGENT_MAX_CONTEXT_TOKENS`
-win over saved values.
+config: minimum gap between requests, timeout, retry count and backoff, loading
+the model catalog from `/v1/models` at launch, the in-run response cache and
+model fallbacks. Only values that differ from the defaults are stored.
+`AGENT_API_INTERVAL` wins over the saved interval.
 
 **Reasoning effort.** `/effort` sets `false`, `low`, `medium` (default), `high`,
 `xhigh` or `max`, and Kvist translates it for each provider. DeepSeek maps

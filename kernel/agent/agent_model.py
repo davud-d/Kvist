@@ -1241,9 +1241,10 @@ _CONTEXT_USAGE_KINDS = frozenset({"step", "chat"})
 def context_token_limit(self) -> int:
     """Tokens one call may occupy — the budget ``_trim_prompt_to_token_limit`` enforces.
 
-    Derived from the *active* model's documented window, so escalating
-    fast → smart mid-run re-resolves it. ``AGENT_MAX_CONTEXT_TOKENS`` and an
-    explicit ``config.max_context_tokens`` are the two ways to override it.
+    Derived from the *active* model's window (stated by its provider, else
+    documented), so escalating fast → smart mid-run re-resolves it. The person
+    pins it with ``AGENT_MAX_CONTEXT_TOKENS``; ``config.max_context_tokens`` is
+    for embedders and tests, with no setting behind it.
     """
     active_model = self._state.selected_action_model or self.config.fast_model
     budget = (

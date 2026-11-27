@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from kernel.context.language_utils import choose_localized_text
+from kernel.llm import model_facts
 from kernel.llm.prompt_prefix import split_style_tail
 from kernel.llm.provider_registry import ANYMODEL_PROVIDER, KIMI_PROVIDER, MANUAL_OPENAI_PROVIDERS
 from kernel.sandbox.redaction import redact_text
@@ -818,13 +819,14 @@ _MODEL_DISCOVERY_CACHE: dict[str, tuple[float, tuple[str, ...]]] = {}
 def clear_model_discovery_cache() -> None:
     """Drop cached /v1/models discovery results (tests, key rotation)."""
     _MODEL_DISCOVERY_CACHE.clear()
+    model_facts.forget_all()
 
 
 def _extract_model_ids(data: Any) -> list[str]:
-    """Collect non-empty ``id`` fields from a models.list() payload."""
+    """Collect non-empty ``id`` fields from a models.list() payload (entries, or bare id strings)."""
     ids: list[str] = []
     for item in data or []:
-        raw = getattr(item, "id", None)
+        raw = item if isinstance(item, str) else getattr(item, "id", None)
         if raw is None and isinstance(item, dict):
             raw = item.get("id")
         candidate = str(raw or "").strip()
@@ -833,12 +835,13 @@ def _extract_model_ids(data: Any) -> list[str]:
     return ids
 
 
-def _list_models_via_openai(api_key: str, base_url: str | None) -> list[str]:
+def _list_models_via_openai(api_key: str, base_url: str | None) -> list[Any]:
+    """The catalog entries as the endpoint returned them: ids plus whatever facts it states."""
     client = _build_openai_client(api_key, base_url=base_url or None)
-    return _extract_model_ids(client.models.list().data)
+    return list(client.models.list().data)
 
 
-def _list_models_via_anthropic(api_key: str, base_url: str | None) -> list[str]:
+def _list_models_via_anthropic(api_key: str, base_url: str | None) -> list[Any]:
     try:
         import anthropic  # type: ignore
     except ImportError as error:
@@ -849,7 +852,7 @@ def _list_models_via_anthropic(api_key: str, base_url: str | None) -> list[str]:
         api_key=api_key,
         base_url=(base_url or ANTHROPIC_DEFAULT_BASE_URL).strip(),
     )
-    return _extract_model_ids(client.models.list(limit=1000).data)
+    return list(client.models.list(limit=1000).data)
 
 
 def _discovery_endpoints(normalized_provider: str, credentials: dict[str, str]) -> list[dict[str, str]]:
@@ -967,10 +970,11 @@ def fetch_available_models(
     for endpoint in endpoints:
         try:
             if endpoint["kind"] == "anthropic":
-                ids = _list_models_via_anthropic(endpoint["api_key"], endpoint["base_url"])
+                entries = _list_models_via_anthropic(endpoint["api_key"], endpoint["base_url"])
             else:
-                ids = _list_models_via_openai(endpoint["api_key"], endpoint["base_url"])
-            collected.update(ids)
+                entries = _list_models_via_openai(endpoint["api_key"], endpoint["base_url"])
+            model_facts.remember(normalized_provider, entries)
+            collected.update(_extract_model_ids(entries))
             succeeded = True
         except Exception as error:
             errors.append(f"{endpoint['label']}: {redact_text(str(error))}")

@@ -42,7 +42,7 @@ pub const COMMANDS: [Command; 26] = [
     command("revert", "Undo the agent's changes", "Отменить изменения агента"),
     command("provider", "Switch or configure the provider", "Сменить или настроить провайдера"),
     command("change-api", "Change the API key of the provider", "Сменить ключ провайдера"),
-    command("settings-api", "Request pacing, timeouts, context window", "Темп запросов, таймауты, окно контекста"),
+    command("settings-api", "Request pacing, timeouts, retries", "Темп запросов, таймауты, повторы"),
     command("strime", "Streaming for a custom provider (on | off)", "Потоковый ответ своего провайдера (on | off)"),
     command("headers", "Extra HTTP headers the provider requires (set | remove | clear)", "Доп. HTTP-заголовки, которые требует провайдер (set | remove | clear)"),
     command("del-provider", "Delete the active custom provider", "Удалить текущего своего провайдера"),

@@ -1100,16 +1100,15 @@ class _ApiSettingsUI:
 
 
 def test_settings_api_dialog_persists_and_applies_one_edit(tmp_path, monkeypatch):
-    monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
-    ui = _ApiSettingsUI(choices=["context_tokens", "__done__"], typed=["1m"])
+    ui = _ApiSettingsUI(choices=["max_retries", "__done__"], typed=["5"])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig(provider="openai")
 
     changed = main.configure_api_settings(config, False)
 
-    assert changed == {"context_tokens"}
-    assert config.max_context_tokens == 1_000_000
-    assert main.load_api_settings()["context_tokens"] == 1_000_000
+    assert changed == {"max_retries"}
+    assert config.max_retries == 5
+    assert main.load_api_settings()["max_retries"] == 5
 
 
 def test_settings_api_dialog_reprompts_after_an_impossible_value(

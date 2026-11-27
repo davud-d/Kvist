@@ -215,7 +215,7 @@ export function Settings({ config, provider, role, effort, environment, busy, ru
 
       <div class="group-title">Advanced</div>
       <div class="group">
-        <Row title="Requests" hint="Pacing, timeouts, context window">
+        <Row title="Requests" hint="Pacing, timeouts, retries">
           <button class="btn" disabled={busy} onClick={() => run("settings-api")}>Open</button>
         </Row>
         <Row title="Changes" hint="Files the agent changed">

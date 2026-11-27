@@ -16,7 +16,7 @@ exist; do not invent subcommands. Some interfaces offer a few more of their own.
 | `/provider` | Switch or configure the provider |
 | `/change-api` (`/apikey`) | Replace the key of the current provider (reauthorizes ChatGPT) |
 | `/models` | Choose the fast and smart models |
-| `/settings-api` | Request pacing, timeouts, retries, context window, fallbacks, catalog loading |
+| `/settings-api` | Request pacing, timeouts, retries, fallbacks, catalog loading |
 | `/del-provider` | Delete the active custom provider |
 | `/full-reset` | Wipe all saved providers and keys |
 | `/role` | `auto`, `coder`, `reader`, `devops`, `chat` (and `universal`) |

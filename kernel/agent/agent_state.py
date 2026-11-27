@@ -59,8 +59,8 @@ class AgentConfig:
     max_retries: int = 2
     retry_base_delay: float = 2.0
     # 0 means "derive from the active model's real context window"
-    # (context_budget.py). A non-zero value is an explicit override, as is the
-    # AGENT_MAX_CONTEXT_TOKENS env var, which wins over both.
+    # (context_budget.py). Non-zero pins it for embedders and tests; people pin
+    # it with the AGENT_MAX_CONTEXT_TOKENS env var, which wins over both.
     max_context_tokens: int = 0
     runtime_model_fallbacks_enabled: bool = False
     stream: bool = True

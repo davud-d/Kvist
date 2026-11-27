@@ -815,7 +815,7 @@ def test_live_ui_stopped_turn_is_recorded_as_stopped_by_the_user(tmp_path):
     }
 
 
-def test_cli_pty_settings_api_edits_the_context_window(tmp_path):
+def test_cli_pty_settings_api_edits_the_retry_attempts(tmp_path):
     """The /settings-api dialog edits, persists, and reports one knob."""
     home = tmp_path / "home"
     child = _spawn(tmp_path / "workspace", home)
@@ -827,27 +827,27 @@ def test_cli_pty_settings_api_edits_the_context_window(tmp_path):
         child.wait_for("API settings", start=start, timeout=15)
         child.settle()
 
-        # Request interval · Request timeout · Retry attempts · Retry backoff ·
-        # Context window — the menu opens on the first row, ↓ moves down.
-        # (Not "j": choose_option now filters long lists by typing, so a
-        # plain letter key is never a hidden navigation shortcut.)
-        for _ in range(4):
+        # Request interval · Request timeout · Retry attempts — the menu opens
+        # on the first row, ↓ moves down. (Not "j": choose_option now filters
+        # long lists by typing, so a plain letter key is never a hidden
+        # navigation shortcut.)
+        for _ in range(2):
             child.send("\x1b[B")
             child.settle(quiet=0.1)
         opened = child.mark()
         child.send("\r")
         child.wait_for("Enter value", start=opened, timeout=10)
-        assert "Current: auto" in child.visible(opened)
+        assert "Current: 2 attempts" in child.visible(opened)
         child.settle()
 
         edited = child.mark()
-        child.send("\x15" "1m\r")
-        child.wait_for("Context window — 1 000 000 tokens", start=edited, timeout=10)
+        child.send("\x15" "5\r")
+        child.wait_for("Retry attempts — 5 attempts", start=edited, timeout=10)
         child.settle()
 
         closed = child.mark()
         child.send("\x1b")
-        child.wait_for("Context window: 1 000 000 tokens", start=closed, timeout=10)
+        child.wait_for("Retry attempts: 5 attempts", start=closed, timeout=10)
 
         child.send("/bye\r")
         assert child.wait() == 0
@@ -856,4 +856,4 @@ def test_cli_pty_settings_api_edits_the_context_window(tmp_path):
         child.close()
 
     saved = json.loads((home / ".kvist" / "config.json").read_text(encoding="utf-8"))
-    assert saved["api_settings"] == {"context_tokens": 1_000_000}
+    assert saved["api_settings"] == {"max_retries": 5}

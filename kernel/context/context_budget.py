@@ -15,13 +15,16 @@ the two differ per vendor and only the input side bounds a prompt:
 * Anthropic bounds the input alone; on Claude 4.5+ a request whose input plus
   ``max_tokens`` overflows is accepted and the *reply* is cut short instead.
 
-Values checked against vendor docs in September 2026. A static table cannot be
-the whole answer, though: Kvist discovers model ids live from ``/v1/models`` on
-every launch (``llm_clients.fetch_available_models``) and neither OpenAI nor
-Anthropic report a context size there, so an id newer than this file is normal
-rather than exceptional. Three things cover that: the ``-mini``/``-nano`` rule,
-the family fallbacks, and ``note_input_overflow`` — a guess that turns out too
-high is corrected from the provider's own rejection instead of failing the run.
+A window the provider states in its ``/models`` catalog (``llm.model_facts``:
+DeepSeek, OpenRouter, Anthropic, vLLM and more) outranks the table; the budget
+is then that window less ``_STATED_WINDOW_RESERVE``.
+
+Values checked against vendor docs in September 2026. The table remains for
+providers that list bare ids (OpenAI among them), where an id newer than this
+file is normal rather than exceptional. Three things cover that: the
+``-mini``/``-nano`` rule, the family fallbacks, and ``note_input_overflow`` — a
+guess that turns out too high is corrected from the provider's own rejection
+instead of failing the run.
 """
 from __future__ import annotations
 
@@ -123,6 +126,11 @@ _SAFETY_FRACTION = 0.85
 # Below this the trimmer has nothing useful to keep, so never derive less.
 _MIN_PROMPT_BUDGET = 8_000
 
+# Room left under a window the provider's catalog states: for the reply and its
+# thinking, and for tiktoken under-counting other tokenizers. On a small window
+# a flat 30k would leave nothing, so there it is the same share as the table's.
+_STATED_WINDOW_RESERVE = 30_000
+
 # Budgets a provider has actually rejected this session, keyed by model id.
 # Session-local on purpose: it corrects one process's guess, and persisting it
 # would outlive the model change that caused it.
@@ -192,14 +200,20 @@ def env_prompt_budget() -> int:
 
 
 def derived_prompt_budget(provider: str, model: str) -> int:
-    """Tokens one request's prompt may occupy on *model* per the docs.
+    """Tokens one request's prompt may occupy on *model*: the provider's stated window, else the docs.
 
     What a call actually uses is ``agent_model.context_token_limit``, which
     applies the overrides and any budget learned from a rejection.
     """
+    from kernel.llm.model_facts import facts_for
+
     if provider == "freeflow":
         return FREEFLOW_PROMPT_BUDGET
-
+    facts = facts_for(provider, model)
+    if facts is not None and facts.context_window is not None:
+        window = facts.context_window
+        reserve = min(_STATED_WINDOW_RESERVE, int(window * (1 - _SAFETY_FRACTION)))
+        return max(_MIN_PROMPT_BUDGET, window - reserve)
     return max(_MIN_PROMPT_BUDGET, int(input_limit_for(model) * _SAFETY_FRACTION))
 
 

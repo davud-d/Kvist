@@ -45,7 +45,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "resume", route: "core", hint: "Continue an interrupted run" },
   { name: "provider", route: "core", hint: "Switch or configure the provider" },
   { name: "change-api", route: "core", hint: "Change the API key of the provider" },
-  { name: "settings-api", route: "core", hint: "Request pacing, timeouts, context window" },
+  { name: "settings-api", route: "core", hint: "Request pacing, timeouts, retries" },
   { name: "strime", route: "core", hint: "Streaming for a custom provider (on | off)" },
   { name: "headers", route: "core", hint: "Extra HTTP headers the provider requires (set | remove | clear)" },
   { name: "del-provider", route: "core", hint: "Delete the active custom provider" },

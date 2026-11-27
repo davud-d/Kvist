@@ -237,7 +237,7 @@ Type `/` to see the list. The common ones:
 | `/update` | Installs the newest build of an installed `kvist-core` (checked against the published SHA-256); restart Kvist afterwards. Kvist itself only tells you a new version exists and never downloads it unasked (`auto_update: false` or `KVIST_AUTO_UPDATE=0` silences the notice) |
 | `/doctor` (or `kvist --doctor`) | Checks modules, frontends, provider, API keys and settings; asks before sending the model a test request that must answer "pong" (`--yes` answers it) |
 | `/web-search-provider` | Tavily, Brave, Exa, Gemini (Google Search) or SearXNG for web search |
-| `/settings-api` | Request pacing, timeouts, retries, context window, fallbacks |
+| `/settings-api` | Request pacing, timeouts, retries, fallbacks, catalog loading |
 | `/tui` | Choose the terminal interface |
 | `/bye` | Save and exit (`/exit`, `/quit`) |
 

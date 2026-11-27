@@ -22,7 +22,6 @@ def test_defaults_match_agent_config_defaults():
     assert values["request_timeout"] == config.api_timeout
     assert values["max_retries"] == config.max_retries
     assert values["retry_base_delay"] == config.retry_base_delay
-    assert values["context_tokens"] == config.max_context_tokens
     assert values["response_cache"] is config.cache_enabled
     assert values["model_fallbacks"] is config.runtime_model_fallbacks_enabled
 
@@ -30,14 +29,12 @@ def test_defaults_match_agent_config_defaults():
 def test_only_changed_keys_are_persisted(tmp_path):
     path = tmp_path / "config.json"
     values = api_settings.default_api_settings()
-    values["context_tokens"] = 1_000_000
+    values["max_retries"] = 5
 
     api_settings.store_api_settings(values, path)
 
-    assert json.loads(path.read_text(encoding="utf-8"))["api_settings"] == {
-        "context_tokens": 1_000_000
-    }
-    assert api_settings.load_api_settings(path)["context_tokens"] == 1_000_000
+    assert json.loads(path.read_text(encoding="utf-8"))["api_settings"] == {"max_retries": 5}
+    assert api_settings.load_api_settings(path)["max_retries"] == 5
     assert api_settings.load_api_settings(path)["request_interval"] == 5.0
 
 
@@ -49,7 +46,6 @@ def test_apply_writes_every_knob_onto_the_config(tmp_path):
         request_timeout=300.0,
         max_retries=5,
         retry_base_delay=0.0,
-        context_tokens=1_000_000,
         response_cache=False,
         model_fallbacks=True,
     )
@@ -62,7 +58,6 @@ def test_apply_writes_every_knob_onto_the_config(tmp_path):
     assert config.api_timeout == 300.0
     assert config.max_retries == 5
     assert config.retry_base_delay == 0.0
-    assert config.max_context_tokens == 1_000_000
     assert config.cache_enabled is False
     assert config.runtime_model_fallbacks_enabled is True
 
@@ -176,11 +171,6 @@ def test_hand_edited_garbage_falls_back_to_the_default(tmp_path):
 @pytest.mark.parametrize(
     ("key", "text", "expected"),
     [
-        ("context_tokens", "1m", 1_000_000),
-        ("context_tokens", "250k", 250_000),
-        ("context_tokens", "1 000 000 tokens", 1_000_000),
-        ("context_tokens", "auto", 0),
-        ("context_tokens", "0", 0),
         ("request_interval", "off", 0.0),
         ("request_interval", "2,5", 2.5),
         ("request_interval", "10 s", 10.0),
@@ -203,8 +193,6 @@ def test_menu_rendering_round_trips_through_the_parser():
 @pytest.mark.parametrize(
     ("key", "text"),
     [
-        ("context_tokens", "500"),
-        ("context_tokens", "5m"),
         ("max_retries", "0"),
         ("max_retries", "11"),
         ("request_timeout", "1"),
@@ -229,9 +217,6 @@ def test_zero_is_only_accepted_where_it_is_a_mode():
 
 def test_format_value_labels_the_modes_and_toggles():
     assert api_settings.format_value(
-        api_settings.setting_for("context_tokens"), 0
-    ) == "auto"
-    assert api_settings.format_value(
         api_settings.setting_for("request_interval"), 0.0
     ) == "no pacing"
     assert api_settings.format_value(
@@ -240,12 +225,12 @@ def test_format_value_labels_the_modes_and_toggles():
 
 
 def test_active_env_override_is_reported_only_when_set(monkeypatch):
-    setting = api_settings.setting_for("context_tokens")
-    monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
+    setting = api_settings.setting_for("request_interval")
+    monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
     assert api_settings.active_env_override(setting) == ""
 
-    monkeypatch.setenv("AGENT_MAX_CONTEXT_TOKENS", "300000")
-    assert api_settings.active_env_override(setting) == "AGENT_MAX_CONTEXT_TOKENS"
+    monkeypatch.setenv("AGENT_API_INTERVAL", "3")
+    assert api_settings.active_env_override(setting) == "AGENT_API_INTERVAL"
     assert api_settings.active_env_override(
         api_settings.setting_for("max_retries")
     ) == ""
@@ -258,19 +243,14 @@ class _Agent:
         self.config = config
 
 
-def test_context_window_override_reaches_the_prompt_budget(
-    tmp_path, agent_factory, monkeypatch
-):
-    """Raising the window in the dialog must change the budget the trimmer uses."""
+def test_the_prompt_budget_is_no_longer_a_dialog_setting(tmp_path, monkeypatch):
+    """Only AGENT_MAX_CONTEXT_TOKENS pins it; a value an older Kvist saved is ignored."""
     monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
     path = tmp_path / "config.json"
-    agent = agent_factory(fast_model="claude-sonnet-4-5")
-    derived = agent_model.context_token_limit(agent)
+    path.write_text(json.dumps({"api_settings": {"context_tokens": 1_000_000}}), encoding="utf-8")
 
-    values = api_settings.default_api_settings()
-    values["context_tokens"] = 1_000_000
-    api_settings.store_api_settings(values, path)
-    api_settings.apply_api_settings(agent.config, path)
+    config = _config()
+    api_settings.apply_api_settings(config, path)
 
-    assert derived < 1_000_000
-    assert agent_model.context_token_limit(agent) == 1_000_000
+    assert "context_tokens" not in {setting.key for setting in api_settings.API_SETTINGS}
+    assert config.max_context_tokens == 0

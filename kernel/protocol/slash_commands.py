@@ -44,7 +44,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("models", "Select fast and smart models"),
     SlashCommand(
         "settings-api",
-        "Tune API pacing, timeouts, retries and the context window",
+        "Tune API pacing, timeouts, retries and model catalog loading",
         aliases=("settings_api", "api"),
     ),
     SlashCommand("role", "Choose auto, coder, devops or chat role"),

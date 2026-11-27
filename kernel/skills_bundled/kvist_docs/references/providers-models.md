@@ -33,11 +33,14 @@ rejects the setting, Kvist retries without it and warns. `AGENT_REASONING_EFFORT
 
 ## Context
 
-The prompt budget is 85% of the model's maximum **input** (not its context window), so
-a 1M-input model gets 850k. A model newer than Kvist's table inherits its family's limit;
-if a provider rejects a prompt as too long, Kvist lowers the budget for that model and
-resends. `/context` shows usage. `AGENT_MAX_CONTEXT_TOKENS` or a context override in
-`/settings-api` pins a value (a limit learned from a rejection still wins).
+When the provider's `/models` catalog states the model's window (DeepSeek, OpenRouter,
+Anthropic, vLLM), the prompt budget is that window less 30k tokens (15% on a window under
+200k). The same catalog says whether a model accepts images, which picks the Vision model.
+Otherwise the budget is 85% of the model's documented maximum **input** (not its context
+window), so a 1M-input model gets 850k, and a model newer than Kvist's table inherits its
+family's limit. If a provider rejects a prompt as too long, Kvist lowers the budget for
+that model and resends. `/context` shows usage. Only `AGENT_MAX_CONTEXT_TOKENS` pins a
+value by hand (a limit learned from a rejection still wins).
 
 ## Native tools or JSON
 
