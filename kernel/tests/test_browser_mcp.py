@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import queue
 import random
 import re
 import shutil
@@ -277,3 +278,78 @@ def test_a_real_chromium_gets_trusted_input_and_scrolls_by_wheel(tmp_path):
         browser.terminate()
         browser.wait(10)
         site.shutdown()
+
+
+class FakeBrowser:
+    """A browser end of the relay's WebSocket: answers every command and remembers it."""
+
+    def __init__(self, url: str) -> None:
+        self.sent: list[dict] = []
+        self.sessions = 0
+        self._inbox: "queue.Queue[str]" = queue.Queue()
+        FakeBrowser.last = self
+
+    def send(self, text: str) -> None:
+        message = json.loads(text)
+        self.sent.append(message)
+        result = {"script": f"s{len(self.sent)}"} if message["method"] == "script.addPreloadScript" else {}
+        if message["method"] == "session.new":
+            self.sessions += 1
+            result = {"sessionId": "x", "capabilities": {"browserName": "waterfox", "browserVersion": "140"}}
+        self._inbox.put(json.dumps({"id": message["id"], "type": "success", "result": result}))
+
+    def recv(self) -> str:
+        return self._inbox.get()
+
+    def close(self) -> None:
+        pass
+
+
+def test_the_relay_shares_one_session_and_cleans_up_after_a_server_that_died():
+    from kernel.browser_mcp.drivers import BidiDriver
+    from kernel.browser_mcp.relay import Relay
+
+    relay = Relay("ws://127.0.0.1:1/session", connect=FakeBrowser)
+
+    def server():
+        ours, theirs = socket.socketpair()
+        threading.Thread(target=relay.serve_client, args=(theirs,), daemon=True).start()
+        return ours, BidiDriver(_SocketLines(ours))
+
+    first, driver = server()
+    assert driver.product == "waterfox 140"
+    assert driver.add_preload("T1", "1") == "s2"
+    driver._call("input.performActions", {"context": "T1", "actions": []})
+    first.shutdown(socket.SHUT_RDWR)  # killed: no session.end, no cleanup of its own
+    deadline = time.monotonic() + 5
+    while not any(m["method"] == "input.releaseActions" for m in FakeBrowser.last.sent):
+        assert time.monotonic() < deadline, FakeBrowser.last.sent
+        time.sleep(0.05)
+
+    _second, again = server()
+
+    methods = [m["method"] for m in FakeBrowser.last.sent]
+    assert {"method": "script.removePreloadScript", "params": {"script": "s2"}}.items() <= {
+        k: v for k, v in next(m for m in FakeBrowser.last.sent if m["method"] == "script.removePreloadScript").items()
+        if k != "id"}.items()
+    assert methods.count("session.new") == 1 and again.product == "waterfox 140"
+
+
+class _SocketLines:
+    def __init__(self, sock: socket.socket) -> None:
+        self._sock = sock
+        self._reader = sock.makefile("rb")
+
+    def send(self, text: str) -> None:
+        self._sock.sendall(text.encode() + b"\n")
+
+    def recv(self) -> str:
+        from kernel.browser_mcp.websocket import WebSocketError
+
+        line = self._reader.readline()
+        if not line:
+            raise WebSocketError("closed")
+        return line.decode()
+
+    def close(self) -> None:
+        self._sock.close()

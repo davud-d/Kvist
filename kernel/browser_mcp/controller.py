@@ -126,7 +126,7 @@ class Controller:
             self._check_stop()
             return self.tab
         self.tab = ""
-        target = self._focused_tab(tabs) if tabs else self.driver.new_tab("about:blank")
+        target = self._focused_tab(tabs) if tabs else self.driver.new_tab()
         self._set_working(target)
         return target
 
@@ -144,7 +144,8 @@ class Controller:
         try:
             if self._preload:
                 self.driver.remove_preload(tab, self._preload)
-            self._eval(tab, "k.unmount()", timeout=3.0)
+            # Kvist gives a stopping server two seconds; the session must still be ended after this.
+            self._eval(tab, "k.unmount()", timeout=0.8)
         except DriverError:
             pass  # the tab is closed or navigating; its overlay goes with it
         self._preload = ""
@@ -191,9 +192,13 @@ class Controller:
 
     def list_tabs(self) -> str:
         tabs = self.driver.tabs()
-        if not tabs:
+        if not tabs and not getattr(self.driver, "partial", False):
             return f"{self.driver.product}: no open tabs."
         lines = [f"{self.driver.product} ({self.driver.protocol}), {len(tabs)} tabs:"]
+        if getattr(self.driver, "partial", False):
+            lines = [f"{self.driver.product}: the browser cannot list its tabs while some of them are not loaded "
+                     "(restored, never opened), so only the tabs Kvist opened are shown. Open a tab with "
+                     "browser_open_tab to work; the person's other tabs cannot be reached."]
         for item in tabs:
             mark = "  ← Kvist works here" if item.id == self.tab else ""
             lines.append(f"{self._alias(item.id)}  {item.title or '(untitled)'} — {item.url}{mark}")
@@ -203,10 +208,14 @@ class Controller:
         if self.stopped:
             raise ToolError(STOPPED)
         target = normalize_url(url) if url else ""
-        tab = self.driver.new_tab(target)
+        # The overlay script is attached to the blank tab first, so the site's first page has it too.
+        tab = self.driver.new_tab()
         self._set_working(tab)
-        if target:
+        if target and target != "about:blank":
             self.status(f"Opening {urlsplit(target).hostname}", f"Открываю {urlsplit(target).hostname}")
+            self.driver.navigate(tab, target)
+            time.sleep(0.3)
+            self._settle()
         return f"Opened {self._alias(tab)}; Kvist works in it now.\n{self._where()}"
 
     def close_tab(self, alias: str) -> str:

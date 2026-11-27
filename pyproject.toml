@@ -71,6 +71,8 @@ packages = [
     "kernel.themes",
     "kernel.plugins",
     "kernel.browser_mcp",
+    "kernel.browser_mcp.firefox",
+    "kernel.browser_mcp.page",
     "kernel.plugins.runner",
     "kernel.plugins.plain",
     "kernel.skills_bundled.browser",
@@ -120,7 +122,8 @@ kvist_web = "frontends/web-local/kvist_web"
 [tool.setuptools.package-data]
 # A bundled skill is installed as a package folder (kvist --skill-op install
 # --skill-path bundled:<id>), so its manifest, instructions and own tests ship too.
-"kernel.browser_mcp" = ["page/*.js"]
+"kernel.browser_mcp.page" = ["*.js"]
+"kernel.browser_mcp.firefox" = ["*.js", "*.cfg"]
 "kernel.skills_bundled.browser" = ["manifest.json", "SKILL.md"]
 "kernel.skills_bundled.app_screen" = ["manifest.json", "SKILL.md"]
 "kernel.skills_bundled.app_screen.icons.kvist" = ["index.theme"]

@@ -146,6 +146,7 @@ a = Analysis(
         ('kernel/plugins/service_browser.py', 'kernel/plugins'),
         ('kernel/skills_bundled', 'kernel/skills_bundled'),
         ('kernel/browser_mcp/page', 'kernel/browser_mcp/page'),
+        ('kernel/browser_mcp/firefox', 'kernel/browser_mcp/firefox'),
         ('frontends/tui/classic/assets', 'assets'),
         ('frontends/web-local/kvist_web/client', 'kvist_web/client'),
         ('frontends/gui/electron-legacy/renderer/image-attachments.js', 'kvist_web/client/utils'),

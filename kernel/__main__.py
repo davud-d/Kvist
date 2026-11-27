@@ -32,7 +32,13 @@ if "--session-op" in sys.argv:
 
     hand_over_plain_request(sys.argv[1:])
 
-# The browser MCP server is standard-library only; it needs none of the core.
+# The browser MCP server and its session relay are standard-library only; they need none of the core.
+if "--browser-relay" in sys.argv:
+    sys.argv.remove("--browser-relay")
+    from kernel.browser_mcp.relay import main as _browser_relay_main
+
+    raise SystemExit(_browser_relay_main(sys.argv[1:]))
+
 if "--browser-mcp" in sys.argv:
     sys.argv.remove("--browser-mcp")
     from kernel.browser_mcp.server import main as _browser_mcp_main

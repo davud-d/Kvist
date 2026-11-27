@@ -19,7 +19,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from kernel.browser_mcp.drivers import BidiDriver, CdpDriver, DriverError
-from kernel.browser_mcp.websocket import WebSocketError
+from kernel.browser_mcp.relay import LineSocket, socket_path
+from kernel.browser_mcp.websocket import WebSocket, WebSocketError
 
 DEFAULT_PORT = 9222
 # Desktop apps built on Chromium open the same debugging port; their user agent names them.
@@ -111,12 +112,27 @@ def _cdp_version(candidate: Candidate) -> dict | None:
     return value if isinstance(value, dict) and value.get("webSocketDebuggerUrl") else None
 
 
+def _bidi(candidate: Candidate) -> BidiDriver:
+    relay = socket_path(candidate.port)
+    if candidate.host in ("127.0.0.1", "localhost") and relay.exists():
+        return BidiDriver(LineSocket(relay))
+    try:
+        return BidiDriver(WebSocket(f"ws://{candidate.host}:{candidate.port}/session"))
+    except DriverError as error:
+        if "Maximum number of active sessions" not in str(error):
+            raise
+        raise EndpointError(
+            f"{error}. Firefox-family browsers keep one automation session and cannot always end it; "
+            f"start the session relay once beside the browser (kvist --browser-relay --browser-endpoint "
+            f"{candidate.port}) and restart the browser") from None
+
+
 def connect_candidate(candidate: Candidate) -> CdpDriver | BidiDriver:
     base = f"ws://{candidate.host}:{candidate.port}"
     if candidate.ws_path.startswith("/devtools/"):
         return CdpDriver(base + candidate.ws_path)
     if candidate.ws_path == "/session":
-        return BidiDriver(base + "/session")
+        return _bidi(candidate)
     version = _cdp_version(candidate)
     if version is not None:
         agent = str(version.get("User-Agent", ""))
@@ -124,7 +140,7 @@ def connect_candidate(candidate: Candidate) -> CdpDriver | BidiDriver:
         if app:
             raise EndpointError(f"port {candidate.port} belongs to {app.rstrip('/')}, an app, not a browser")
         return CdpDriver(version["webSocketDebuggerUrl"], product=str(version.get("Browser", "")))
-    return BidiDriver(base + "/session")
+    return _bidi(candidate)
 
 
 def connect(spec: str = "") -> CdpDriver | BidiDriver:
@@ -141,5 +157,6 @@ def connect(spec: str = "") -> CdpDriver | BidiDriver:
             return connect_candidate(candidate)
         except (DriverError, WebSocketError, EndpointError) as error:
             errors.append(f"{candidate.host}:{candidate.port}: {error}")
-    detail = ("\nTried: " + "; ".join(errors)) if errors else ""
-    raise EndpointError(HOW_TO_START + detail)
+    if errors:
+        raise EndpointError("A browser is listening, but Kvist could not use it:\n" + "\n".join(errors))
+    raise EndpointError(HOW_TO_START)

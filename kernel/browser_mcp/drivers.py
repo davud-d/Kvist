@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -35,6 +36,10 @@ class Tab:
     id: str
     url: str
     title: str
+
+
+# How Firefox ≤ 140 fails when a command meets a tab that has no page loaded.
+_UNLOADED_TAB = re.compile(r"CanonicalBrowsingContext|browsingContext is null")
 
 
 class Rpc:
@@ -134,8 +139,8 @@ class CdpDriver:
         return [Tab(info["targetId"], info.get("url", ""), info.get("title", ""))
                 for info in infos if info.get("type") == "page" and not info.get("url", "").startswith("devtools://")]
 
-    def new_tab(self, url: str) -> str:
-        return self._call("Target.createTarget", {"url": url or "about:blank"})["targetId"]
+    def new_tab(self) -> str:
+        return self._call("Target.createTarget", {"url": "about:blank"})["targetId"]
 
     def close_tab(self, tab: str) -> None:
         self._call("Target.closeTarget", {"targetId": tab})
@@ -240,15 +245,23 @@ class CdpDriver:
 
 
 class BidiDriver:
+    """WebDriver BiDi, as Firefox and its forks (Waterfox, LibreWolf) speak it.
+
+    ``transport`` is a WebSocket to the browser's ``/session`` endpoint, or a line socket
+    to the session relay (relay.py), which answers ``session.new`` with the session it holds.
+    """
+
     protocol = "bidi"
 
-    def __init__(self, ws_url: str) -> None:
-        self._rpc = Rpc(WebSocket(ws_url), lambda _message: None)
+    def __init__(self, transport: Any) -> None:
+        self._rpc = Rpc(transport, lambda _message: None)
         # "ignore": the person's own alerts and confirms must stay theirs to answer.
         result = self._call("session.new", {"capabilities": {"alwaysMatch": {
             "unhandledPromptBehavior": {"default": "ignore"}}}})
         capabilities = result.get("capabilities") or {}
         self.product = f"{capabilities.get('browserName', 'firefox')} {capabilities.get('browserVersion', '')}".strip()
+        self._opened: set[str] = set()
+        self.partial = False
 
     def _call(self, method: str, params: dict[str, Any], timeout: float = CALL_TIMEOUT) -> dict[str, Any]:
         reply = self._rpc.call({"method": method, "params": params}, timeout)
@@ -257,24 +270,41 @@ class BidiDriver:
         return reply.get("result") or {}
 
     def tabs(self) -> list[Tab]:
-        contexts = self._call("browsingContext.getTree", {"maxDepth": 0}).get("contexts") or []
-        tabs = []
-        for context in contexts:
-            try:
-                title = self.evaluate(context["context"], "document.title", timeout=3.0) or ""
-            except DriverError:
-                title = ""
-            tabs.append(Tab(context["context"], context.get("url", ""), title))
-        return tabs
+        try:
+            contexts = self._call("browsingContext.getTree", {"maxDepth": 0}).get("contexts") or []
+        except DriverError as error:
+            if not _UNLOADED_TAB.search(str(error)):
+                raise
+            # Firefox ≤ 140 fails every command that visits all tabs once one of them was restored
+            # but never opened (or was unloaded to save memory). Commands for one tab still work,
+            # so the tabs Kvist opened itself stay usable.
+            self.partial = True
+            return [self._known(tab) for tab in list(self._opened)]
+        self.partial = False
+        return [Tab(item["context"], item.get("url", ""), self._title(item["context"])) for item in contexts]
 
-    def new_tab(self, url: str) -> str:
+    def _title(self, tab: str) -> str:
+        try:
+            return self.evaluate(tab, "document.title", timeout=3.0) or ""
+        except DriverError:
+            return ""
+
+    def _known(self, tab: str) -> Tab:
+        try:
+            url = self.evaluate(tab, "location.href", timeout=3.0) or ""
+        except DriverError:
+            self._opened.discard(tab)  # closed by the person
+            return Tab(tab, "", "")
+        return Tab(tab, url, self._title(tab))
+
+    def new_tab(self) -> str:
         tab = self._call("browsingContext.create", {"type": "tab"})["context"]
-        if url:
-            self.navigate(tab, url)
+        self._opened.add(tab)
         return tab
 
     def close_tab(self, tab: str) -> None:
         self._call("browsingContext.close", {"context": tab})
+        self._opened.discard(tab)
 
     def activate(self, tab: str) -> None:
         self._call("browsingContext.activate", {"context": tab})
@@ -292,12 +322,19 @@ class BidiDriver:
         return (result.get("result") or {}).get("value")
 
     def add_preload(self, tab: str, source: str) -> str:
-        result = self._call("script.addPreloadScript", {
-            "functionDeclaration": "() => {\n" + source + "\n}", "sandbox": WORLD, "contexts": [tab]})
-        return result["script"]
+        params = {"functionDeclaration": "() => {\n" + source + "\n}", "sandbox": WORLD, "contexts": [tab]}
+        try:
+            return self._call("script.addPreloadScript", params)["script"]
+        except DriverError as error:
+            if not _UNLOADED_TAB.search(str(error)):
+                raise
+        # Same Firefox fault as in tabs(). Without the preload the overlay appears on the next
+        # call into the page instead of the moment a new page loads.
+        return ""
 
     def remove_preload(self, tab: str, handle: str) -> None:
-        self._call("script.removePreloadScript", {"script": handle})
+        if handle:
+            self._call("script.removePreloadScript", {"script": handle}, timeout=0.8)
 
     def _perform(self, tab: str, source: dict[str, Any], timeout: float = 60.0) -> None:
         self._call("input.performActions", {"context": tab, "actions": [source]}, timeout)
@@ -345,7 +382,8 @@ class BidiDriver:
 
     def close(self) -> None:
         try:
-            self._call("session.end", {}, timeout=3.0)
+            # Through the relay this only releases what this server holds; the session stays.
+            self._call("session.end", {}, timeout=1.0)
         except DriverError:
-            pass  # the browser may already be gone; the socket is closed either way
+            pass  # the browser may be gone already; the socket is closed either way
         self._rpc.close()

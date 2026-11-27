@@ -29,6 +29,34 @@ and skipped. Another port or host goes in `--browser-endpoint 9333` (or `host:po
 Remote debugging gives full control of the browser to any local program that connects to the
 port. Turn it off when you do not need it.
 
+### Firefox and its forks (Waterfox, LibreWolf)
+
+Three things differ from Chromium, measured on Firefox 140 / Waterfox 6.6:
+
+* **Sites see it.** While Firefox runs with `--remote-debugging-port`, `navigator.webdriver` is
+  `true` on every page, whether Kvist is working or not; some sites answer with more captchas.
+  Chromium with the same flag keeps it `false`.
+* **One session for the browser's whole life.** Firefox allows one automation session and
+  does not end it when the connection drops, so a server Kvist stopped with its task would lock
+  the browser until a restart. Start the session relay once beside the browser; every MCP server
+  then goes through it, and it cleans up after each one (its page scripts, any key still held):
+
+  ```bash
+  kvist --browser-relay --browser-endpoint 9222    # e.g. from i3: exec --no-startup-id ...
+  ```
+
+* **Tabs without a page break automation.** A tab restored after a restart but never opened (or
+  unloaded to save memory) has no page, and every command that visits all tabs fails on it:
+  the tab list, page scripts, events, ending the session. The fix is two files for the browser's
+  install folder (autoconfig, applied at start-up; delete them to undo):
+
+  ```bash
+  sudo cp kernel/browser_mcp/firefox/autoconfig.js /opt/waterfox/defaults/pref/
+  sudo cp kernel/browser_mcp/firefox/kvist-autoconfig.cfg /opt/waterfox/
+  ```
+
+  Without it Kvist still works, but only in tabs it opens itself.
+
 ## 2. Register the server
 
 ```bash
