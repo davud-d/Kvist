@@ -510,6 +510,23 @@ scenario("a plain browser has no wallet and says nothing false about it", async 
   assert.equal(await page.locator(".row.dev").count(), 1, "only the development path to pay on a local run");
 });
 
+scenario("deleting the account asks twice, signs out, and signing in again cancels it", async (page) => {
+  await signIn(page);
+  await page.getByLabel("Sessions").first().click();
+  await page.locator(".drawer-account").click();
+  await page.locator(".link-danger").click();
+  await visible(page, ".sheet .btn.danger");
+  await shot(page, "delete-ask");
+  await page.locator(".sheet .btn.danger").click();
+  await page.getByText(/will be erased on/).waitFor();
+  assert.equal(await page.evaluate(async () => (await fetch("/api/me")).status), 401);
+  await page.locator(".sheet .btn.primary.wide").click();
+  // Back on the sign-in screen; signing in brings the account back and says so.
+  await page.getByText("Continue with GitHub").click();
+  await visible(page, ".home");
+  await page.getByText("Deletion cancelled").waitFor();
+});
+
 scenario("Russian: every word is Russian and nothing is left unfilled", async (page) => {
   await signIn(page);
   await page.getByLabel("Sessions").first().click();

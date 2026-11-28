@@ -78,6 +78,8 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .btn.primary:active { background: #d4d4d6; }
 .btn.primary:disabled { background: var(--s3); border-color: var(--s3); color: var(--text3); }
 .btn.wide { width: 100%; }
+.btn.danger { color: var(--bad); }
+.btn.danger:disabled { color: var(--text3); }
 .btn.small { min-height: 36px; padding: 0 14px; font-size: 14px; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { flex: 1; }
@@ -151,6 +153,8 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .row-main small { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-end { color: var(--text2); font-size: 14px; }
 .row.danger { color: var(--bad); border: 1px solid var(--line); border-radius: var(--r-m); background: var(--s1); }
+/* Quiet on purpose: deleting the account is findable, not one tap away from "sign out". */
+.link-danger { justify-self: center; min-height: 44px; padding: 0 12px; color: var(--text3); font-size: 14px; }
 .row.on { background: var(--s2); }
 .row.dev { color: var(--text2); border-top: 1px dashed var(--line); }
 .choices { display: grid; background: var(--s1); border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; }

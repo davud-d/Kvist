@@ -71,7 +71,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    github_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    # None once the account is deleted (account.py): the same GitHub account may then sign up anew.
+    github_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     github_login: Mapped[str] = mapped_column(String(100))
     name: Mapped[str] = mapped_column(String(200), default="")
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
@@ -79,6 +80,12 @@ class User(Base):
     github_token_enc: Mapped[str] = mapped_column(Text, default="")
     github_created_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     trial_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # A deleted account that had used its trial keeps the GitHub id here, so signing up again gives no second trial.
+    trial_github_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    # Deletion asked for (account.py): signing in again within the grace period cancels it; after it, the sweep
+    # erases the account and sets deleted_at.
+    delete_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # Raised to sign out every cookie at once.
     session_version: Mapped[int] = mapped_column(Integer, default=1)
     model_provider: Mapped[str] = mapped_column(String(40), default="")

@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .db import get_db, utcnow
 from .errors import ApiError, not_signed_in
-from .models import User
+from .models import Notification, User
 from .validation import InputModel
 
 SESSION_COOKIE = "kc_session"
@@ -236,12 +236,22 @@ async def _github_profile(request: Request, code: str) -> tuple[dict, str]:
     return profile_response.json(), token
 
 
+def _spent_trial(db: Session, github_id: int) -> datetime | None:
+    """When an erased account of this GitHub user had taken the trial: a new account does not get another."""
+    return db.scalar(select(User.trial_used_at).where(User.trial_github_id == github_id)
+                     .order_by(User.trial_used_at).limit(1))
+
+
 def _upsert_user(db: Session, profile: dict, locale: str) -> User:
     github_id = int(profile["id"])
     user = db.scalars(select(User).where(User.github_id == github_id)).first()
     if user is None:
-        user = User(github_id=github_id, locale=locale)
+        user = User(github_id=github_id, locale=locale, trial_used_at=_spent_trial(db, github_id))
         db.add(user)
+    if user.delete_requested_at is not None:
+        # Back within the grace period (account.py): the deletion is off and the bell says so.
+        user.delete_requested_at = None
+        db.add(Notification(user_id=user.id, kind="deletion_cancelled", params={}))
     user.github_login = str(profile.get("login") or "")
     user.name = str(profile.get("name") or "")
     user.avatar_url = str(profile.get("avatar_url") or "")

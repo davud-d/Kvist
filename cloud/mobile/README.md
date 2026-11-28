@@ -54,6 +54,13 @@ The apps give the page `window.KvistHost` ([`js/native.js`](js/native.js) is the
 | `signIn` | | `{started: true}` once the app has taken the sign-in over (the system browser signs in, the app reloads the page signed in); `null`: the page signs in the ordinary way |
 | `open` `copy` `share` `haptic` | `{url}` `{text}` `{text}` `{kind}` | nothing |
 
+## Deleting the account
+
+The app stores want it inside the app, so it is at the bottom of the account sheet, asked twice. The server
+([`account.py`](../backend/kvist_cloud/account.py)) signs the person out everywhere, puts the machine to sleep and stops the plan
+from renewing; the account itself is erased 90 days later (the law asks for the wait). Signing in again before then cancels it,
+and the page says so once. Payment records stay, as the privacy policy says.
+
 ## In an IDE panel
 
 The VS Code and JetBrains side panel switches between "Cloud" and "Local" at the top (the switch and its motion are in

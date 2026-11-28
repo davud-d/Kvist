@@ -124,6 +124,10 @@ XSS = '<img src=x onerror="globalThis.__xss=1"><script>globalThis.__xss=1</scrip
 # All declared JSON body fields, including numeric/boolean fields that must reject strings.
 FIELDS = [
     ("PATCH", "/api/me", {"locale": "en"}, "locale"),
+    *[("POST", "/api/me/terms", {"terms": True, "privacy": True}, k) for k in ("terms", "privacy")],
+    ("POST", "/api/me/delete", {"confirm": True}, "confirm"),
+    *[("POST", "/api/model-catalog", {"provider": "deepseek", "key": "test-key-12345678"}, k)
+      for k in ("provider", "key", "base_url", "headers")],
     *[("POST", "/api/model-key", {"provider": "deepseek", "key": "test-key-12345678"}, k)
       for k in ("provider", "key", "base_url", "model", "headers", "stream")],
     ("PUT", "/api/effort", {"level": "medium"}, "level"),

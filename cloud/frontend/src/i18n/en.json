@@ -403,6 +403,7 @@
     "label": "Notifications, {n} unread",
     "note": "Note: {note}",
     "kind": {
+      "deletion_cancelled": "You signed in again, so your account will not be deleted.",
       "plan_granted": "An administrator gave you the {plan} plan until {date}.",
       "hours_granted": "An administrator added {time} of agent hours to your account.",
       "hours_removed": "An administrator took {time} of agent hours off your account.",

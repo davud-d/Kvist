@@ -99,6 +99,34 @@ export function accountSheet() {
         await fetch("/auth/logout", { method: "POST", headers: { "X-Kvist-Client": "1" }, credentials: "same-origin" });
         location.assign("/m/");
       } }, icon("logout", 20), h("span", { class: "row-main" }, t("sign out"))),
+      h("button", { class: "link-danger", type: "button", onclick: deleteSheet }, t("delete account")),
     ],
+  });
+}
+
+/** Asked twice: this sheet is the second question. The account is erased only after the grace period, and signing in
+ * again before then keeps it; the sheet says both before and after. */
+function deleteSheet() {
+  openSheet({
+    title: t("delete account q"),
+    build: (close, body) => {
+      const go = h("button", { class: "btn danger wide", type: "button", onclick: async () => {
+        go.disabled = true;
+        try {
+          const { erase_after: after } = await post("/api/me/delete", { confirm: true });
+          const date = new Date(after).toLocaleDateString(document.documentElement.lang, { day: "numeric", month: "long", year: "numeric" });
+          body.replaceChildren(
+            h("p", { class: "lead" }, t("delete account done", { date })),
+            h("button", { class: "btn primary wide", type: "button", onclick: () => location.assign("/m/") }, t("accept")));
+        } catch (error) {
+          toast(error.localized, "error");
+          go.disabled = false;
+        }
+      } }, t("delete account yes"));
+      return [
+        h("p", { class: "lead" }, t("delete account body")),
+        h("div", { class: "stack" }, go, h("button", { class: "btn wide", type: "button", onclick: close }, t("cancel"))),
+      ];
+    },
   });
 }

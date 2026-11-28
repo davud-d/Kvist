@@ -117,7 +117,19 @@ async function boot() {
   shell = startShell(screen, { go, onAuth: signIn });
   window.addEventListener("popstate", route);
   route();
+  sayIfDeletionCancelled();
   return undefined;
+}
+
+// Signing in again during the grace period cancels a deletion (the server leaves a notice); say so once, here.
+const SEEN_NOTICE = "kc_seen_deletion_notice";
+
+async function sayIfDeletionCancelled() {
+  const list = await api("/api/notifications").catch(() => null);
+  const notice = list?.items.find((item) => item.kind === "deletion_cancelled" && !item.read);
+  if (!notice || localStorage.getItem(SEEN_NOTICE) === String(notice.id)) return;
+  localStorage.setItem(SEEN_NOTICE, String(notice.id));
+  toast(t("deletion cancelled"));
 }
 
 // The phone's back key (the app calls this): a sheet closes first, then the drawer, then a session goes home.

@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from . import (
+    account,
     admin,
     appauth,
     auth,
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(machines.sweep_forever(app)),
         asyncio.create_task(billing.sweep_forever(app)),
         asyncio.create_task(updates.sweep_forever(app)),
+        asyncio.create_task(account.purge_forever(app)),
     ]
     if app.state.settings.chatgpt_signin:
         # Off, the server makes no request to OpenAI for anyone's plan.
@@ -139,6 +141,7 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(account.router)
     app.include_router(appauth.router)
     app.include_router(review.router)
     app.include_router(keys.router)
