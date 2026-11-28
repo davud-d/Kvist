@@ -13,6 +13,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     ASWebAuthenticationPresentationContextProviding {
     private let background = UIColor(red: 10 / 255, green: 10 / 255, blue: 11 / 255, alpha: 1)
     private let cloudURL: String = (Bundle.main.object(forInfoDictionaryKey: "KvistCloudURL") as? String) ?? "https://cloud.kvist.site"
+    // The App Store build (KVIST_STORE=YES): the page sells nothing in it (App Review Guideline 3.1.3(f)).
+    private let storeBuild: Bool = (Bundle.main.object(forInfoDictionaryKey: "KvistStore") as? String) == "YES"
     private let applePay = ApplePay()
     private var webView: WKWebView!
     private var offline: UIView!
@@ -26,7 +28,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         view.backgroundColor = background
 
         let content = WKUserContentController()
-        content.addUserScript(WKUserScript(source: Bridge.startScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        content.addUserScript(WKUserScript(source: Bridge.startScript(store: storeBuild), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         content.addScriptMessageHandler(self, contentWorld: .page, name: Bridge.handlerName)
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = content

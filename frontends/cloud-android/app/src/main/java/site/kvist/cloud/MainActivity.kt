@@ -47,7 +47,7 @@ import java.io.IOException
  * the Google Pay sheet, links in the system browser, the clipboard, a tap's vibration, the photo picker and the camera
  * behind the page's file inputs, and photos dragged onto the app from another one.
  *
- * The page reaches this class only through a message channel that exists for the cloud's own origin (Bridge.START_SCRIPT
+ * The page reaches this class only through a message channel that exists for the cloud's own origin (Bridge.startScript
  * makes it look like `window.KvistHost`); GitHub's sign-in page and anything else loaded here get nothing.
  */
 class MainActivity : ComponentActivity() {
@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
         WebViewCompat.addWebMessageListener(webView, Bridge.CHANNEL, origins) { _, message, _, _, reply ->
             handle(message, reply)
         }
-        WebViewCompat.addDocumentStartJavaScript(webView, Bridge.START_SCRIPT, origins)
+        WebViewCompat.addDocumentStartJavaScript(webView, Bridge.startScript(BuildConfig.STORE), origins)
     }
 
     private fun handle(message: WebMessageCompat, reply: JavaScriptReplyProxy) {

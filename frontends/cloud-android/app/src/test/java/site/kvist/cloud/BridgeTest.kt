@@ -46,9 +46,11 @@ class BridgeTest {
     @Test
     fun theStartScriptSpeaksTheWordsThePageExpects() {
         // cloud/mobile/js/native.js calls KvistHost.call(id, name, json) and is answered through __kvistReply(id, payload).
-        assertTrue(Bridge.START_SCRIPT.contains("window.KvistHost"))
-        assertTrue(Bridge.START_SCRIPT.contains("""platform: "android""""))
-        assertTrue(Bridge.START_SCRIPT.contains("window.__kvistReply(reply.id, reply.payload)"))
-        assertTrue(Bridge.START_SCRIPT.contains("window.${Bridge.CHANNEL}"))
+        assertTrue(Bridge.startScript(false).contains("window.KvistHost"))
+        assertTrue(Bridge.startScript(false).contains("""platform: "android""""))
+        assertTrue(Bridge.startScript(false).contains("window.__kvistReply(reply.id, reply.payload)"))
+        assertTrue(Bridge.startScript(false).contains("window.${Bridge.CHANNEL}"))
+        assertTrue(Bridge.startScript(false).contains("store: false,"))
+        assertTrue(Bridge.startScript(true).contains("store: true,"))
     }
 }

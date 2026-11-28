@@ -69,12 +69,13 @@ async function browserFor(profile) {
  * The phone app's side of the bridge. `pay` says what the operating system's sheet does: "ok" hands back a wallet's
  * token, "cancel" is the person closing the sheet, "none" means this phone has no wallet.
  */
-const bridge = ({ platform, wallet, pay, signin }) => {
+const bridge = ({ platform, wallet, pay, signin, store }) => {
   window.__host = [];
   const google = JSON.stringify({ id: "tok_goodGooglePayToken01", object: "token", type: "card" });
   const apple = JSON.stringify({ paymentData: '{"version":"EC_v1","data":"x"}', transactionIdentifier: "tx-1", network: "Visa", displayName: "Visa 4242" });
   window.KvistHost = {
     platform,
+    store,
     call(id, name, json) {
       const args = JSON.parse(json);
       window.__host.push({ name, args });
@@ -93,10 +94,10 @@ const bridge = ({ platform, wallet, pay, signin }) => {
   };
 };
 
-async function openPage(profile, server, { host = true, pay = "ok", signin = "app", locale = "en-US", viewport } = {}) {
+async function openPage(profile, server, { host = true, pay = "ok", signin = "app", locale = "en-US", viewport, store = false } = {}) {
   const browser = await browserFor(profile);
   const context = await browser.newContext({ ...pw.devices[profile.device], locale, ...(viewport ? { viewport } : {}) });
-  if (host) await context.addInitScript(bridge, { platform: profile.platform, wallet: profile.wallet, pay, signin });
+  if (host) await context.addInitScript(bridge, { platform: profile.platform, wallet: profile.wallet, pay, signin, store });
   const page = await context.newPage();
   const problems = [];
   page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
@@ -527,6 +528,30 @@ scenario("deleting the account asks twice, signs out, and signing in again cance
   await page.getByText("Deletion cancelled").waitFor();
 });
 
+scenario("the store app sells nothing and points nowhere to buy, but shows the hours bought elsewhere", async (page) => {
+  await signIn(page);
+  await page.getByText("This account has no plan yet.").waitFor();
+  assert.equal(await page.locator(".banner-action").count(), 0);
+  await page.getByLabel("Sessions").first().click();
+  await page.locator(".drawer-account").click();
+  await visible(page, ".card.hours");
+  const noPlan = await page.locator(".sheet").innerText();
+  assert.doesNotMatch(noPlan, /Choose a plan|Plans|Buy|\$/);
+  await page.locator(".sheet-head .icon-btn").last().click();
+  // A plan bought on the site (here the dev path) shows up with its hours and nothing to buy next to it.
+  await page.evaluate(() => fetch("/api/billing/dev/skip-checkout", { method: "POST", headers: { "X-Kvist-Client": "1" } }));
+  await page.reload();
+  await visible(page, ".home");
+  await page.getByLabel("Sessions").first().click();
+  await page.locator(".drawer-account").click();
+  await page.locator(".card.hours .hours-big").waitFor();
+  const withPlan = await page.locator(".sheet").innerText();
+  assert.match(withPlan, /left/);
+  assert.doesNotMatch(withPlan, /Plans|Buy|\$/);
+  assert.equal(await page.locator(".plan-card").count(), 0);
+  await shot(page, "store-account");
+});
+
 scenario("Russian: every word is Russian and nothing is left unfilled", async (page) => {
   await signIn(page);
   await page.getByLabel("Sessions").first().click();
@@ -580,7 +605,7 @@ for (const profile of PROFILES) {
     const label = `${profile.name}: ${name}`;
     if (ONLY && !ONLY.test(label)) continue;
     const server = await startServer();
-    const page = await openPage(profile, server, { host: !/plain browser/.test(name), signin: /cannot sign in/.test(name) ? "none" : /handed to the app/.test(name) ? "hold" : "app" });
+    const page = await openPage(profile, server, { host: !/plain browser/.test(name), signin: /cannot sign in/.test(name) ? "none" : /handed to the app/.test(name) ? "hold" : "app", store: /^the store app/.test(name) });
     const started = Date.now();
     try {
       page.on("response", (r) => r.url().includes("/api/wallet") && console.log(`     ${r.status()} ${r.url().replace(page.base, "")}`));

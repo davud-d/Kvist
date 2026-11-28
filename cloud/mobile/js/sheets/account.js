@@ -13,8 +13,11 @@ import { paySheet, plansSheet } from "./billing.js";
 import { keySheet } from "./key.js";
 
 export function hoursCard(sub, closeSheet) {
+  // A store app shows what the account has and sells nothing (native.storeBuild).
+  const sells = !native.storeBuild();
   if (!sub || sub.status === "none") {
-    return h("div", { class: "card hours" }, h("div", { class: "dim" }, t("no plan")), h("button", { class: "btn primary", type: "button", onclick: plansSheet }, t("choose plan")));
+    return h("div", { class: "card hours" }, h("div", { class: "dim" }, t("no plan")),
+      sells ? h("button", { class: "btn primary", type: "button", onclick: plansSheet }, t("choose plan")) : null);
   }
   if (sub.unmetered) return h("div", { class: "card hours" }, h("div", { class: "hours-big" }, t("unmetered")), h("div", { class: "dim" }, t("plan named", { name: t(`plan ${sub.plan}`) })));
   const left = Math.max(0, sub.balance_seconds);
@@ -26,26 +29,26 @@ export function hoursCard(sub, closeSheet) {
     h("div", { class: "hours-meta dim" },
       h("span", {}, t("plan named", { name: t(`plan ${sub.plan}`) })),
       renews ? h("span", {}, sub.status === "trialing" ? t("trial ends", { date: renews }) : t("renews", { date: renews })) : null),
-    h("div", { class: "btn-row" },
+    sells ? h("div", { class: "btn-row" },
       h("button", { class: "btn", type: "button", onclick: plansSheet }, t("plans")),
-      h("button", { class: "btn", type: "button", onclick: plansSheet }, t("buy hours"))),
-    searchesPart(account.searches, closeSheet));
+      h("button", { class: "btn", type: "button", onclick: plansSheet }, t("buy hours"))) : null,
+    searchesPart(account.searches, closeSheet, sells));
 }
 
 /** Under the hours: the free web searches left, the bought ones, and the pack's button. Paying closes the account
  * sheet too, so it is opened again with the new count rather than left showing the old one. */
-function searchesPart(usage, closeSheet) {
+function searchesPart(usage, closeSheet, sells) {
   if (!usage?.enabled) return null;
   const out = (usage.day === 0 || usage.week === 0) && usage.bought === 0;
   const left = t("searches left", { day: usage.day, perDay: usage.per_day, week: usage.week, perWeek: usage.per_week });
   return h("div", { class: "searches" },
-    out ? h("p", { class: "searches-out", role: "status" }, t("searches out")) : null,
+    out ? h("p", { class: "searches-out", role: "status" }, t(sells ? "searches out" : "searches out store")) : null,
     h("div", { class: "hours-meta dim" },
       h("span", {}, left),
       usage.bought > 0 ? h("span", {}, t("searches bought", { n: usage.bought })) : null),
-    h("div", { class: "btn-row" },
+    sells ? h("div", { class: "btn-row" },
       h("button", { class: `btn${out ? " primary" : ""}`, type: "button", onclick: () => paySheet("searches", closeSheet) },
-        t("buy searches"))));
+        t("buy searches"))) : null);
 }
 
 function machineRow() {

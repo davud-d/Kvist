@@ -12,6 +12,8 @@ cd frontends/cloud-android                      # JDK 21 и ANDROID_HOME с пл
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 # сборка для тестового сервера на этом компьютере (эмулятор видит его как 10.0.2.2); обычный HTTP разрешён только в ней:
 ./gradlew :app:assembleDebug -PkvistCloudUrl=http://10.0.2.2:8742
+# сборка для Google Play: страница в ней ничего не продаёт (см. cloud/mobile/README.ru.md):
+./gradlew :app:assembleRelease -PkvistStore=true
 ```
 
 Продуктовая сборка ходит на `https://cloud.kvist.site` и отказывается от обычного HTTP (CI проверяет итоговый манифест).

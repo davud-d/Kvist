@@ -34,9 +34,11 @@ final class BridgeTests: XCTestCase {
 
     func testTheStartScriptSpeaksTheWordsThePageExpects() {
         // cloud/mobile/js/native.js calls KvistHost.call(id, name, json) and is answered through __kvistReply(id, payload).
-        XCTAssertTrue(Bridge.startScript.contains("window.KvistHost"))
-        XCTAssertTrue(Bridge.startScript.contains(#"platform: "ios""#))
-        XCTAssertTrue(Bridge.startScript.contains("window.__kvistReply(id,"))
-        XCTAssertTrue(Bridge.startScript.contains("handlers.\(Bridge.handlerName).postMessage"))
+        XCTAssertTrue(Bridge.startScript(store: false).contains("window.KvistHost"))
+        XCTAssertTrue(Bridge.startScript(store: false).contains(#"platform: "ios""#))
+        XCTAssertTrue(Bridge.startScript(store: false).contains("window.__kvistReply(id,"))
+        XCTAssertTrue(Bridge.startScript(store: false).contains("handlers.\(Bridge.handlerName).postMessage"))
+        XCTAssertTrue(Bridge.startScript(store: false).contains("store: false,"))
+        XCTAssertTrue(Bridge.startScript(store: true).contains("store: true,"))
     }
 }

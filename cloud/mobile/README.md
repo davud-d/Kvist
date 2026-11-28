@@ -54,6 +54,11 @@ The apps give the page `window.KvistHost` ([`js/native.js`](js/native.js) is the
 | `signIn` | | `{started: true}` once the app has taken the sign-in over (the system browser signs in, the app reloads the page signed in); `null`: the page signs in the ordinary way |
 | `open` `copy` `share` `haptic` | `{url}` `{text}` `{text}` `{kind}` | nothing |
 
+Besides `platform`, the host sets `store: true` in the Google Play and App Store builds. Then the page sells nothing and points
+nowhere to buy: no plans, prices or buy buttons, and the banners only say what the account lacks (Apple's 3.1.3(f) for a free
+companion of a paid web service; Google Play's payments policy for an app without Play Billing). Hours bought on the site work as
+everywhere. A browser and the sideloaded apps from the GitHub release sell as before.
+
 ## Deleting the account
 
 The app stores want it inside the app, so it is at the bottom of the account sheet, asked twice. The server

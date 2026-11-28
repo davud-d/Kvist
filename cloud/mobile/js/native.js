@@ -43,6 +43,10 @@ window.addEventListener("message", (event) => {
 export const host = () => window.KvistHost ?? (inIde() ? ideHost : null);
 export const inApp = () => host() !== null;
 export const platform = () => host()?.platform ?? "web";
+/** An app from Google Play or the App Store: nothing is sold in it and nothing points to buying elsewhere (Apple's
+ * 3.1.3(f) for a free companion of a paid web service; Google Play's payments policy). Plans and hours bought on the
+ * site still work here. A browser and the sideloaded apps sell as usual. */
+export const storeBuild = () => host()?.store === true;
 
 function call(name, args = {}) {
   const app = host();

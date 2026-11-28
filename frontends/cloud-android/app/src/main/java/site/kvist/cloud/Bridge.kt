@@ -12,13 +12,17 @@ data class Call(val id: String, val name: String, val args: JSONObject)
  * {"id", "payload"}. Pure, so the unit tests need no phone.
  */
 object Bridge {
-    /** Runs in the page before its own scripts: makes `window.KvistHost` out of the message channel. */
-    val START_SCRIPT = """
+    /**
+     * Runs in the page before its own scripts: makes `window.KvistHost` out of the message channel. `store`: the
+     * Google Play build, in which the page sells nothing (cloud/mobile/js/native.js, storeBuild).
+     */
+    fun startScript(store: Boolean): String = """
         (function () {
           if (window.KvistHost || !window.KvistBridge) return;
           var port = window.KvistBridge;
           window.KvistHost = {
             platform: "android",
+            store: $store,
             call: function (id, name, json) {
               port.postMessage(JSON.stringify({ id: id, name: name, json: json }));
             }

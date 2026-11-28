@@ -31,10 +31,12 @@ import { projectSheet } from "./sheets/project.js";
 import { reloadIfOutdated } from "./update.js";
 
 const TASK_REFRESH_MS = 30_000;
+// In a store app the plans are not on offer, so "pick a plan" would point nowhere.
+const STORE_TEXT = { "banner no plan": "banner no plan store", "banner no hours": "banner no hours store" };
 
 /** What a problem sending needs from the person: the sheet that fixes it. */
 function fixFor(code) {
-  if (code === "no_subscription" || code === "no_hours") return plansSheet;
+  if (code === "no_subscription" || code === "no_hours") return native.storeBuild() ? null : plansSheet;
   if (code === "no_key" || code === "chatgpt_login") return () => keySheet();
   return null;
 }
@@ -120,9 +122,11 @@ export function startShell(root, { go, onAuth }) {
   function paintBanner() {
     const found = banner({ account, task: view.task, link: link() });
     if (!found) return fill(bannerEl);
-    const action = found.action === "plans" ? plansSheet : found.action === "key" ? () => keySheet() : null;
+    // A store app says what is missing and stops there: no plans to open, no hint to buy elsewhere.
+    const store = native.storeBuild() && found.action === "plans";
+    const action = found.action === "plans" ? (store ? null : plansSheet) : found.action === "key" ? () => keySheet() : null;
     fill(bannerEl, h("div", { class: `banner ${found.level}` },
-      h("span", {}, t(found.text, found.params.seconds === undefined ? {} : { time: clock(found.params.seconds).replace(/^0:/, "0:") })),
+      h("span", {}, t(store ? STORE_TEXT[found.text] ?? found.text : found.text, found.params.seconds === undefined ? {} : { time: clock(found.params.seconds).replace(/^0:/, "0:") })),
       action ? h("button", { class: "banner-action", type: "button", onclick: action }, t(found.action === "plans" ? "see plans" : "add key")) : null));
   }
 

@@ -13,14 +13,16 @@ public struct BridgeCall {
 public enum Bridge {
     public static let handlerName = "kvist"
 
-    /// Runs in the page before its own scripts: makes `window.KvistHost` out of the message handler.
-    public static let startScript = """
+    /// Runs in the page before its own scripts: makes `window.KvistHost` out of the message handler. `store`: the App
+    /// Store build, in which the page sells nothing (cloud/mobile/js/native.js, storeBuild).
+    public static func startScript(store: Bool) -> String { """
     (function () {
       if (window.KvistHost) return;
       var handlers = window.webkit && window.webkit.messageHandlers;
       if (!handlers || !handlers.kvist) return;
       window.KvistHost = {
         platform: "ios",
+        store: \(store),
         call: function (id, name, json) {
           var answer = function (payload) {
             if (window.__kvistReply) window.__kvistReply(id, payload === undefined ? null : payload);
@@ -29,7 +31,7 @@ public enum Bridge {
         }
       };
     })();
-    """
+    """ }
 
     /// The body of a script message, or nil when it is not a call.
     public static func parse(_ body: Any) -> BridgeCall? {

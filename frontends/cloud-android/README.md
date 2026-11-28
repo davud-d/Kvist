@@ -12,6 +12,8 @@ cd frontends/cloud-android                      # JDK 21 and ANDROID_HOME with p
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 # a build that talks to a test server on this computer (the emulator reaches it as 10.0.2.2); plain HTTP is allowed in it only:
 ./gradlew :app:assembleDebug -PkvistCloudUrl=http://10.0.2.2:8742
+# the Google Play build: the page sells nothing in it (see cloud/mobile/README.md):
+./gradlew :app:assembleRelease -PkvistStore=true
 ```
 
 The product build talks to `https://cloud.kvist.site` and refuses plain HTTP (the CI checks the merged manifest).

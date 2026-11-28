@@ -16,6 +16,8 @@ xcodebuild -project KvistCloud.xcodeproj -scheme KvistCloud -sdk iphonesimulator
   CODE_SIGNING_ALLOWED=NO build
 # сборка для тестового сервера на этом компьютере (обычный HTTP к локальным адресам разрешает App Transport Security):
 xcodebuild … KVIST_CLOUD_URL=http://127.0.0.1:8742 build
+# сборка для App Store: страница в ней ничего не продаёт (см. cloud/mobile/README.ru.md):
+xcodebuild … KVIST_STORE=YES build
 ```
 
 Продуктовая сборка ходит на `https://cloud.kvist.site`.
