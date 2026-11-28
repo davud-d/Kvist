@@ -29,6 +29,7 @@ ENCRYPTED_COLUMNS = (
     (User, "model_key_enc"),
     (User, "model_headers_enc"),
     (User, "chatgpt_enc"),
+    (User, "apple_token_enc"),
     (ChatGPTLogin, "verifier_enc"),
 )
 

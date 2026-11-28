@@ -17,6 +17,7 @@ from . import (
     account,
     admin,
     appauth,
+    apple,
     auth,
     billing,
     chatgpt,
@@ -142,6 +143,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(account.router)
+    app.include_router(apple.router)
     app.include_router(appauth.router)
     app.include_router(review.router)
     app.include_router(keys.router)

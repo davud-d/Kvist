@@ -52,6 +52,7 @@ The apps give the page `window.KvistHost` ([`js/native.js`](js/native.js) is the
 | `pay` | `{wallet, request, environment}` | `{token}` or `{cancelled: true}` or `{error}` |
 | `payDone` | `{wallet, ok}` | nothing (Apple's sheet waits for it; Google's closes by itself) |
 | `signIn` | | `{started: true}` once the app has taken the sign-in over (the system browser signs in, the app reloads the page signed in); `null`: the page signs in the ordinary way |
+| `appleSignIn` | `{nonce}` (the server's) | `{identityToken, authorizationCode, name}` or `{cancelled: true}` or `{error}`; iOS only |
 | `open` `copy` `share` `haptic` | `{url}` `{text}` `{text}` `{kind}` | nothing |
 
 Besides `platform`, the host sets `store: true` in the Google Play and App Store builds. Then the page sells nothing and points

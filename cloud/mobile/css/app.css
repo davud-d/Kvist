@@ -248,6 +248,10 @@ h1, h2, h3, h4, h5, h6, p { margin: 0; }
 .plan-card:active:not(:disabled) { background: var(--s2); }
 .plan-card:disabled { opacity: .55; }
 .plan-card.current { border-color: #55555b; }
+.plan-card.static:active { background: var(--bg); }
+.plan-card.static .btn { justify-self: start; margin-top: 6px; }
+.btn.apple { background: #000; border-color: #5a5a5e; color: #fff; }
+.btn.apple:active { background: #1c1c1e; }
 .plan-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .plan-top strong { font-size: 17px; }
 .plan-price { font-size: 17px; font-variant-numeric: tabular-nums; }

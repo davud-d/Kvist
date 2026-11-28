@@ -16,6 +16,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     // The App Store build (KVIST_STORE=YES): the page sells nothing in it (App Review Guideline 3.1.3(f)).
     private let storeBuild: Bool = (Bundle.main.object(forInfoDictionaryKey: "KvistStore") as? String) == "YES"
     private let applePay = ApplePay()
+    private lazy var appleSignIn = AppleSignIn(anchor: self)
     private var webView: WKWebView!
     private var offline: UIView!
     private var signInSession: ASWebAuthenticationSession?
@@ -107,6 +108,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case "signIn":
             signIn()
             replyHandler(["started": true], nil)
+        case "appleSignIn":
+            appleSignIn.start(nonce: call.args["nonce"] as? String ?? "") { replyHandler($0, nil) }
         case "payDone":
             applePay.finish(ok: call.args["ok"] as? Bool ?? false)
             replyHandler(nil, nil)

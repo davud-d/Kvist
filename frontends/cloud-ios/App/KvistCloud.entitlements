@@ -7,5 +7,10 @@
     <array>
         <string>merchant.site.kvist.cloud</string>
     </array>
+    <!-- Sign in with Apple (App/AppleSignIn.swift); the App ID needs the capability turned on in the developer account. -->
+    <key>com.apple.developer.applesignin</key>
+    <array>
+        <string>Default</string>
+    </array>
 </dict>
 </plist>

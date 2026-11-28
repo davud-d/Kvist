@@ -178,6 +178,17 @@ async function startTrial(close) {
   }
 }
 
+/** Connecting GitHub happens in this browser's own session, which the apps' web views do not share. */
+export const linkGithubHref = `/auth/github/login?link=1&next=${encodeURIComponent("/m/")}`;
+
+function trialNeedsGithub(trial) {
+  return h("div", { class: "plan-card static" },
+    h("div", { class: "plan-top" }, h("strong", {}, t("plan trial")), h("span", { class: "plan-price" }, t("free"))),
+    h("div", { class: "dim" }, `${hoursLabel(trial.hours)} · ${t("days n", { n: trial.trial_days })}`),
+    h("p", { class: "fine" }, t(native.inApp() ? "trial needs github app" : "trial needs github")),
+    native.inApp() ? null : h("a", { class: "btn small", href: linkGithubHref }, icon("github", 16), t("connect github")));
+}
+
 /** The plans, the hour pack and, if it is still free for this person, the trial. */
 export function plansSheet() {
   openSheet({
@@ -189,7 +200,11 @@ export function plansSheet() {
       const canBuyPlan = sub.status === "none" || sub.plan === "trial" || sub.can_renew;
       const trial = catalog.find((p) => p.id === "trial");
       const items = [];
-      if (sub.status === "none" && trial) {
+      if (sub.status === "none" && trial && account.me?.github === false) {
+        // An account made with Apple: the trial waits for a GitHub account older than a month; the plans below
+        // can be bought straight away without one.
+        items.push(trialNeedsGithub(trial));
+      } else if (sub.status === "none" && trial) {
         items.push(h("button", { class: "plan-card", type: "button", onclick: () => startTrial(close) },
           h("div", { class: "plan-top" }, h("strong", {}, t("plan trial")), h("span", { class: "plan-price" }, t("free"))),
           h("div", { class: "dim" }, `${hoursLabel(trial.hours)} · ${t("days n", { n: trial.trial_days })}`),

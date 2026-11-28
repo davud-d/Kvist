@@ -40,12 +40,59 @@ function centered(...children) {
   screen.replaceChildren(h("div", { class: "gate" }, ...children));
 }
 
-function signIn() {
+// The Apple mark for its sign-in button (filled, unlike the page's stroked icons).
+const APPLE_MARK = "M16.37 12.6c-.03-2.7 2.2-4 2.3-4.07-1.25-1.83-3.2-2.08-3.9-2.1-1.66-.17-3.24.97-4.08.97-.85 0-2.15-.95-3.53-.92-1.8.03-3.48 1.06-4.4 2.68-1.9 3.27-.48 8.1 1.35 10.76.9 1.3 1.96 2.75 3.36 2.7 1.35-.06 1.86-.87 3.49-.87 1.62 0 2.08.87 3.5.84 1.45-.02 2.37-1.32 3.25-2.63 1.03-1.5 1.45-2.97 1.47-3.05-.03-.01-2.82-1.08-2.85-4.3zM13.7 4.67c.74-.9 1.24-2.15 1.1-3.4-1.07.05-2.37.72-3.13 1.61-.68.79-1.28 2.06-1.12 3.28 1.19.09 2.41-.6 3.15-1.5z";
+
+function appleMark() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "20");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", APPLE_MARK);
+  path.setAttribute("fill", "currentColor");
+  svg.append(path);
+  return svg;
+}
+
+/** Apple's sheet in the iOS app, Apple's page in a browser; none in the Android app or when the server has it off. */
+function appleWay(config) {
+  if (native.platform() === "ios") return config?.apple_app ? "sheet" : "";
+  return !native.inApp() && config?.apple_web ? "page" : "";
+}
+
+async function signInWithApple(way, button) {
+  if (way === "page") return location.assign(`/auth/apple/login?next=${encodeURIComponent("/m/")}`);
+  button.disabled = true;
+  try {
+    const { nonce } = await post("/api/auth/apple/nonce");
+    const result = await native.appleSignIn(nonce);
+    if (!result || result.cancelled) return undefined;
+    if (result.error) throw Object.assign(new Error(result.error), { localized: t("apple failed") });
+    await post("/api/auth/apple", { identity_token: result.identityToken, authorization_code: result.authorizationCode ?? "",
+      nonce, name: result.name ?? "" });
+    return boot();
+  } catch (error) {
+    toast(error.localized ?? t("apple failed"), "error");
+    return undefined;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function signIn() {
+  const config = await api("/api/auth/config").catch(() => null);
+  const way = appleWay(config);
+  // Apple's rules for its button: the Apple mark and "Continue with Apple", as large as the other ways in.
+  const apple = way ? h("button", { class: "btn apple wide", type: "button", onclick: (event) => signInWithApple(way, event.currentTarget) },
+    appleMark(), t("continue apple")) : null;
   centered(
     h("img", { class: "mark", src: "/m/icon.svg", width: "56", height: "56", alt: "" }),
     h("div", { class: "wordmark big" }, "Kvist Cloud"),
     h("h1", {}, t("gate title")),
     h("p", { class: "lead" }, t("gate lead")),
+    apple,
     h("a", { class: "btn primary wide", href: `/auth/github/login?next=${encodeURIComponent("/m/")}`, onclick: async (event) => {
       event.preventDefault();
       const href = event.currentTarget.getAttribute("href");

@@ -9,7 +9,7 @@ import { lang, setLang, t } from "../i18n.js";
 import * as native from "../native.js";
 import { machineState } from "../rules.js";
 import { openSheet, toast } from "../sheet.js";
-import { paySheet, plansSheet } from "./billing.js";
+import { linkGithubHref, paySheet, plansSheet } from "./billing.js";
 import { keySheet } from "./key.js";
 
 export function hoursCard(sub, closeSheet) {
@@ -74,6 +74,15 @@ function machineRow() {
     } }, action.label) : null);
 }
 
+/** Only for an account made with Apple and no GitHub yet: connecting it opens repositories and the trial. */
+function githubRow() {
+  if (account.me?.github !== false) return null;
+  return h("div", { class: "row static" },
+    icon("github", 20),
+    h("span", { class: "row-main" }, h("span", {}, t("github")), h("small", { class: "dim" }, t("github not connected"))),
+    native.inApp() ? null : h("a", { class: "btn small", href: linkGithubHref }, t("connect github")));
+}
+
 export function accountSheet() {
   openSheet({
     title: account.me?.name || account.me?.login || t("account"),
@@ -82,6 +91,7 @@ export function accountSheet() {
       hoursCard(account.sub, close),
       h("div", { class: "group" },
         machineRow(),
+        githubRow(),
         h("button", { class: "row", type: "button", onclick: () => keySheet() },
           icon("key", 20),
           h("span", { class: "row-main" }, h("span", {}, t("model key")),

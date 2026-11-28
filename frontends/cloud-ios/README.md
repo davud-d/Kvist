@@ -56,6 +56,11 @@ shares Safari's cookies) and the cloud hands the app a short-lived signed code (
 the web view trades it, with a random nonce only this app knows, for its own session (`/auth/app/exchange`). See
 [`appauth.py`](../../cloud/backend/kvist_cloud/appauth.py) and [`AppSignIn.swift`](Sources/KvistCloudCore/AppSignIn.swift).
 
+**Sign in with Apple** (Guideline 4.8) is Apple's own sheet ([`App/AppleSignIn.swift`](App/AppleSignIn.swift)): the page asks the
+server for a nonce, the app puts its SHA-256 into the request, and the page posts the token Apple returns to `/api/auth/apple`
+([`apple.py`](../../cloud/backend/kvist_cloud/apple.py)). It needs the `com.apple.developer.applesignin` entitlement, so it works
+only in a build signed by a paid developer account; the sideloaded .ipa signs in with GitHub.
+
 ## How the page reaches the app
 
 A `WKUserScript` at document start ([`Bridge.startScript`](Sources/KvistCloudCore/Bridge.swift)) makes `window.KvistHost` out of a

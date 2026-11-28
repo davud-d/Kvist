@@ -58,6 +58,11 @@ xcodebuild … KVIST_STORE=YES build
 (`/auth/app/exchange`). См. [`appauth.py`](../../cloud/backend/kvist_cloud/appauth.py) и
 [`AppSignIn.swift`](Sources/KvistCloudCore/AppSignIn.swift).
 
+**Вход через Apple** (правило 4.8) — собственное окно Apple ([`App/AppleSignIn.swift`](App/AppleSignIn.swift)): страница просит у
+сервера nonce, приложение кладёт его SHA-256 в запрос, а страница отправляет полученный от Apple токен на `/api/auth/apple`
+([`apple.py`](../../cloud/backend/kvist_cloud/apple.py)). Нужен entitlement `com.apple.developer.applesignin`, поэтому работает
+только в сборке, подписанной платным аккаунтом разработчика; сайдлоад-.ipa входит через GitHub.
+
 ## Как страница достаёт до приложения
 
 `WKUserScript`, запускаемый до страницы ([`Bridge.startScript`](Sources/KvistCloudCore/Bridge.swift)), делает `window.KvistHost`

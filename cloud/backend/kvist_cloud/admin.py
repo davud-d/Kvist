@@ -87,7 +87,7 @@ def _user_row(db: Session, app: FastAPI, user: User) -> dict[str, object]:
     machine = machines.live_machine(db, user.id)
     return {
         "id": user.id,
-        "login": user.github_login,
+        "login": user.github_login or ("apple" if user.apple_sub else ""),
         "name": user.name,
         "email": user.email,
         "avatar_url": user.avatar_url,

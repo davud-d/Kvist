@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from . import apple
 from .auth import SESSION_COOKIE, _ide_cookie, signed_user
 from .db import get_db, lock_account, session_scope, utcnow
 from .exports import archive_path
@@ -74,7 +75,11 @@ async def request_deletion(payload: DeleteIn, request: Request, user: User = Dep
                .values(cancel_at_period_end=True))
     awake = list(db.scalars(select(Machine.id).where(
         Machine.user_id == user.id, Machine.status.in_((MachineStatus.AWAKE, MachineStatus.WAKING)))))
+    sealed, user.apple_token_enc = user.apple_token_enc, ""
     db.commit()
+    # Apple asks for the token to be revoked when the person deletes the account; signing in with Apple again
+    # within the grace period makes a new one.
+    await apple.revoke(request.app, sealed)
     for machine_id in awake:
         spawn(request.app, put_to_sleep(request.app, machine_id))
     log.info("account %s asked to be deleted", user.id)
@@ -126,6 +131,8 @@ def _erase_work(app: FastAPI, db: Session, user_id: int) -> None:
 def _anonymize(user: User) -> None:
     user.trial_github_id = user.github_id if user.trial_used_at is not None else None
     user.github_id = None
+    user.apple_sub = None
+    user.apple_token_enc = ""
     user.github_login = DELETED_LOGIN
     user.name = user.avatar_url = user.email = user.github_token_enc = ""
     user.github_created_at = None

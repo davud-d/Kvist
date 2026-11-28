@@ -185,6 +185,17 @@ Not verified against Stripe itself (no keys here; tests use `backend/tests/strip
 at `POST /v1/tokens` with `pk_token` the way its iOS library sends it, and the exact account behaviour of `allow_redirects=never`.
 Run one test-mode payment from a phone before switching anything on.
 
+### Sign in with Apple
+
+The App Store asks for it next to GitHub ([`apple.py`](backend/kvist_cloud/apple.py)). The iOS app shows Apple's own sheet;
+a browser gets Apple's page when a Services ID is set. An account made with Apple alone has no trial until a GitHub account
+older than a month is connected (the account sheet's "Connect GitHub", in a browser); the paid plans can be bought straight
+away without it. Deleting the account revokes Apple's token, as Apple requires.
+
+Off unless `APPLE_SIGNIN_ENABLED=true`. In the developer account: turn on Sign in with Apple for the App ID `site.kvist.cloud`,
+make a key with it ticked (`APPLE_KEY_ID`, the `.p8` file in `APPLE_PRIVATE_KEY_FILE`, readable by the server only), note the
+`APPLE_TEAM_ID`; for the web, a Services ID (`APPLE_SERVICES_ID`) with `https://<cloud>/auth/apple/callback` as its return URL.
+
 ### Web search on the shared key
 
 Kvist on customers' machines searches the web with the cloud's own Exa key (`EXA_API_KEY`), which never

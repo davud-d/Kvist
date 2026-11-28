@@ -74,6 +74,10 @@ class User(Base):
     # None once the account is deleted (account.py): the same GitHub account may then sign up anew.
     github_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     github_login: Mapped[str] = mapped_column(String(100))
+    # Sign in with Apple (apple.py): Apple's stable user id, and the refresh token sealed with the client it was issued
+    # to, kept only so deleting the account can revoke it.
+    apple_sub: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    apple_token_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
     name: Mapped[str] = mapped_column(String(200), default="")
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     email: Mapped[str] = mapped_column(String(320), default="")

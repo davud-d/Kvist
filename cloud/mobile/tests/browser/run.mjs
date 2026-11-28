@@ -89,15 +89,21 @@ const bridge = ({ platform, wallet, pay, signin, store }) => {
         if (signin === "app") setTimeout(() => location.assign("/auth/github/login?next=%2Fm%2F"), 30);
       }
       if (name === "pay") answer = pay === "cancel" ? { cancelled: true } : { token: wallet === "apple_pay" ? apple : google };
+      if (name === "appleSignIn") {
+        // Apple's sheet: the test server signs a token for this nonce the way Apple would.
+        fetch(`/__test/apple-token?nonce=${encodeURIComponent(args.nonce)}`).then((r) => r.text())
+          .then((text) => window.__kvistReply(id, text));
+        return;
+      }
       setTimeout(() => window.__kvistReply(id, JSON.stringify(answer)), 10);
     },
   };
 };
 
-async function openPage(profile, server, { host = true, pay = "ok", signin = "app", locale = "en-US", viewport, store = false } = {}) {
+async function openPage(profile, server, { host = true, pay = "ok", signin = "app", locale = "en-US", viewport, store = false, platform } = {}) {
   const browser = await browserFor(profile);
   const context = await browser.newContext({ ...pw.devices[profile.device], locale, ...(viewport ? { viewport } : {}) });
-  if (host) await context.addInitScript(bridge, { platform: profile.platform, wallet: profile.wallet, pay, signin, store });
+  if (host) await context.addInitScript(bridge, { platform: platform ?? profile.platform, wallet: profile.wallet, pay, signin, store });
   const page = await context.newPage();
   const problems = [];
   page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
@@ -528,6 +534,47 @@ scenario("deleting the account asks twice, signs out, and signing in again cance
   await page.getByText("Deletion cancelled").waitFor();
 });
 
+scenario("the iOS app signs in with Apple's sheet; without GitHub the trial waits and a plan can be bought at once", async (page) => {
+  await page.goto(`${page.base}/m/`);
+  // Both ways in, the same size: Apple's rules for its button.
+  const [apple, github] = [page.locator(".btn.apple"), page.getByText("Continue with GitHub")];
+  await apple.waitFor();
+  assert.equal((await apple.boundingBox()).height, (await github.boundingBox()).height);
+  await shot(page, "sign-in-ios");
+  await apple.click();
+  await visible(page, "#t1");
+  assert.equal((await hostCalls(page, "appleSignIn")).length, 1);
+  await page.check("#t1");
+  await page.check("#t2");
+  await page.locator(".gate .btn.primary").click();
+  await visible(page, ".home");
+  await page.getByLabel("Sessions").first().click();
+  await page.locator(".drawer-account").click();
+  await page.getByText("Ada Lovelace").first().waitFor();
+  assert.match(await page.locator(".sheet").innerText(), /Not connected/);
+  await page.locator(".card.hours .btn.primary").click();
+  // The trial asks for GitHub; the paid plans below are there to buy without it.
+  await page.getByText(/needs a GitHub account older than a month/).waitFor();
+  assert.equal(await page.locator(".plan-card.static").count(), 1);
+  const start = page.locator("button.plan-card", { hasText: "Start" });
+  assert.equal(await start.isDisabled(), false);
+  await start.click();
+  await visible(page, ".pay-price");
+  await shot(page, "apple-no-github-plans");
+});
+
+scenario("a plain browser offers Apple's own page for signing in", async (page) => {
+  await page.goto(`${page.base}/m/`);
+  const apple = page.locator(".btn.apple");
+  await apple.waitFor();
+  const asked = page.waitForRequest((request) => request.url().startsWith("https://appleid.apple.com/auth/authorize"));
+  await page.route("https://appleid.apple.com/**", (route) => route.fulfill({ status: 200, body: "apple" }));
+  await apple.click();
+  const url = new URL((await asked).url());
+  assert.equal(url.searchParams.get("response_mode"), "form_post");
+  assert.equal(url.searchParams.get("client_id"), "site.kvist.cloud.web");
+});
+
 scenario("the store app sells nothing and points nowhere to buy, but shows the hours bought elsewhere", async (page) => {
   await signIn(page);
   await page.getByText("This account has no plan yet.").waitFor();
@@ -605,7 +652,8 @@ for (const profile of PROFILES) {
     const label = `${profile.name}: ${name}`;
     if (ONLY && !ONLY.test(label)) continue;
     const server = await startServer();
-    const page = await openPage(profile, server, { host: !/plain browser/.test(name), signin: /cannot sign in/.test(name) ? "none" : /handed to the app/.test(name) ? "hold" : "app", store: /^the store app/.test(name) });
+    const page = await openPage(profile, server, { host: !/plain browser/.test(name), signin: /cannot sign in/.test(name) ? "none" : /handed to the app/.test(name) ? "hold" : "app", store: /^the store app/.test(name),
+      platform: /^the iOS app/.test(name) ? "ios" : undefined });
     const started = Date.now();
     try {
       page.on("response", (r) => r.url().includes("/api/wallet") && console.log(`     ${r.status()} ${r.url().replace(page.base, "")}`));

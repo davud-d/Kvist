@@ -91,6 +91,12 @@ export async function signIn() {
   return Boolean(result);
 }
 
+/**
+ * Apple's own sign-in sheet (the iOS app only). `nonce` is the server's: the app puts its SHA-256 into the request.
+ * Resolves to {identityToken, authorizationCode, name} | {cancelled: true} | {error} | null (no such sheet here).
+ */
+export const appleSignIn = (nonce) => call("appleSignIn", { nonce });
+
 /** A link goes to the system browser from the app (a payment page or a repository), to a new tab elsewhere. */
 export function open(url) {
   if (inApp()) return call("open", { url });

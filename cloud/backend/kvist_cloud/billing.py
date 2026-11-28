@@ -480,7 +480,9 @@ def eligibility(user: User = Depends(current_user), db: Session = Depends(get_db
         BillingCheckout.transaction_id.is_not(None), BillingCheckout.payment_method < WALLET_METHOD,
         BillingCheckout.created_at > utcnow() - SYNC_MAX_AGE))
     return {"trial_eligible": trial_eligible(user), "trial_used": user.trial_used_at is not None,
-            "payment_pending": pending is not None}
+            "payment_pending": pending is not None,
+            # An account made with Apple alone: the trial waits for a GitHub account older than a month.
+            "github_linked": user.github_id is not None}
 
 
 @router.post("/api/billing/sync")
@@ -531,7 +533,8 @@ def _transaction_body(settings: Settings, user: User, checkout: BillingCheckout)
         "failedUrl": settings.public_url + page + "?payment=failed",
         "payload": checkout.token,
         # Required by Platega; GitHub may hide the real address, then a stable id on a noreply domain stands in.
-        "metadata": {"user_email": user.email or f"{user.github_id}@users.noreply.github.com",
+        "metadata": {"user_email": user.email or (f"{user.github_id}@users.noreply.github.com" if user.github_id
+                                                  else f"user-{user.id}@users.noreply.kvist.site"),
                      "userId": str(user.id)},
     }
 

@@ -170,10 +170,19 @@ def admin_user(request: Request, user: User = Depends(current_user)) -> User:
 
 
 @router.get("/auth/github/login")
-async def github_login(request: Request, next: str | None = None) -> RedirectResponse:
+async def github_login(request: Request, next: str | None = None, link: bool = False,
+                       user: User | None = Depends(optional_user)) -> RedirectResponse:
+    """``link=1``: connect GitHub to the signed-in account (one made with Apple) instead of signing in with it."""
     settings: Settings = request.app.state.settings
     state = secrets.token_urlsafe(24)
     target = safe_next(next)
+    saved: dict[str, object] = {"s": state, "n": target}
+    if link:
+        if user is None:
+            raise not_signed_in()
+        if user.github_id is not None:
+            raise ApiError(409, "github_linked", "GitHub is already connected. / GitHub уже подключён.")
+        saved["l"] = [user.id, user.session_version]
     if settings.github_client_id:
         query = urlencode(
             {
@@ -195,7 +204,7 @@ async def github_login(request: Request, next: str | None = None) -> RedirectRes
         )
     response.set_cookie(
         OAUTH_COOKIE,
-        _serializer(settings, "oauth").dumps({"s": state, "n": target}),
+        _serializer(settings, "oauth").dumps(saved),
         max_age=OAUTH_MAX_AGE,
         httponly=True,
         samesite="lax",
@@ -242,16 +251,49 @@ def _spent_trial(db: Session, github_id: int) -> datetime | None:
                      .order_by(User.trial_used_at).limit(1))
 
 
+def cancel_pending_deletion(db: Session, user: User) -> None:
+    """Back within the grace period (account.py): the deletion is off and the bell says so."""
+    if user.delete_requested_at is None:
+        return
+    user.delete_requested_at = None
+    db.add(Notification(user_id=user.id, kind="deletion_cancelled", params={}))
+
+
 def _upsert_user(db: Session, profile: dict, locale: str) -> User:
     github_id = int(profile["id"])
     user = db.scalars(select(User).where(User.github_id == github_id)).first()
     if user is None:
         user = User(github_id=github_id, locale=locale, trial_used_at=_spent_trial(db, github_id))
         db.add(user)
-    if user.delete_requested_at is not None:
-        # Back within the grace period (account.py): the deletion is off and the bell says so.
-        user.delete_requested_at = None
-        db.add(Notification(user_id=user.id, kind="deletion_cancelled", params={}))
+    _apply_profile(user, profile)
+    db.flush()
+    cancel_pending_deletion(db, user)
+    return user
+
+
+def _link_github(db: Session, saved: dict, profile: dict) -> User:
+    """Attaches a GitHub profile to an account made without one. Its age then decides the trial, as for anyone."""
+    user_id, version = saved["l"]
+    user = db.get(User, user_id)
+    if user is None or user.session_version != version or user.github_id is not None:
+        raise ApiError(400, "oauth_state", "The sign-in link expired, start again. / Ссылка входа устарела.")
+    github_id = int(profile["id"])
+    if db.scalars(select(User.id).where(User.github_id == github_id)).first() is not None:
+        raise ApiError(409, "github_taken", "This GitHub account already has its own Kvist Cloud account: sign in "
+                       "with it. / У этого GitHub уже есть свой аккаунт Kvist Cloud: войди через него.")
+    user.github_id = github_id
+    spent = _spent_trial(db, github_id)
+    if spent is not None and user.trial_used_at is None:
+        user.trial_used_at = spent
+    name, email = user.name, user.email
+    _apply_profile(user, profile)
+    # What the person gave Apple stays when GitHub has nothing to say.
+    user.name, user.email = user.name or name, user.email or email
+    db.flush()
+    return user
+
+
+def _apply_profile(user: User, profile: dict) -> None:
     user.github_login = str(profile.get("login") or "")
     user.name = str(profile.get("name") or "")
     user.avatar_url = str(profile.get("avatar_url") or "")
@@ -262,8 +304,6 @@ def _upsert_user(db: Session, profile: dict, locale: str) -> User:
         user.github_created_at = created if created is not None and created.tzinfo else None
     except (ValueError, TypeError, AttributeError):
         user.github_created_at = None
-    db.flush()
-    return user
 
 
 def request_locale(request: Request) -> str:
@@ -288,7 +328,7 @@ async def github_callback(
     if not code or not secrets.compare_digest(str(saved.get("s", "")), state):
         raise ApiError(400, "oauth_state", "The sign-in link expired, start again. / Ссылка входа устарела.")
     profile, github_token = await _github_profile(request, code)
-    user = _upsert_user(db, profile, request_locale(request))
+    user = _link_github(db, saved, profile) if saved.get("l") else _upsert_user(db, profile, request_locale(request))
     if github_token:
         # Encrypted at rest; used only for GitHub listing and authenticated clones.
         user.github_token_enc = request.app.state.vault.encrypt(github_token)
@@ -314,6 +354,9 @@ def me(request: Request, user: User = Depends(signed_user)) -> dict[str, object]
         "is_owner": is_owner(request.app.state.settings, user),
         "ban": ban_view(user),
         "terms_accepted": user.terms_accepted_at is not None,
+        # How the person signs in: an account made with Apple may have no GitHub yet (and so no trial).
+        "github": user.github_id is not None,
+        "apple": user.apple_sub is not None,
         # The field's rotating hints mark a year with Kvist from it.
         "created_at": user.created_at.isoformat(),
     }

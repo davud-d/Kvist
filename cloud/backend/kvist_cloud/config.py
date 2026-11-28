@@ -72,6 +72,23 @@ class FreedomPaySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class AppleSettings:
+    """Sign in with Apple (apple.py). None in Settings means switched off.
+
+    The key (a .p8 from the developer account, "Sign in with Apple" ticked) signs the client secret that turns an
+    authorization code into a refresh token and revokes it when the account is deleted, as Apple requires.
+    """
+
+    team_id: str
+    key_id: str
+    private_key: str = field(repr=False)
+    # The iOS app's bundle id: the audience of tokens from the app's own sheet.
+    bundle_id: str = "site.kvist.cloud"
+    # A Services ID for the web's "Continue with Apple"; empty: the web has no Apple button.
+    services_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     data_dir: Path
     database_url: str
@@ -92,6 +109,7 @@ class Settings:
     platega_prices: Mapping[str, Decimal] = field(default_factory=dict)
     wallet: WalletSettings | None = None
     freedompay: FreedomPaySettings | None = None
+    apple: AppleSettings | None = None
     machine_provider: str = "local"
     runner_command: tuple[str, ...] = ()
     kvist_command: tuple[str, ...] = ()
@@ -339,6 +357,27 @@ def _wheels_dir(env: Mapping[str, str]) -> Path | None:
     return DEFAULT_WHEELS_DIR if DEFAULT_WHEELS_DIR.is_dir() else None
 
 
+def _apple(env: Mapping[str, str]) -> AppleSettings | None:
+    if not _flag(env, "APPLE_SIGNIN_ENABLED"):
+        return None
+    team_id = env.get("APPLE_TEAM_ID", "").strip()
+    key_id = env.get("APPLE_KEY_ID", "").strip()
+    if not re.fullmatch(r"[A-Z0-9]{10}", team_id):
+        raise ConfigError("APPLE_SIGNIN_ENABLED needs APPLE_TEAM_ID (10 letters and digits)")
+    if not re.fullmatch(r"[A-Z0-9]{10}", key_id):
+        raise ConfigError("APPLE_SIGNIN_ENABLED needs APPLE_KEY_ID (10 letters and digits)")
+    key_file = env.get("APPLE_PRIVATE_KEY_FILE", "").strip()
+    try:
+        private_key = Path(key_file).read_text(encoding="utf-8") if key_file else ""
+    except OSError as error:
+        raise ConfigError(f"APPLE_PRIVATE_KEY_FILE cannot be read: {error}") from error
+    if "BEGIN PRIVATE KEY" not in private_key:
+        raise ConfigError("APPLE_SIGNIN_ENABLED needs APPLE_PRIVATE_KEY_FILE (the .p8 key from the developer account)")
+    bundle_id = env.get("APPLE_BUNDLE_ID", "").strip() or "site.kvist.cloud"
+    return AppleSettings(team_id=team_id, key_id=key_id, private_key=private_key, bundle_id=bundle_id,
+                         services_id=env.get("APPLE_SERVICES_ID", "").strip())
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = _environment() if env is None else env
     data_dir = Path(env.get("KVIST_CLOUD_DATA_DIR", "") or CLOUD_ROOT / ".cloud-data").resolve()
@@ -379,6 +418,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         platega_prices=prices,
         wallet=_wallet(env),
         freedompay=_freedompay(env),
+        apple=_apple(env),
         machine_provider=env.get("MACHINE_PROVIDER", "local"),
         runner_command=_argv(env, "RUNNER_COMMAND", default_runner_command()),
         kvist_command=_argv(env, "KVIST_COMMAND", default_kvist_command()),

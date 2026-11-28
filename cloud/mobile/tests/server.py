@@ -9,6 +9,7 @@ provider the key is checked against) answers like an OpenAI-compatible API. Noth
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import secrets
 import sys
@@ -25,15 +26,18 @@ sys.path[:0] = [str(CLOUD / "backend"), str(CLOUD / "backend" / "tests"), str(CL
 
 from kvist_cloud.config import load_settings  # noqa: E402
 from kvist_cloud.main import create_app  # noqa: E402
+from apple_fake import BUNDLE, SERVICES, FakeApple, id_token, p8_pem  # noqa: E402
 from stripe_fake import PUBLISHABLE, SECRET, WEBHOOK_SECRET, StripeFake  # noqa: E402
 
 FAKE_KVIST = CLOUD / "runner" / "tests" / "fake_kvist.py"
 
 
-def handler(stripe: StripeFake):
+def handler(stripe: StripeFake, apple: FakeApple):
     def answer(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.stripe.com":
             return stripe(request)
+        if request.url.host == "appleid.apple.com":
+            return apple(request)
         # The model provider the key is checked against.
         return httpx.Response(200, json={"data": [{"id": "fake-model"}]})
 
@@ -65,8 +69,20 @@ def main() -> None:
     if not args.no_wallet:
         env |= {"WALLET_ENABLED": "true", "STRIPE_SECRET_KEY": SECRET, "STRIPE_PUBLISHABLE_KEY": PUBLISHABLE,
                 "STRIPE_WEBHOOK_SECRET": WEBHOOK_SECRET, "APPLE_PAY_MERCHANT_ID": "merchant.site.kvist.cloud"}
-    stripe = StripeFake()
-    app = create_app(load_settings(env), http_transport=httpx.MockTransport(handler(stripe)))
+    key_file = Path(args.data) / "AuthKey.p8"
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_bytes(p8_pem())
+    env |= {"APPLE_SIGNIN_ENABLED": "true", "APPLE_TEAM_ID": "TEAM123456", "APPLE_KEY_ID": "KEY1234567",
+            "APPLE_PRIVATE_KEY_FILE": str(key_file), "APPLE_SERVICES_ID": SERVICES}
+    stripe, apple = StripeFake(), FakeApple()
+    app = create_app(load_settings(env), http_transport=httpx.MockTransport(handler(stripe, apple)))
+
+    # What Apple's sheet hands the iOS app for this nonce (the app sends its SHA-256 to Apple).
+    @app.get("/__test/apple-token")
+    def apple_token(nonce: str) -> dict:
+        return {"identityToken": id_token(BUNDLE, hashlib.sha256(nonce.encode()).hexdigest()),
+                "authorizationCode": "c.test", "name": "Ada Lovelace"}
+
     # What the tests may look at: the charges Stripe was asked for, and how a card should behave.
     @app.get("/__test/charges")
     def charges() -> dict:
