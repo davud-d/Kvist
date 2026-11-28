@@ -8,6 +8,11 @@ val cloudUrl = (findProperty("kvistCloudUrl") as String?) ?: "https://cloud.kvis
 // The Google Play build (-PkvistStore=true): the page sells nothing in it, as Play's payments policy asks of an app that
 // does not use Play Billing. The APK from the GitHub release sells as the site does.
 val storeBuild = (findProperty("kvistStore") as String?) == "true"
+// Every upload to Google Play needs a higher versionCode: the store workflow passes its run number.
+val versionCodeFromCi = (findProperty("kvistVersionCode") as String?)?.toInt()
+// The upload key (Play App Signing re-signs with Google's key). Only CI has it, from secrets; without it a release
+// build is unsigned, which is fine for anything but an upload.
+val uploadKeystore = System.getenv("KVIST_UPLOAD_KEYSTORE")?.takeIf { it.isNotBlank() }
 
 android {
     namespace = "site.kvist.cloud"
@@ -17,12 +22,29 @@ android {
         applicationId = "site.kvist.cloud"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
+        versionCode = versionCodeFromCi ?: 1
         versionName = "0.1.0"
         buildConfigField("String", "CLOUD_URL", "\"$cloudUrl\"")
         buildConfigField("boolean", "STORE", storeBuild.toString())
         // Plain HTTP only when the build points at a test server on this network; a product build refuses it.
         manifestPlaceholders["cleartext"] = cloudUrl.startsWith("http://").toString()
+    }
+
+    signingConfigs {
+        if (uploadKeystore != null) {
+            create("upload") {
+                storeFile = file(uploadKeystore)
+                storePassword = System.getenv("KVIST_UPLOAD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KVIST_UPLOAD_KEY_ALIAS")
+                keyPassword = System.getenv("KVIST_UPLOAD_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (uploadKeystore != null) signingConfig = signingConfigs.getByName("upload")
+        }
     }
 
     buildFeatures {

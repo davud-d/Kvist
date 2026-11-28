@@ -1,0 +1,176 @@
+name: Cloud Mobile Store
+
+# The Kvist Cloud phone apps for Google Play and the App Store: store builds (the page sells nothing in them, see
+# cloud/mobile/README.md), signed, numbered by this run, kept as artifacts and, when the store's credentials are in
+# the repository's secrets, uploaded to Play's internal track and to TestFlight. Run by hand only: an upload is a
+# release decision. What to register first and which secrets to set: frontends/cloud-mobile-store.md.
+#
+# Not run yet: no developer account existed when it was written. The first run is the check.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Which app"
+        type: choice
+        options: [both, android, ios]
+        default: both
+      play_track:
+        description: "Google Play track"
+        type: choice
+        options: [internal, alpha, beta, production]
+        default: internal
+
+concurrency:
+  group: cloud-mobile-store
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Above the sideloaded builds' numbers and rising with every run.
+  BUILD_NUMBER: ${{ 1000 + github.run_number }}
+
+jobs:
+  android:
+    name: Google Play (AAB)
+    if: inputs.platform != 'ios'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      HAS_KEY: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 != '' }}
+      HAS_PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Android SDK platform 36
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: The upload key
+        if: env.HAS_KEY == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          echo "KVIST_UPLOAD_KEYSTORE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+
+      - name: Unit tests and the store bundle
+        working-directory: frontends/cloud-android
+        env:
+          KVIST_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          KVIST_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          KVIST_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:bundleRelease \
+            -PkvistStore=true "-PkvistVersionCode=$BUILD_NUMBER"
+
+      - name: Signed with the upload key
+        if: env.HAS_KEY == 'true'
+        run: jarsigner -verify frontends/cloud-android/app/build/outputs/bundle/release/app-release.aab | grep -q "jar verified"
+
+      - name: Keep the bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cloud-mobile-store-android
+          path: frontends/cloud-android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      # Google's API cannot create the app: the very first bundle is uploaded by hand in Play Console.
+      - name: Upload to Google Play
+        if: env.HAS_KEY == 'true' && env.HAS_PLAY == 'true'
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: site.kvist.cloud
+          releaseFiles: frontends/cloud-android/app/build/outputs/bundle/release/app-release.aab
+          track: ${{ inputs.play_track }}
+          status: ${{ inputs.play_track == 'production' && 'draft' || 'completed' }}
+
+  ios:
+    name: App Store (TestFlight)
+    if: inputs.platform != 'android'
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      HAS_ASC: ${{ secrets.ASC_KEY_P8_BASE64 != '' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Core tests
+        working-directory: frontends/cloud-ios
+        run: swift test
+
+      - name: The App Store Connect key
+        if: env.HAS_ASC == 'true'
+        env:
+          KEY_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$KEY_BASE64" | base64 -d > "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8"
+
+      # Without the key the archive is built unsigned: it proves the store build compiles, nothing more.
+      - name: Archive the store build
+        working-directory: frontends/cloud-ios
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          common=(-project KvistCloud.xcodeproj -scheme KvistCloud -configuration Release -destination 'generic/platform=iOS'
+                  -archivePath build/KvistCloud.xcarchive KVIST_STORE=YES "CURRENT_PROJECT_VERSION=$BUILD_NUMBER")
+          if [ "$HAS_ASC" = true ]; then
+            xcodebuild "${common[@]}" archive -allowProvisioningUpdates \
+              -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8" \
+              -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
+              CODE_SIGN_STYLE=Automatic "DEVELOPMENT_TEAM=$TEAM_ID"
+          else
+            xcodebuild "${common[@]}" archive CODE_SIGNING_ALLOWED=NO
+          fi
+          test "$(/usr/libexec/PlistBuddy -c 'Print :KvistStore' build/KvistCloud.xcarchive/Products/Applications/*.app/Info.plist)" = YES
+
+      - name: Export and upload to TestFlight
+        if: env.HAS_ASC == 'true'
+        working-directory: frontends/cloud-ios
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          cat > build/ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath build/KvistCloud.xcarchive -exportPath build/export \
+            -exportOptionsPlist build/ExportOptions.plist -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
