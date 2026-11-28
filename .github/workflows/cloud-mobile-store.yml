@@ -27,10 +27,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # Above the sideloaded builds' numbers and rising with every run.
-  BUILD_NUMBER: ${{ 1000 + github.run_number }}
-
 jobs:
   android:
     name: Google Play (AAB)
@@ -41,6 +37,10 @@ jobs:
       HAS_KEY: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 != '' }}
       HAS_PLAY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
     steps:
+      # Above the sideloaded builds' numbers and rising with every run (expressions have no arithmetic).
+      - name: Build number
+        run: echo "BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -107,6 +107,9 @@ jobs:
     env:
       HAS_ASC: ${{ secrets.ASC_KEY_P8_BASE64 != '' }}
     steps:
+      - name: Build number
+        run: echo "BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
