@@ -210,6 +210,62 @@ def test_a_step_does_not_repeat_the_opening_its_answer_stream_began_with():
     assert ch.drain()[0].user_message == ""
 
 
+def _stream(ui: EventStreamUI, text: str) -> None:
+    with ui.live_markdown() as update:
+        update(text)
+
+
+def test_a_final_the_stream_already_showed_says_so_even_past_notes_between():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    _stream(ui, "Стим открыт.\n\nСкажи «да».")
+    ui.print_step_header(2, make_command("final_answer", {"message": "Стим открыт.\n\nСкажи «да»."}))
+    ui.debug_print("Result: final answer at step 2")
+    ui.print_result("Kvist closed the task's processes: browser.")
+    ui.print_final("Стим открыт.\n\nСкажи «да».")
+
+    final = ch.drain()[-1]
+    assert final.to_dict()["shown"] is True
+    assert final.message == "Стим открыт.\n\nСкажи «да»."
+
+
+def test_a_final_that_was_not_streamed_is_not_marked_shown():
+    ch = FrontendChannel()
+    EventStreamUI(ch).print_final("готово")
+
+    assert "shown" not in ch.drain()[-1].to_dict()
+
+
+def test_a_final_that_differs_from_the_stream_is_not_marked_shown():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    _stream(ui, "первая половина")
+    ui.print_final("первая половина\n\nи хвост, которого стрим не показал")
+
+    assert ch.drain()[-1].shown is False
+
+
+def test_words_that_introduced_calls_do_not_mark_a_later_final_shown():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    _stream(ui, "Смотрю файл.")
+    ui.print_step_header(1, make_command("read_file", {"path": "a.py"}, text="Смотрю файл."))
+    ui.print_final("Смотрю файл.")
+
+    assert ch.drain()[-1].shown is False
+
+
+def test_a_stream_marks_only_the_final_of_its_own_turn():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    _stream(ui, "да")
+    ui.print_final("да")
+    ui.print_final("да")
+
+    first, second = ch.drain()[-2:]
+    assert (first.shown, second.shown) == (True, False)
+
+
 def test_live_markdown_stream_sequence():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)

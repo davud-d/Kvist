@@ -403,7 +403,8 @@ export function reduce(agent, ev, { replay = false } = {}) {
     case "final":
       settleStreams(agent);
       agent.dialogs = [];
-      const tail = unshownTail(agent, ev.message);
+      // `shown`: the core says the stream already drew it; older cores are guessed at.
+      const tail = ev.shown ? "" : unshownTail(agent, ev.message);
       if (tail !== null) {
         if (tail) addNote(agent, asNote(tail));
         return;

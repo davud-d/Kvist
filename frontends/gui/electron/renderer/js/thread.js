@@ -402,7 +402,8 @@
     },
 
     final(event, ts) {
-      const message = String(event.message || "").trim()
+      // `shown`: the core says the stream already drew it, so there is no answer to add.
+      const message = event.shown ? "" : String(event.message || "").trim()
       const shown = lastAnswer(this)
       // The runtime may append a line to the answer that already streamed (a
       // clean-up note); that is the same message, not a second one.

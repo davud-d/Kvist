@@ -192,6 +192,9 @@ class FinalEvent:
     # Additive: the person paused the task; it continues with their next
     # message. The outcome stays "incomplete" for frontends that do not know it.
     paused: bool = False
+    # Additive: ``message`` is exactly the text the turn's last stream_commit
+    # already showed, so a frontend does not draw it again.
+    shown: bool = False
     type: ClassVar[str] = "final"
 
     def to_dict(self) -> dict:
@@ -205,6 +208,8 @@ class FinalEvent:
             payload["closed"] = True
         if self.paused:
             payload["paused"] = True
+        if self.shown:
+            payload["shown"] = True
         return payload
 
 

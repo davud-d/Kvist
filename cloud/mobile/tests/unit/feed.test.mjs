@@ -140,3 +140,14 @@ test("an answer the model wrote twice shows once; a long different tail is not t
   ]);
   assert.deepEqual(other.items.map((item) => item.kind), ["reply", "final"]);
 });
+
+test("a final the core marks shown is not drawn again, whatever came between", () => {
+  const feed = run([
+    { type: "stream_commit", stream_id: "s", text: "Steam is open." },
+    { type: "debug", message: "Result: final answer at step 2" },
+    { type: "skill", skill: "desktop", name: "desktop", version: "0.2.2", state: "detached" },
+    { type: "message", markdown: "Kvist closed the task's processes: browser.", source: "notice" },
+    { type: "final", message: "Steam is open.", user_messages: [], outcome: "done", shown: true },
+  ]);
+  assert.equal(feed.items.filter((item) => item.text === "Steam is open.").length, 1);
+});

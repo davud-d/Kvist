@@ -364,3 +364,16 @@ test("a stored session shows its history even though showing it wakes its agent 
   assert.deepEqual(kinds(agent), ["user", "reply"], "and its earlier conversation is there, not an empty page");
   assert.equal(agent.items[0].text, "Earlier request");
 });
+
+test("a final the core marks shown is not drawn again, whatever came between", () => {
+  const agent = createAgent("a1", "/w");
+  feed(
+    agent,
+    { type: "stream_commit", stream_id: "s", text: "Steam is open." },
+    { type: "debug", message: "Result: final answer at step 2" },
+    { type: "skill", skill: "desktop", name: "desktop", version: "0.2.2", state: "detached" },
+    { type: "message", markdown: "Kvist closed the task's processes: browser.", source: "notice" },
+    { type: "final", message: "Steam is open.", user_messages: [], outcome: "done", shown: true },
+  );
+  assert.equal(agent.items.filter((item) => item.kind === "reply" || item.kind === "final").length, 1);
+});

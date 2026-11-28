@@ -642,7 +642,9 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
     case "message":
       return push(state, (id) => ({ id, kind: "answer", text: event.markdown, done: true }))
     case "final": {
-      // A streamed reply ends with its `final` (the words before the call come first): show it once.
+      // `shown`: the core says the stream already drew this text. A core without the field is
+      // guessed at: a streamed reply ends with its `final` (the words before the call come first).
+      if (event.shown) return state
       const message = event.message.trim()
       if (message && lastAnswerText(state)?.endsWith(message)) return state
       return push(state, (id) => ({ id, kind: "answer", text: event.message, done: true }))

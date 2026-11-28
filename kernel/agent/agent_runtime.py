@@ -460,7 +460,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
     paused = self.control.state == PAUSED
     summary = cleanup_summary(self, cleanup)
-    if summary and not report_rendered:
+    # A separate line: written into the answer, it made the final differ from the
+    # streamed reply, and every frontend drew the answer a second time. Voice
+    # reads only the answer aloud, so there it stays in it.
+    if summary and self.config.voice_mode and not report_rendered:
         final_message = f"{final_message}\n\n_{summary}_"
     elif summary:
         self._ui.print_result(summary)

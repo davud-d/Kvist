@@ -215,6 +215,10 @@ class EventStreamUI:
             said = redact_text(text).strip()
             if said and self._streamed_words.startswith(said):
                 text = ""
+        # Words that introduced calls are not the answer: a later final with the same text
+        # was not streamed. The final's own step keeps them for print_final.
+        if command.action.type != "final_answer":
+            self._streamed_words = ""
         self._channel.emit(
             StepEvent(
                 step,
@@ -616,13 +620,19 @@ class EventStreamUI:
     ) -> None:
         closed = outcome == "closed"
         paused = outcome == "paused"
+        message = redact_text(final_message)
+        # The core says so instead of each frontend guessing: a note or a debug line between
+        # the stream and the final defeated the guess, and the answer was drawn twice.
+        shown = bool(message.strip()) and message.strip() == self._streamed_words
+        self._streamed_words = ""
         self._channel.emit(
             FinalEvent(
-                redact_text(final_message),
+                message,
                 [redact_text(m) for m in (user_messages or [])],
                 "incomplete" if closed or paused else outcome,
                 closed=closed,
                 paused=paused,
+                shown=shown,
             )
         )
 

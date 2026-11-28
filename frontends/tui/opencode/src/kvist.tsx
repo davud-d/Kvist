@@ -97,7 +97,8 @@ export function KvistProvider(props: ParentProps<{ options: LaunchOptions; onQui
 
   const dispatch = (action: Action) => setState((previous) => {
     if (action.type === "event" && action.event.type === "final") {
-      // The core can log completion between stream_commit and final.
+      if (action.event.shown) return previous
+      // A core without `shown`: it can log completion between stream_commit and final.
       const last = previous.items.findLast((item) => item.kind !== "note")
       if (last?.kind === "answer" && last.text.trim() === action.event.message.trim()) return previous
     }

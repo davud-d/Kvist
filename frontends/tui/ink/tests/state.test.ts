@@ -50,6 +50,25 @@ test("final is not shown twice when the same text was just streamed", () => {
   assert.equal(state.items.length, 1)
 })
 
+test("a final the core marks shown is drawn once even past notes between it and the stream", () => {
+  const state = feed(
+    { type: "stream_commit", stream_id: "a", text: "same" },
+    { type: "debug", message: "Result: final answer at step 2" },
+    { type: "skill", skill: "desktop", name: "desktop", version: "0.2.2", state: "detached" },
+    { type: "final", message: "same", user_messages: [], shown: true },
+  )
+  assert.deepEqual(state.items.map((i) => i.kind), ["answer", "note", "note"])
+})
+
+test("a final without shown that differs from the stream is still drawn", () => {
+  const state = feed(
+    { type: "stream_commit", stream_id: "a", text: "words before a call" },
+    { type: "debug", message: "x" },
+    { type: "final", message: "the answer", user_messages: [] },
+  )
+  assert.deepEqual(state.items.filter((i) => i.kind === "answer").map((i) => (i as { text: string }).text), ["words before a call", "the answer"])
+})
+
 test("reasoning: live thinking, then a committed thought when it took time or said something", () => {
   const thinking = feed(
     { type: "reasoning_start", stream_id: "a" },

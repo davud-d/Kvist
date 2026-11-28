@@ -38,6 +38,8 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         "stream_commit" => vec![CoreEvent::Stream { id: text("stream_id"), text: text("text"), append: false, done: true }],
         "plan" => vec![CoreEvent::Say(text("markdown"))],
         "message" => vec![CoreEvent::Say(text("markdown"))],
+        // `shown`: the stream already drew the answer, so only the turn's end is news.
+        "final" if event.get("shown").and_then(Value::as_bool) == Some(true) => Vec::new(),
         "final" => vec![CoreEvent::Say(text("message"))],
         "step" => step(event),
         "action_result" => result(event),
@@ -443,6 +445,14 @@ mod tests {
         assert_eq!(translate(&failed), vec![CoreEvent::Result { call: "c1".into(), ok: false, summary: "denied".into(), diff: None, output: String::new() }]);
         let read = json!({"type": "action_result", "call_id": "c2", "ok": true, "summary": "12 lines", "path": "b"});
         assert_eq!(translate(&read).len(), 1);
+    }
+
+    #[test]
+    fn a_final_the_core_marks_shown_is_not_said_again() {
+        let shown = json!({"type": "final", "message": "Готово", "user_messages": [], "shown": true});
+        assert!(translate(&shown).is_empty());
+        let fresh = json!({"type": "final", "message": "Готово", "user_messages": []});
+        assert_eq!(translate(&fresh), vec![CoreEvent::Say("Готово".into())]);
     }
 
     #[test]

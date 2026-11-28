@@ -55,7 +55,7 @@ function buildTranscript(entries) {
         answer(event.markdown)
         break
       case "final":
-        answer(event.message)
+        if (!event.shown) answer(event.message)
         break
       case "error":
         items.push({ kind: "error", text: event.message })

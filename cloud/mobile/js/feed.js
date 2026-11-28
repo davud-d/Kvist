@@ -243,7 +243,8 @@ export function reduce(feed, ev, { replay = false } = {}) {
     case "final":
       settleStreams(feed);
       feed.dialogs = [];
-      const tail = unshownTail(feed, ev.message);
+      // `shown`: the core says the stream already drew it; older cores are guessed at.
+      const tail = ev.shown ? "" : unshownTail(feed, ev.message);
       if (tail !== null) {
         if (tail) push(feed, { kind: "note", text: asNote(tail), tone: "muted" });
         return;

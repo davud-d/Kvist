@@ -196,6 +196,20 @@ def _stream_ids(events: list[dict], *kinds: str) -> list[str]:
     return [event["stream_id"] for event in events if event["type"] in kinds]
 
 
+def test_a_streamed_final_is_marked_shown_live_and_in_the_journal(tmp_path):
+    def play(ui):
+        with ui.live_markdown() as update:
+            update("Стим открыт.")
+        ui.debug_print("Result: final answer at step 2")
+        ui.print_result("Kvist closed the task's processes: browser.")
+        ui.print_final("Стим открыт.")
+
+    live, journaled = _live_and_journaled(tmp_path, play)
+
+    finals = [[e for e in events if e["type"] == "final"] for events in (live, journaled)]
+    assert [[f.get("shown") for f in group] for group in finals] == [[True], [True]]
+
+
 def test_journal_reuses_the_live_stream_id_of_each_answer(tmp_path):
     def play(ui):
         for answer in ("first", "second"):

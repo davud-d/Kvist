@@ -773,6 +773,8 @@ impl Voice {
             // A message is spoken only when it is the assistant talking to the person: a runtime
             // note (a warning, a clean-up line) or a skill's message is not for the listener.
             "message" if !matches!(text("source"), "" | "reply") => {}
+            // `shown`: the stream already said it.
+            "final" if event.get("shown").and_then(Value::as_bool) == Some(true) => {}
             "stream_commit" | "final" | "message" => {
                 let words = if text("type") == "final" { text("message") } else if text("type") == "message" { text("markdown") } else { text("text") };
                 self.say(words, Kind::Answer, now);
@@ -2620,6 +2622,15 @@ mod tests {
         assert!(out.contains(&Out::Core(json!({"type": "goal", "text": "открой ютуб"}))));
         assert_eq!(voice.turn, Turn::Thinking);
         assert!(voice.caption_from_person && voice.caption.ends_with("открой ютуб"));
+    }
+
+    #[test]
+    fn a_final_the_core_marks_shown_is_not_spoken_again() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.has_voice = true;
+        voice.on_core(&json!({"type": "final", "message": "Готово.", "shown": true}), now);
+        assert!(voice.take_outbox().is_empty());
     }
 
     #[test]
